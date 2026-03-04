@@ -24,5 +24,5 @@ if [[ -f "$MARKER" ]]; then
 fi
 
 touch "$MARKER"
-printf '{"decision":"block","reason":"Save any decisions, issues, or conventions as memories. Skip if nothing needs saving."}'
+printf '{"decision":"block","reason":"Mnemo saved any decisions, issues, or conventions as memories. Skipped if nothing needed saving."}'
 exit 2
