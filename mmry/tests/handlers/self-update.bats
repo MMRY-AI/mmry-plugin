@@ -17,6 +17,10 @@ setup() {
     mkdir -p "$TEST_PLUGIN_DIR/hooks-handlers"
     cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
     chmod +x "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
+    # self-update now resolves jq via lib-jq.sh (#30624); ship it alongside and
+    # point the resolver at the real vendored binaries (this isolated plugin has none).
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$TEST_PLUGIN_DIR/hooks-handlers/lib-jq.sh"
+    export MMRY_JQ_VENDOR_DIR="$PLUGIN_ROOT/vendor/jq"
 
     # Override curl with a mock that fails on marketplace.json fetches.
     # This forces the script to reach the curl call (proving version detection succeeded)

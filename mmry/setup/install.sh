@@ -10,11 +10,11 @@ MARKETPLACE_PATH="$(cd "$(dirname "$0")/../.." && pwd)"
 # Ensure .claude directory exists
 mkdir -p "${HOME}/.claude"
 
-# Check for jq
-if ! command -v jq &>/dev/null; then
-    echo "Error: jq is required for installation. Install it first:"
-    echo "  macOS: brew install jq"
-    echo "  Linux: sudo apt-get install jq"
+# Resolve jq (system or bundled). jq ships with the plugin (#30624), so this
+# succeeds on every supported platform; only a truly unsupported OS/arch fails.
+source "$(cd "$(dirname "$0")/../hooks-handlers" && pwd)/lib-jq.sh"
+if ! mmry_resolve_jq; then
+    mmry_jq_unavailable_message
     exit 1
 fi
 
@@ -31,21 +31,21 @@ else
     settings='{}'
 fi
 
-# Add marketplace and enable plugin using jq
-settings="$(echo "$settings" | jq --arg name "$MARKETPLACE_NAME" --arg path "$MARKETPLACE_PATH" '
+# Add marketplace and enable plugin using the resolved jq
+settings="$(echo "$settings" | "$MMRY_JQ" --arg name "$MARKETPLACE_NAME" --arg path "$MARKETPLACE_PATH" '
     .extraKnownMarketplaces //= {} |
     .extraKnownMarketplaces[$name] //= {"source": {"source": "directory", "path": $path}}
 ')"
 
-settings="$(echo "$settings" | jq --arg name "$PLUGIN_NAME" '
+settings="$(echo "$settings" | "$MMRY_JQ" --arg name "$PLUGIN_NAME" '
     .enabledPlugins //= {} |
     .enabledPlugins[$name] //= true
 ')"
 
 # Disable built-in auto memory (MMRY AI replaces it)
-settings="$(echo "$settings" | jq '.autoMemoryEnabled = false')"
+settings="$(echo "$settings" | "$MMRY_JQ" '.autoMemoryEnabled = false')"
 
-echo "$settings" | jq '.' > "$SETTINGS_PATH"
+echo "$settings" | "$MMRY_JQ" '.' > "$SETTINGS_PATH"
 
 echo "MMRY AI memory plugin installed!"
 echo ""

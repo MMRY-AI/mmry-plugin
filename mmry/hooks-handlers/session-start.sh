@@ -12,6 +12,15 @@ bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
 
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
+# jq is required and bundled by setup. If none is usable (unsupported platform
+# or a broken install), fail fast with a clear message rather than stalling on a
+# slow fallback (#30624 absorbs #30319).
+if [[ -z "${MMRY_JQ:-}" ]]; then
+    mmry_jq_unavailable_message
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not find a usable jq on this machine, so memories were not loaded. Ask the user to re-run setup to restore the bundled jq: bash ~/.claude/mmry/setup/mmry-setup.sh"}}'
+    exit 0
+fi
+
 WORK_DIR="$PWD"
 
 # Bug #9 (Intervals #29949): read session_id from the SessionStart hook stdin
@@ -27,16 +36,10 @@ if [[ ! -t 0 ]]; then
     [[ -z "$HOOK_PAYLOAD" ]] && HOOK_PAYLOAD='{}'
 fi
 
-SESSION_ID=""
-if command -v jq &>/dev/null; then
-    SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
-fi
-if [[ -z "$SESSION_ID" ]]; then
-    # jq missing or stdin not JSON — try a grep extraction, then env var, then "unknown".
-    # grep -o returns 1 on no match; the || true keeps set -e from killing the script.
-    SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | { grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' || true; } | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
-    SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
-fi
+# stdin may not be JSON outside a hook context; jq returns empty and we fall
+# back to the env var, then "unknown". This is a data fallback, not a jq one.
+SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
+SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
@@ -86,44 +89,15 @@ if ! mmry_get_startup_memories "$WORK_DIR"; then
     exit 0
 fi
 
-# Parse JSON response into markdown (disable pipefail — grep returns 1 on no match)
-set +o pipefail
+# Parse JSON response into markdown using the resolved jq (#30624).
 {
     echo "# MMRY AI — Loaded Memories"
     echo ""
-
-    if command -v jq &>/dev/null; then
-        local_count="$(echo "$MMRY_RESPONSE" | jq 'length')"
-        echo "$MMRY_RESPONSE" | jq -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"'
-    else
-        # Grep/sed fallback for flat JSON arrays
-        local_count=0
-        # Count objects by counting "id" fields
-        local_count="$(echo "$MMRY_RESPONSE" | { grep -o '"id"' || true; } | wc -l | tr -d ' ')"
-
-        # Simple line-by-line extraction — works for flat JSON arrays
-        echo "$MMRY_RESPONSE" | sed 's/},{/}\n{/g' | sed 's/^\[//;s/\]$//' | while IFS= read -r obj; do
-            [[ -z "$obj" || "$obj" == "[" || "$obj" == "]" ]] && continue
-            # Extract key-value pairs
-            echo "$obj" | { grep -o '"[^"]*":"[^"]*"\|"[^"]*":[0-9]*\|"[^"]*":null\|"[^"]*":true\|"[^"]*":false' || true; } | while IFS= read -r kv; do
-                [[ -z "$kv" ]] && continue
-                key="$(echo "$kv" | sed 's/"\([^"]*\)".*/\1/')"
-                val="$(echo "$kv" | sed 's/"[^"]*":\s*//' | sed 's/^"//;s/"$//')"
-                echo "${key}: ${val}"
-            done
-            echo "---"
-        done
-    fi
+    "$MMRY_JQ" -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"' <<<"$MMRY_RESPONSE"
 } > "$MEM_FILE" 2>/dev/null
-set -o pipefail
 
 # Count memories
-count=0
-if command -v jq &>/dev/null; then
-    count="$(echo "$MMRY_RESPONSE" | jq 'length' 2>/dev/null || echo 0)"
-else
-    count="$(echo "$MMRY_RESPONSE" | { grep -o '"id"' || true; } | wc -l | tr -d ' ')"
-fi
+count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
 
 # Write the Foundation-only cache the UserPromptSubmit hook re-injects each turn (#30579).
 # Presentation/framing is applied at inject time; this file holds just the data. Best-effort.

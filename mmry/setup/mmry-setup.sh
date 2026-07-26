@@ -41,29 +41,23 @@ if ! command -v curl &>/dev/null; then
     exit 1
 fi
 
-HAS_JQ=false
-if command -v jq &>/dev/null; then
-    HAS_JQ=true
+# jq is required for setup; it ships bundled with the plugin (#30624). Resolve a
+# usable one (system or bundled) and stop with a clear message if none works.
+source "${PLUGIN_ROOT}/hooks-handlers/lib-jq.sh"
+if ! mmry_resolve_jq; then
+    mmry_jq_unavailable_message
+    exit 1
 fi
 
-# Helper: extract JSON string value (jq or regex fallback)
+# Helper: extract a JSON string or numeric value with the resolved jq.
 json_value() {
     local json="$1" key="$2"
-    if $HAS_JQ; then
-        echo "$json" | jq -r ".${key} // empty"
-    else
-        echo "$json" | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | sed "s/\"${key}\"[[:space:]]*:[[:space:]]*\"//" | sed 's/"$//' | head -1
-    fi
+    printf '%s' "$json" | "$MMRY_JQ" -r ".${key} // empty"
 }
 
-# Helper: extract JSON numeric value (jq or regex fallback)
 json_number() {
     local json="$1" key="$2"
-    if $HAS_JQ; then
-        echo "$json" | jq -r ".${key} // empty"
-    else
-        echo "$json" | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*[0-9]*" | grep -o '[0-9]*$' | head -1
-    fi
+    printf '%s' "$json" | "$MMRY_JQ" -r ".${key} // empty"
 }
 
 # Helper: escape a string for safe JSON embedding (handles \, ", newlines)
@@ -330,21 +324,11 @@ CONFIG_FILE="${CONFIG_DIR}/mmry-config.json"
 
 mkdir -p "$CONFIG_DIR"
 
-if $HAS_JQ; then
-    jq -n --arg url "$API_URL" --arg key "$API_KEY" '{
-        apiUrl: $url,
-        authMethod: "apikey",
-        apiKey: $key
-    }' > "$CONFIG_FILE"
-else
-    cat > "$CONFIG_FILE" << EOF
-{
-  "apiUrl": "${API_URL}",
-  "authMethod": "apikey",
-  "apiKey": "${API_KEY}"
-}
-EOF
-fi
+"$MMRY_JQ" -n --arg url "$API_URL" --arg key "$API_KEY" '{
+    apiUrl: $url,
+    authMethod: "apikey",
+    apiKey: $key
+}' > "$CONFIG_FILE"
 
 echo "  Config written to ${CONFIG_FILE}"
 
@@ -361,90 +345,20 @@ MMRY_PERMISSIONS=(
     "Bash(*mmry-client.sh*)"
 )
 
-if $HAS_JQ; then
-    # Create settings file if it doesn't exist
-    if [[ ! -f "$SETTINGS_FILE" ]]; then
-        echo '{}' > "$SETTINGS_FILE"
-    fi
-
-    # Build jq filter to add permissions
-    JQ_FILTER='.permissions //= {} | .permissions.allow //= []'
-    for perm in "${MMRY_PERMISSIONS[@]}"; do
-        JQ_FILTER+=" | if (.permissions.allow | index(\"${perm}\")) then . else .permissions.allow += [\"${perm}\"] end"
-    done
-
-    jq "$JQ_FILTER" "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" \
-        && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-    echo "  Script permissions configured."
-else
-    # Non-jq fallback: check if permissions already present, add if missing
-    if [[ ! -f "$SETTINGS_FILE" ]]; then
-        cat > "$SETTINGS_FILE" << 'SETTINGSEOF'
-{
-  "permissions": {
-    "allow": [
-      "Bash(*save-memory.sh*)",
-      "Bash(*reinforce-memory.sh*)",
-      "Bash(*deactivate-memory.sh*)",
-      "Bash(*link-memories.sh*)",
-      "Bash(*search-memories.sh*)",
-      "Bash(*list-groups.sh*)",
-      "Bash(*submit-feedback.sh*)",
-      "Bash(*mmry-client.sh*)"
-    ]
-  }
-}
-SETTINGSEOF
-        echo "  Script permissions configured."
-    elif grep -q "save-memory.sh" "$SETTINGS_FILE" 2>/dev/null; then
-        echo "  Script permissions already configured."
-    else
-        # settings.json exists but needs permissions — try Python, then manual fallback
-        PERMS_ADDED=false
-        PY_CMD=""
-        if command -v python3 &>/dev/null; then
-            PY_CMD="python3"
-        elif command -v python &>/dev/null; then
-            PY_CMD="python"
-        fi
-
-        if [[ -n "$PY_CMD" ]]; then
-            "$PY_CMD" - "$SETTINGS_FILE" << 'PYEOF' && PERMS_ADDED=true
-import json, sys
-sf = sys.argv[1]
-perms = [
-    "Bash(*save-memory.sh*)",
-    "Bash(*reinforce-memory.sh*)",
-    "Bash(*deactivate-memory.sh*)",
-    "Bash(*link-memories.sh*)",
-    "Bash(*search-memories.sh*)",
-    "Bash(*list-groups.sh*)",
-    "Bash(*submit-feedback.sh*)",
-    "Bash(*mmry-client.sh*)"
-]
-with open(sf) as f:
-    data = json.load(f)
-data.setdefault("permissions", {}).setdefault("allow", [])
-for p in perms:
-    if p not in data["permissions"]["allow"]:
-        data["permissions"]["allow"].append(p)
-with open(sf, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PYEOF
-        fi
-
-        if $PERMS_ADDED; then
-            echo "  Script permissions configured."
-        else
-            echo "  Note: Could not auto-configure permissions (jq and python not found)."
-            echo "  Add these to ${SETTINGS_FILE} under permissions.allow:"
-            for perm in "${MMRY_PERMISSIONS[@]}"; do
-                echo "    \"${perm}\""
-            done
-        fi
-    fi
+# Create settings file if it doesn't exist
+if [[ ! -f "$SETTINGS_FILE" ]]; then
+    echo '{}' > "$SETTINGS_FILE"
 fi
+
+# Build jq filter to add permissions
+JQ_FILTER='.permissions //= {} | .permissions.allow //= []'
+for perm in "${MMRY_PERMISSIONS[@]}"; do
+    JQ_FILTER+=" | if (.permissions.allow | index(\"${perm}\")) then . else .permissions.allow += [\"${perm}\"] end"
+done
+
+"$MMRY_JQ" "$JQ_FILTER" "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" \
+    && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+echo "  Script permissions configured."
 
 # Install plugin (skip for marketplace/stable installs — already handled by Claude Code)
 SCRIPT_DIR_RESOLVED="$(cd "$SCRIPT_DIR" && pwd)"

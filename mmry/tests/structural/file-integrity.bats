@@ -126,3 +126,20 @@ load '../helpers/test-helper'
 @test "skills/memory-system/SKILL.md exists and is non-empty" {
     [[ -s "$PLUGIN_ROOT/skills/memory-system/SKILL.md" ]]
 }
+
+# ── vendored jq (#30624) ──
+
+@test "hooks-handlers/lib-jq.sh exists" {
+    [[ -f "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" ]]
+}
+
+@test "vendored jq binaries exist for all supported platforms" {
+    for f in jq-linux-amd64 jq-linux-arm64 jq-macos-amd64 jq-macos-arm64 jq-windows-amd64.exe; do
+        [[ -f "$PLUGIN_ROOT/vendor/jq/$f" ]] || fail "missing vendor/jq/$f"
+    done
+}
+
+@test "vendored jq ships its license and checksums" {
+    [[ -s "$PLUGIN_ROOT/vendor/jq/LICENSE" ]]
+    [[ -s "$PLUGIN_ROOT/vendor/jq/CHECKSUMS.txt" ]]
+}
