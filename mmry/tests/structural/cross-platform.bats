@@ -45,8 +45,9 @@ load '../helpers/test-helper'
     [[ -f "$PLUGIN_ROOT/setup/install.sh" ]]
 }
 
-@test "install.sh checks for jq dependency" {
-    grep -q 'command -v jq' "$PLUGIN_ROOT/setup/install.sh"
+@test "install.sh guarantees jq via the resolver" {
+    grep -q 'lib-jq.sh' "$PLUGIN_ROOT/setup/install.sh"
+    grep -q 'mmry_resolve_jq' "$PLUGIN_ROOT/setup/install.sh"
 }
 
 @test "install.sh warns about bash version below 4" {

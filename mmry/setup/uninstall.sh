@@ -35,49 +35,48 @@ fi
 if [[ ! -f "$SETTINGS_PATH" ]]; then
     echo "  No settings.json found."
 else
-    HAS_JQ=false
-    if command -v jq &>/dev/null; then
-        HAS_JQ=true
-    fi
+    # Prefer the resolved jq (system or bundled). #30624. The Python block below
+    # remains as a teardown safety net so uninstall can always clean settings.
+    source "$(cd "$(dirname "$0")/../hooks-handlers" && pwd)/lib-jq.sh" 2>/dev/null || true
 
-    if $HAS_JQ; then
+    if command -v mmry_resolve_jq &>/dev/null && mmry_resolve_jq; then
         settings="$(cat "$SETTINGS_PATH")"
 
         # Remove plugin entries
         for name in "${PLUGIN_NAMES[@]}"; do
-            settings="$(echo "$settings" | jq --arg name "$name" '
+            settings="$(echo "$settings" | "$MMRY_JQ" --arg name "$name" '
                 if .enabledPlugins then del(.enabledPlugins[$name]) else . end
             ')"
         done
-        settings="$(echo "$settings" | jq '
+        settings="$(echo "$settings" | "$MMRY_JQ" '
             if .enabledPlugins and (.enabledPlugins | length) == 0 then del(.enabledPlugins) else . end
         ')"
 
         # Remove marketplace entries
         for name in "${MARKETPLACE_NAMES[@]}"; do
-            settings="$(echo "$settings" | jq --arg name "$name" '
+            settings="$(echo "$settings" | "$MMRY_JQ" --arg name "$name" '
                 if .extraKnownMarketplaces then del(.extraKnownMarketplaces[$name]) else . end
             ')"
         done
-        settings="$(echo "$settings" | jq '
+        settings="$(echo "$settings" | "$MMRY_JQ" '
             if .extraKnownMarketplaces and (.extraKnownMarketplaces | length) == 0 then del(.extraKnownMarketplaces) else . end
         ')"
 
         # Re-enable built-in auto memory
-        settings="$(echo "$settings" | jq 'del(.autoMemoryEnabled)')"
+        settings="$(echo "$settings" | "$MMRY_JQ" 'del(.autoMemoryEnabled)')"
 
         # Remove MMRY AI permissions
         for perm in "${MMRY_PERMISSIONS[@]}"; do
-            settings="$(echo "$settings" | jq --arg p "$perm" '
+            settings="$(echo "$settings" | "$MMRY_JQ" --arg p "$perm" '
                 if .permissions.allow then .permissions.allow -= [$p] else . end
             ')"
         done
-        settings="$(echo "$settings" | jq '
+        settings="$(echo "$settings" | "$MMRY_JQ" '
             if .permissions.allow and (.permissions.allow | length) == 0 then del(.permissions.allow) else . end |
             if .permissions and (.permissions | length) == 0 then del(.permissions) else . end
         ')"
 
-        echo "$settings" | jq '.' > "$SETTINGS_PATH"
+        echo "$settings" | "$MMRY_JQ" '.' > "$SETTINGS_PATH"
         echo "  Cleaned settings.json (plugin, marketplace, permissions)"
     else
         # Try Python fallback

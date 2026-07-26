@@ -22,6 +22,13 @@ LAST_UPDATE_SENTINEL="${PLUGIN_ROOT}/.last-self-update"
 MARKETPLACE_URL="https://raw.githubusercontent.com/MMRY-AI/mmry-plugin/master/.claude-plugin/marketplace.json"
 REPO_ARCHIVE_URL="https://github.com/MMRY-AI/mmry-plugin/archive/refs/heads/master.tar.gz"
 
+# Resolve jq (system or bundled) for version parsing. #30624. Tolerate a missing
+# resolver on a partial install rather than crash this best-effort background check.
+if ! source "$(cd "$(dirname "$0")" && pwd)/lib-jq.sh" 2>/dev/null; then
+    echo "mmry self-update: jq resolver unavailable; skipping update check" >&2
+    exit 0
+fi
+
 TMPDIR="${TMPDIR:-/tmp}"
 UPDATE_MARKER="${TMPDIR}/.mmry-update-checked"
 
@@ -46,16 +53,19 @@ fi
 
 touch "$UPDATE_MARKER"
 
+# jq is required to parse versions; it is bundled by setup. If somehow
+# unavailable, skip this cycle rather than misparse (self-update is best-effort).
+if ! mmry_resolve_jq; then
+    log "no usable jq; skipping update check this cycle"
+    exit 0
+fi
+
 # Get local version — fallback chain.
 local_version=""
 local_version_source=""
 
 if [[ -f "$LOCAL_VERSION_FILE" ]]; then
-    if command -v jq &>/dev/null; then
-        local_version="$(jq -r '.version // empty' "$LOCAL_VERSION_FILE" 2>/dev/null)"
-    else
-        local_version="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$LOCAL_VERSION_FILE" | sed 's/.*"version"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//' | head -1)"
-    fi
+    local_version="$("$MMRY_JQ" -r '.version // empty' "$LOCAL_VERSION_FILE" 2>/dev/null)"
     [[ -n "$local_version" ]] && local_version_source="plugin.json"
 fi
 
@@ -78,12 +88,7 @@ remote_json="$(curl -s --connect-timeout 5 --max-time 10 "$MARKETPLACE_URL" 2>/d
     exit 0
 }
 
-remote_version=""
-if command -v jq &>/dev/null; then
-    remote_version="$(echo "$remote_json" | jq -r '.plugins[0].version // empty' 2>/dev/null)"
-else
-    remote_version="$(echo "$remote_json" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"version"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//')"
-fi
+remote_version="$(printf '%s' "$remote_json" | "$MMRY_JQ" -r '.plugins[0].version // empty' 2>/dev/null)"
 
 if [[ -z "$remote_version" ]]; then
     log "could not parse remote version from marketplace.json"

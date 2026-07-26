@@ -8,19 +8,19 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
+if [[ -z "${MMRY_JQ:-}" ]]; then
+    mmry_jq_unavailable_message
+    exit 1
+fi
+
 if mmry_get_my_groups; then
-    if command -v jq &>/dev/null; then
-        count="$(echo "$MMRY_RESPONSE" | jq 'length')"
-        if [[ "$count" -eq 0 ]]; then
-            echo "No groups found. Create one with the API or ask an admin."
-        else
-            echo "Found ${count} group(s):"
-            echo ""
-            echo "$MMRY_RESPONSE" | jq -r '.[] | "  ID: \(.id)  Name: \(.groupName)"'
-        fi
+    count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length')"
+    if [[ "$count" -eq 0 ]]; then
+        echo "No groups found. Create one with the API or ask an admin."
     else
-        echo "Groups:"
-        echo "$MMRY_RESPONSE"
+        echo "Found ${count} group(s):"
+        echo ""
+        printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] | "  ID: \(.id)  Name: \(.groupName)"'
     fi
 else
     _mmry_format_error "list groups"
