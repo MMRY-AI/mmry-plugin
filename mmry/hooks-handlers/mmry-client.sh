@@ -98,11 +98,14 @@ mmry_load_config() {
             val="$(_mmry_parse_json_value "$content" "apiKey")"
             [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
             # Non-string (bool/number) config values — targeted grep, no jq.
-            val="$(echo "$content" | { grep -oE '"foundationReinject"[[:space:]]*:[[:space:]]*(true|false)' || true; } | grep -oE '(true|false)$' | head -1)"
+            # The trailing `|| true` guards against the second grep exiting non-zero when the
+            # key is absent, which under `set -euo pipefail` would abort the whole script
+            # (silent save failure — #30608).
+            val="$(echo "$content" | { grep -oE '"foundationReinject"[[:space:]]*:[[:space:]]*(true|false)' || true; } | grep -oE '(true|false)$' | head -1 || true)"
             [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
-            val="$(echo "$content" | { grep -oE '"foundationReinjectTokenCap"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1)"
+            val="$(echo "$content" | { grep -oE '"foundationReinjectTokenCap"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1 || true)"
             [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
-            val="$(echo "$content" | { grep -oE '"foundationRefreshSeconds"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1)"
+            val="$(echo "$content" | { grep -oE '"foundationRefreshSeconds"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1 || true)"
             [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
         fi
     fi
