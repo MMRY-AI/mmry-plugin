@@ -105,3 +105,28 @@ EOF
     # Clean up
     rm -f "$PLUGIN_ROOT/mmry-config.json"
 }
+
+@test "config: loads without error when jq is unavailable and config lacks foundation keys (regression #30608)" {
+    # Reproduces the 2.1.0 silent-save-fail: a pre-2.1.0 config (no foundation* keys)
+    # parsed on the grep fallback path (jq absent). The unguarded fallback greps returned
+    # non-zero under set -euo pipefail and aborted the whole script silently.
+    cat > "$MMRY_CONFIG_FILE" <<'EOF'
+{
+  "apiUrl": "http://localhost",
+  "authMethod": "apikey",
+  "apiKey": "some-key"
+}
+EOF
+    # Force the grep fallback by making `command -v jq` report jq as missing.
+    run bash -c '
+        command() { [[ "$*" == "-v jq" ]] && return 1; builtin command "$@"; }
+        export MMRY_CONFIG_FILE="'"$MMRY_CONFIG_FILE"'"
+        export CLAUDE_PLUGIN_ROOT="'"$PLUGIN_ROOT"'"
+        source "'"$PLUGIN_ROOT"'/hooks-handlers/mmry-client.sh"
+        echo "LOADED_OK reinject=${MMRY_FOUNDATION_REINJECT:-} cap=${MMRY_FOUNDATION_TOKEN_CAP:-}"
+    '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"LOADED_OK"* ]]
+    # Defaults still applied for the absent keys
+    [[ "$output" == *"reinject=true"* ]]
+}
