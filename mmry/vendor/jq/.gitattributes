@@ -1,0 +1,6 @@
+# Vendored jq binaries — treat as binary, never apply text/EOL normalization.
+jq-linux-amd64    binary
+jq-linux-arm64    binary
+jq-macos-amd64    binary
+jq-macos-arm64    binary
+jq-windows-amd64.exe binary

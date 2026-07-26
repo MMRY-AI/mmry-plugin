@@ -9,7 +9,7 @@ Cross-platform: works on Windows (Git Bash), macOS, and Linux.
 - **Claude Code** (latest version)
 - **bash** (Git Bash on Windows, native on macOS/Linux)
 - **curl** (included with Git Bash, native on macOS/Linux)
-- **jq** (optional, recommended — falls back to grep/sed parsing)
+- **jq** (ships bundled with the plugin, so nothing to install; a system jq is used automatically when present)
 
 ## Installation
 

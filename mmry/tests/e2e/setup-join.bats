@@ -21,6 +21,12 @@ setup() {
     chmod +x "$HOME/.claude/mmry/setup/mmry-setup.sh"
     SETUP_SCRIPT="$HOME/.claude/mmry/setup/mmry-setup.sh"
 
+    # mmry-setup.sh resolves jq via hooks-handlers/lib-jq.sh (#30624); mirror it into
+    # the isolated plugin and point the resolver at the real vendored jq binaries.
+    mkdir -p "$HOME/.claude/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$HOME/.claude/mmry/hooks-handlers/"
+    export MMRY_JQ_VENDOR_DIR="$PLUGIN_ROOT/vendor/jq"
+
     # Mock sleep (no-op) to prevent polling delays in device auth tests
     local mock_dir="$TEST_TMPDIR/mock-bin"
     printf '#!/usr/bin/env bash\nexit 0\n' > "$mock_dir/sleep"

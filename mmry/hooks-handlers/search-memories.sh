@@ -16,16 +16,16 @@ if [[ -z "$KEYWORDS" ]]; then
     exit 1
 fi
 
+if [[ -z "${MMRY_JQ:-}" ]]; then
+    mmry_jq_unavailable_message
+    exit 1
+fi
+
 if mmry_search_memories "$KEYWORDS" "$SCOPE"; then
-    if command -v jq &>/dev/null; then
-        count="$(echo "$MMRY_RESPONSE" | jq 'length')"
-        echo "Found ${count} memories:"
-        echo ""
-        echo "$MMRY_RESPONSE" | jq -r '.[] | "\(.memoryTier) | \(.scope) | \(.topic)\n  \(.content)\n---"'
-    else
-        echo "Results:"
-        echo "$MMRY_RESPONSE"
-    fi
+    count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length')"
+    echo "Found ${count} memories:"
+    echo ""
+    printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] | "\(.memoryTier) | \(.scope) | \(.topic)\n  \(.content)\n---"'
 else
     _mmry_format_error
     exit 1

@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # mmry-client.sh — MMRY AI REST API client library (bash+curl)
 # Source this file to access all MMRY AI API functions.
-# Version: 2.0.0
+# Version: 2.2.0
 
 set -euo pipefail
+
+# Resolve a usable jq (system or bundled) before anything parses JSON. #30624.
+# jq is guaranteed by setup; on an unsupported platform MMRY_JQ is empty and
+# jq-dependent steps are skipped (entry-point handlers fail fast with a message).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-jq.sh"
+mmry_resolve_jq || true
 
 # ============================================================================
 # 1. CONFIG LOADING
@@ -50,13 +56,6 @@ _mmry_urlencode() {
         -e 's|@|%40|g'
 }
 
-_mmry_parse_json_value() {
-    # Parse a value from flat JSON using grep/sed (no jq dependency)
-    # Usage: _mmry_parse_json_value "$json" "key"
-    local json="$1" key="$2"
-    echo "$json" | { grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" || true; } | sed "s/\"${key}\"[[:space:]]*:[[:space:]]*\"//" | sed 's/"$//' | head -1
-}
-
 mmry_load_config() {
     # Discovery order: $MMRY_CONFIG_FILE → plugin root → ~/.claude/
     local config_file=""
@@ -74,38 +73,22 @@ mmry_load_config() {
         local content
         content="$(cat "$config_file")"
 
-        # Parse with jq if available, otherwise regex fallback
-        if command -v jq &>/dev/null; then
+        # Parse config with the resolved jq (system or bundled). No regex
+        # fallback: the slow, brittle grep/sed path was the #30608 silent-save
+        # bug site and is removed now that jq is guaranteed by setup (#30624).
+        if [[ -n "${MMRY_JQ:-}" ]]; then
             local val
-            val="$(echo "$content" | jq -r '.apiUrl // empty')"
+            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.apiUrl // empty')"
             [[ -z "$MMRY_API_URL" && -n "$val" ]] && MMRY_API_URL="$val" || true
-            val="$(echo "$content" | jq -r '.authMethod // empty')"
+            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.authMethod // empty')"
             [[ -z "$MMRY_AUTH_METHOD" && -n "$val" ]] && MMRY_AUTH_METHOD="$val" || true
-            val="$(echo "$content" | jq -r '.apiKey // empty')"
+            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.apiKey // empty')"
             [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
-            val="$(echo "$content" | jq -r '.foundationReinject // empty')"
+            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationReinject // empty')"
             [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
-            val="$(echo "$content" | jq -r '.foundationReinjectTokenCap // empty')"
+            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationReinjectTokenCap // empty')"
             [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
-            val="$(echo "$content" | jq -r '.foundationRefreshSeconds // empty')"
-            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
-        else
-            local val
-            val="$(_mmry_parse_json_value "$content" "apiUrl")"
-            [[ -z "$MMRY_API_URL" && -n "$val" ]] && MMRY_API_URL="$val" || true
-            val="$(_mmry_parse_json_value "$content" "authMethod")"
-            [[ -z "$MMRY_AUTH_METHOD" && -n "$val" ]] && MMRY_AUTH_METHOD="$val" || true
-            val="$(_mmry_parse_json_value "$content" "apiKey")"
-            [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
-            # Non-string (bool/number) config values — targeted grep, no jq.
-            # The trailing `|| true` guards against the second grep exiting non-zero when the
-            # key is absent, which under `set -euo pipefail` would abort the whole script
-            # (silent save failure — #30608).
-            val="$(echo "$content" | { grep -oE '"foundationReinject"[[:space:]]*:[[:space:]]*(true|false)' || true; } | grep -oE '(true|false)$' | head -1 || true)"
-            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
-            val="$(echo "$content" | { grep -oE '"foundationReinjectTokenCap"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1 || true)"
-            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
-            val="$(echo "$content" | { grep -oE '"foundationRefreshSeconds"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1 || true)"
+            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationRefreshSeconds // empty')"
             [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
         fi
     fi
@@ -140,14 +123,9 @@ mmry_write_foundation_cache() {
     # Writes Foundation-tier memories (topic + content) to the cache. Best-effort; the
     # UserPromptSubmit hook applies framing at inject time, so this holds just the data.
     local resp="$1" cache="$2"
-    if command -v jq &>/dev/null; then
+    if [[ -n "${MMRY_JQ:-}" ]]; then
         printf '%s' "$resp" \
-            | jq -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
-            > "$cache" 2>/dev/null || true
-    else
-        printf '%s' "$resp" | sed 's/},{/}\n{/g' | sed 's/^\[//;s/\]$//' \
-            | { grep '"memoryTier":"Foundation"' || true; } \
-            | sed -E 's/.*"topic":"([^"]*)".*"content":"([^"]*)".*/- \1: \2/' \
+            | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
             > "$cache" 2>/dev/null || true
     fi
 }
@@ -487,17 +465,8 @@ mmry_process_context() {
     # Surface the message for callers (save-memory.sh, process-context.sh) so
     # they can print the actual ack instead of a generic placeholder.
     MMRY_PROCESS_MESSAGE=""
-    if [[ -n "$MMRY_RESPONSE" ]]; then
-        if command -v jq &>/dev/null; then
-            MMRY_PROCESS_MESSAGE="$(printf '%s' "$MMRY_RESPONSE" | jq -r '.message // empty' 2>/dev/null || true)"
-        fi
-        if [[ -z "$MMRY_PROCESS_MESSAGE" ]]; then
-            # Fallback parser for jq-less environments — match a single `"message":"..."` pair.
-            MMRY_PROCESS_MESSAGE="$(printf '%s' "$MMRY_RESPONSE" \
-                | { grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' || true; } \
-                | head -1 \
-                | sed 's/.*"\([^"]*\)"$/\1/')"
-        fi
+    if [[ -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
+        MMRY_PROCESS_MESSAGE="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.message // empty' 2>/dev/null || true)"
     fi
 
     # #29912 — record successful save so stop-check.sh can compute time-since-last-save
