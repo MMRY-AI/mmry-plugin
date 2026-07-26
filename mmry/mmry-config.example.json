@@ -1,5 +1,8 @@
 {
   "apiUrl": "https://mmryai.com",
   "authMethod": "apikey",
-  "apiKey": ""
+  "apiKey": "",
+  "foundationReinject": true,
+  "foundationReinjectTokenCap": 1500,
+  "foundationRefreshSeconds": 86400
 }

@@ -125,6 +125,10 @@ else
     count="$(echo "$MMRY_RESPONSE" | { grep -o '"id"' || true; } | wc -l | tr -d ' ')"
 fi
 
+# Write the Foundation-only cache the UserPromptSubmit hook re-injects each turn (#30579).
+# Presentation/framing is applied at inject time; this file holds just the data. Best-effort.
+mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"
+
 # Register session — uses session_id read from hook stdin (see top of file).
 # WORK_DIR is persisted server-side here; subsequent save calls reference it
 # via session_id rather than reading a (collidable) /tmp file.
