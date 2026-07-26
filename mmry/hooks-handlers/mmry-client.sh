@@ -13,6 +13,15 @@ MMRY_API_URL="${MMRY_API_URL:-}"
 MMRY_API_KEY="${MMRY_API_KEY:-}"
 MMRY_AUTH_METHOD="${MMRY_AUTH_METHOD:-}"
 
+# #30579 Foundation re-injection (UserPromptSubmit hook) settings.
+# foundationReinject: "true"/"false" — restate Foundation memories every prompt (default true).
+# foundationReinjectTokenCap: max approx tokens re-injected per prompt (default 1500).
+MMRY_FOUNDATION_REINJECT="${MMRY_FOUNDATION_REINJECT:-}"
+MMRY_FOUNDATION_TOKEN_CAP="${MMRY_FOUNDATION_TOKEN_CAP:-}"
+# foundationRefreshSeconds: re-fetch the Foundation cache mid-session at most this often so
+# admin-added Foundation memories propagate without a Claude restart. 0 = session-start only.
+MMRY_FOUNDATION_REFRESH_SECONDS="${MMRY_FOUNDATION_REFRESH_SECONDS:-}"
+
 # Temp directory — cross-platform
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
 
@@ -74,6 +83,12 @@ mmry_load_config() {
             [[ -z "$MMRY_AUTH_METHOD" && -n "$val" ]] && MMRY_AUTH_METHOD="$val" || true
             val="$(echo "$content" | jq -r '.apiKey // empty')"
             [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
+            val="$(echo "$content" | jq -r '.foundationReinject // empty')"
+            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
+            val="$(echo "$content" | jq -r '.foundationReinjectTokenCap // empty')"
+            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
+            val="$(echo "$content" | jq -r '.foundationRefreshSeconds // empty')"
+            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
         else
             local val
             val="$(_mmry_parse_json_value "$content" "apiUrl")"
@@ -82,16 +97,68 @@ mmry_load_config() {
             [[ -z "$MMRY_AUTH_METHOD" && -n "$val" ]] && MMRY_AUTH_METHOD="$val" || true
             val="$(_mmry_parse_json_value "$content" "apiKey")"
             [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
+            # Non-string (bool/number) config values — targeted grep, no jq.
+            val="$(echo "$content" | { grep -oE '"foundationReinject"[[:space:]]*:[[:space:]]*(true|false)' || true; } | grep -oE '(true|false)$' | head -1)"
+            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
+            val="$(echo "$content" | { grep -oE '"foundationReinjectTokenCap"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1)"
+            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
+            val="$(echo "$content" | { grep -oE '"foundationRefreshSeconds"[[:space:]]*:[[:space:]]*[0-9]+' || true; } | grep -oE '[0-9]+$' | head -1)"
+            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
         fi
     fi
 
     # Apply defaults
     MMRY_API_URL="${MMRY_API_URL:-$_MMRY_DEFAULT_URL}"
+    MMRY_FOUNDATION_REINJECT="${MMRY_FOUNDATION_REINJECT:-true}"
+    MMRY_FOUNDATION_TOKEN_CAP="${MMRY_FOUNDATION_TOKEN_CAP:-1500}"
+    MMRY_FOUNDATION_REFRESH_SECONDS="${MMRY_FOUNDATION_REFRESH_SECONDS:-86400}"
 
     # Auto-detect auth method if not set
     if [[ -z "$MMRY_AUTH_METHOD" && -n "$MMRY_API_KEY" ]]; then
         MMRY_AUTH_METHOD="apikey"
     fi
+}
+
+# ============================================================================
+# 3. FOUNDATION CACHE (#30579)
+# ============================================================================
+
+_mmry_mtime() {
+    # Epoch mtime of a file, cross-platform. Echoes 0 if missing.
+    if stat --version &>/dev/null 2>&1; then
+        stat -c %Y "$1" 2>/dev/null || echo 0
+    else
+        stat -f %m "$1" 2>/dev/null || echo 0
+    fi
+}
+
+mmry_write_foundation_cache() {
+    # Usage: mmry_write_foundation_cache <response-json> <cache-file>
+    # Writes Foundation-tier memories (topic + content) to the cache. Best-effort; the
+    # UserPromptSubmit hook applies framing at inject time, so this holds just the data.
+    local resp="$1" cache="$2"
+    if command -v jq &>/dev/null; then
+        printf '%s' "$resp" \
+            | jq -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
+            > "$cache" 2>/dev/null || true
+    else
+        printf '%s' "$resp" | sed 's/},{/}\n{/g' | sed 's/^\[//;s/\]$//' \
+            | { grep '"memoryTier":"Foundation"' || true; } \
+            | sed -E 's/.*"topic":"([^"]*)".*"content":"([^"]*)".*/- \1: \2/' \
+            > "$cache" 2>/dev/null || true
+    fi
+}
+
+mmry_refresh_foundation_cache() {
+    # Usage: mmry_refresh_foundation_cache <working-dir> <cache-file>
+    # Re-fetches startup memories and rewrites the Foundation cache ONLY on a successful
+    # fetch, so an offline/failed refresh never clobbers a good cache. Returns 0 on refresh.
+    local workdir="$1" cache="$2"
+    if mmry_get_startup_memories "$workdir" >/dev/null 2>&1; then
+        mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache"
+        return 0
+    fi
+    return 1
 }
 
 # ============================================================================

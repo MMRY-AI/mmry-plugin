@@ -7,6 +7,7 @@ MMRY AI is your memory. It remembers your decisions, conventions, preferences, a
 You don't need to do anything special. MMRY AI runs quietly in the background:
 
 - **When a session starts**, your memories load automatically. Claude already knows your context.
+- **On every message**, your Foundation memories - your identity, values, and standards - are kept front and center, so Claude follows them consistently through a long session, not just at the start.
 - **When a session ends**, Claude is prompted to save anything important before closing.
 - **When context gets compressed**, Claude saves a continuity note so nothing is lost.
 - **When a plan is accepted**, Claude saves it as a decision record.
@@ -38,6 +39,7 @@ Memories that get accessed regularly stay alive longer. Memories that stop being
 ## Tips
 
 - **You don't need to memorize this.** Just talk to Claude. Say "remember this" or "save this as a decision" and Claude handles the rest.
-- **Foundation memories are your identity.** Take a few minutes early on to tell Claude about your team, your tools, and your values. Everything builds on that.
+- **Foundation memories are your identity.** Take a few minutes early on to tell Claude about your team, your tools, and your values. Everything builds on that. Because they steer every response, keep the set small and deliberate.
+- **Foundation changes reach the whole team.** Foundation memories refresh automatically each day, so when an admin adds or updates one, everyone picks it up. Need it sooner? Say "load my memories" or restart Claude Code to refresh right away.
 - **Don't over-save.** Only save things you'd want to know next week or next month. Claude's own context handles the rest within a session.
 - **Memories are private to your organization.** Your team shares memories. Other organizations can't see them.

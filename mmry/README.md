@@ -78,11 +78,24 @@ Setup creates `~/.claude/mmry-config.json` automatically. You can also create it
 
 **Environment variable overrides:** `MMRY_API_URL`, `MMRY_API_KEY`
 
+### Foundation re-injection (optional)
+
+Foundation memories are restated to Claude on every prompt so they consistently guide responses. These optional keys tune that behavior:
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `foundationReinject` | `true` | Set to `false` to turn off per-prompt Foundation re-injection. |
+| `foundationReinjectTokenCap` | `1500` | Max approximate tokens of Foundation memories re-injected per prompt. Beyond this the set is truncated and the drop is logged. |
+| `foundationRefreshSeconds` | `86400` | How often (seconds) the Foundation cache re-fetches mid-session so admin changes propagate without a restart. Default is daily; `0` re-fetches only at session start. |
+
+Env overrides: `MMRY_FOUNDATION_REINJECT`, `MMRY_FOUNDATION_TOKEN_CAP`, `MMRY_FOUNDATION_REFRESH_SECONDS`.
+
 ## What It Does
 
 | When | What Happens |
 |------|-------------|
 | **Session starts** | Your memories load automatically via API (Foundation + directory-matched) |
+| **Every prompt** | Foundation memories are re-injected so they consistently guide responses (configurable; see Configuration) |
 | **Session ends** | Claude is prompted to save any decisions, issues, or notes before exiting |
 | **Context compresses** | Claude saves a "Session Continuity" memory so nothing is lost |
 | **Plan accepted** | Claude saves the accepted plan as a Decision memory |
