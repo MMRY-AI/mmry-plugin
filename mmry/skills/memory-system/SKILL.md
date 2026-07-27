@@ -233,6 +233,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
 
 Search finds memories by keyword across Topic and Content fields, regardless of age. This is intentional — search is how you recover memories that have expired from normal loading.
 
+Users can also trigger a search directly with the `/mmry:search <keywords> [scope]` command, which wraps the same `search-memories.sh` hook shown below. Reach for the command when the user explicitly asks to search; use the hook calls here when you are searching as part of your own reasoning.
+
 ```bash
 # Search all scopes
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" "UPC"

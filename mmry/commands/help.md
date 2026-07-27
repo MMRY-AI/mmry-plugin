@@ -19,6 +19,7 @@ You can talk to Claude naturally about your memories:
 - **"Remember this: we always use kebab-case for file names."** — Claude saves it as a memory.
 - **"Save a Foundation memory about our tech stack."** — Foundation memories never expire. Use them for things that define who you are.
 - **"What do you remember about our deployment process?"** — Claude searches your memories.
+- **`/mmry:search <keywords> [scope]`** runs a search on demand and lists the matches, optionally narrowed to one area of your work.
 - **"Forget the memory about the old API endpoint."** — Claude deactivates it.
 - **"Load my memories."** — Reloads your memories mid-session (same as `/mmry:load-memories`).
 
