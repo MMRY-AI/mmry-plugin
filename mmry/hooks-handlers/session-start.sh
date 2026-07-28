@@ -84,6 +84,12 @@ if ! mmry_get_startup_memories "$WORK_DIR"; then
         printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI credits exhausted. Inform the user their API credits have run out. Visit https://mmryai.com to add more credits or upgrade their plan."}}'
         exit 0
     fi
+    if [[ "${MMRY_HTTP_CODE:-}" == "401" ]]; then
+        # #30321: the stored credential is present but invalid or expired. Tell the assistant
+        # so it warns the user, instead of falling through to the generic failure below.
+        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI: the stored sign-in credential is invalid or expired. Tell the user that their memories may not be saved or loaded, and direct them to run /mmry:setup to re-authenticate."}}'
+        exit 0
+    fi
     escaped_err="$(echo "$MMRY_RESPONSE" | sed "s/\"/'/g" | sed 's/\\/\\\\/g')"
     printf '{"error":"session-start failed: %s"}' "$escaped_err"
     exit 0

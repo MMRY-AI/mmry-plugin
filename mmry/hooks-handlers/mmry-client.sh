@@ -219,6 +219,14 @@ _mmry_format_error() {
     if [[ "$MMRY_HTTP_CODE" == "402" ]]; then
         echo "Credits exhausted. Your MMRY AI subscription has run out of API credits." >&2
         echo "Visit https://mmryai.com or contact your admin to add more credits." >&2
+    elif [[ "$MMRY_HTTP_CODE" == "401" ]]; then
+        # #30321: the stored credential is present but invalid or expired. Warn clearly and
+        # point to setup rather than a bare "Error (HTTP 401)". Kept after the 402 case so
+        # credit-exhaustion messaging is not swallowed. The empty-key case (HTTP 000, whose
+        # MMRY_RESPONSE is "No API key configured. Run /mmry:setup ...") stays in the generic
+        # branch below and keeps its own setup direction.
+        echo "MMRY AI: your saved credential is invalid or expired. Memories may not be saved or loaded." >&2
+        echo "Run /mmry:setup to re-authenticate." >&2
     else
         echo "Error (HTTP ${MMRY_HTTP_CODE}): ${MMRY_RESPONSE}" >&2
     fi
