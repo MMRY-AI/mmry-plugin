@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# stop-check.bats — Test stop-check.sh debounce, output, and #29912 compliance contract.
+# stop-check.bats — Test stop-check.sh debounce, output, and the #29912/#30642 contract.
 
 load '../helpers/test-helper'
 
@@ -12,8 +12,10 @@ setup() {
 
 # --- Debounce and basic block contract -------------------------------------
 
-@test "stop-check: first invocation outputs block JSON and exits 2" {
+@test "stop-check: first invocation blocks (exit 2) and emits decision:block" {
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
+    # #30642: exit 2 is preserved so the stop stays blocked; Claude Code feeds the hook's
+    # stderr to the model on exit 2 (that is where the directive now lives).
     [[ "$status" -eq 2 ]]
     [[ "$output" == *'"decision":"block"'* ]]
 }
@@ -23,7 +25,7 @@ setup() {
     [[ -f "$TEST_TMPDIR/.mmry-stop-checked" ]]
 }
 
-@test "stop-check: second invocation within debounce window exits 0" {
+@test "stop-check: second invocation within debounce window exits 0 with no output" {
     # Pre-stamp a fresh marker.
     touch "$TEST_TMPDIR/.mmry-stop-checked"
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
@@ -39,26 +41,34 @@ setup() {
     [[ "$output" == *'"decision":"block"'* ]]
 }
 
-# --- #29912 directive contract ---------------------------------------------
+# --- #30642 delivery contract ----------------------------------------------
 
-@test "stop-check: visible reason field is empty (no Acknowledged-bait)" {
-    run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
-    # The reason key exists but its value is the empty string. With nothing to
-    # acknowledge, the assistant's only natural response is to act on systemMessage.
-    [[ "$output" == *'"reason":""'* ]]
-    # Old status-line phrasing must be gone.
-    [[ "$output" != *'Mnemo: saving important memories'* ]]
-}
-
-@test "stop-check: systemMessage is a single imperative directive" {
-    run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
-    # Imperative verb, action target, explicit skip clause.
+@test "stop-check: directive is emitted on stderr, the channel the model gets on exit 2 (#30642)" {
+    # Capture stderr only (stdout to /dev/null).
+    run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>&1 1>/dev/null'
     [[ "$output" == *'Save what is new since the last memory'* ]]
     [[ "$output" == *'save-memory.sh'* ]]
     [[ "$output" == *'skip'* ]]
 }
+
+@test "stop-check: does not use systemMessage (user-only) or an empty reason (#30642)" {
+    run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
+    [[ "$status" -eq 2 ]]
+    [[ "$output" != *'systemMessage'* ]]
+    [[ "$output" != *'"reason":""'* ]]
+    # Old status-line phrasing must be gone.
+    [[ "$output" != *'Mnemo: saving important memories'* ]]
+}
+
+@test "stop-check: directive is a single imperative with an explicit skip clause" {
+    run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
+    [[ "$status" -eq 2 ]]
+    [[ "$output" == *'Save what is new since the last memory'* ]]
+    [[ "$output" == *'save-memory.sh'* ]]
+    [[ "$output" == *'skip'* ]]
+}
+
+# --- #29912 escalation / anchoring contract --------------------------------
 
 @test "stop-check: increments firings counter on each unique trigger" {
     bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" >/dev/null 2>&1 || true

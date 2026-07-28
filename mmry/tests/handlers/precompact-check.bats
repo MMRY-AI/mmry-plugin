@@ -31,3 +31,16 @@ load '../helpers/test-helper'
     [[ "$status" -eq 2 ]]
     [[ "$output" == *'"decision":"block"'* ]]
 }
+
+@test "precompact-check: emits the directive on stderr, the channel the model gets on exit 2 (#30642)" {
+    rm -f "$TEST_TMPDIR/.mmry-precompact-checked"
+    run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/precompact-check.sh" 2>&1 1>/dev/null'
+    [[ "$output" == *'Context compression is imminent'* ]]
+    [[ "$output" == *'process-context.sh'* ]]
+}
+
+@test "precompact-check: does not use systemMessage (user-only) (#30642)" {
+    rm -f "$TEST_TMPDIR/.mmry-precompact-checked"
+    run bash "$PLUGIN_ROOT/hooks-handlers/precompact-check.sh"
+    [[ "$output" != *'systemMessage'* ]]
+}

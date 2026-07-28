@@ -7,10 +7,14 @@
 #   saving important memories..."), and assistants would reply "Acknowledged" without
 #   ever calling save-memory.sh. Net effect: multi-hour sessions produced zero memories.
 #
-#   This version makes five changes:
-#     1. Drop the visible reason field entirely. With nothing to acknowledge, the
-#        only natural response is to act on systemMessage.
-#     2. systemMessage is a single imperative line with an explicit skip clause.
+#   This version:
+#     1. Delivers the directive on STDERR and keeps exit 2 (#30642). On exit 2 Claude Code
+#        feeds the hook's stderr to the model and ignores stdout JSON, so the directive now
+#        reaches the model instead of surfacing only as "Blocked by hook". Keeping exit 2
+#        preserves the block (no exit-code change). systemMessage was user-only and never
+#        reached the model.
+#     2. The directive is a single imperative line with an explicit skip clause, so the model
+#        acts rather than replying "Acknowledged".
 #     3. Track last successful save via ${TMPDIR}/.mmry-last-save (written by
 #        mmry-client.sh). The systemMessage surfaces minutes-since-last-save so
 #        the assistant produces incremental memories, not duplicates.
@@ -86,7 +90,11 @@ fi
 # last-save info when available. Inner quotes escaped for JSON.
 DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \\\"\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh\\\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}"
 
-# Emit block JSON with NO reason field. The empty reason avoids the
-# "Acknowledged" reflex; systemMessage carries the imperative.
-printf '{"decision":"block","reason":"","systemMessage":"%s"}' "$DIRECTIVE"
+# #30642: deliver the directive on stderr and keep exit 2. On exit 2 (which blocks the stop)
+# Claude Code feeds the hook's STDERR to the model and ignores stdout JSON, so the directive
+# reaches the model here. Keeping exit 2 preserves the blocking behavior; moving to exit 0
+# would risk changing it. systemMessage is dropped (user-only). The stdout decision:block with
+# the directive in reason is retained for clarity and in case the harness parses it.
+printf '%s\n' "$DIRECTIVE" >&2
+printf '{"decision":"block","reason":"%s"}' "$DIRECTIVE"
 exit 2

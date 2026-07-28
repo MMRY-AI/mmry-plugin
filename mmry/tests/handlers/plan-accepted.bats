@@ -8,13 +8,17 @@ load '../helpers/test-helper'
     [[ "$output" == *'"decision":"block"'* ]]
 }
 
-@test "plan-accepted: includes reason about saving plan" {
+@test "plan-accepted: emits the directive on stderr, the channel the model gets on exit 2 (#30642)" {
+    # Capture stderr only. #30642: the directive must reach the model, not sit in the
+    # user-only systemMessage field.
+    run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/plan-accepted-check.sh" 2>&1 1>/dev/null'
+    [[ "$output" == *'accepted an implementation plan'* ]]
+    [[ "$output" == *'process-context.sh'* ]]
+}
+
+@test "plan-accepted: does not use systemMessage (user-only) (#30642)" {
     run bash "$PLUGIN_ROOT/hooks-handlers/plan-accepted-check.sh"
-    # Reason wording was changed from "PLAN ACCEPTED" to a softer status line
-    # in the thin-client refactor (v1.4 #29732). Assertion now matches the
-    # current production string. Either phrasing should mention saving.
-    [[ "$output" == *'saving accepted plan'* ]] || \
-    [[ "$output" == *'Saving accepted plan'* ]]
+    [[ "$output" != *'systemMessage'* ]]
 }
 
 @test "plan-accepted: exits with code 2" {
