@@ -12,12 +12,12 @@ setup() {
 
 # --- Debounce and basic block contract -------------------------------------
 
-@test "stop-check: first invocation blocks (exit 2) and emits decision:block" {
-    run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    # #30642: exit 2 is preserved so the stop stays blocked; Claude Code feeds the hook's
-    # stderr to the model on exit 2 (that is where the directive now lives).
+@test "stop-check: first invocation blocks (exit 2) with the directive on stderr and empty stdout (#30642)" {
+    # #30642: exit 2 keeps the stop blocked; Claude Code discards stdout on exit 2 and feeds
+    # the hook's stderr to the model, so stdout must be empty and the directive lives on stderr.
+    run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>/dev/null'
     [[ "$status" -eq 2 ]]
-    [[ "$output" == *'"decision":"block"'* ]]
+    [[ -z "$output" ]]
 }
 
 @test "stop-check: creates marker file" {
@@ -38,7 +38,8 @@ setup() {
     touch -t 202001010000.00 "$TEST_TMPDIR/.mmry-stop-checked"
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
     [[ "$status" -eq 2 ]]
-    [[ "$output" == *'"decision":"block"'* ]]
+    # #30642: block is signalled by exit 2; the directive (merged stderr) is the payload.
+    [[ "$output" == *'Save what is new since the last memory'* ]]
 }
 
 # --- #30642 delivery contract ----------------------------------------------
@@ -51,13 +52,27 @@ setup() {
     [[ "$output" == *'skip'* ]]
 }
 
-@test "stop-check: does not use systemMessage (user-only) or an empty reason (#30642)" {
+@test "stop-check: no stdout JSON on exit 2 (discarded by the harness anyway) (#30642)" {
+    # stdout only — must be empty. No decision:block, no systemMessage, no reason field.
+    run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>/dev/null'
+    [[ -z "$output" ]]
+    [[ "$output" != *'decision'* ]]
+    [[ "$output" != *'systemMessage'* ]]
+}
+
+@test "stop-check: does not use systemMessage (user-only) anywhere (#30642)" {
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
     [[ "$status" -eq 2 ]]
     [[ "$output" != *'systemMessage'* ]]
-    [[ "$output" != *'"reason":""'* ]]
     # Old status-line phrasing must be gone.
     [[ "$output" != *'Mnemo: saving important memories'* ]]
+}
+
+@test "stop-check: stderr carries no literal backslash-n escape markers (#30642 regression)" {
+    # The directive must reach the model as clean text, not with visible \n markers.
+    run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>&1 1>/dev/null'
+    [[ "$output" != *'\n'* ]]
+    [[ "$output" != *'\"'* ]]
 }
 
 @test "stop-check: directive is a single imperative with an explicit skip clause" {

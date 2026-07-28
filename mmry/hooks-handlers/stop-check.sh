@@ -86,15 +86,16 @@ if (( firings >= ESCALATION_THRESHOLD )); then
     escalation_clause=" You have skipped ${firings} Stop firings without saving. Either save now or briefly state in your reply why this segment has nothing worth keeping."
 fi
 
-# Build the directive — one imperative line, explicit skip clause, anchored by
-# last-save info when available. Inner quotes escaped for JSON.
-DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \\\"\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh\\\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}"
+# Build the directive — one imperative line, explicit skip clause, anchored by last-save info
+# when available. Plain double quotes around the path (the model sees them literally on stderr);
+# the ${CLAUDE_PLUGIN_ROOT} reference is intentionally literal so the model expands it when it
+# runs save-memory.sh.
+DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \"\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}"
 
 # #30642: deliver the directive on stderr and keep exit 2. On exit 2 (which blocks the stop)
-# Claude Code feeds the hook's STDERR to the model and ignores stdout JSON, so the directive
-# reaches the model here. Keeping exit 2 preserves the blocking behavior; moving to exit 0
-# would risk changing it. systemMessage is dropped (user-only). The stdout decision:block with
-# the directive in reason is retained for clarity and in case the harness parses it.
+# Claude Code discards stdout entirely and feeds the hook's STDERR to the model, so we emit
+# ONLY to stderr - no JSON. Emitting the directive as JSON would force backslash escaping that
+# leaks into the model-visible text; stderr-only keeps it clean. exit 2 preserves the block;
+# moving to exit 0 would risk changing it. The user-only systemMessage is dropped.
 printf '%s\n' "$DIRECTIVE" >&2
-printf '{"decision":"block","reason":"%s"}' "$DIRECTIVE"
 exit 2
