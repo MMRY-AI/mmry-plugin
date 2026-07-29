@@ -69,3 +69,24 @@ setup() {
     [[ "$output" == *'hookSpecificOutput'* ]]
     [[ "$output" == *'setup'* ]] || [[ "$output" == *'Setup'* ]] || [[ "$output" == *'MMRY AI'* ]]
 }
+
+@test "session-start: 402 credits-exhausted message is unchanged" {
+    export MOCK_CURL_HTTP_CODE="402"
+    export MOCK_CURL_RESPONSE='{"error":"no credits"}'
+    run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *'credits'* ]] || [[ "$output" == *'Credits'* ]]
+    [[ "$output" != *'/mmry:setup'* ]]
+}
+
+@test "session-start: 401 invalid credential warns and directs to setup (#30321)" {
+    export MOCK_CURL_HTTP_CODE="401"
+    export MOCK_CURL_RESPONSE='{"error":"unauthorized"}'
+    run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *'hookSpecificOutput'* ]]
+    [[ "$output" == *'invalid or expired'* ]]
+    [[ "$output" == *'may not be saved or loaded'* ]]
+    [[ "$output" == *'/mmry:setup'* ]]
+    [[ "$output" != *'session-start failed'* ]]
+}
