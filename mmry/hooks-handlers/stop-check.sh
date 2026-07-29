@@ -7,10 +7,14 @@
 #   saving important memories..."), and assistants would reply "Acknowledged" without
 #   ever calling save-memory.sh. Net effect: multi-hour sessions produced zero memories.
 #
-#   This version makes five changes:
-#     1. Drop the visible reason field entirely. With nothing to acknowledge, the
-#        only natural response is to act on systemMessage.
-#     2. systemMessage is a single imperative line with an explicit skip clause.
+#   This version:
+#     1. Delivers the directive on STDERR and keeps exit 2 (#30642). On exit 2 Claude Code
+#        feeds the hook's stderr to the model and ignores stdout JSON, so the directive now
+#        reaches the model instead of surfacing only as "Blocked by hook". Keeping exit 2
+#        preserves the block (no exit-code change). systemMessage was user-only and never
+#        reached the model.
+#     2. The directive is a single imperative line with an explicit skip clause, so the model
+#        acts rather than replying "Acknowledged".
 #     3. Track last successful save via ${TMPDIR}/.mmry-last-save (written by
 #        mmry-client.sh). The systemMessage surfaces minutes-since-last-save so
 #        the assistant produces incremental memories, not duplicates.
@@ -82,11 +86,16 @@ if (( firings >= ESCALATION_THRESHOLD )); then
     escalation_clause=" You have skipped ${firings} Stop firings without saving. Either save now or briefly state in your reply why this segment has nothing worth keeping."
 fi
 
-# Build the directive — one imperative line, explicit skip clause, anchored by
-# last-save info when available. Inner quotes escaped for JSON.
-DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \\\"\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh\\\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}"
+# Build the directive — one imperative line, explicit skip clause, anchored by last-save info
+# when available. Plain double quotes around the path (the model sees them literally on stderr);
+# the ${CLAUDE_PLUGIN_ROOT} reference is intentionally literal so the model expands it when it
+# runs save-memory.sh.
+DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \"\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}"
 
-# Emit block JSON with NO reason field. The empty reason avoids the
-# "Acknowledged" reflex; systemMessage carries the imperative.
-printf '{"decision":"block","reason":"","systemMessage":"%s"}' "$DIRECTIVE"
+# #30642: deliver the directive on stderr and keep exit 2. On exit 2 (which blocks the stop)
+# Claude Code discards stdout entirely and feeds the hook's STDERR to the model, so we emit
+# ONLY to stderr - no JSON. Emitting the directive as JSON would force backslash escaping that
+# leaks into the model-visible text; stderr-only keeps it clean. exit 2 preserves the block;
+# moving to exit 0 would risk changing it. The user-only systemMessage is dropped.
+printf '%s\n' "$DIRECTIVE" >&2
 exit 2
