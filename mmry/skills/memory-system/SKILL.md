@@ -410,6 +410,32 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
 
 The API validates that you are a member of the group. Non-members get a 403 error.
 
+### Setting a Default Visibility
+
+A user can set a sticky default so every later save follows it without repeating a scope:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh"                # show current default
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh" private        # default to Private
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh" group          # list their groups
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh" group "Sales"  # default to a group
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh" global         # back to the default
+```
+
+This reads and writes `GET`/`PUT /api/users/me/default-visibility`. An explicit scope on a
+single save still wins over the default. Groups are created and their membership managed by
+an account administrator in the portal; this only selects among groups the user already
+belongs to, so when a user has no groups, tell them to ask an administrator rather than
+trying to create one.
+
+### Sensitive-Content Nudge
+
+Because memories are shared by default, when a save is clearly personal or sensitive
+(health, pay, a personnel matter, a private opinion), add one short passive line after the
+save noting that it went out shared and that they can say "make it private." Never ask a
+question, never wait, and never change visibility on your own; the user decides. Do not
+nudge on ordinary work content, and skip it when the user already chose a scope.
+
 ## How to Deactivate a Memory
 When something is no longer true:
 ```bash
