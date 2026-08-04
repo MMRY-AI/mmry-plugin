@@ -99,6 +99,17 @@ case "$(printf '%s' "$MODE" | tr '[:upper:]' '[:lower:]')" in
         fi
         gid="$(resolve_group_id_by_name "$GROUP_NAME")"
         if [[ -z "$gid" ]]; then
+            # Distinguish "you have no groups" from "that name is not one of yours",
+            # otherwise a zero-group user gets a contradictory message.
+            if ! mmry_get_my_groups; then
+                _mmry_format_error "list groups"
+                exit 1
+            fi
+            if [[ "$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length')" -eq 0 ]]; then
+                echo "You are not in any groups yet, so there is no group to choose."
+                echo "Ask an account administrator to create a group and add you to it."
+                exit 1
+            fi
             echo "No group named \"${GROUP_NAME}\" found among your groups."
             echo ""
             list_groups_for_choice
