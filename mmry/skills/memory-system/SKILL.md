@@ -428,6 +428,18 @@ an account administrator in the portal; this only selects among groups the user 
 belongs to, so when a user has no groups, tell them to ask an administrator rather than
 trying to create one.
 
+### Restricting a Memory After Saving
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/make-private.sh"          # the last one saved
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/make-private.sh" 1234     # a specific memory
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/make-private.sh" 1234 group 7
+```
+
+Calls `PUT /api/memories/{id}/visibility`, which is creator-only: only the person who saved
+a memory can change its scope, and the server returns 403 otherwise (an administrator
+cannot re-scope someone else's memory either). Content is preserved.
+
 ### Sensitive-Content Nudge
 
 Because memories are shared by default, when a save is clearly personal or sensitive
