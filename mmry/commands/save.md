@@ -33,6 +33,18 @@ Save a memory to MMRY AI. If the user provided a description after the command, 
    > Saved. This looks personal, and memories are shared with your organization by default —
    > say "make it private" if you would rather keep it to yourself.
 
+   If the user then says "make it private" (or asks for it to be restricted), run:
+
+   ```bash
+   HOOK="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/hooks-handlers/make-private.sh}"
+   [ -f "$HOOK" ] || HOOK="${HOME}/.claude/mmry/hooks-handlers/make-private.sh"
+   bash "$HOOK"
+   ```
+
+   With no argument it restricts the memory they just saved. Pass a memory id to target a
+   specific one. Only the person who saved a memory can change its scope; the server
+   returns 403 otherwise, so do not try to do this on someone else's memory.
+
    Rules for this nudge, which matter more than the wording:
    - **Never ask a question and never wait.** The save already happened; this is a passive note.
    - **Never change visibility yourself.** Only the user decides, by asking.

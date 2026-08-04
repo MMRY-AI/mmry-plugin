@@ -116,6 +116,10 @@ case "$URL" in
         HTTP_CODE="200"
         RESPONSE_BODY='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
         ;;
+    */api/memories/*/visibility)
+        HTTP_CODE="204"
+        RESPONSE_BODY=''
+        ;;
     */api/memories/*/reinforce)
         HTTP_CODE="204"
         RESPONSE_BODY=''

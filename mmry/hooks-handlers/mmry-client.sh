@@ -437,6 +437,17 @@ mmry_get_my_groups() {
     _mmry_request GET "/api/groups/mine"
 }
 
+mmry_set_memory_visibility() {
+    # Retarget one memory's visibility (#29901). Creator-only, enforced server-side.
+    # Usage: mmry_set_memory_visibility MEMORY_ID VISIBILITY [PERMISSION_GROUP_ID]
+    local id="$1" visibility="$2" group_id="${3:-}"
+
+    local body
+    body="$(_mmry_build_json         "visibility" "$visibility"         "#permissionGroupID" "$group_id")"
+
+    _mmry_request PUT "/api/memories/${id}/visibility" "$body"
+}
+
 mmry_get_default_visibility() {
     # Current user's default memory visibility (#29901).
     _mmry_request GET "/api/users/me/default-visibility"
