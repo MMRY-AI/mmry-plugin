@@ -123,3 +123,14 @@ setup() {
     [[ "$status" -ne 0 ]]
     [[ "$output" == *"Error"* ]]
 }
+
+@test "visibility: zero groups plus an unknown name says so plainly (no contradictory list)" {
+    if ! command -v jq &>/dev/null; then
+        skip "Requires jq"
+    fi
+    export MOCK_CURL_RESPONSE='[]'
+    run bash "$PLUGIN_ROOT/hooks-handlers/visibility.sh" group "Anything"
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"not in any groups yet"* ]]
+    [[ "$output" != *"No group named"* ]]
+}
