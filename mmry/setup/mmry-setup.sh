@@ -78,6 +78,16 @@ json_escape() {
 # distinct block by the caller regardless of whether auto-open succeeded.
 open_browser() {
     local url="$1"
+
+    # Test/CI escape hatch: never launch a real browser when MMRY_NO_BROWSER is set.
+    # The device-auth e2e tests mock curl but previously still reached this function,
+    # which opened real tabs against the live authorize page during a local test run.
+    # Returning non-zero keeps the caller's "open the URL yourself" path, which is the
+    # correct unattended behavior.
+    if [[ -n "${MMRY_NO_BROWSER:-}" ]]; then
+        return 1
+    fi
+
     local kernel
     kernel="$(uname -s 2>/dev/null || echo unknown)"
 
