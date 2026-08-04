@@ -10,6 +10,12 @@ SETUP_SCRIPT=""
 setup() {
     setup_mock_curl
 
+    # Never launch a real browser from a test run. curl is mocked, but open_browser
+    # is not: without this the device-auth tests opened real tabs against the live
+    # authorize page. mmry-setup.sh honors MMRY_NO_BROWSER and falls back to telling
+    # the user to open the URL themselves.
+    export MMRY_NO_BROWSER=1
+
     # Isolate HOME so setup doesn't touch real config
     export HOME="$TEST_TMPDIR/fakehome"
     mkdir -p "$HOME/.claude"
