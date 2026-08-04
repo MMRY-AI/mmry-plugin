@@ -437,6 +437,24 @@ mmry_get_my_groups() {
     _mmry_request GET "/api/groups/mine"
 }
 
+mmry_get_default_visibility() {
+    # Current user's default memory visibility (#29901).
+    _mmry_request GET "/api/users/me/default-visibility"
+}
+
+mmry_set_default_visibility() {
+    # Usage: mmry_set_default_visibility VISIBILITY [PERMISSION_GROUP_ID]
+    # VISIBILITY is Global, Private, or Group; a group id is required for Group.
+    local visibility="$1" group_id="${2:-}"
+
+    local body
+    body="$(_mmry_build_json \
+        "visibility" "$visibility" \
+        "#permissionGroupID" "$group_id")"
+
+    _mmry_request PUT "/api/users/me/default-visibility" "$body"
+}
+
 mmry_process_context() {
     # Send session context to the server-side AI layer for processing.
     # Usage: mmry_process_context "context" "hookType" \
