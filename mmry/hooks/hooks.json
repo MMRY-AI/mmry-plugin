@@ -4,54 +4,63 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-init.sh\"",
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-init.sh\"", 
             "timeout": 30
           }
         ]
       }
-    ],
+    ], 
     "UserPromptSubmit": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\"",
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\"", 
             "timeout": 5
           }
         ]
       }
-    ],
+    ], 
     "Stop": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh stop-check || true\"",
+            "type": "command", 
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh stop-check || true\"", 
             "timeout": 10
           }
         ]
       }
-    ],
+    ], 
     "PreCompact": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh precompact-check || true\"",
+            "type": "command", 
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh precompact-check || true\"", 
             "timeout": 10
           }
         ]
       }
-    ],
+    ], 
     "PostToolUse": [
       {
-        "matcher": "ExitPlanMode",
+        "matcher": "ExitPlanMode", 
         "hooks": [
           {
-            "type": "command",
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh plan-accepted-check || true\"",
+            "type": "command", 
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh plan-accepted-check || true\"", 
             "timeout": 10
+          }
+        ]
+      }, 
+      {
+        "hooks": [
+          {
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check || true\"", 
+            "type": "command", 
+            "timeout": 8
           }
         ]
       }

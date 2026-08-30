@@ -416,6 +416,20 @@ mmry_get_active_sessions() {
     _mmry_request GET "/api/sessions/active"
 }
 
+# Poll a formation's shared messages since a moment (#31012). The server decides whether this
+# caller may hear anything: it returns an empty list rather than an error for a non-member, so that
+# a caller cannot tell an empty formation from one it cannot see. Do not turn that silence into an
+# error message here.
+mmry_get_formation_transmissions() {
+    # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601]
+    local formation_id="$1" session_id="$2" since="${3:-}"
+    local path="/api/formations/${formation_id}/transmissions?sessionId=${session_id}"
+    if [[ -n "$since" ]]; then
+        path="${path}&since=${since}"
+    fi
+    _mmry_request GET "$path"
+}
+
 mmry_submit_feedback() {
     # Usage: mmry_submit_feedback TYPE TITLE DESCRIPTION [COMPONENT] [REPRO_STEPS] [ENVIRONMENT]
     local type="$1" title="$2" description="$3"
