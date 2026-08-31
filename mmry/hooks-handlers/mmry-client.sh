@@ -420,6 +420,20 @@ mmry_get_active_sessions() {
 # caller may hear anything: it returns an empty list rather than an error for a non-member, so that
 # a caller cannot tell an empty formation from one it cannot see. Do not turn that silence into an
 # error message here.
+# Join a formation with this session, and list or leave one (#31012 QA). Delivery was unreachable
+# without these: the hook reads the formation from local state and nothing wrote it.
+mmry_get_active_formations() {
+    _mmry_request GET "/api/formations/active"
+}
+
+mmry_join_formation() {
+    # Usage: mmry_join_formation FORMATION_ID SESSION_ID
+    local formation_id="$1" session_id="$2"
+    local body
+    body="$(_mmry_build_json "sessionId" "$session_id")"
+    _mmry_request POST "/api/formations/${formation_id}/join" "$body"
+}
+
 mmry_get_formation_transmissions() {
     # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601]
     local formation_id="$1" session_id="$2" since="${3:-}"

