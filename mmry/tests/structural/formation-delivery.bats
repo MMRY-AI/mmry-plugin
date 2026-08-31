@@ -10,10 +10,44 @@ setup() {
     export TMPDIR="${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
     export CLAUDE_SESSION_ID="bats-formation-$$"
     bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_SESSION_ID" || true
+
+    # The one well-formed transmission the transport tests share. Whether the hook speaks has to
+    # turn on the response and on the tools available, never on a different fixture per test.
+    VALID_TRANSMISSION='[{"senderRole":"lead","senderSessionID":"other-session","content":"Heads up: I am touching FormationService.cs","sentDate":"2026-08-30T12:00:00"}]'
 }
 
 teardown() {
     bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_SESSION_ID" || true
+}
+
+# A fake curl on PATH is the transport for the failure-mode tests below, and it exists because QA
+# round 2 found the previous versions of those tests unable to reach the guards they were named
+# after. One served its malformed response from a Python-2-only module, so on a Python 3 host the
+# server never started, the request was simply refused, and the hook went quiet for the wrong
+# reason. The other pointed at a dead port, so the network guard returned before the parse stage was
+# reached at all. Both had quietly become second copies of the "unreachable service" test.
+#
+# This shim takes the network out of the question. It answers with whatever body and status the test
+# asks for, in bash, with no interpreter and no port, so the thing being varied is the response
+# itself. Prints a directory to put at the front of PATH.
+_fake_curl_dir() {
+    local dir="${BATS_TEST_TMPDIR}/fake-bin"
+    mkdir -p "$dir"
+    cat > "${dir}/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+# The client calls curl with -o <file> -w '%{http_code}', so the body belongs in the -o target and
+# the status code on stdout. The URL is ignored: nothing here touches the network.
+out=""; prev=""
+for arg in "$@"; do
+    [[ "$prev" == "-o" ]] && out="$arg"
+    prev="$arg"
+done
+[[ -n "$out" ]] && printf '%s' "${FAKE_BODY:-}" > "$out"
+printf '%s' "${FAKE_CODE:-200}"
+exit 0
+FAKECURL
+    chmod +x "${dir}/curl"
+    printf '%s' "$dir"
 }
 
 @test "state: set then get returns the formation id" {
@@ -96,44 +130,89 @@ teardown() {
     [[ "$output" == *"since="* ]]
 }
 
-@test "hook: a malformed response is silent and does not fail" {
-    # QA round 1 found this guarded in code but exercised by no test. A local server that answers
-    # 200 with HTML instead of JSON is the real condition, so the guard is driven rather than
-    # described. Anything but silence here would put half-parsed text in front of the model.
-    command -v python >/dev/null 2>&1 || skip "python not available to serve a malformed response"
+@test "transport: the fake curl delivers, so silence in the next two tests means something" {
+    # The control. Without it "the hook was silent" proves nothing: a typo in the shim, a missing
+    # key, a guard firing three steps earlier would each produce exactly the same silence, and both
+    # failure-mode tests below would pass while exercising nothing. This asserts that the identical
+    # setup DOES deliver, which is what makes the silence attributable to the one thing each of
+    # those tests changes.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
 
-    local port=18731
-    python - "$port" <<'PYSRV' &
-import sys, BaseHTTPServer
-class H(BaseHTTPServer.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write('<html>this is not json at all</html>')
-    def log_message(self, *a): pass
-BaseHTTPServer.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
-PYSRV
-    local srv=$!
-    sleep 2
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-check.sh"
 
-    MMRY_API_URL="http://127.0.0.1:${port}" run bash "${HANDLERS}/formation-check.sh"
-    kill "$srv" 2>/dev/null || true
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"FormationService.cs"* ]]
+}
+
+@test "hook: a malformed response is silent and does not fail" {
+    # 200 with a body that is not the array the hook expects, which is what an interposing proxy,
+    # an error page, or a truncated read looks like from here. Anything but silence would put
+    # half-parsed text in front of the model.
+    #
+    # Three shapes, because they fail at different guards: HTML never parses, truncated JSON parses
+    # to nothing, and a JSON object parses fine but is the wrong type. The type check exists
+    # precisely so the third one cannot slip through.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local body
+
+    for body in \
+        '<html>this is not json at all</html>' \
+        '[{"content":"tru' \
+        '{"error":"unexpected object where an array belongs"}'
+    do
+        PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run bash "${HANDLERS}/formation-check.sh"
+
+        [ "$status" -eq 0 ] || {
+            echo "spoke on malformed body: $body"
+            return 1
+        }
+        [ -z "$output" ] || {
+            echo "output on malformed body: $body -> $output"
+            return 1
+        }
+    done
+}
+
+@test "hook: with no jq available it is silent and does not fail" {
+    # The response here is the same well-formed one the control test proves gets delivered, and the
+    # transport is the same fake curl, so the only variable is whether jq exists. That matters: the
+    # round 1 version of this test asserted silence against an unreachable URL, and the network
+    # guard produces that silence on its own several steps before jq is ever consulted, so it could
+    # not attribute the result to anything.
+    #
+    # MMRY_JQ_SKIP_SYSTEM and MMRY_JQ_VENDOR_DIR are the client library's own test seams; pointing
+    # the vendor directory at an empty one leaves no usable jq at all, which is the condition on a
+    # platform the bundled binary does not cover.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local emptydir="${BATS_TEST_TMPDIR}/no-jq"
+    mkdir -p "$emptydir"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_JQ="" MMRY_JQ_SKIP_SYSTEM=1 MMRY_JQ_VENDOR_DIR="$emptydir" \
+        run bash "${HANDLERS}/formation-check.sh"
 
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-@test "hook: with no jq available it is silent and does not fail" {
-    # The other half of QA round 1's finding. MMRY_JQ_SKIP_SYSTEM and MMRY_JQ_VENDOR_DIR are the
-    # library's own test seams, so pointing the vendor directory at an empty one leaves no usable
-    # jq at all, which is the condition on an unsupported platform.
+@test "hook: a non-2xx response is silent even when its body would parse" {
+    # A 500 whose body happens to be a valid transmission array. The status check has to come
+    # first: the hook must not read a body it was told is an error, or a server having a bad day
+    # starts dictating to sessions.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    local emptydir="${BATS_TEST_TMPDIR}/no-jq"
-    mkdir -p "$emptydir"
+    local bin; bin="$(_fake_curl_dir)"
 
-    MMRY_JQ="" MMRY_JQ_SKIP_SYSTEM=1 MMRY_JQ_VENDOR_DIR="$emptydir"         MMRY_API_URL="http://127.0.0.1:9" run bash "${HANDLERS}/formation-check.sh"
+    PATH="${bin}:${PATH}" FAKE_CODE=500 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-check.sh"
 
     [ "$status" -eq 0 ]
     [ -z "$output" ]
