@@ -1,7 +1,7 @@
 {
   "name": "mmry",
   "description": "MMRY AI — Persistent SQL-backed memory system. Auto-loads memories at session start, prompts to save at session end, before context compression, and when plans are accepted.",
-  "version": "2.4.0",
+  "version": "2.6.0",
   "author": {
     "name": "MMRY AI"
   }

@@ -8,7 +8,7 @@
       "name": "mmry",
       "source": "./mmry",
       "description": "Persistent memory system for Claude Code. Auto-loads, auto-saves, auto-reinforces.",
-      "version": "2.4.0",
+      "version": "2.6.0",
       "category": "productivity"
     }
   ]
