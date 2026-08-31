@@ -24,6 +24,34 @@ Save a memory to MMRY AI. If the user provided a description after the command, 
 
 3. Confirm to the user that the memory was sent for processing. Keep it brief — one sentence. Do **not** announce internal classification details (the server decides those).
 
+4. **Sensitive-content nudge.** Memories are shared with the organization by default. If what
+   was just saved reads as personal or sensitive (health, pay or finances, a performance or
+   personnel matter, a private opinion about someone, anything clearly meant for the person
+   alone), add ONE short line after the confirmation pointing out that it saved as shared and
+   how to restrict it. For example:
+
+   > Saved. This looks personal, and memories are shared with your organization by default —
+   > say "make it private" if you would rather keep it to yourself.
+
+   If the user then says "make it private" (or asks for it to be restricted), run:
+
+   ```bash
+   HOOK="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/hooks-handlers/make-private.sh}"
+   [ -f "$HOOK" ] || HOOK="${HOME}/.claude/mmry/hooks-handlers/make-private.sh"
+   bash "$HOOK"
+   ```
+
+   With no argument it restricts the memory they just saved. Pass a memory id to target a
+   specific one. Only the person who saved a memory can change its scope; the server
+   returns 403 otherwise, so do not try to do this on someone else's memory.
+
+   Rules for this nudge, which matter more than the wording:
+   - **Never ask a question and never wait.** The save already happened; this is a passive note.
+   - **Never change visibility yourself.** Only the user decides, by asking.
+   - **Do not nudge on ordinary work content.** Reserve it for genuinely personal material, or
+     it becomes noise people ignore.
+   - Skip it entirely when the user already chose a scope (they saved privately or to a group).
+
 ## Guidelines
 
 - Keep the context dense and specific. Aim for under 500 characters of substantive content unless the situation genuinely needs more.

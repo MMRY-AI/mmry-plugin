@@ -116,6 +116,10 @@ case "$URL" in
         HTTP_CODE="200"
         RESPONSE_BODY='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
         ;;
+    */api/memories/*/visibility)
+        HTTP_CODE="204"
+        RESPONSE_BODY=''
+        ;;
     */api/memories/*/reinforce)
         HTTP_CODE="204"
         RESPONSE_BODY=''
@@ -150,6 +154,16 @@ case "$URL" in
         else
             HTTP_CODE="200"
             RESPONSE_BODY='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
+        fi
+        ;;
+    */api/users/me/default-visibility)
+        if [[ "$METHOD" == "PUT" ]]; then
+            HTTP_CODE="204"
+            RESPONSE_BODY=''
+        else
+            HTTP_CODE="200"
+            # Tests can vary the stored default with MOCK_DEFAULT_VISIBILITY_BODY.
+            RESPONSE_BODY="${MOCK_DEFAULT_VISIBILITY_BODY:-{\"visibility\":\"Global\",\"permissionGroupID\":null\}}"
         fi
         ;;
     */api/sessions/active)
