@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # mmry-client.sh — MMRY AI REST API client library (bash+curl)
 # Source this file to access all MMRY AI API functions.
-# Version: 2.2.0
+# Version: tracked in .claude-plugin/plugin.json, not here. This line said 2.2.0 while the
+# plugin shipped 2.8.0 (#31104 QA), which is what a hardcoded second copy of a version does.
 
 set -euo pipefail
 
