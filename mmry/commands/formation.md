@@ -1,6 +1,6 @@
 Join, speak to, or leave a formation: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation say "message"` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation say "message"` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
 
 ## What This Does
 
@@ -69,6 +69,22 @@ interrupted by it after their next tool call.
 The script exits non-zero and explains itself when the message was not recorded. **Pass that
 through. Never report a message as sent unless the script said so**, because a message nobody
 received, reported as sent, is worse than an error.
+
+### debrief
+
+The lead gives the closing summary, for example `/mmry:formation debrief "Schema migrated, the
+import bug turned out to be the date format, follow-up filed as #12345"`.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-debrief.sh" "<summary>"
+```
+
+This is how a formation ends properly. The summary is consolidated into lasting memories that
+someone who was never in the formation can read later, and the running chatter stops being served.
+Only the lead, the creator or an administrator may do it; the script translates a refusal.
+
+If it reports that nothing was recorded, the formation is still active and retrying is safe. Do
+not tell the user it was closed out unless the script said so.
 
 ### leave
 

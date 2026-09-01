@@ -449,6 +449,17 @@ mmry_create_formation() {
     _mmry_request POST "/api/formations" "$body"
 }
 
+# Close out a formation with the lead's summary (#31104). The server consolidates the summary into
+# lasting memories and only records the transition if that actually happened; a failed
+# consolidation returns 502 with the formation left Active (DD-70), so retrying is safe.
+mmry_debrief_formation() {
+    # Usage: mmry_debrief_formation FORMATION_ID "summary"
+    local formation_id="$1" summary="$2"
+    local body
+    body="$(_mmry_build_json "context" "$summary")"
+    _mmry_request POST "/api/formations/${formation_id}/debrief" "$body"
+}
+
 # Send a transmission to a formation (#31104). Until this existed the plugin could join a formation
 # and listen, and had no way to speak, so nothing was ever delivered to anybody and the feature
 # shipped inert in v1.21.

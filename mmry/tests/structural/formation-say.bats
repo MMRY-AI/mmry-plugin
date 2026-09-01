@@ -175,3 +175,68 @@ _env() {
     run grep -c "Never report a message as sent unless the script said so" "${BATS_TEST_DIRNAME}/../../commands/formation.md"
     [ "$output" -ge 1 ]
 }
+
+@test "debrief: a session in no formation is told there is nothing to close out" {
+    run bash "${HANDLERS}/formation-debrief.sh" "This formation accomplished the migration and found the date bug"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"not in a formation"* ]]
+}
+
+@test "debrief: refuses a summary too short to be worth keeping" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    run bash "${HANDLERS}/formation-debrief.sh" "done"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"too short"* ]]
+}
+
+@test "control: a confirmed debrief clears local state and says what happened" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='{"id":42,"status":"Debriefed"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"closed out"* ]]
+    # The hook must stop polling a channel that will never serve again.
+    run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
+    [ -z "$output" ]
+}
+
+@test "debrief: a 502 says the formation is still active and nothing was recorded" {
+    # DD-70 server-side: a failed consolidation refuses to record the transition. The client must
+    # say that plainly AND must keep the local state, because the formation is still live.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"consolidation failed"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"left active"* ]]
+    [[ "$output" != *"closed out"* ]]
+    run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
+    [[ "$output" == 42* ]]
+}
+
+@test "debrief: a role refusal names who may close out, not a generic error" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{"error":"forbidden"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"lead"* ]]
+    [[ "$output" == *"administrator"* ]]
+}
+
+@test "command: /mmry:formation documents debrief, and help advertises it" {
+    run grep -c "formation-debrief.sh" "${BATS_TEST_DIRNAME}/../../commands/formation.md"
+    [ "$output" -ge 1 ]
+    run grep -c "debrief" "${BATS_TEST_DIRNAME}/../../commands/help.md"
+    [ "$output" -ge 1 ]
+}
