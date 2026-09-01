@@ -434,6 +434,57 @@ mmry_join_formation() {
     _mmry_request POST "/api/formations/${formation_id}/join" "$body"
 }
 
+# Start a formation (#31104). Added alongside the send path for the same reason: without it a
+# plugin user could only ever join a formation that something else had created, and nothing they
+# have could create one. Requirement 2 of #31104 asks for a message to reach another session with no
+# manual step, and calling the API by hand to start the formation is a manual step.
+mmry_create_formation() {
+    # Usage: mmry_create_formation "objective" SESSION_ID [TASK_ID]
+    local objective="$1" session_id="$2" task_id="${3:-}"
+    local body
+    body="$(_mmry_build_json \
+        "objective" "$objective" \
+        "sessionId" "$session_id" \
+        "taskId"    "$task_id")"
+    _mmry_request POST "/api/formations" "$body"
+}
+
+# Send a transmission to a formation (#31104). Until this existed the plugin could join a formation
+# and listen, and had no way to speak, so nothing was ever delivered to anybody and the feature
+# shipped inert in v1.21.
+#
+# It goes through the processing endpoint rather than a create-memory call because that is the ONLY
+# write path the server binds a formation on: #31011 QA deliberately made a formation id on the
+# public create-memory body bind nothing, so a caller cannot forge a binding. The hook type must be
+# 'formation' and the id must travel with it; the server ignores a formation id on any other type.
+#
+# That endpoint is synchronous for this hook type as of #31104 and reports how many memories it
+# stored, so a refusal (not a current member, formation closed out) is a real failure here rather
+# than the 202 that used to come back either way.
+mmry_send_formation_transmission() {
+    # Usage: mmry_send_formation_transmission FORMATION_ID SESSION_ID "message" [WORKING_DIR]
+    local formation_id="$1" session_id="$2" message="$3" working_dir="${4:-}"
+    local body
+    body="$(_mmry_build_json \
+        "context"          "$message" \
+        "hookType"         "formation" \
+        "formationId"      "$formation_id" \
+        "sessionId"        "$session_id" \
+        "workingDirectory" "$working_dir")"
+
+    _mmry_request POST "/api/memories/process" "$body"
+    local rc=$?
+
+    # How many memories the server actually stored. Zero means nobody will receive this, whatever
+    # the accompanying message says.
+    MMRY_TRANSMISSION_STORED=""
+    if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+        MMRY_TRANSMISSION_STORED="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.stored // empty' 2>/dev/null || true)"
+    fi
+
+    return $rc
+}
+
 mmry_get_formation_transmissions() {
     # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601]
     local formation_id="$1" session_id="$2" since="${3:-}"
