@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "mmry-plugin",
   "owner": {
     "name": "MMRY AI"
@@ -8,7 +8,7 @@
       "name": "mmry",
       "source": "./mmry",
       "description": "Persistent memory system for Claude Code. Auto-loads, auto-saves, auto-reinforces.",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "category": "productivity"
     }
   ]
