@@ -30,7 +30,7 @@ if [[ "${#objective}" -lt 10 ]]; then
     exit 1
 fi
 
-session_id="${CLAUDE_SESSION_ID:-}"
+session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is nothing to enrol as the lead. This needs to run inside a session."
     exit 1

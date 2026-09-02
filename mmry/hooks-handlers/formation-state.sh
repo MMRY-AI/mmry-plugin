@@ -26,7 +26,7 @@ set -euo pipefail
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
 
 _state_file() {
-    local sid="${1:-${CLAUDE_SESSION_ID:-unknown}}"
+    local sid="${1:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
     # Session ids come from the client and can carry characters that are awkward in a filename.
     local safe
     safe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"
