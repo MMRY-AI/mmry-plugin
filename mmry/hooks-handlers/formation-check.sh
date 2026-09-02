@@ -30,16 +30,30 @@ trap 'exit 0' ERR
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
 
-# ---- 1. Are we in a formation at all? One file test, then out. ----
-state="$(bash "${HANDLER_DIR}/formation-state.sh" get 2>/dev/null || true)"
+# ---- 0. Resolve this session's id BEFORE anything else, because the state is keyed by it. ----
+# CLAUDE_SESSION_ID is unreliable (session-init.sh says so and reads stdin instead), and the join
+# that wrote our state runs in the command runtime, which provides CLAUDE_CODE_SESSION_ID. This hook
+# runs in the hook runtime, which per the Claude Code spec always carries session_id on stdin. All
+# three resolve to the same session UUID, so the id used here matches the id the join stored under
+# and the membership it created (#31143). Read stdin first, then fall back to the env vars.
+session_id=""
+if [[ ! -t 0 ]]; then
+    payload="$(timeout 2 cat 2>/dev/null || true)"
+    if [[ -n "$payload" ]]; then
+        jq_bin="$(command -v jq 2>/dev/null || true)"
+        [[ -n "$jq_bin" ]] && session_id="$(printf '%s' "$payload" | "$jq_bin" -r '.session_id // empty' 2>/dev/null || true)"
+    fi
+fi
+session_id="${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
+[[ -n "$session_id" ]] || exit 0
+
+# ---- 1. Are we in a formation at all? One file test, then out. Key state by the resolved id. ----
+state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 [[ -n "$state" ]] || exit 0
 
 formation_id="${state%% *}"
 last_seen="${state#* }"
 [[ "$formation_id" =~ ^[0-9]+$ ]] || exit 0
-
-session_id="${CLAUDE_SESSION_ID:-}"
-[[ -n "$session_id" ]] || exit 0
 
 # ---- 2. Load the client. If it is not there, this feature simply does not run. ----
 # shellcheck source=/dev/null
@@ -77,7 +91,9 @@ newest="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
 # If this ran afterwards and the hook were interrupted, the same messages would be delivered again
 # on the next tool call, and a repeating transmission is worse than a late one.
 if [[ -n "$newest" ]]; then
-    bash "${HANDLER_DIR}/formation-state.sh" seen "$newest" 2>/dev/null || true
+    # Pass the resolved session id: in the hook runtime it may only be on stdin, and "seen" must
+    # record against the same key "get" read from, or the next poll re-delivers everything (#31143).
+    bash "${HANDLER_DIR}/formation-state.sh" seen "$newest" "$session_id" 2>/dev/null || true
 fi
 
 # ---- 6. Surface. ----
