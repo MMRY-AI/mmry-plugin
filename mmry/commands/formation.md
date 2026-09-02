@@ -92,7 +92,7 @@ not tell the user it was closed out unless the script said so.
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-leave.sh"
 ```
 
-This stops delivery to this session and tells the server the session has left. Confirm in one line.
+This is local only: it stops this session receiving, and nothing more. There is no leave endpoint, so the roster still lists this session until the lead or an administrator removes it or the formation is debriefed. Say that plainly rather than implying the server was told. Confirm in one line.
 
 ### status
 
