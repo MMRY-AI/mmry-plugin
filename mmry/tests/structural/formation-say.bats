@@ -55,11 +55,21 @@ _env() {
     [[ "$output" == *"Say what?"* ]]
 }
 
-@test "say: refuses a message too short to be worth interrupting anyone" {
+@test "say: a two-word message is sent, not refused for being short (#31122)" {
+    # This test is the inverse of the one it replaces. The old ten-character floor was written on
+    # the assumption that a very short message was probably a mistake; the real reason short
+    # messages went nowhere was that the server ran them through AI extraction and dropped
+    # whatever it judged not worth keeping. "files locked" is exactly what one window needs to
+    # tell another.
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
-    run bash "${HANDLERS}/formation-say.sh" "ok"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"too short"* ]]
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=201 FAKE_BODY='{"transmissionId":7,"stored":1}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-say.sh" "ok"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Sent to formation"* ]]
 }
 
 @test "say: a session in no formation is told so, and told how to fix it" {
@@ -114,19 +124,38 @@ _env() {
     [[ "$output" != *"Sent to formation"* ]]
 }
 
-@test "say: a 502 from the close-out guard says the formation is closed, not something generic" {
-    # prod_037 refuses a transmission into a closed-out formation server side. The sender needs to
-    # hear which of the two it is, because "not a member" sends them looking for a permissions
-    # problem that does not exist.
+@test "say: a 403 tells the sender to join from this window, and names both possible causes" {
+    # The server answers 403 for not-a-member, for a closed-out formation and for another
+    # account's formation, deliberately not distinguishing them: telling them apart would disclose
+    # whether somebody else's formation exists. So the client names both causes the sender can act
+    # on, and gives the command that fixes the common one.
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
 
-    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"message":"Nothing stored.","stored":0}' \
+    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{"message":"This session is not a current member of that formation.","stored":0}' \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
         run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
 
     [ "$status" -ne 0 ]
+    [[ "$output" == *"not a current member"* ]]
     [[ "$output" == *"closed out"* ]]
+    [[ "$output" == *"join 42"* ]]
+    [[ "$output" != *"Sent to formation"* ]]
+}
+
+@test "say: an out-of-date plugin posting the old way passes the server answer through (#31122)" {
+    # The server refuses hookType formation on /api/memories/process with a 400 naming the new
+    # endpoint. The sender must see the server's own words rather than a summary, because they are
+    # trying to work out why nothing arrived.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=400 FAKE_BODY='{"errors":{"hookType":["Use POST /api/formations/{formationId}/transmissions"]}}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"/api/formations/"* ]]
     [[ "$output" != *"Sent to formation"* ]]
 }
 
@@ -152,15 +181,21 @@ _env() {
     [[ "$output" != *"Sent to formation"* ]]
 }
 
-@test "client: the send function targets the process endpoint with the formation hook type" {
-    # The only write path the server binds a formation on. #31011 QA deliberately made a formation
-    # id on the public create-memory body bind nothing, so a send built on that route would return
-    # success and bind nothing at all.
-    run grep -A 14 "^mmry_send_formation_transmission()" "${HANDLERS}/mmry-client.sh"
+@test "client: the send function targets the formation endpoint, not memory processing (#31122)" {
+    # The memory-processing route ran the message through AI extraction and stored it as a memory,
+    # which dropped short messages and put coordination chatter in the customer recall, search and
+    # export. The server now refuses that route outright, so a client still pointed at it would
+    # fail every send.
+    #
+    # Comments are stripped before the negative assertion, deliberately. The function explains why
+    # it moved and names the old route while doing so, and a check that cannot tell an explanation
+    # from a request would fail on the documentation rather than on the behaviour.
+    run bash -c "grep -A 26 '^mmry_send_formation_transmission()' '${HANDLERS}/mmry-client.sh' | grep -v '^[[:space:]]*#'"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"/api/memories/process"* ]]
-    [[ "$output" == *"formation"* ]]
-    [[ "$output" == *"formationId"* ]]
+    [[ "$output" == *"/api/formations/"* ]]
+    [[ "$output" == *"transmissions"* ]]
+    [[ "$output" == *"content"* ]]
+    [[ "$output" != *"/api/memories/process"* ]]
 }
 
 @test "command: /mmry:formation documents say, and help advertises it" {

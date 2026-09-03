@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # formation-say.sh - send a message to the other members of this session's formation (#31104).
 #
+# #31122: this now posts to the formation's own endpoint, which records the message VERBATIM. It
+# used to go through memory processing, so a short message was interpreted and often discarded,
+# and the ones that survived turned up in the subscriber's own recall, search and export.
+#
 # WHY THIS EXISTS. v1.21 shipped the whole receiving half of formation coordination and no way to
 # speak. A session could start a formation, others could join, and every one of them would listen
 # faithfully to a channel nobody could put anything into. UAT against production found it: the
@@ -32,12 +36,11 @@ if [[ -z "$message" ]]; then
     exit 1
 fi
 
-# Long enough to be worth someone else's attention. A one-word transmission interrupts every other
-# session in the formation to say nothing.
-if [[ "${#message}" -lt 10 ]]; then
-    echo "That is too short to be worth interrupting the others with. Say what you are doing or what is blocked."
-    exit 1
-fi
+# #31122: the ten-character floor is GONE, and removing it is a fix rather than a relaxation. It
+# was written on the assumption that a very short message was probably an accident, when the real
+# reason short messages went nowhere was that the server ran them through AI extraction and
+# discarded whatever it judged not worth keeping. "done", "stop" and "files locked" are among the
+# most useful things one assistant can tell another. Blank is still refused above.
 
 session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
@@ -67,18 +70,23 @@ fi
 if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "$PWD"; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
-        502) echo "Nothing was recorded, so nobody will see this. The formation may have been closed out, or you may no longer be a member of it. Nothing was sent." ;;
-        403) echo "Refused. Your account may no longer be active, or you are no longer a member of formation ${formation_id}." ;;
+        # One answer covers not-a-member, closed-out and another account's formation, because the
+        # server deliberately does not distinguish them: telling them apart would disclose whether
+        # somebody else's formation exists.
+        403) echo "Refused, and nothing was sent. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run /mmry:formation join ${formation_id} from this window, or /mmry:formation list to see what is active." ;;
         404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        # An out-of-date plugin still posting to the old memory-processing path lands here, and the
+        # server's message names the endpoint to use. Passing it through verbatim rather than
+        # replacing it with a summary: the person reading this is working out why nothing arrived.
         400) echo "The server refused the message. ${MMRY_RESPONSE:-}" ;;
         *)   echo "Could not send to formation ${formation_id} (HTTP ${code}). Nothing was recorded." ;;
     esac
     exit 1
 fi
 
-# A 2xx is not enough on its own. The processing path swallows an AI failure and returns a result
-# rather than throwing, so the only honest signal that anyone will receive this is the count of what
-# was stored. This is the #31012 lesson applied at the client: never report delivery on faith.
+# A 2xx is not enough on its own. The count of what was recorded is checked even now that the
+# write is a plain insert, because the rule is about what this script is allowed to claim rather
+# than about which failure is currently possible: never report delivery on faith (#31012, DD-70).
 stored="${MMRY_TRANSMISSION_STORED:-}"
 if [[ -z "$stored" || ! "$stored" =~ ^[0-9]+$ || "$stored" -eq 0 ]]; then
     echo "The server accepted the request but recorded nothing, so nobody will see this. Try again shortly."

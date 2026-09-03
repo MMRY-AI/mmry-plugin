@@ -49,7 +49,12 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
 
    A refusal is usually one of two things, and both are worth saying plainly:
    - You share no access group with whoever created the formation. An administrator adds you.
+     This does NOT apply to your own formations: since #31122 a person needs no access group with
+     themselves, so your own other windows can always join.
    - This session already belongs to another formation. Leave that one first.
+
+   **Every window joins for itself.** Membership is held per session, so starting a formation in
+   one terminal does not enrol the others; each runs join with the id.
 
 ### say
 
@@ -59,8 +64,10 @@ The user gives the message, for example `/mmry:formation say "I am refactoring F
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-say.sh" "<message>"
 ```
 
-This is how anything gets into the channel the other members are listening to. Until #31104 there
-was no way to speak at all, so every formation was silent no matter how many sessions had joined it.
+This is how anything gets into the channel the other members are listening to. The message is
+recorded exactly as typed and delivered to every other member. There is no minimum length: "done",
+"stop" and "files locked" are perfectly good transmissions, and until #31122 they were silently
+discarded because the server interpreted messages instead of storing them.
 
 Send one when it affects what somebody else is doing: you are about to change a file, you are
 blocked, you have finished something they are waiting on. Do not narrate. Every member is
@@ -69,6 +76,9 @@ interrupted by it after their next tool call.
 The script exits non-zero and explains itself when the message was not recorded. **Pass that
 through. Never report a message as sent unless the script said so**, because a message nobody
 received, reported as sent, is worse than an error.
+
+A refusal usually means this window has not joined the formation, or the formation has been closed
+out. The server does not distinguish those two, deliberately, so the script names both.
 
 ### debrief
 
