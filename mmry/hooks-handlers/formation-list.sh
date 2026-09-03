@@ -9,7 +9,16 @@ source "${HANDLER_DIR}/mmry-client.sh"
 mmry_load_config || true
 
 if ! mmry_get_active_formations; then
-    echo "Could not reach the service (HTTP ${MMRY_HTTP_CODE:-0})."
+    # #31195: this said "could not reach the service" for every failure, including the ones that
+    # prove the opposite. A 401 or a 403 is the service answering, and sending somebody to look at
+    # their network when the real answer was "your credential expired" is the same defect as the
+    # formation 502: a status reported as a cause it does not support. HTTP 000 IS the unreachable
+    # case and mmry-client puts its explanation in MMRY_RESPONSE, so that is passed through.
+    if [[ "${MMRY_HTTP_CODE:-0}" == "000" ]]; then
+        echo "Could not reach the service. ${MMRY_RESPONSE:-}"
+    else
+        echo "Could not list this account's formations (HTTP ${MMRY_HTTP_CODE:-0}). ${MMRY_RESPONSE:-}"
+    fi
     exit 1
 fi
 

@@ -35,6 +35,9 @@ for arg in "$@"; do
     [[ "$prev" == "-o" ]] && out="$arg"
     prev="$arg"
 done
+# One line per invocation when a test asks for it, so a test can assert HOW MANY requests were
+# made and not merely what came back. #31195 needed that to prove a 502 is not silently retried.
+if [[ -n "${FAKE_CALL_LOG:-}" ]]; then printf 'call\n' >> "$FAKE_CALL_LOG"; fi
 [[ -n "$out" ]] && printf '%s' "${FAKE_BODY:-}" > "$out"
 printf '%s' "${FAKE_CODE:-200}"
 exit 0
@@ -140,6 +143,110 @@ _env() {
     [[ "$output" == *"not a current member"* ]]
     [[ "$output" == *"closed out"* ]]
     [[ "$output" == *"join 42"* ]]
+    [[ "$output" != *"Sent to formation"* ]]
+}
+
+@test "say: a 502 is reported as a server fault with the status code, never as a membership problem (#31195)" {
+    # THE DEFECT THIS FILE NOW GUARDS. Reproduced in production on 2026-09-03: the Lead of a live
+    # formation, with an intact roster, was told "the formation may have been closed out, or you may
+    # no longer be a member of it". Both were false. A read of the formation at that moment returned
+    # it Active with that session listed as Lead, and the true cause was on the server.
+    #
+    # The cost was not the wording. The operator's next move after reading that sentence is to check
+    # the roster and re-join, so the message spent an investigation on the one place the fault was
+    # not. A 502 says the server failed. It says nothing whatever about who is in the formation, and
+    # the client is not entitled to invent that.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"Bad Gateway"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
+
+    [ "$status" -ne 0 ]
+    # What it must say: a server fault, the status code, and what to do next.
+    [[ "$output" == *"server"* ]]
+    [[ "$output" == *"502"* ]]
+    [[ "$output" == *"Try again"* || "$output" == *"try again"* ]]
+    # What it must never say. These are the two false explanations from the production report, plus
+    # the re-join instruction that acting on them produces. "member" and "join" are barred outright
+    # rather than pattern-matched loosely: a 502 branch has no business using either word.
+    [[ "$output" != *"member"* ]]
+    [[ "$output" != *"closed out"* ]]
+    [[ "$output" != *"join"* ]]
+    [[ "$output" != *"Sent to formation"* ]]
+}
+
+@test "say: the rest of the gateway family is treated the same way as a 502 (#31195)" {
+    # 503 and 504 are the same kind of answer from the same layer, and a client that fixed only the
+    # code it happened to be shown would leave the identical misreport one bad afternoon away.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    for gateway_code in 503 504; do
+        PATH="${bin}:${PATH}" FAKE_CODE="$gateway_code" FAKE_BODY='{"error":"upstream"}' \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
+
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"server"* ]]
+        [[ "$output" == *"$gateway_code"* ]]
+        [[ "$output" != *"member"* ]]
+        [[ "$output" != *"closed out"* ]]
+        [[ "$output" != *"Sent to formation"* ]]
+    done
+}
+
+@test "say: an unmapped status names the code and claims nothing it cannot support (#31195)" {
+    # The catch-all is where every status nobody anticipated lands, so it is the one branch that
+    # must not guess. It may name the code and refuse to claim delivery. It may not narrate a cause.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=418 FAKE_BODY='{"error":"teapot"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"418"* ]]
+    [[ "$output" != *"member"* ]]
+    [[ "$output" != *"closed out"* ]]
+    [[ "$output" != *"Sent to formation"* ]]
+}
+
+@test "say: a 502 is sent once and not silently retried (#31195 decision)" {
+    # The decision recorded on #31195 and in the handler: the client does NOT retry a failed send by
+    # itself. The transmission POST carries no idempotency key, so a 502 raised after the row was
+    # written would put the same instruction into the channel twice, and the other members cannot
+    # tell a duplicate from a repeat. The sender is a person who is present and waiting, so the
+    # retry is theirs to make. This test is what stops that decision being quietly reversed.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local log="${BATS_TEST_TMPDIR}/curl-calls.log"
+    : > "$log"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"Bad Gateway"}' FAKE_CALL_LOG="$log" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
+
+    [ "$status" -ne 0 ]
+    run wc -l < "$log"
+    [ "${output// /}" -eq 1 ]
+}
+
+@test "say: a 404 still says the formation is gone, unchanged (#31195 regression guard)" {
+    # The counterpart to the 502 fix. Correcting a server fault must not blur the statuses that DO
+    # carry a cause: 404 means the formation is not there, and that sentence has to survive intact.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=404 FAKE_BODY='{"error":"not found"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-say.sh" "$MESSAGE"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no longer exists"* ]]
+    [[ "$output" == *"leave"* ]]
     [[ "$output" != *"Sent to formation"* ]]
 }
 

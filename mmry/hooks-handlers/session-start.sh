@@ -77,7 +77,13 @@ MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"
 # Load startup memories
 if ! mmry_get_startup_memories "$WORK_DIR"; then
     if [[ "${MMRY_HTTP_CODE:-}" == "403" ]]; then
-        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI trial has expired. Inform the user that their free trial has ended and they need to upgrade to continue using memory features."}}'
+        # #31195: this used to state the expired trial as fact. A 403 says access was refused; it
+        # does not say which of the things gating access is the one that fired, and telling a
+        # subscriber whose payment lapsed that their free trial has ended points them at a trial
+        # they finished months ago. The trial is still named first because it is the most common
+        # cause and the message is more useful for saying so - it is just no longer the only
+        # explanation on offer, and the assistant is told to let the user establish which it is.
+        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI refused the memory read (HTTP 403), which means this account is not currently entitled to it. The usual cause is an expired free trial; a lapsed or cancelled subscription does the same thing. Tell the user memories are unavailable for that reason, name both possibilities rather than asserting one, and point them at https://mmryai.com to check or restore their plan."}}'
         exit 0
     fi
     if [[ "${MMRY_HTTP_CODE:-}" == "402" ]]; then
