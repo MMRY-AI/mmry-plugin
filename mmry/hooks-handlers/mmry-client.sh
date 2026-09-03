@@ -475,20 +475,24 @@ mmry_debrief_formation() {
 # than the 202 that used to come back either way.
 mmry_send_formation_transmission() {
     # Usage: mmry_send_formation_transmission FORMATION_ID SESSION_ID "message" [WORKING_DIR]
+    #
+    # #31122: this posts to the formation's own endpoint, not to memory processing. It used to go
+    # to /api/memories/process with hookType "formation", which ran the message through AI
+    # extraction on its way to the memory store. Verified against production on 2026-09-02: a
+    # short message came back 502 with stored 0 and "No memories warranted saving from this
+    # context", while a longer one from the same session stored fine. The server now refuses the
+    # old path outright, so an un-updated plugin gets a 400 that names this route rather than
+    # silently delivering nothing.
     local formation_id="$1" session_id="$2" message="$3" working_dir="${4:-}"
     local body
-    body="$(_mmry_build_json \
-        "context"          "$message" \
-        "hookType"         "formation" \
-        "formationId"      "$formation_id" \
-        "sessionId"        "$session_id" \
-        "workingDirectory" "$working_dir")"
+    body="$(_mmry_build_json         "sessionId"        "$session_id"         "content"          "$message"         "workingDirectory" "$working_dir")"
 
-    _mmry_request POST "/api/memories/process" "$body"
+    _mmry_request POST "/api/formations/${formation_id}/transmissions" "$body"
     local rc=$?
 
-    # How many memories the server actually stored. Zero means nobody will receive this, whatever
-    # the accompanying message says.
+    # Whether the message was actually recorded. The server returns stored 1 on a 201 and stored 0
+    # with its reason on a refusal, so this stays the single signal the caller checks: zero means
+    # nobody will receive it, whatever the accompanying message says.
     MMRY_TRANSMISSION_STORED=""
     if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
         MMRY_TRANSMISSION_STORED="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.stored // empty' 2>/dev/null || true)"
