@@ -99,6 +99,12 @@ _env() {
     # asserting the negative is the half that matters.
     [[ "$output" == *"/api/formations/42/members/7/progress"* ]]
     [[ "$output" != *"/members/3/progress"* ]]
+    # AND EXACTLY THAT PATH, NOT MERELY A URL CONTAINING IT. Found by mutation: renaming the route
+    # to /progressMUTANT left every assertion above green, because the old path is a substring of
+    # the new one, while the request reached nothing any server answers. A whole-line match is the
+    # cheapest thing that separates "calls this route" from "calls something that starts like it".
+    run grep -Fxq "http://fake.invalid/api/formations/42/members/7/progress" "$urls"
+    [ "$status" -eq 0 ]
     run cat "$methods"
     [[ "$output" == *"PUT"* ]]
 }

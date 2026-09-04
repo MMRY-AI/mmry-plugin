@@ -75,6 +75,11 @@ BODY
     [ "$status" -eq 0 ]
     run cat "$urls"
     [[ "$output" == *"/api/formations/42/close-out"* ]]
+    # AND EXACTLY THAT PATH. Found by mutation: renaming the route to /close-outMUTANT left the
+    # substring assertion above green while the client called a route nothing serves. The whole-line
+    # match is what makes this test able to fail for the reason it claims to be checking.
+    run grep -Fxq "http://fake.invalid/api/formations/42/close-out" "$urls"
+    [ "$status" -eq 0 ]
 }
 
 @test "report: an id given on the command line is used, and no membership is needed" {
@@ -91,6 +96,8 @@ BODY
     [ "$status" -eq 0 ]
     run cat "$urls"
     [[ "$output" == *"/api/formations/99/close-out"* ]]
+    run grep -Fxq "http://fake.invalid/api/formations/99/close-out" "$urls"
+    [ "$status" -eq 0 ]
 }
 
 # ---------------------------------------------------------------- what it prints
