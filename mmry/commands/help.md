@@ -20,7 +20,7 @@ You can talk to Claude naturally about your memories:
 - **"Save a Foundation memory about our tech stack."** — Foundation memories never expire. Use them for things that define who you are.
 - **"What do you remember about our deployment process?"** — Claude searches your memories.
 - **`/mmry:search <keywords> [scope]`** runs a search on demand and lists the matches, optionally narrowed to one area of your work.
-- **`/mmry:formation start "objective"`** begins a formation with this session as its lead. **`join <id>`** puts this session in a formation, a group of assistants coordinating on one job, so their messages are surfaced here automatically. **`say "message"`** sends one to the others, and **`debrief "summary"`** closes the job out with a record that lasts. Also `leave` and `status`.
+- **`/mmry:formation start "objective"`** begins a formation with this session as its lead. **`join <id>`** puts this session in a formation, a group of assistants coordinating on one job, so their messages are surfaced here automatically. **`say "message"`** sends one to the others, and **`say "message" --to <memberId>`** sends it to that one member and nobody else, which is what an instruction meant for one person wants. **`roster`** lists the members and the ids to address them by. **`debrief "summary"`** closes the job out with a record that lasts. Also `leave` and `status`.
 - **"Forget the memory about the old API endpoint."** — Claude deactivates it.
 - **"Load my memories."** — Reloads your memories mid-session (same as `/mmry:load-memories`).
 

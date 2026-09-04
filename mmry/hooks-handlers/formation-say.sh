@@ -22,7 +22,20 @@
 # because somebody asked for it and is waiting to know whether it worked, so a failure is reported.
 # Reporting success for a message nobody received is the failure this whole task exists to fix.
 #
-# Usage: formation-say.sh "message"
+# DIRECTED MESSAGES (#31045). An optional second argument names ONE roster entry, and the message
+# then reaches that member and nobody else. Without it the message goes to the whole formation,
+# which is what every message has done until now and what most messages should keep doing.
+#
+# Send a directed one when the message is an instruction with exactly one intended recipient.
+# Broadcasting an instruction means every other member reads an order meant for somebody else, and
+# any of them might act on it; with five members, four of them evaluate every instruction that does
+# not concern them.
+#
+# The address is the ROSTER ENTRY id from /mmry:formation roster, never a session string. A sender
+# has no legitimate way to learn another session's id, and it is not the kind of thing that should
+# travel through a command line.
+#
+# Usage: formation-say.sh "message" [recipientMemberId]
 # Exits 0 only when the server confirms it stored the transmission.
 set -euo pipefail
 
@@ -32,7 +45,18 @@ source "${HANDLER_DIR}/mmry-client.sh"
 
 message="${1:-}"
 if [[ -z "$message" ]]; then
-    echo "Say what? Usage: /mmry:formation say \"what you want the others to know\""
+    echo "Say what? Usage: /mmry:formation say \"what you want the others to know\" [recipientMemberId]"
+    exit 1
+fi
+
+# Validated here as well as on the server, because this is the one thing the server cannot judge
+# for us: whether the caller meant to address anybody at all. A non-numeric value is a mistake at
+# the keyboard, and refusing it here means the message is not sent to the WHOLE FORMATION by
+# accident while the sender believes it went to one person. That is the failure worth preventing:
+# an unaddressed instruction is not a smaller version of an addressed one, it is a broadcast.
+recipient_member_id="${2:-}"
+if [[ -n "$recipient_member_id" ]] && ! [[ "$recipient_member_id" =~ ^[1-9][0-9]*$ ]]; then
+    echo "A recipient is a roster entry id, a positive whole number from /mmry:formation roster. Nothing was sent, because sending this without the recipient would have told the whole formation."
     exit 1
 fi
 
@@ -67,7 +91,7 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "$PWD"; then
+if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "$PWD" "$recipient_member_id"; then
     code="${MMRY_HTTP_CODE:-0}"
     # #31195: EVERY BRANCH HERE MAY ONLY SAY WHAT ITS STATUS ACTUALLY MEANS. The gateway branch
     # below used to read "the formation may have been closed out, or you may no longer be a member
@@ -84,10 +108,24 @@ if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "
         # formation exists.
         403) echo "Refused, and nothing was sent. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run /mmry:formation join ${formation_id} from this window, or /mmry:formation list to see what is active." ;;
         404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
-        # An out-of-date plugin still posting to the old memory-processing path lands here, and the
-        # server's message names the endpoint to use. Passing it through verbatim rather than
-        # replacing it with a summary: the person reading this is working out why nothing arrived.
-        400) echo "The server refused the message. ${MMRY_RESPONSE:-}" ;;
+        # Two things land on 400 and both need the SERVER's own words rather than a summary. An
+        # out-of-date plugin still posting to the old memory-processing path gets a body naming the
+        # endpoint to use. A directed message naming a recipient who is not in this formation, is on
+        # another account, has left, or is the sender itself gets the reason from the procedure
+        # (#31045).
+        #
+        # This branch may NOT guess which of those it is, for the #31195 reason: the person reading
+        # it is working out why nothing arrived, and a wrong explanation costs them an investigation
+        # in the one place the fault is not. So it prints what the server said, preferring the
+        # message field when there is one and falling back to the whole body when there is not.
+        400)
+            server_said=""
+            if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+                server_said="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.message // empty' 2>/dev/null || true)"
+            fi
+            [[ -n "$server_said" ]] || server_said="${MMRY_RESPONSE:-}"
+            echo "The server refused the message, and nothing was sent. ${server_said}"
+            ;;
         # The gateway family: the server, or something in front of it, failed while handling the
         # request. That is not a refusal and carries no information about the roster, so this says
         # so explicitly, and stays clear of the words "member" and "join" so it cannot be read as
@@ -124,5 +162,13 @@ if [[ -z "$stored" || ! "$stored" =~ ^[0-9]+$ || "$stored" -eq 0 ]]; then
     exit 1
 fi
 
-echo "Sent to formation ${formation_id}. The other members will see it after their next tool call."
+# The report says which of the two things actually happened (#31045). A directed message and a
+# broadcast are different acts with different consequences, and reporting both as "sent to the
+# formation" would leave a sender believing four other people had read an instruction that reached
+# one, or the reverse. Neither is recoverable once the sender has moved on.
+if [[ -n "$recipient_member_id" ]]; then
+    echo "Sent to member ${recipient_member_id} in formation ${formation_id}, and to nobody else. They will see it after their next tool call, marked as directed at them."
+else
+    echo "Sent to formation ${formation_id}. The other members will see it after their next tool call."
+fi
 exit 0
