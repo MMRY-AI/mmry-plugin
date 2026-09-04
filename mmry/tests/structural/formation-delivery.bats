@@ -92,16 +92,67 @@ FAKECURL
     [ -z "$output" ]
 }
 
+# A curl that records every invocation before answering, so "was the network reached" is a
+# question about an observed fact rather than about how long something took.
+_recording_curl_dir() {
+    local dir="${BATS_TEST_TMPDIR}/curl-recorder"
+    mkdir -p "$dir"
+    cat > "${dir}/curl" <<'RECCURL'
+#!/usr/bin/env bash
+printf 'called\n' >> "${MMRY_TEST_CURL_LOG:?curl recorder needs MMRY_TEST_CURL_LOG}"
+out=""; prev=""
+for arg in "$@"; do
+    [[ "$prev" == "-o" ]] && out="$arg"
+    prev="$arg"
+done
+[[ -n "$out" ]] && printf '%s' "${FAKE_BODY:-}" > "$out"
+printf '%s' "${FAKE_CODE:-200}"
+exit 0
+RECCURL
+    chmod +x "${dir}/curl"
+    printf '%s' "$dir"
+}
+
 @test "hook: no state file means no network call at all" {
-    # The cost of not being in a formation must be one file test. If the hook reached the network
-    # first, pointing it at the discard port would still take the connect timeout; this asserts it
-    # returns immediately instead.
-    local start end
-    start=$(date +%s)
-    MMRY_API_URL="http://127.0.0.1:9" run bash "${HANDLERS}/formation-check.sh"
-    end=$(date +%s)
+    # The cost of not being in a formation must be one file test.
+    #
+    # The previous version of this test argued that from a STOPWATCH: point the hook at the
+    # discard port, and if it came back in under three seconds it cannot have paid a connect
+    # timeout, so it cannot have touched the network. That is an inference from elapsed time, and
+    # it fails for reasons that have nothing to do with the hook - it failed exactly that way in a
+    # full-suite run with four other bats runs in flight, on code where the property held. A test
+    # that reports a defect when the machine is busy is not measuring the code.
+    #
+    # So observe the call. A curl that records every invocation answers the question directly, and
+    # answers it identically on an idle machine and a loaded one.
+    local log="${BATS_TEST_TMPDIR}/curl-calls.log"
+    local bin; bin="$(_recording_curl_dir)"
+
+    bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_SESSION_ID"
+    : > "$log"
+    run env PATH="${bin}:${PATH}" MMRY_TEST_CURL_LOG="$log" \
+        FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash "${HANDLERS}/formation-check.sh"
     [ "$status" -eq 0 ]
-    [ $((end - start)) -lt 3 ]
+    [ ! -s "$log" ] || {
+        echo "a session in no formation reached the network $(wc -l < "$log") time(s)"
+        return 1
+    }
+
+    # POSITIVE CONTROL. An empty log only means something if a call would have written to it. The
+    # identical invocation WITH a state file must record one, or this test is passing because the
+    # recorder was never on the path the handler actually resolves curl from.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    : > "$log"
+    run env PATH="${bin}:${PATH}" MMRY_TEST_CURL_LOG="$log" \
+        FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash "${HANDLERS}/formation-check.sh"
+    [ -s "$log" ] || {
+        echo "the recorder logged nothing even when in a formation, so the assertion above proves nothing"
+        return 1
+    }
 }
 
 @test "hook: the handler is wired into PostToolUse" {
