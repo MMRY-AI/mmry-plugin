@@ -230,20 +230,16 @@ FAKECURL
     [[ "$output" == *"Which formation"* ]]
 }
 
-@test "leave: with no formation it says so and succeeds" {
-    run bash "${HANDLERS}/formation-leave.sh"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"not in a formation"* ]]
-}
-
-@test "leave: it clears local state and is honest that the roster is untouched" {
-    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    run bash "${HANDLERS}/formation-leave.sh"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"roster still lists this session"* ]]
-    run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
-    [ -z "$output" ]
-}
+# LEAVING MOVED TO formation-leave.bats (#31194). Two tests lived here and both asserted the
+# local-only contract that ticket removed: that leaving with no local record says "not in a
+# formation", and that a leave prints "the roster still lists this session". Leaving now calls the
+# service, so the first sentence is wrong (a session with no local record is exactly the one that
+# is still on the roster and must ask to be released) and the second is a claim the product no
+# longer makes.
+#
+# They are not merely deleted. Leaving has four outcomes now instead of one, and formation-leave.bats
+# covers all four against a fake transport. These two also made no HTTP request at all, so they had
+# no transport to fake and would now reach whatever service the developer's own config points at.
 
 @test "command: /mmry:formation exists and is advertised in help" {
     [ -f "${BATS_TEST_DIRNAME}/../../commands/formation.md" ]

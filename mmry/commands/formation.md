@@ -51,7 +51,8 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    - You share no access group with whoever created the formation. An administrator adds you.
      This does NOT apply to your own formations: since #31122 a person needs no access group with
      themselves, so your own other windows can always join.
-   - This session already belongs to another formation. Leave that one first.
+   - This session already belongs to another formation. Run `/mmry:formation leave` first, which
+     since #31194 releases it on the service and frees it to join this one.
 
    **Every window joins for itself.** Membership is held per session, so starting a formation in
    one terminal does not enrol the others; each runs join with the id.
@@ -102,7 +103,18 @@ not tell the user it was closed out unless the script said so.
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-leave.sh"
 ```
 
-This is local only: it stops this session receiving, and nothing more. There is no leave endpoint, so the roster still lists this session until the lead or an administrator removes it or the formation is debriefed. Say that plainly rather than implying the server was told. Confirm in one line.
+This releases the session on the service as well as stopping delivery here (#31194), so the session can then join another formation. Nobody else in the formation is affected and the formation is not closed out.
+
+**Report what the script reports, and nothing more.** It distinguishes four outcomes and the wording matters:
+
+- It released the session. Say so, and that this session can now join another formation.
+- The service holds no membership for this session. There was nothing to release; do not call that a failure.
+- The service refused (it prints the status). Say the release was refused and that this session is still a member as far as the service is concerned, so joining another formation will be refused until that is resolved.
+- The service could not be reached. Same warning, different cause.
+
+Never tell the user the session left when the script did not say it did. Somebody who believes they left, and then cannot join anything, has nothing on screen to explain it.
+
+A session that has lost track of which formation it was in can still run this: the service resolves the membership from the session itself, so no formation id is needed.
 
 ### status
 
