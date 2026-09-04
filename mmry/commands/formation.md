@@ -1,6 +1,6 @@
-Join, speak to, or leave a formation: a group of assistants coordinating on one job at the same time.
+Join a formation, hand out its work, declare what you are touching, speak to it, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
 
 ## What This Does
 
@@ -121,6 +121,81 @@ received, reported as sent, is worse than an error.
 
 A refusal usually means this window has not joined the formation, or the formation has been closed
 out. The server does not distinguish those two, deliberately, so the script names both.
+
+### assign
+
+The lead gives one member its work, for example `/mmry:formation assign 12 "take the validator and its tests"`.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" <memberId> "<assignment>" [role]
+```
+
+This is how the lead stops being a title. Until #31044 each member declared its own job when it
+joined and nothing could change it afterwards, so the person running the work opened every window
+themselves and briefed each one by hand.
+
+**Get the member id from `/mmry:formation roster`, and do not guess one.** It is the same id
+`say --to` uses.
+
+**Only the flight lead, the person who started the formation, or an account administrator may do
+this.** A wingman reassigning a colleague is refused, and the refusal comes from the server, which
+decides it from the roster rather than from anything the request says.
+
+**It reaches that member and nobody else.** The assigned session sees it after its next tool call,
+marked as directed at it. The other members are not interrupted, because an instruction that
+concerns one person and is read by five is the waste the formation exists to remove.
+
+**An omitted field is left alone.** Give an assignment, a role, or both. Changing only the role
+keeps the assignment. There is deliberately no way to blank an assignment back to empty.
+
+To change only the role, pass an empty assignment:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" 12 "" Lead
+```
+
+**Report what the script reports.** On success it prints what the roster now holds, read back from
+the server rather than echoed from the request. On a refusal it prints the server's own reason, and
+that reason is worth passing through verbatim: no such member, a member who has left, a bad role
+and nothing named to change all look the same otherwise.
+
+### claim
+
+Declare the area this session is about to work, so nobody collides with it unknowingly.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" "<path>" [repository]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" --list
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" --release <claimId>
+```
+
+For example `/mmry:formation claim "src/Billing"` before starting on the billing code.
+
+**Declare before you start, not after.** The point is to find out that somebody else is already
+there while it still costs nothing.
+
+**The repository is worked out from the git root.** Pass it as a second argument only when the
+checkout is not named what the team calls the repository. Two members who spell it differently are
+never warned about each other, and nothing detects that they have not been.
+
+**If it overlaps somebody, both of you are told, privately, and nothing is blocked.** Two sessions
+legitimately touch one file during a rebase, so a hard refusal would strand real work. Agree who
+takes it, or carry on if you are not in fact in each other's way.
+
+**An overlap means two declared paths overlap as text.** It does not mean you are editing the same
+file. Do not tell the user it does.
+
+**Leaving the formation releases every area this session declared,** so `--release` is only for
+finishing one area and moving to another while staying in the formation. A session that has left,
+or one that rejoins, holds nothing.
+
+**Declaring the same area twice is not news.** The script says so, and says that nobody was told
+the second time. Never describe a repeat as having warned anybody.
+
+**What is compared is the repository and the path, never what anybody wrote in their assignment.**
+If the user asks why two people working "the billing code" were not warned, that is the answer:
+prose is not matched, on purpose, because a warning built on a guess is a warning that will be
+wrong.
 
 ### debrief
 
