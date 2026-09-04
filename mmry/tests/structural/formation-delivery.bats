@@ -247,3 +247,266 @@ FAKECURL
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
+
+# ---------------------------------------------------------------------------------------------
+# IDLE DELIVERY (#31196)
+# ---------------------------------------------------------------------------------------------
+# The defect: delivery was registered on PostToolUse and nowhere else, so a member sitting idle -
+# which is exactly when the lead has something to tell it - received nothing until it happened to
+# run a tool on its own account. These cover the two registrations added to close that, and the
+# wrapper defect found on the way, which had been swallowing delivery on every shipped version.
+
+# A shim that honours the "since" parameter, which the plain one deliberately ignores. Needed to
+# prove requirement 4: that a message delivered once is not delivered again. With a shim that
+# answers identically every time, "it delivered twice" and "it correctly re-asked" are the same
+# observation and nothing is being tested.
+_fake_curl_since_dir() {
+    local dir="${BATS_TEST_TMPDIR}/fake-bin-since"
+    mkdir -p "$dir"
+    cat > "${dir}/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+out=""; prev=""; url=""
+for arg in "$@"; do
+    [[ "$prev" == "-o" ]] && out="$arg"
+    case "$arg" in http*) url="$arg" ;; esac
+    prev="$arg"
+done
+# A request carrying a non-empty since= has already been told about this batch, so it gets nothing.
+answer="${FAKE_BODY:-}"
+case "$url" in
+    *since=)  ;;
+    *since=*) answer='[]' ;;
+esac
+[[ -n "$out" ]] && printf '%s' "$answer" > "$out"
+printf '%s' "${FAKE_CODE:-200}"
+exit 0
+FAKECURL
+    chmod +x "${dir}/curl"
+    printf '%s' "$dir"
+}
+
+_safe_sid_for_test() {
+    printf '%s' "$CLAUDE_SESSION_ID" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+@test "wrapper: the registration preserves exit 2 rather than swallowing it" {
+    # THE REGRESSION GUARD FOR THE DEFECT THIS TASK FOUND. Every shipped version from 2.6.0 to
+    # 2.8.2 wrapped the handler in the shape '[ -f x ] && bash y || true'. In that shape the
+    # trailing || true catches the handler's exit 2 and returns 0, so Claude Code was told
+    # "nothing to report" and the message never entered the model's context. Delivery was not
+    # late, it was absent, on the only event it was registered on. The guard must map the
+    # missing-file case to 0 and nothing else.
+    run grep -c 'formation-check || true' "${BATS_TEST_DIRNAME}/../../hooks/hooks.json"
+    [ "$output" -eq 0 ]
+}
+
+@test "wired: the handler is registered on Stop with asyncRewake" {
+    # asyncRewake is the entire mechanism. Without the flag the Stop hook is synchronous, so it
+    # cannot wait for a message to arrive, and a plain Stop block is discarded when the turn ended
+    # on a tool result. A Stop registration missing this flag is worse than no registration.
+    run node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.Stop||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check"));if(s.length!==1){console.log("expected 1, got "+s.length);process.exit(1);}if(s[0].asyncRewake!==true){console.log("asyncRewake not set");process.exit(1);}if(!(s[0].timeout>240)){console.log("timeout must outlast the poll budget");process.exit(1);}console.log("ok");' "${BATS_TEST_DIRNAME}/../../hooks/hooks.json"
+    [ "$status" -eq 0 ]
+}
+
+@test "wired: the handler is registered on SessionStart for the missed-message sweep" {
+    run node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.SessionStart||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check"));process.exit(s.length===1?0:1);' "${BATS_TEST_DIRNAME}/../../hooks/hooks.json"
+    [ "$status" -eq 0 ]
+}
+
+@test "idle: a pending message wakes the session, on stderr with exit 2" {
+    # The case the task exists for, at handler level. Exit 2 is what asyncRewake turns into a wake.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"FormationService.cs"* ]]
+}
+
+@test "idle: nothing pending means the poller gives up quietly, and never wakes the model" {
+    # Both halves matter. A Stop hook that exits 2 with nothing to say wakes the model for no
+    # reason and is a worse defect than the one being fixed; a poller that never returned would
+    # outlive the session it was watching. The budget bounds it, and this asserts it does stop.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='[]' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "idle: a session in no formation starts no poller and makes no request" {
+    # The fail-open budget. Most sessions are in no formation and must pay one file test, not a
+    # four-minute background poll. A delivering shim is on PATH, so the silence is attributable.
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -d "${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)" ]
+}
+
+@test "idle: a second poller does not start while one is already watching" {
+    # Stop fires at the end of every turn. Without the lock a long conversation leaves one poller
+    # per turn, all polling the same formation on the same interval.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    mkdir -p "${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "concurrency: a held delivery mutex silences the other reader rather than double-delivering" {
+    # Two readers now exist at once - the background poller and a PostToolUse hook - and the
+    # last-seen timestamp alone does not stop them both reading the same batch before either
+    # records it. Whoever does not hold the mutex says nothing.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    mkdir -p "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "no repeats: what the tool hook delivered, the idle poller does not deliver again" {
+    # Requirement 4, across the two registrations rather than within one. Both must share the one
+    # last-seen record, or a member sees every message twice: once on a tool call, once on idle.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_since_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 2 ]
+
+    # The timestamp is now recorded, so the second reader sends since= and is told nothing is new.
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        run bash "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "sessionstart: missed messages are surfaced as additionalContext, not as exit 2" {
+    # Requirement 8, and the runtime difference that makes it necessary. SessionStart records an
+    # exit 2 as an error and DISCARDS the text: a probe's codeword sent that way never reached the
+    # model, while sibling hooks using additionalContext were read back verbatim. Delivering here
+    # the way PostToolUse delivers would look healthy and surface nothing.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=start \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" > "${BATS_TEST_TMPDIR}/ss.json"
+    run node -e 'const o=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const a=o.hookSpecificOutput.additionalContext;if(o.hookSpecificOutput.hookEventName!=="SessionStart")process.exit(1);if(!a.includes("FormationService.cs"))process.exit(1);if(!/never shown|not running/.test(a))process.exit(1);console.log("ok");' "${BATS_TEST_TMPDIR}/ss.json"
+    [ "$status" -eq 0 ]
+}
+
+@test "sessionstart: a fresh session with nothing pending says nothing at all" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='[]' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=start \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "docs: the command page states when a member receives, and that idle may not" {
+    # Requirement 8 is half documentation. The release win condition on #31139 is that the product
+    # stops being silent about the limitation, so the text must say what happens when a session
+    # cannot be reached and what the operator should do instead, not just describe the happy path.
+    local doc="${BATS_TEST_DIRNAME}/../../commands/formation.md"
+    run grep -qi "idle" "$doc"
+    [ "$status" -eq 0 ]
+    run grep -qi "may not receive" "$doc"
+    [ "$status" -eq 0 ]
+    run grep -qi "formation status" "$doc"
+    [ "$status" -eq 0 ]
+}
+
+@test "docs: the help page does not promise delivery it cannot guarantee" {
+    local doc="${BATS_TEST_DIRNAME}/../../commands/help.md"
+    run grep -qi "idle" "$doc"
+    [ "$status" -eq 0 ]
+}
+
+@test "wired: the handler is registered on UserPromptSubmit as the backstop" {
+    run node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.UserPromptSubmit||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check"));process.exit(s.length===1?0:1);' "${BATS_TEST_DIRNAME}/../../hooks/hooks.json"
+    [ "$status" -eq 0 ]
+}
+
+@test "prompt: a returning human is told what was missed, as additionalContext" {
+    # The one path that reaches a turn running no tools at all. It is not the idle fix - nobody is
+    # typing in an idle session - it is what catches the member whose poller expired before their
+    # human came back. The event name in the payload must match the event or Claude Code rejects it.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=prompt \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    printf '%s' "$output" > "${BATS_TEST_TMPDIR}/ups.json"
+    run node -e 'const o=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const h=o.hookSpecificOutput;if(h.hookEventName!=="UserPromptSubmit")process.exit(1);if(!h.additionalContext.includes("FormationService.cs"))process.exit(1);console.log("ok");' "${BATS_TEST_TMPDIR}/ups.json"
+    [ "$status" -eq 0 ]
+}
+
+@test "prompt: nothing pending means the prompt is not touched" {
+    # This runs on every prompt in every session. Any stray byte on stdout here is prepended to
+    # somebody's context for no reason.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='[]' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=prompt \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "prompt: a session in no formation costs one file test and says nothing" {
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_MODE=prompt \
+        run bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}

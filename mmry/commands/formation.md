@@ -6,11 +6,40 @@ Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>
 
 A formation is several assistants working one objective together, sending each other short
 messages as they go. Once this session is in a formation, those messages are surfaced to you
-automatically after each tool call. You do not have to ask for them.
+automatically. You do not have to ask for them.
 
 **This command is what activates that.** Without it, this session does not know which formation
 it belongs to and nothing is delivered, because the delivery hook reads the formation from local
 session state and nothing else writes it.
+
+## When A Member Actually Receives A Message
+
+This matters to a lead, because "I sent it" and "they have read it" are not the same thing. There
+are three moments a member receives:
+
+1. **After any tool call.** A member that is working picks messages up between its own steps.
+2. **While it is sitting idle.** When a member's turn ends, MMRY keeps watching on its behalf in
+   the background for about four minutes and wakes it if something arrives. This is the case that
+   matters most, because a member is usually idle at exactly the moment the lead has something to
+   tell it.
+3. **When its human comes back and types.** If the background watch had already given up, anything
+   outstanding is shown on the next prompt, before the member acts on it.
+4. **When that session next starts.** Anything still unread is shown then, marked as having
+   arrived while the session was not running, and flagged as possibly stale.
+
+**A truly idle session may not receive.** The background watch gives up after about four minutes,
+and it cannot run at all if the session has been closed, or is on a machine that has gone to
+sleep. After that, every remaining path needs somebody to touch that session: a tool call, a typed
+prompt, or a restart. Nothing is lost, the message is held on the server, but it may go unread for
+as long as the session stays untouched, and the lead is not told that it has.
+
+**What to do instead when it matters.** If a member has to act on something now, do not assume the
+message arrived. Ask that session to run `/mmry:formation status`: that is a tool call, and it
+delivers anything pending immediately. This is also the manual nudge for anyone on a plugin version
+older than the one that added idle delivery, where a tool call is the only path there is.
+
+A message is never delivered twice. The background watch and the tool-call path share one record
+of what this session has already been shown.
 
 ## How to Run It
 
@@ -113,7 +142,9 @@ Nothing is sent in any of those cases, and the message is not quietly broadcast 
 
 Send one when it affects what somebody else is doing: you are about to change a file, you are
 blocked, you have finished something they are waiting on. Do not narrate. Every member is
-interrupted by it after their next tool call.
+interrupted by it: on its next tool call if it is working, or within a few minutes if it is idle.
+A member whose session is closed reads it when that session next starts. See "When A Member
+Actually Receives A Message" above before assuming somebody has acted on it.
 
 The script exits non-zero and explains itself when the message was not recorded. **Pass that
 through. Never report a message as sent unless the script said so**, because a message nobody
@@ -141,9 +172,11 @@ themselves and briefed each one by hand.
 this.** A wingman reassigning a colleague is refused, and the refusal comes from the server, which
 decides it from the roster rather than from anything the request says.
 
-**It reaches that member and nobody else.** The assigned session sees it after its next tool call,
-marked as directed at it. The other members are not interrupted, because an instruction that
-concerns one person and is read by five is the waste the formation exists to remove.
+**It reaches that member and nobody else.** The assigned session sees it on its next tool call, or
+within a few minutes if it is idle, marked as directed at it. The other members are not
+interrupted, because an instruction that concerns one person and is read by five is the waste the
+formation exists to remove. An assignment is the message most likely to be sent to somebody who is
+idle and waiting, so if it has to be acted on now, confirm rather than assume.
 
 **An omitted field is left alone.** Give an assignment, a role, or both. Changing only the role
 keeps the assignment. There is deliberately no way to blank an assignment back to empty.
