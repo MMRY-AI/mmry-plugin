@@ -559,6 +559,77 @@ mmry_get_formation_transmissions() {
     _mmry_request GET "$path"
 }
 
+
+# ---- Leader-assigned targets and collision deconfliction (#31044) ----
+
+mmry_update_formation_member() {
+    # Usage: mmry_update_formation_member FORMATION_ID MEMBER_ID [ROLE] [ASSIGNMENT]
+    #
+    # Set what ONE member of the formation is working on. The member is named by its ROSTER ENTRY
+    # id from /mmry:formation roster, never by a session string: a session id is secret-adjacent
+    # and a caller has no legitimate way to learn somebody else's.
+    #
+    # An OMITTED field is left alone rather than cleared, so a caller changing only the role
+    # cannot silently wipe what somebody is working on. _mmry_build_json skips empty values, which
+    # is exactly that behaviour: the field is not sent at all rather than sent as null.
+    #
+    # There is nothing here that says who is asking, deliberately. The caller's standing is
+    # decided by the server from the roster, the formation and the account's roles, and a request
+    # that could state its own authority would not be an authorisation check.
+    local formation_id="$1" member_id="$2" role="${3:-}" assignment="${4:-}"
+    local body
+    body="$(_mmry_build_json \
+        "role"       "$role" \
+        "assignment" "$assignment")"
+
+    _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}" "$body"
+}
+
+mmry_add_formation_claim() {
+    # Usage: mmry_add_formation_claim FORMATION_ID SESSION_ID REPOSITORY PATH_PREFIX
+    #
+    # Declare the area this session is about to work. If it overlaps an area another member has
+    # already declared, BOTH of them are warned by the server before this returns, each by a
+    # message directed at them and nobody else.
+    #
+    # Two structured values, declared on purpose. What a session is working on in prose is NOT
+    # what is compared: the server never matches the free-text assignment, because guessing from
+    # prose whether two people are in each other's way produces warnings that are wrong, and a
+    # coordination feature that cries wolf is ignored on the day it is right.
+    local formation_id="$1" session_id="$2" repository="$3" path_prefix="$4"
+    local body
+    body="$(_mmry_build_json \
+        "sessionId"  "$session_id" \
+        "repository" "$repository" \
+        "pathPrefix" "$path_prefix")"
+
+    _mmry_request POST "/api/formations/${formation_id}/claims" "$body"
+}
+
+mmry_get_formation_claims() {
+    # Usage: mmry_get_formation_claims FORMATION_ID SESSION_ID
+    #
+    # Every area the formation is holding right now. A caller who is not a current member gets an
+    # empty list rather than a refusal, so nothing here can tell an empty formation from one it
+    # cannot see.
+    local formation_id="$1" session_id="$2"
+    _mmry_request GET "/api/formations/${formation_id}/claims?sessionId=$(_mmry_urlencode "$session_id")"
+}
+
+mmry_release_formation_claim() {
+    # Usage: mmry_release_formation_claim FORMATION_ID CLAIM_ID SESSION_ID
+    #
+    # Release one of this session's OWN areas. Somebody else's is refused by the server: releasing
+    # another member's area would let one session silence the warning that protects another.
+    #
+    # Leaving the formation needs none of this. A claim is live only while its roster entry has
+    # not left, so /mmry:formation leave frees every area this session held, with nothing having
+    # to remember to do it. This is for the session that moves on WITHOUT leaving.
+    local formation_id="$1" claim_id="$2" session_id="$3"
+    _mmry_request DELETE \
+        "/api/formations/${formation_id}/claims/${claim_id}?sessionId=$(_mmry_urlencode "$session_id")"
+}
+
 mmry_submit_feedback() {
     # Usage: mmry_submit_feedback TYPE TITLE DESCRIPTION [COMPONENT] [REPRO_STEPS] [ENVIRONMENT]
     local type="$1" title="$2" description="$3"
