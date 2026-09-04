@@ -78,11 +78,26 @@ count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r 'if type == "array" then l
 [[ "$count" =~ ^[0-9]+$ ]] || exit 0
 [[ "$count" -gt 0 ]] || exit 0
 
+# #31045: a directed line is marked. recipientMemberID is non-null only on a message addressed to
+# THIS session - the server withholds an addressed message from everybody else - so its presence is
+# the whole test and no comparison against a local id is needed or possible.
+#
+# The marker sits before the content rather than after it, because the model reads the line to
+# decide whether to act, and finding out that an instruction was meant for it at the end of the
+# sentence is finding out too late.
 lines="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
     if type == "array" then
-        .[] | "  [" + ((.senderRole // "member")) + " " + ((.senderSessionID // "?") | tostring) + "] " + ((.content // .topic // "") | tostring)
+        .[] | "  [" + ((.senderRole // "member")) + " " + ((.senderSessionID // "?") | tostring) + "] "
+              + (if (.recipientMemberID // null) != null then "DIRECTED TO YOU: " else "" end)
+              + ((.content // .topic // "") | tostring)
     else empty end' 2>/dev/null || true)"
 [[ -n "$lines" ]] || exit 0
+
+# Whether to print the directed-message guidance at all. Printing it every time would train the
+# model to skim past it, and most batches contain no directed message.
+directed_count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
+    if type == "array" then ([.[] | select((.recipientMemberID // null) != null)] | length) else 0 end' 2>/dev/null || printf '0')"
+[[ "$directed_count" =~ ^[0-9]+$ ]] || directed_count=0
 
 newest="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
     if type == "array" then ([.[].sentDate // empty] | max // empty) else empty end' 2>/dev/null || true)"
@@ -100,6 +115,11 @@ fi
 {
     printf 'FORMATION TRANSMISSION (%s new, formation %s)\n\n' "$count" "$formation_id"
     printf '%s\n' "$lines"
+    if [[ "$directed_count" -gt 0 ]]; then
+        printf '\nA line marked DIRECTED TO YOU was addressed to this session specifically and was\n'
+        printf 'sent to nobody else in the formation. Treat it as an instruction meant for you and\n'
+        printf 'act on it. The unmarked lines went to everybody and are for your awareness.\n'
+    fi
     printf '\nThese are other assistants working the same job right now. Act on anything that\n'
     printf 'affects what you are doing, especially a Blocked or a Heads up naming something you\n'
     printf 'are about to touch. Do not reply to the formation unless you have something worth\n'

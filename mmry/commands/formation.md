@@ -1,6 +1,6 @@
 Join, speak to, or leave a formation: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation say "message"` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
 
 ## What This Does
 
@@ -57,6 +57,19 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    **Every window joins for itself.** Membership is held per session, so starting a formation in
    one terminal does not enrol the others; each runs join with the id.
 
+### roster
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-roster.sh" [formationId]
+```
+
+Who is in the formation, with the **member id** for each one. With no argument it shows this
+session's own formation.
+
+The member id is what `say --to` addresses. Report the list as the script prints it. Members who
+have left are shown last and marked; a message cannot be directed at them, and the server refuses
+it rather than sending it into a void.
+
 ### say
 
 The user gives the message, for example `/mmry:formation say "I am refactoring FormationService, do not touch it"`.
@@ -69,6 +82,34 @@ This is how anything gets into the channel the other members are listening to. T
 recorded exactly as typed and delivered to every other member. There is no minimum length: "done",
 "stop" and "files locked" are perfectly good transmissions, and until #31122 they were silently
 discarded because the server interpreted messages instead of storing them.
+
+#### say to one member (#31045)
+
+When the message is an **instruction with exactly one intended recipient**, address it:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-say.sh" "<message>" <memberId>
+```
+
+The user writes it as `/mmry:formation say "rewrite the validator" --to 12`. Pass the number
+through as the second argument.
+
+**Get the id from `/mmry:formation roster`, and do not guess one.** A wrong id is refused rather
+than misdelivered, but it costs a round trip and the sender's attention. If the user names a person
+rather than an id, run the roster, match them, and use the id you found.
+
+**When to direct and when to broadcast.** Direct it when it is an order for one member: broadcasting
+an instruction means every other member reads an order meant for somebody else, and any of them
+might act on it. Broadcast findings, blockers and heads-ups, which are exactly the things everybody
+needs.
+
+**Report which one happened.** The script says "Sent to member N in formation X, and to nobody
+else" or "Sent to formation X", and those are different facts. Never describe a directed message as
+having gone to the formation, or the reverse.
+
+**A refusal names its own cause and you pass it through.** The server refuses a member id that is
+not in this formation, one belonging to another account, one who has left, and the sender's own.
+Nothing is sent in any of those cases, and the message is not quietly broadcast instead.
 
 Send one when it affects what somebody else is doing: you are about to change a file, you are
 blocked, you have finished something they are waiting on. Do not narrate. Every member is

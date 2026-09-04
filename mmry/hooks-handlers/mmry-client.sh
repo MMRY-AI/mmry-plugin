@@ -427,6 +427,19 @@ mmry_get_active_formations() {
     _mmry_request GET "/api/formations/active"
 }
 
+# One formation and its roster (#31045). This is how a sender learns the roster entry id to
+# address a message to: the roster is the formation's own public identifier for each participation,
+# and the alternative - naming somebody's session string - is not available to a sender and should
+# not be, because a session string is secret-adjacent.
+#
+# The roster includes members who have left, carrying a leftDate, which is deliberate: the history
+# is the point. A caller wanting only the current crew filters on it, and formation-roster.sh does.
+mmry_get_formation() {
+    # Usage: mmry_get_formation FORMATION_ID
+    local formation_id="$1"
+    _mmry_request GET "/api/formations/${formation_id}"
+}
+
 mmry_join_formation() {
     # Usage: mmry_join_formation FORMATION_ID SESSION_ID
     local formation_id="$1" session_id="$2"
@@ -503,9 +516,24 @@ mmry_send_formation_transmission() {
     # context", while a longer one from the same session stored fine. The server now refuses the
     # old path outright, so an un-updated plugin gets a 400 that names this route rather than
     # silently delivering nothing.
+    #
+    # #31045: an optional FIFTH argument names ONE roster entry to address the message to, and the
+    # field is omitted entirely when it is empty. Omitting rather than sending null matters: an
+    # absent recipient is what every message has been until now and is what the server reads as
+    # "the whole formation", so an un-updated caller and an updated caller sending nothing produce
+    # byte-identical requests.
+    #
+    # The roster entry, never a session string. A sender has no legitimate way to learn somebody
+    # else's session id, and _mmry_build_json's "#" prefix sends this unquoted because it is a
+    # number on the wire.
     local formation_id="$1" session_id="$2" message="$3" working_dir="${4:-}"
+    local recipient_member_id="${5:-}"
     local body
-    body="$(_mmry_build_json         "sessionId"        "$session_id"         "content"          "$message"         "workingDirectory" "$working_dir")"
+    body="$(_mmry_build_json \
+        "sessionId"          "$session_id" \
+        "content"            "$message" \
+        "workingDirectory"   "$working_dir" \
+        "#recipientMemberId" "$recipient_member_id")"
 
     _mmry_request POST "/api/formations/${formation_id}/transmissions" "$body"
     local rc=$?

@@ -297,7 +297,12 @@ _env() {
     # Comments are stripped before the negative assertion, deliberately. The function explains why
     # it moved and names the old route while doing so, and a check that cannot tell an explanation
     # from a request would fail on the documentation rather than on the behaviour.
-    run bash -c "grep -A 26 '^mmry_send_formation_transmission()' '${HANDLERS}/mmry-client.sh' | grep -v '^[[:space:]]*#'"
+    #
+    # #31045: extracted by FUNCTION BOUNDARIES rather than by a fixed 26 lines. The function gained
+    # the recipient argument and its explanation, which pushed the request line past that window, so
+    # the test would have stopped covering the request it is named after while continuing to pass on
+    # the comment block. A window measured in lines is a window that silently narrows.
+    run bash -c "awk '/^mmry_send_formation_transmission\\(\\)/,/^}/' '${HANDLERS}/mmry-client.sh' | grep -v '^[[:space:]]*#'"
     [ "$status" -eq 0 ]
     [[ "$output" == *"/api/formations/"* ]]
     [[ "$output" == *"transmissions"* ]]
