@@ -29,6 +29,24 @@
 #                ended, exited 2, and the model woke with no human input and read the codeword.
 #                This is the mechanism that makes idle delivery possible at all.
 #
+#                REQUIRES CLAUDE CODE 2.1.64 OR NEWER. 2.1.64 is the first release to carry the
+#                field in its hook-config schema ("If true, hook runs in background and wakes the
+#                model on exit code 2 (blocking error). Implies async."); 2.1.63 does not carry it
+#                at all. That is checkable against the published bundles without installing
+#                anything, and was checked rather than assumed:
+#
+#                  B=https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819
+#                  curl -s "$B/claude-code-releases/2.1.63/darwin-arm64/claude" | grep -ac asyncRewake
+#                  curl -s "$B/claude-code-releases/2.1.64/darwin-arm64/claude" | grep -ac asyncRewake
+#
+#                answering 0 and 7 respectively. The schema is not strict, so an older client
+#                silently DROPS the field and runs the Stop hook synchronously: idle delivery then
+#                does not happen and nothing says why, which makes the client version the first
+#                thing to check before this plugin is suspected. The user-facing statement of this
+#                lives in commands/formation.md and commands/help.md, where support and users will
+#                actually look, because a limitation only recorded in a source comment is still a
+#                limitation nobody was told about.
+#
 #   SessionStart NEITHER. stderr + exit 2 is recorded as outcome "error" and the text is DISCARDED:
 #                the probe's codeword never reached the model. SessionStart delivers only through
 #                {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}
@@ -61,7 +79,31 @@ MMRY_TMPDIR="${TMPDIR:-/tmp}"
 MMRY_IDLE_POLL_SECONDS="${MMRY_IDLE_POLL_SECONDS:-240}"
 MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
 
-# ---- 0. Resolve this session's id and the event we are running in, BEFORE anything else. ----
+# ---- 0. Resolve a jq BEFORE anything is parsed with it. ----
+# THIS MUST BE THE PROJECT'S OWN RESOLVER, NOT `command -v jq` (#31196 QA round 2).
+#
+# The round 1 version of this file asked `command -v jq` here, thirty lines before mmry-client.sh
+# and its lib-jq.sh resolver were sourced. On a machine with no system jq that answers nothing,
+# even though MMRY ships a working jq in vendor/jq for exactly that machine - lib-jq.sh's own
+# header says the bundle exists because jq is commonly absent on Windows Git Bash, and setup never
+# puts a literal jq on PATH. The consequences were silent and total: with no session id in the
+# environment the hook returned at the id check and delivered nothing on any event, and with one
+# present every event fell through the case below to "tool", so SessionStart exited 2 into a
+# runtime that discards it and Stop ran one un-looped pass instead of polling. The headline
+# deliverable of this ticket did nothing on the platform the bundle was added for, while the
+# swallowing fix landed and made it look healthy.
+#
+# lib-jq.sh prefers a working system jq and falls back to the bundled binary. It costs one
+# `jq --version` that the old line did not, and it does NOT breach the cost contract at the top of
+# this file, because the parse below now takes both fields from ONE jq call where the old one made
+# two. Measured, not assumed: 20 invocations of a session that is in no formation averaged 961ms
+# on round 1 and 743ms on this, on the same machine, both figures dominated by bash startup. On a
+# machine with no system jq it is the difference between working and not working at all.
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-jq.sh" 2>/dev/null || exit 0
+mmry_resolve_jq >/dev/null 2>&1 || true
+
+# ---- Resolve this session's id and the event we are running in. ----
 # CLAUDE_SESSION_ID is unreliable (session-init.sh says so and reads stdin instead), and the join
 # that wrote our state runs in the command runtime, which provides CLAUDE_CODE_SESSION_ID. This hook
 # runs in the hook runtime, which per the Claude Code spec always carries session_id on stdin. All
@@ -69,16 +111,19 @@ MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
 # and the membership it created (#31143). Read stdin first, then fall back to the env vars.
 #
 # The same stdin payload carries hook_event_name, which is how one handler serves three
-# registrations without three copies of itself (#31196).
+# registrations without three copies of itself (#31196). Both fields come out of ONE jq call: two
+# calls in the hottest path in the plugin bought nothing, and the event must not be able to arrive
+# without the id it is paired with.
 session_id=""
 hook_event=""
 if [[ ! -t 0 ]]; then
     payload="$(timeout 2 cat 2>/dev/null || true)"
-    if [[ -n "$payload" ]]; then
-        jq_bin="$(command -v jq 2>/dev/null || true)"
-        if [[ -n "$jq_bin" ]]; then
-            session_id="$(printf '%s' "$payload" | "$jq_bin" -r '.session_id // empty' 2>/dev/null || true)"
-            hook_event="$(printf '%s' "$payload" | "$jq_bin" -r '.hook_event_name // empty' 2>/dev/null || true)"
+    if [[ -n "$payload" && -n "${MMRY_JQ:-}" ]]; then
+        parsed="$(printf '%s' "$payload" | "$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' 2>/dev/null || true)"
+        # @tsv always emits the separator, so a missing tab means jq produced nothing at all.
+        if [[ "$parsed" == *$'	'* ]]; then
+            session_id="${parsed%%$'	'*}"
+            hook_event="${parsed#*$'	'}"
         fi
     fi
 fi
@@ -114,10 +159,11 @@ mmry_load_config 2>/dev/null || exit 0
 # ---- Locking ----------------------------------------------------------------------------------
 # Two different locks, because they stop two different things.
 #
-# The DELIVERY MUTEX is held around poll-mark-render by every mode. Without it the background idle
-# poller and a PostToolUse hook can be in flight at the same moment, both read the same batch before
-# either records it as seen, and the member is shown the same lines twice. Requirement 4 is not
-# satisfied by the last-seen timestamp alone once two readers exist concurrently.
+# The DELIVERY MUTEX is held around read-poll-mark by every mode, the LAST-SEEN READ INCLUDED.
+# Without it the background idle poller and a PostToolUse hook can be in flight at the same moment,
+# both read the same last-seen value before either advances it, and the member is shown the same
+# lines twice. Requirement 4 is not satisfied by the last-seen timestamp alone once two readers
+# exist concurrently, and it is not satisfied by a lock that starts after the read either.
 #
 # The POLLER LOCK is held for the whole life of an idle poll, and stops a second poller starting.
 # Stop fires at the end of every turn, so without it a long conversation would leave a poller per
@@ -131,6 +177,22 @@ _poller_dir="${MMRY_TMPDIR}/.mmry-formation-poll-${_safe_sid}"
 _held_mutex=""
 _held_poller=""
 
+# Epoch mtime of a path, on GNU and on BSD. Echoes 0 when it cannot be read.
+#
+# `date -r PATH` is NOT this (#31196 QA round 2). It is a GNU extension; on BSD and macOS `date -r`
+# takes an epoch NUMBER, so passing a path errors, the mtime falls back to 0, and the guard below
+# then reports "not stale" for every lock forever - meaning a lock left behind by a killed hook can
+# never be reclaimed and delivery stays silenced for the rest of that session on every Mac. The
+# `stat -c` then `stat -f` pair is the pattern already used in mmry-client.sh, stop-check.sh,
+# precompact-check.sh and self-update.sh; there was never a reason for this file to differ.
+_lock_mtime() {
+    if stat --version >/dev/null 2>&1; then
+        stat -c %Y "$1" 2>/dev/null || printf '0'
+    else
+        stat -f %m "$1" 2>/dev/null || printf '0'
+    fi
+}
+
 # A lock is stale if it is older than the argument in seconds. A hook killed with -9 cannot clean up
 # after itself, and a lock nobody can ever clear would silence delivery for the rest of the session,
 # which is the failure this whole task is about.
@@ -138,7 +200,7 @@ _lock_is_stale() {
     local dir="$1" max_age="$2" now mtime
     [[ -d "$dir" ]] || return 1
     now="$(date +%s 2>/dev/null || printf '0')"
-    mtime="$(date -r "$dir" +%s 2>/dev/null || printf '0')"
+    mtime="$(_lock_mtime "$dir")"
     [[ "$now" =~ ^[0-9]+$ ]] || return 1
     [[ "$mtime" =~ ^[0-9]+$ ]] || return 1
     [[ "$mtime" -gt 0 ]] || return 1
@@ -171,15 +233,18 @@ trap '_release_all' EXIT
 _poll_once() {
     FORMATION_BLOCK=""
 
+    # Hold the mutex from BEFORE THE LAST-SEEN READ until after "seen" is written. The read is the
+    # first half of the read-then-write that must not interleave, so leaving it outside the lock -
+    # which is what round 1 did, while its comment claimed otherwise - lets two concurrent readers
+    # each capture the same stale value and each deliver a batch the other has already shown
+    # (#31196 QA round 2). If somebody else holds the mutex they are already delivering this batch,
+    # so the right move is silence, not a wait.
+    _acquire "$_mutex_dir" 120 || return 1
+    _held_mutex=1
+
     local last_seen
     last_seen="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
     last_seen="${last_seen#* }"
-
-    # Hold the mutex from before the request until after "seen" is written. Anything less leaves the
-    # read-then-write open to the interleaving that double-delivers. If somebody else holds it they
-    # are already delivering this batch, so the right move is silence, not a wait.
-    _acquire "$_mutex_dir" 120 || return 1
-    _held_mutex=1
 
     if ! mmry_get_formation_transmissions "$formation_id" "$session_id" "$last_seen" 2>/dev/null; then
         rmdir "$_mutex_dir" 2>/dev/null || true; _held_mutex=""; return 1

@@ -551,10 +551,15 @@ mmry_send_formation_transmission() {
 
 mmry_get_formation_transmissions() {
     # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601]
+    #
+    # Both parameters are encoded, as its siblings on the claims endpoints already were. The
+    # session id is not ours to assume the shape of, and "since" is an ISO timestamp whose colons
+    # are reserved characters in a query string: an unencoded value is a request the server is
+    # entitled to read differently from the one we meant to send (#31196 QA round 2).
     local formation_id="$1" session_id="$2" since="${3:-}"
-    local path="/api/formations/${formation_id}/transmissions?sessionId=${session_id}"
+    local path="/api/formations/${formation_id}/transmissions?sessionId=$(_mmry_urlencode "$session_id")"
     if [[ -n "$since" ]]; then
-        path="${path}&since=${since}"
+        path="${path}&since=$(_mmry_urlencode "$since")"
     fi
     _mmry_request GET "$path"
 }

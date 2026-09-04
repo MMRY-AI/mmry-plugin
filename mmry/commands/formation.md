@@ -15,7 +15,7 @@ session state and nothing else writes it.
 ## When A Member Actually Receives A Message
 
 This matters to a lead, because "I sent it" and "they have read it" are not the same thing. There
-are three moments a member receives:
+are four moments a member receives:
 
 1. **After any tool call.** A member that is working picks messages up between its own steps.
 2. **While it is sitting idle.** When a member's turn ends, MMRY keeps watching on its behalf in
@@ -37,6 +37,17 @@ as long as the session stays untouched, and the lead is not told that it has.
 message arrived. Ask that session to run `/mmry:formation status`: that is a tool call, and it
 delivers anything pending immediately. This is also the manual nudge for anyone on a plugin version
 older than the one that added idle delivery, where a tool call is the only path there is.
+
+**Delivery to an idle session needs Claude Code 2.1.64 or newer.** Moment 2 above is the only one
+with a version floor, and it is the one that matters most. It works by asking Claude Code to keep
+the check running in the background after the turn ends and to wake the session when a message
+lands; the setting that does that arrived in 2.1.64. An older client does not report the setting as
+unsupported, it simply ignores it, so the check runs and finishes before the session goes idle and
+the member is never woken. Moments 1, 3 and 4 are unaffected and still deliver on any version.
+
+If a member is on 2.1.63 or older, `claude --version` says so, and the answer is to update Claude
+Code. Nothing needs changing in MMRY, and nothing is lost in the meantime: the message is held on
+the server and arrives on that member's next tool call, next prompt or next session start.
 
 A message is never delivered twice. The background watch and the tool-call path share one record
 of what this session has already been shown.
