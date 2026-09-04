@@ -435,6 +435,26 @@ mmry_join_formation() {
     _mmry_request POST "/api/formations/${formation_id}/join" "$body"
 }
 
+# Release this session's own place in whatever formation it is in (#31194).
+#
+# There is no formation id, and that is the point rather than an omission. A session has at most
+# one membership it has not left, so the service resolves it from the caller's token and the named
+# session. That also rescues a session whose local record of the formation is gone, which is every
+# session stranded by the leave that used to be local to the plugin: it could not name the
+# formation it was stuck in, so an id-carrying route would have left it stuck for good.
+#
+# Callers must distinguish the outcomes rather than treating any non-zero return as one failure.
+# MMRY_HTTP_CODE 404 means the service holds no live membership for this session, which is a
+# different thing to say than a refusal, and 000 is the only status that proves nothing was
+# reached (#31195).
+mmry_leave_formation() {
+    # Usage: mmry_leave_formation SESSION_ID
+    local session_id="$1"
+    local body
+    body="$(_mmry_build_json "sessionId" "$session_id")"
+    _mmry_request POST "/api/formations/leave" "$body"
+}
+
 # Start a formation (#31104). Added alongside the send path for the same reason: without it a
 # plugin user could only ever join a formation that something else had created, and nothing they
 # have could create one. Requirement 2 of #31104 asks for a message to reach another session with no
