@@ -585,6 +585,47 @@ mmry_update_formation_member() {
     _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}" "$body"
 }
 
+mmry_update_formation_member_progress() {
+    # Usage: mmry_update_formation_member_progress FORMATION_ID MEMBER_ID SESSION_ID PROGRESS [NOTE]
+    #
+    # Record how the work on one member's assignment is going, or how it ended: Assigned, Accepted,
+    # Done, Blocked or Abandoned. A member moves its OWN state; the lead, the person who started
+    # the formation and an account administrator move anybody's, which is what lets abandoned work
+    # be picked up rather than sitting in the record as somebody's last optimistic claim.
+    #
+    # The session id is what makes "own" mean this window rather than this person. Two windows of
+    # one account are two participations with two assignments, and the server refuses one of them
+    # reporting for the other.
+    #
+    # The list of states is NOT repeated here. It is held by a constraint in the database, and the
+    # server answers a wrong value with a sentence naming the five, so a copy in this file would be
+    # a second answer that can drift from the enforced one.
+    #
+    # The NOTE is optional and IS NEVER STORED. It rides in the message the lead receives and is
+    # written to no column, so it cannot turn up later in the close-out record as though it were
+    # part of the account.
+    local formation_id="$1" member_id="$2" session_id="$3" progress="$4" note="${5:-}"
+    local body
+    body="$(_mmry_build_json         "sessionId" "$session_id"         "progress"  "$progress"         "note"      "$note")"
+
+    _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}/progress" "$body"
+}
+
+mmry_get_formation_close_out() {
+    # Usage: mmry_get_formation_close_out FORMATION_ID
+    #
+    # What each member was asked to do and how that ended. Every member is in it, including one
+    # that reported nothing, which reads as unstarted rather than being left out: a record that
+    # silently drops abandoned work reads as though everything went to plan.
+    #
+    # Readable while the formation is still running, not only after it is closed out, and readable
+    # by somebody who was never in it.
+    #
+    # It carries assignments and states only. No message is in it, directed or otherwise.
+    local formation_id="$1"
+    _mmry_request GET "/api/formations/${formation_id}/close-out"
+}
+
 mmry_add_formation_claim() {
     # Usage: mmry_add_formation_claim FORMATION_ID SESSION_ID REPOSITORY PATH_PREFIX
     #

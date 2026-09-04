@@ -1,6 +1,6 @@
-Join a formation, hand out its work, declare what you are touching, speak to it, or leave: a group of assistants coordinating on one job at the same time.
+Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
 
 ## What This Does
 
@@ -159,6 +159,68 @@ the server rather than echoed from the request. On a refusal it prints the serve
 that reason is worth passing through verbatim: no such member, a member who has left, a bad role
 and nothing named to change all look the same otherwise.
 
+### progress
+
+The session says how the work it took on is going, for example `/mmry:formation progress Blocked "waiting on the schema migration"`.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-progress.sh" <state> ["note"]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-progress.sh" <memberId> <state> ["note"]
+```
+
+The states are **Assigned, Accepted, Done, Blocked and Abandoned**. Assigned is where work starts
+the moment it is handed out, so the ones a session reports are the other four.
+
+**Report it when it changes, not on a schedule.** Accepting the work, finishing it, hitting
+something that stops you, and giving up are the four moments worth a report. Between them, say
+nothing: the lead is interrupted by each one.
+
+**Say Blocked when you are blocked, and say Abandoned when you stop.** This is the whole point of
+the feature. A member that goes quiet used to leave no trace at all, so the closing record said the
+job went to plan when part of it was never done. Reporting Blocked with a note is how the lead
+learns in time to do something about it.
+
+**The note is delivered and never stored.** It reaches the lead's session and is written nowhere,
+so it will not appear in the close-out record later. Put the reason in it; do not put anything in
+it that has to survive.
+
+**With a member id first, it reports for somebody ELSE,** which only the flight lead, the person
+who started the formation, or an account administrator may do. That is how abandoned work gets
+picked up: the lead marks it Abandoned and reassigns it. A wingman trying it is refused by the
+server.
+
+**Reporting for another window of your own account is refused too,** and that is not a bug. Each
+window is a separate participation with its own work, so each reports for itself.
+
+**Report what the script reports.** On success it prints the state the server read back, not the
+one that was asked for. On a refusal it prints the server's own reason: no such member, a formation
+already closed out, and a state that is not one of the five all look identical otherwise.
+
+### report
+
+The close-out record: what each member was asked to do and how that ended.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-report.sh" [formationId]
+```
+
+**Every member is in it, including one that reported nothing,** which reads as unstarted. That is
+deliberate and it is the point of the record: a summary that quietly leaves out abandoned work
+reads as though everything went to plan, which is worse than no record at all. If a member is
+missing from the output, that is a defect worth reporting, not tidiness.
+
+**It contains no messages.** Anything said with `say --to` was said to that recipient, and this
+record is readable by people who were never in the formation. If the user asks why something
+somebody transmitted is not in the report, that is the answer.
+
+**Read it before writing the debrief.** It is available while the formation is still running, and
+it is the material the summary should be written against: it will tell you which members never
+reported, which is usually the thing the lead did not know.
+
+**Print it as the script prints it.** The record is assembled by the server so that every reader
+sees the same account; do not re-summarise it into a sentence, and in particular do not drop the
+members with nothing to report, because they are the reason it exists.
+
 ### claim
 
 Declare the area this session is about to work, so nobody collides with it unknowingly.
@@ -210,6 +272,14 @@ This is how a formation ends properly. The summary is consolidated into lasting 
 someone who was never in the formation can read later, and the running chatter stops being served.
 Only the lead, the creator or an administrator may do it; the script translates a refusal.
 
+**The summary is no longer the whole record.** The close-out account goes with it - every member,
+the work it was given, and the state it ended in - and the script prints that account before its
+confirmation. Show it. A lead who never sees it cannot notice that somebody it believed was
+finished never reported anything.
+
+**Check `/mmry:formation report` first and write the summary against it.** The account says what
+happened; the summary says what it meant.
+
 If it reports that nothing was recorded, the formation is still active and retrying is safe. Do
 not tell the user it was closed out unless the script said so.
 
@@ -252,3 +322,9 @@ timestamp of the last message already surfaced.
 - **Do not transmit on the user's behalf without being asked.** Speaking interrupts every other
   session in the formation. Send when the user asks, or when you have something that genuinely
   affects another member's work.
+- **Do not report progress you have not made.** The close-out record is built from these states and
+  is read by people who were never here. Marking work Done because a session is ending produces
+  exactly the confidently wrong record the feature was built to remove; Abandoned is the honest
+  answer and nobody is judged for it.
+- **Do not summarise the close-out record away.** Print it. Its value is in the members who have
+  nothing to show, and a one-line paraphrase is how they disappear.

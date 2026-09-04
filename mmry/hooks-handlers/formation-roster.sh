@@ -87,9 +87,16 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
       + "  " + (.role // "member")
       + "  " + (.email // "?")
       + (if .assignment then "  - " + .assignment else "" end)
+      + (if .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]" else "" end)
       + (if .leftDate != null then "   (has left; cannot be addressed)" else "" end)
 ' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
 
 printf '\nDirect a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off\n'
 printf 'and the message goes to the whole formation.\n'
+# #31046. The state in brackets is the last thing that member reported, and "not started" means
+# nothing has been reported against work that WAS handed out, which is the thing worth noticing on
+# this list. The full account, one section per member, is /mmry:formation report.
+printf 'The state in brackets is the last thing that member reported. Report your own with\n'
+printf '/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account\n'
+printf 'with /mmry:formation report.\n'
 exit 0
