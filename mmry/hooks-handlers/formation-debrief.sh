@@ -13,6 +13,12 @@
 # the transition when the consolidation stored nothing, returning 502 with the formation left
 # Active, so a failure here is safe to retry and is reported as exactly that.
 #
+# #31046: THE SUMMARY IS NO LONGER THE WHOLE RECORD. The server returns the close-out account with
+# the transition - every member, the work it was given, and the state it ended in - and this prints
+# it, because a lead that never sees the account cannot notice that a member it thought was
+# finished never reported anything. The summary is one part of the record now, and the printing
+# order says so: the account first, the confirmation after.
+#
 # Usage: formation-debrief.sh "summary of what was accomplished, decided, and learned"
 set -euo pipefail
 
@@ -74,5 +80,21 @@ fi
 # a channel that will never serve anything again; the membership record itself is the server's.
 bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id" 2>/dev/null || true
 
-echo "Formation ${formation_id} closed out. The summary has been recorded as lasting memories, and the formation's chatter has stopped."
+# THE ACCOUNT, AS THE SERVER RENDERED IT (#31046). Printed rather than rebuilt here: it is
+# assembled in one place on purpose, and a second version written in bash would be a second answer
+# that can disagree with what every other reader sees. A body that cannot be read is not faked into
+# one - the close-out is still readable with /mmry:formation report.
+record=""
+if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+    record="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.closeOut.record // empty' 2>/dev/null || true)"
+fi
+
+if [[ -n "$record" ]]; then
+    printf '%s\n\n' "$record"
+fi
+
+echo "Formation ${formation_id} closed out. The summary and the account above have been recorded as lasting memories, and the formation's chatter has stopped."
+if [[ -z "$record" ]]; then
+    echo "The account itself could not be read from the reply. Run /mmry:formation report ${formation_id} to see it."
+fi
 exit 0
