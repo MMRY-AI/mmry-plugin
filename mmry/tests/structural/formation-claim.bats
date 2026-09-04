@@ -188,6 +188,28 @@ _repeat_with_overlap() {
     [ ! -s "$urls" ]
 }
 
+@test "claim: the '.' the refusal recommends is sent verbatim, so the advice is followable" {
+    # The refusal above tells a member to use '.' for the whole repository. That advice is only
+    # worth printing if '.' actually survives the trip: a client that treated it as "no path" and
+    # refused it, or helpfully expanded it to the working directory, would make the message name a
+    # workaround the member cannot carry out. The server half of this is CL-17.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local urls="${BATS_TEST_TMPDIR}/urls" body="${BATS_TEST_TMPDIR}/req"
+    : > "$urls"; : > "$body"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=201 FAKE_BODY="$(_no_overlap)"         FAKE_URL_LOG="$urls" FAKE_BODY_LOG="$body"         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid"         run bash "${HANDLERS}/formation-claim.sh" "."
+
+    [ "$status" -eq 0 ]
+    # It was sent at all, rather than being caught by the empty-path refusal.
+    run cat "$urls"
+    [[ "$output" == *"/api/formations/42/claims"* ]]
+    run cat "$body"
+    [[ "$output" == *'"pathPrefix":"."'* ]]
+    # And not expanded into an absolute path on the way, which would collide with nobody.
+    [[ "$output" != *'"pathPrefix":"/'* ]]
+}
+
 @test "claim: a session in no formation is told so, and nothing is sent" {
     local bin; bin="$(_fake_curl_dir)"
     local urls="${BATS_TEST_TMPDIR}/urls"
