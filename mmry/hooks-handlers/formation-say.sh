@@ -69,18 +69,49 @@ fi
 
 if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "$PWD"; then
     code="${MMRY_HTTP_CODE:-0}"
+    # #31195: EVERY BRANCH HERE MAY ONLY SAY WHAT ITS STATUS ACTUALLY MEANS. The gateway branch
+    # below used to read "the formation may have been closed out, or you may no longer be a member
+    # of it". Hit in production on 2026-09-03 by the Lead of a live formation with an intact roster,
+    # and both explanations were false. The cost is not the wording: after reading that sentence the
+    # operator checks the roster and re-joins, so the message spends an investigation on the one
+    # place the fault is not. It did exactly that, across three formations. A status code is
+    # evidence about the server's answer, not about the state of the world behind it, and where the
+    # two are guessed at they must be guessed at OUT LOUD.
     case "$code" in
-        # One answer covers not-a-member, closed-out and another account's formation, because the
-        # server deliberately does not distinguish them: telling them apart would disclose whether
-        # somebody else's formation exists.
+        # A refusal, and the only branch entitled to talk about membership. One answer covers
+        # not-a-member, closed-out and another account's formation, because the server deliberately
+        # does not distinguish them: telling them apart would disclose whether somebody else's
+        # formation exists.
         403) echo "Refused, and nothing was sent. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run /mmry:formation join ${formation_id} from this window, or /mmry:formation list to see what is active." ;;
         404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
         # An out-of-date plugin still posting to the old memory-processing path lands here, and the
         # server's message names the endpoint to use. Passing it through verbatim rather than
         # replacing it with a summary: the person reading this is working out why nothing arrived.
         400) echo "The server refused the message. ${MMRY_RESPONSE:-}" ;;
-        *)   echo "Could not send to formation ${formation_id} (HTTP ${code}). Nothing was recorded." ;;
+        # The gateway family: the server, or something in front of it, failed while handling the
+        # request. That is not a refusal and carries no information about the roster, so this says
+        # so explicitly, and stays clear of the words "member" and "join" so it cannot be read as
+        # one. 503 and 504 are here with 502 because they are the same answer from the same layer,
+        # and fixing only the code we happened to be shown would leave the identical misreport one
+        # bad afternoon away.
+        #
+        # It does not claim the message was discarded either, only that it was not confirmed. A 502
+        # can be raised after the row was written, so "nothing was recorded" would be the same
+        # unsupported guess pointing the other way.
+        502|503|504) echo "The server failed while handling the message (HTTP ${code}) and did not confirm it, so treat it as not delivered. This is a fault on the server side, not something about formation ${formation_id} or your standing in it. Try again shortly." ;;
+        # Whatever nobody anticipated. This may name the code and refuse to claim delivery. It may
+        # not narrate a cause, which is why the old "Nothing was recorded" is gone from here too.
+        *)   echo "Could not send to formation ${formation_id} (HTTP ${code}). The server did not confirm the message, so treat it as not delivered." ;;
     esac
+    # NO AUTOMATIC RETRY, DELIBERATELY (#31195 requirement 4). mmry-client.sh records that a failed
+    # debrief is safe to retry, and that guarantee is specific to /debrief: DD-70 has the server
+    # refuse to record the transition when the consolidation stored nothing, so the caller knows the
+    # first attempt changed nothing. The transmissions insert makes no such promise and carries no
+    # idempotency key, so a 502 raised after the row was written would put the same instruction into
+    # the channel twice, and the other members cannot tell a duplicate from a repeat. Against that,
+    # the sender is a person who is present and waiting, for whom retrying costs one command, and a
+    # silent retry would also hide how often the service is failing. Re-opening this needs a
+    # server-side idempotency key first, not a loop here.
     exit 1
 fi
 

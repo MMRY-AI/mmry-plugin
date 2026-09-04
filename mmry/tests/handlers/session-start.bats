@@ -59,6 +59,23 @@ setup() {
     [[ "$output" == *'trial'* ]]
 }
 
+@test "session-start: a 403 offers the expired trial as a likely cause, not as a fact (#31195)" {
+    # From the #31195 census of status-to-message mappings. A 403 on the startup read says access
+    # was refused; it does not say which of the several things gating access is the one that fired.
+    # Telling a subscriber whose payment lapsed that "their free trial has ended" points them at a
+    # trial they finished months ago, and it is the same defect as the formation 502: a status
+    # mapped to its most likely cause, then stated as though it were the known one.
+    export MOCK_CURL_HTTP_CODE="403"
+    export MOCK_CURL_RESPONSE='{"error":"forbidden"}'
+    run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    [[ "$status" -eq 0 ]]
+    # The trial stays named. It IS the most common cause and the message is more useful for saying
+    # so. What changes is that it is no longer the only explanation on offer.
+    [[ "$output" == *'trial'* ]]
+    [[ "$output" == *'subscription'* ]]
+    [[ "$output" != *'their free trial has ended'* ]]
+}
+
 @test "session-start: shows setup guidance when no API key configured" {
     # Create config with empty API key
     create_test_config "http://localhost:5291" "" "apikey"
