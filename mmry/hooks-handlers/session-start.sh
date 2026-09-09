@@ -28,12 +28,35 @@ WORK_DIR="$PWD"
 # env var is not reliably exported across hook and Bash-tool environments, so
 # we treat stdin as the canonical source. The fallback chain ends at "unknown"
 # only when the script is invoked outside a hook context (e.g., manual tests).
+#
+# #31385: the read used to be `timeout 2 cat`. GNU `timeout` is absent from a stock macOS (and the
+# Homebrew coreutils build names it `gtimeout`), so on a Mac that line ran a command that does not
+# exist, `2>/dev/null || true` swallowed exit 127, and the payload came back empty. The session id
+# then fell through to CLAUDE_SESSION_ID and finally to the literal "unknown", and that is the id
+# this session was REGISTERED UNDER below - an entry against this workspace carrying no real
+# identifier. lib-hookread.sh reads it with the `read -t` builtin instead, which needs nothing
+# installed and works on the bash 3.2 macOS ships.
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-hookread.sh"
+
 HOOK_PAYLOAD='{}'
+HOOK_READ_STATUS="notty"
 if [[ ! -t 0 ]]; then
-    # stdin is not a terminal — read piped hook payload (with a 2s safety cap
-    # in case something pipes us a never-closing stream).
-    HOOK_PAYLOAD="$( { timeout 2 cat 2>/dev/null || true; } )"
+    mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
+    HOOK_READ_STATUS="${MMRY_HOOK_READ_STATUS:-empty}"
+    HOOK_PAYLOAD="${MMRY_HOOK_PAYLOAD:-}"
     [[ -z "$HOOK_PAYLOAD" ]] && HOOK_PAYLOAD='{}'
+fi
+
+# AN EMPTY READ MUST SAY SO (#31385). The defect was not only the missing binary: it was that a
+# payload which came back empty was indistinguishable from a hook that legitimately had nothing to
+# say, so a total failure looked healthy from every angle. This handler is the one place in the
+# plugin that always has a channel to the model, so it is where the fault gets stated. Anything
+# formation-check.sh recorded while it was obliged to stay silent is picked up here too.
+MMRY_HOOK_FAULT_NOTE=""
+if [[ "$HOOK_READ_STATUS" == "empty" || "$HOOK_READ_STATUS" == "timeout" ]]; then
+    mmry_note_hook_read_fault "session-start" "$HOOK_READ_STATUS" || true
+    MMRY_HOOK_FAULT_NOTE="WARNING FROM MMRY AI: the Claude Code hook payload could not be read from stdin (${HOOK_READ_STATUS}), so this session could not learn its own session id and coordination features will not work correctly. Tell the user, and ask them to report it with /mmry:feedback. "
 fi
 
 # stdin may not be JSON outside a hook context; jq returns empty and we fall
@@ -124,8 +147,10 @@ mmry_register_session "$SESSION_ID" "claude-code" "$WORK_DIR" "" 2>/dev/null || 
 escaped_path="$(echo "$MEM_FILE" | sed 's/\\/\\\\/g')"
 
 # First-session onboarding: detect zero memories
+# The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it
+# would be read after the model has already decided what to do with the turn (#31385).
 if [[ "$count" == "0" ]]; then
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Welcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know they can always say remember this to save something new, or /mmry:help for a quick reference."}}'
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know they can always say remember this to save something new, or /mmry:help for a quick reference."}}' "$MMRY_HOOK_FAULT_NOTE"
 else
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI loaded %s memories. Read them now: %s"}}' "$count" "$escaped_path"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path"
 fi
