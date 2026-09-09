@@ -114,10 +114,40 @@ mmry_resolve_jq >/dev/null 2>&1 || true
 # registrations without three copies of itself (#31196). Both fields come out of ONE jq call: two
 # calls in the hottest path in the plugin bought nothing, and the event must not be able to arrive
 # without the id it is paired with.
+#
+# THE READ ITSELF MUST NOT DEPEND ON GNU COREUTILS (#31385). This line used to be
+# `payload="$(timeout 2 cat 2>/dev/null || true)"`. `timeout` is not on a stock macOS and the
+# Homebrew coreutils build calls it `gtimeout`, so on any Mac without coreutils it was a command
+# that does not exist: 2>/dev/null hid "command not found", || true discarded exit 127, and the
+# payload came back empty. hook_event was then empty for every registration and the case below fell
+# through to "tool", which is why an idle Mac session was never reached by a coordination message,
+# why a message arriving mid-typing blocked the prompt on stderr instead of being handed over, and
+# why the SessionStart sweep was discarded by a runtime that treats exit 2 as an error. None of it
+# reported a fault. lib-hookread.sh does the same job with `read -t`, a builtin present in the
+# bash 3.2 macOS ships, and it FORKS NOTHING, so it is also cheaper than what it replaces.
+#
+# It also names the outcome instead of collapsing it. An empty read from a live pipe now comes back
+# as its own status rather than as an indistinguishable empty string, and is recorded - see the
+# breadcrumb below.
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-hookread.sh" 2>/dev/null || exit 0
+
 session_id=""
 hook_event=""
+hook_read_status="notty"
 if [[ ! -t 0 ]]; then
-    payload="$(timeout 2 cat 2>/dev/null || true)"
+    mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
+    payload="${MMRY_HOOK_PAYLOAD:-}"
+    hook_read_status="${MMRY_HOOK_READ_STATUS:-empty}"
+
+    # A pipe that yielded nothing, or that ran out of time, is a FAULT and not a quiet hook. This
+    # hook is forbidden from telling the model about it - its governing rule at the top of the file
+    # is to fail open and silent, because it runs in every session - so it leaves a breadcrumb that
+    # session-start.sh, which does have a channel to the model, reads and reports out loud.
+    if [[ "$hook_read_status" == "empty" || "$hook_read_status" == "timeout" ]]; then
+        mmry_note_hook_read_fault "formation-check" "$hook_read_status" || true
+    fi
+
     if [[ -n "$payload" && -n "${MMRY_JQ:-}" ]]; then
         parsed="$(printf '%s' "$payload" | "$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' 2>/dev/null || true)"
         # @tsv always emits the separator, so a missing tab means jq produced nothing at all.
@@ -131,15 +161,31 @@ session_id="${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
 [[ -n "$session_id" ]] || exit 0
 
 # MMRY_FORMATION_MODE exists for the test suite, which has no Claude Code runtime to be launched by
-# and therefore no stdin payload to read the event from. An unrecognised event falls back to the
-# PostToolUse contract, which is the conservative choice: it is the one that has always been there.
+# and therefore no stdin payload to read the event from.
+#
+# EVERY REGISTERED EVENT IS NAMED EXPLICITLY (#31385 requirement 2). PostToolUse used to arrive here
+# through the catch-all, which meant the catch-all was doing two jobs at once: serving the event the
+# plugin is actually registered on, and absorbing every event it failed to read. A branch that is
+# both the correct answer for one input and the failure mode for all the others cannot be told apart
+# from the outside, and that is precisely how the macOS defect passed for healthy. PostToolUse is now
+# matched by name, and reaching the catch-all means the event was not resolved.
 mode="${MMRY_FORMATION_MODE:-}"
 if [[ -z "$mode" ]]; then
     case "$hook_event" in
         Stop|SubagentStop) mode="idle"   ;;
         SessionStart)      mode="start"  ;;
         UserPromptSubmit)  mode="prompt" ;;
-        *)                 mode="tool"   ;;
+        PostToolUse)       mode="tool"   ;;
+        *)
+            # Unresolved. Still PostToolUse's contract, because that is the conservative choice and
+            # the one that has always been there, but recorded rather than assumed. In the hook
+            # runtime this only happens when the payload did not arrive or did not parse, which is
+            # the fault #31385 exists to end; outside it (a manual run, the suite) it is ordinary.
+            mode="tool"
+            if [[ "$hook_read_status" != "notty" ]]; then
+                mmry_note_hook_read_fault "formation-check-event-unresolved" "$hook_read_status" || true
+            fi
+            ;;
     esac
 fi
 

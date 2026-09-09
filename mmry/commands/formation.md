@@ -49,6 +49,18 @@ If a member is on 2.1.63 or older, `claude --version` says so, and the answer is
 Code. Nothing needs changing in MMRY, and nothing is lost in the meantime: the message is held on
 the server and arrives on that member's next tool call, next prompt or next session start.
 
+**The client version is not the only thing to check, and on a Mac it is usually the wrong one.**
+MMRY plugin versions up to and including 2.9.0 could not read the hook payload on macOS, because
+the read used the GNU `timeout` command, which a Mac does not have unless somebody installed GNU
+coreutils. On those versions a Mac member received nothing while idle, had their prompt blocked
+rather than handed the message quietly, and had the session-start sweep discarded - on any Claude
+Code version, however new. Fixed in plugin 2.9.1.
+
+So when a Mac member is not receiving, check BOTH: `claude --version` for 2.1.64 or newer, and
+`/plugin` for MMRY 2.9.1 or newer. Checking only the client version is the dead end this guidance
+used to lead people into: on a Mac the client is usually fine and the answer is usually the plugin,
+which updates itself once the marketplace carries a newer version than the installed one.
+
 A message is never delivered twice. The background watch and the tool-call path share one record
 of what this session has already been shown.
 
