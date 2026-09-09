@@ -160,11 +160,21 @@ _assert_path_was_empty() {
     local f="${BATS_TEST_TMPDIR}/multi2.json"
     printf '{\n  "session_id": "s9",\n  "hook_event_name": "Stop"\n}\n' > "$f"
 
+    # THIS HARNESS BUILDS ITS OWN SHELL rather than using $PROBE, so it does not inherit the probe's
+    # PATHCONTROL line - and for a while nothing here checked that the PATH had actually been
+    # emptied. QA neutralised the `PATH=""` and this test carried on passing, which means it was
+    # asserting "the payload parses" and NOT "the payload parses with no external command
+    # reachable". A control that cannot fail is the entire defect class this file exists to avoid,
+    # so the emptied PATH is now witnessed to a side channel: stdout belongs to jq and cannot carry
+    # it.
+    local pathmark="${BATS_TEST_TMPDIR}/rebuilt-pathcontrol"
+    rm -f "$pathmark"
     local rebuilt="${BATS_TEST_TMPDIR}/rebuilt.sh"
     {
         echo 'set -euo pipefail'
         echo "source \"${LIB}\""
         echo 'PATH=""; export PATH'
+        echo "if command -v timeout >/dev/null 2>&1; then printf 'timeout-STILL-REACHABLE' > '${pathmark}'; else printf 'clean' > '${pathmark}'; fi"
         echo 'mmry_read_hook_payload 2 || true'
         echo 'printf "%s" "$MMRY_HOOK_PAYLOAD"'
     } > "$rebuilt"
@@ -175,6 +185,16 @@ _assert_path_was_empty() {
 
     run bash -c "bash '${rebuilt}' < '${f}' | '${MMRY_JQ}' -r '.hook_event_name'"
     [ "$status" -eq 0 ]
+
+    [ -f "$pathmark" ] || {
+        echo "the harness never reported on its own PATH, so absence was never witnessed here"
+        return 1
+    }
+    [ "$(cat "$pathmark")" = "clean" ] || {
+        echo "the harness ran with timeout still reachable ($(cat "$pathmark")), so this assertion proves nothing"
+        return 1
+    }
+
     [ "$output" = "Stop" ] || {
         echo "the reconstructed payload did not parse back to its event name: ${output}"
         return 1
@@ -203,6 +223,10 @@ _assert_path_was_empty() {
     _assert_path_was_empty "$output"
     local empty_out="$output"
     run bash -c "printf 'x' | bash '${PROBE}' 2"
+    # Both halves of the comparison need the marker. Only the first one carried it, so the `ok` run
+    # could have been made with a full PATH and the pair would still have looked like a valid
+    # contrast. Half a control is not a control.
+    _assert_path_was_empty "$output"
     local ok_out="$output"
 
     [[ "$empty_out" == *"status=empty"* ]]
@@ -307,8 +331,98 @@ _assert_path_was_empty() {
     }
 }
 
+# `read -t` reports a timeout with a status ABOVE 128 only from bash 4.0 onwards. bash 3.2 - the
+# shell macOS ships at /bin/bash, which is the entire reason #31385 exists - returns plain 1 for a
+# timeout and plain 1 for end-of-input, indistinguishably. A reader that classifies by return code
+# alone therefore calls a timed-out read `empty` on exactly the platform this fix is for, which is
+# the same "a total failure looks like a quiet hook" collapse the fix was written to end.
+#
+# Simulated by shadowing the `read` builtin with a function that clamps the status the way bash 3.2
+# does. A shell function wins over a builtin, so the library under test is genuinely reading through
+# it, unmodified. This is what makes the claim testable on a host with bash 5.
+_write_bash32_probe() {
+    local target="$1" lib="$2"
+    {
+        echo 'set -euo pipefail'
+        echo "source \"${lib}\""
+        echo 'PATH=""; export PATH'
+        echo 'if command -v timeout >/dev/null 2>&1; then printf "PATHCONTROL=timeout-STILL-REACHABLE\n"; else printf "PATHCONTROL=clean\n"; fi'
+        # bash 3.2 semantics: a timeout is reported as 1, not as >128.
+        echo 'read() { local __rc=0; builtin read "$@" || __rc=$?; [ "$__rc" -gt 128 ] && __rc=1; return "$__rc"; }'
+        echo 'printf "SHIM=%s\n" "$(type -t read)"'
+        echo 'rc=0'
+        echo 'mmry_read_hook_payload "${1:-2}" || rc=$?'
+        echo 'printf "rc=%s\n" "$rc"'
+        echo 'printf "status=%s\n" "$MMRY_HOOK_READ_STATUS"'
+    } > "$target"
+}
+
+@test "bash 3.2: a timeout is still called a timeout on a shell that reports it as plain 1" {
+    local probe32="${BATS_TEST_TMPDIR}/probe32.sh"
+    _write_bash32_probe "$probe32" "$LIB"
+
+    run bash -c "{ printf 'first\n'; sleep 6; } | bash '${probe32}' 1"
+    [ "$status" -eq 0 ]
+    _assert_path_was_empty "$output"
+    # The simulation must actually be in force, or this test is just the bash-5 case again.
+    [[ "$output" == *"SHIM=function"* ]] || {
+        echo "the bash 3.2 return-code simulation was not in effect, so nothing here was tested: ${output}"
+        return 1
+    }
+    [[ "$output" == *"rc=3"* ]] || {
+        echo "on bash 3.2 semantics the timed-out read was NOT classified as a timeout: ${output}"
+        return 1
+    }
+    [[ "$output" == *"status=timeout"* ]]
+}
+
+@test "control: classifying by return code alone mislabels the bash 3.2 timeout as 'ok'" {
+    # POSITIVE CONTROL for the test above. A copy of the library with the deadline check removed,
+    # leaving the >128 test on its own - the shape this file shipped with, and the one QA reproduced
+    # by mutation and a real bash 3.2.57 reproduced directly. It must get the answer WRONG here, or
+    # the assertion above is true of any implementation and proves nothing.
+    local mutlib="${BATS_TEST_TMPDIR}/lib-hookread-rc-only.sh"
+    sed 's/if \[ "\$rc" -gt 128 \] || \[ "\$SECONDS" -ge "\$deadline" \]; then/if [ "$rc" -gt 128 ]; then/' \
+        "$LIB" > "$mutlib"
+    grep -q 'gt 128 \] || \[' "$mutlib" && {
+        echo "the mutation did not apply, so this control would prove nothing"
+        return 1
+    }
+    grep -q 'if \[ "$rc" -gt 128 \]; then' "$mutlib" || {
+        echo "the mutated library no longer has the return-code test at all, so it is not the shape being controlled for"
+        return 1
+    }
+    bash -n "$mutlib" || { echo "the mutation produced invalid bash"; return 1; }
+
+    local probe32="${BATS_TEST_TMPDIR}/probe32-mutant.sh"
+    _write_bash32_probe "$probe32" "$mutlib"
+
+    run bash -c "{ printf 'first\n'; sleep 6; } | bash '${probe32}' 1"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SHIM=function"* ]]
+    [[ "$output" == *"status=timeout"* ]] && {
+        echo "the return-code-only reader ALSO called it a timeout under bash 3.2 semantics, so there was nothing to fix: ${output}"
+        return 1
+    }
+    [[ "$output" == *"status=ok"* ]] || {
+        echo "expected the mislabelled outcome to be 'ok': ${output}"
+        return 1
+    }
+}
+
 @test "timeout: whatever DID arrive before the deadline is still handed back" {
     run bash -c "{ printf 'first\n'; sleep 6; } | bash '${PROBE}' 1"
+    # Carrying the same markers as every other probe test. Without them this passed on a run where
+    # the PATH was never emptied and where the read had not actually timed out - "payload=[first]"
+    # is also what a plain successful read of one line looks like, so on its own it does not say
+    # the partial payload SURVIVED A DEADLINE. It only says a line was read.
+    [ "$status" -eq 0 ]
+    _assert_path_was_empty "$output"
+    [[ "$output" == *"rc=3"* ]] || {
+        echo "the read did not time out here, so 'the partial payload survived the timeout' is not what was measured: ${output}"
+        return 1
+    }
+    [[ "$output" == *"status=timeout"* ]]
     [[ "$output" == *"payload=[first]"* ]] || {
         echo "the partial payload was discarded on timeout: ${output}"
         return 1

@@ -112,8 +112,25 @@ ${line}"
 
         # rc 0 is a complete line: there may be more.
         [ "$rc" -eq 0 ] && continue
-        # Above 128 is the timeout; anything else is end-of-input. Either way we stop reading.
-        [ "$rc" -gt 128 ] && timed_out=1
+
+        # THE DEADLINE IS THE AUTHORITY, NOT THE RETURN CODE.
+        #
+        # bash >= 4 reports a `read -t` timeout with a status above 128, and the first version of
+        # this loop trusted that alone. bash 3.2 - which is what macOS ships at /bin/bash, i.e. the
+        # exact platform this whole change exists for - returns plain 1 for BOTH a timeout and
+        # end-of-input. On that shell the >128 test never fires, so a stream that ran out the clock
+        # was classified `empty` (or `ok`, if some bytes had arrived) and the caller was told the
+        # hook had simply gone quiet. That is the same "a total failure looks healthy" collapse this
+        # file was written to end, reintroduced one line below the comment describing it.
+        #
+        # The clock does not vary by shell version. If the budget has expired, the read stopped
+        # because time ran out, whatever the status says; if time remains, a non-zero status can
+        # only be end-of-input. A genuine end-of-input landing in the same second as the deadline is
+        # reported as a timeout, which is the safe way round: it names a state a caller can act on
+        # rather than one that reads as normal.
+        if [ "$rc" -gt 128 ] || [ "$SECONDS" -ge "$deadline" ]; then
+            timed_out=1
+        fi
         break
     done
 

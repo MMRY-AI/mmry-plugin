@@ -1,14 +1,19 @@
 name: Plugin Tests
 
+# `develop` is on both lists deliberately (#31385). The macOS leg of this matrix has existed since
+# the workflow was written, but the triggers only ever named the release branches, so no branch
+# targeting `develop` had ever run on a Mac. A macOS-specific defect therefore shipped with "there
+# is no Mac here" written into its own tests while a Mac runner sat unused in this file.
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, develop]
 
 jobs:
   offline-tests:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -18,7 +23,33 @@ jobs:
         with:
           submodules: recursive
 
+      # A macOS runner is not by itself a test of the shell macOS ships. The image also carries a
+      # Homebrew bash 5 that wins on PATH, so `#!/usr/bin/env bash` in bats and in every handler
+      # would silently pick the NEW shell and the run would prove nothing about the 3.2 a customer
+      # actually has at /bin/bash. This puts a `bash` that IS /bin/bash at the front of PATH, so the
+      # whole suite - bats, handlers, fixtures - runs on the stock shell.
+      - name: Pin bash to the stock /bin/bash (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$HOME/stockbash"
+          ln -sf /bin/bash "$HOME/stockbash/bash"
+          ln -sf /bin/sh   "$HOME/stockbash/sh"
+          echo "$HOME/stockbash" >> "$GITHUB_PATH"
+
+      - name: Report the shell under test
+        shell: bash
+        run: |
+          echo "runner.os      = ${{ runner.os }}"
+          echo "which bash     = $(command -v bash)"
+          echo "bash --version = $(bash --version | head -1)"
+          echo "/bin/bash      = $(/bin/bash --version | head -1)"
+          echo "BASH_VERSION   = ${BASH_VERSION}"
+          echo "timeout        = $(command -v timeout || echo ABSENT)"
+          echo "gtimeout       = $(command -v gtimeout || echo ABSENT)"
+
       - name: Run offline tests (structural + unit + handlers)
+        # /bin/bash explicitly, so the step's own shell is the stock one on macOS too.
+        shell: /bin/bash -e {0}
         run: |
           cd mmry/tests
           chmod +x run-tests.sh

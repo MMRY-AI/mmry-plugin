@@ -54,11 +54,23 @@ _reset_locks() {
 # A curl that answers from FAKE_BODY / FAKE_CODE, in bash, with no port and no network. Copied
 # deliberately from formation-delivery.bats rather than shared: these tests must keep working if
 # that file's fixture is changed for its own reasons.
+#
+# It COUNTS its invocations when MMRY_TEST_CALL_COUNTER is set. That is how the idle tests below
+# tell a poll from a single pass. They used to time the handler instead, and a stopwatch cannot make
+# that distinction on a slow host: QA deleted the polling behaviour outright and the timing
+# assertion still passed, because one non-polling pass on a loaded Windows runner already took
+# longer than the two seconds the test demanded. Counting the requests measures the thing the claim
+# is actually about - "it kept asking" - and does not vary with how busy the machine is.
 _fake_curl_dir() {
     local dir="${BATS_TEST_TMPDIR}/fake-bin"
     mkdir -p "$dir"
     cat > "${dir}/curl" <<'FAKECURL'
 #!/usr/bin/env bash
+if [ -n "${MMRY_TEST_CALL_COUNTER:-}" ]; then
+    n=0
+    [ -f "$MMRY_TEST_CALL_COUNTER" ] && n="$(cat "$MMRY_TEST_CALL_COUNTER")"
+    printf '%s' "$(( n + 1 ))" > "$MMRY_TEST_CALL_COUNTER"
+fi
 out=""; prev=""
 for arg in "$@"; do
     [[ "$prev" == "-o" ]] && out="$arg"
@@ -447,74 +459,92 @@ LATECURL
 @test "tc3: with timeout absent and nothing pending, Stop polls and then gives up in silence" {
     # The other half of the idle contract, and the "worse defect" guard: a Stop hook that exited 2
     # with nothing to say would wake the model for no reason. Also the assertion that distinguishes
-    # a poll from a single pass - with an empty response the handler must consume its whole budget.
+    # a poll from a single pass - with an empty response the handler must keep ASKING.
+    #
+    # WHY THIS COUNTS REQUESTS RATHER THAN SECONDS. It used to assert the handler took at least 2s
+    # against a 3s budget. QA deleted the polling behaviour outright and this test still passed on
+    # Windows, because a single non-polling pass on a slow host already exceeds two seconds - the
+    # stopwatch was measuring host load, not looping. The same mutant died on Linux, so the reading
+    # was a host artifact rather than a wrong idea, but an assertion that only discriminates on the
+    # faster of two supported platforms is not an assertion. The request count is the evidence the
+    # claim is actually made of, it is what the late-message test above already uses, and it does
+    # not move with the weather.
     local bin; bin="$(_fake_curl_dir)"
     local shim; shim="$(_macos_shim_dir)"
+    local counter="${BATS_TEST_TMPDIR}/idle-call-count"
+    rm -f "$counter"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     _reset_locks
     printf '%s' "{\"session_id\":\"${CLAUDE_SESSION_ID}\",\"hook_event_name\":\"Stop\"}" \
         > "${BATS_TEST_TMPDIR}/payload.json"
 
-    local start finish
-    start="$(date +%s)"
-    run bash -c "env PATH='${shim}:${bin}:${PATH}' \
+    run bash -c "env PATH='${shim}:${bin}:${PATH}' MMRY_TEST_CALL_COUNTER='${counter}' \
             FAKE_CODE=200 FAKE_BODY='[]' \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid' \
             MMRY_IDLE_POLL_SECONDS=3 MMRY_IDLE_POLL_INTERVAL=1 \
             bash '${HANDLERS}/formation-check.sh' \
             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
-    finish="$(date +%s)"
 
     [ "$status" -eq 0 ] || { echo "the poller woke the model with nothing to say: ${status} ${output}"; return 1; }
     [ -z "$output" ]
-    # It must have LOOPED. A single un-looped pass - the shipped behaviour on a Mac - returns at
-    # once. Timing the handler is safe here because the handler is the only thing being timed.
-    [ $(( finish - start )) -ge 2 ] || {
-        echo "Stop returned in $(( finish - start ))s against a 3s budget, so it did not poll"
+
+    # It must have LOOPED. A single un-looped pass - the shipped behaviour on a Mac - asks once and
+    # returns. Anything that asked more than once against an always-empty server was polling.
+    local calls; calls="$(cat "$counter" 2>/dev/null || printf '0')"
+    [ "$calls" -ge 2 ] || {
+        echo "Stop made ${calls} request(s) against a 3s budget at a 1s interval, so it did not poll"
         return 1
     }
 }
 
-@test "control: with the shipped read, Stop returns at once instead of polling" {
+@test "control: with the shipped read, Stop asks once instead of polling" {
     # POSITIVE CONTROL for the test above. This is the headline symptom of the ticket - "coordination
-    # messages never reach an idle session" - reproduced.
+    # messages never reach an idle session" - reproduced. Counted, not timed, for the reason given
+    # above: the stopwatch version of this pair could not reliably tell the mutant from the fix on a
+    # slow host, which is precisely the pair it exists to separate.
     local mutant; mutant="$(_mutant_handler_dir)"
     local bin; bin="$(_fake_curl_dir)"
     local shim; shim="$(_macos_shim_dir)"
+    local mutant_counter="${BATS_TEST_TMPDIR}/idle-mutant-count"
+    local fixed_counter="${BATS_TEST_TMPDIR}/idle-fixed-count"
+    rm -f "$mutant_counter" "$fixed_counter"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     _reset_locks
     printf '%s' "{\"session_id\":\"${CLAUDE_SESSION_ID}\",\"hook_event_name\":\"Stop\"}" \
         > "${BATS_TEST_TMPDIR}/payload.json"
 
-    local start finish
-    start="$(date +%s)"
     run bash -c "env PATH='${shim}:${bin}:${PATH}' CLAUDE_SESSION_ID='${CLAUDE_SESSION_ID}' \
+            MMRY_TEST_CALL_COUNTER='${mutant_counter}' \
             FAKE_CODE=200 FAKE_BODY='[]' \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid' \
             MMRY_IDLE_POLL_SECONDS=8 MMRY_IDLE_POLL_INTERVAL=1 \
             bash '${mutant}/formation-check.sh' \
             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
-    finish="$(date +%s)"
 
-    local mutant_secs=$(( finish - start ))
-    [ "$mutant_secs" -lt 5 ] || {
-        echo "the mutant polled for ${mutant_secs}s against an 8s budget, so it did not collapse to a single pass and this control proves nothing"
+    local mutant_calls; mutant_calls="$(cat "$mutant_counter" 2>/dev/null || printf '0')"
+    [ "$mutant_calls" -eq 1 ] || {
+        echo "the mutant made ${mutant_calls} request(s) against an 8s budget; it was expected to ask exactly once and give up, so this control proves nothing"
         return 1
     }
 
-    # A/B, not a single stopwatch reading. "Returned quickly" on its own is also what a handler that
-    # died on line one looks like, and the mutant differs from the real handler in exactly one line,
-    # so the comparison has to be against the real handler in the IDENTICAL setup.
+    # A/B, not a single reading. "Asked once" on its own is also what a handler that died on line one
+    # looks like, and the mutant differs from the real handler in exactly one line, so the comparison
+    # has to be against the real handler in the IDENTICAL setup.
     _reset_locks
-    start="$(date +%s)"
-    run bash -c "env PATH='${shim}:${bin}:${PATH}' CLAUDE_SESSION_ID='${CLAUDE_SESSION_ID}'             FAKE_CODE=200 FAKE_BODY='[]'             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid'             MMRY_IDLE_POLL_SECONDS=8 MMRY_IDLE_POLL_INTERVAL=1             bash '${HANDLERS}/formation-check.sh'             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
-    finish="$(date +%s)"
-    local fixed_secs=$(( finish - start ))
+    run bash -c "env PATH='${shim}:${bin}:${PATH}' CLAUDE_SESSION_ID='${CLAUDE_SESSION_ID}' \
+            MMRY_TEST_CALL_COUNTER='${fixed_counter}' \
+            FAKE_CODE=200 FAKE_BODY='[]' \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid' \
+            MMRY_IDLE_POLL_SECONDS=8 MMRY_IDLE_POLL_INTERVAL=1 \
+            bash '${HANDLERS}/formation-check.sh' \
+            < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
 
-    [ "$fixed_secs" -ge 5 ] || {
-        echo "the FIXED handler also returned in ${fixed_secs}s, so the ${mutant_secs}s above is not evidence of anything"
+    local fixed_calls; fixed_calls="$(cat "$fixed_counter" 2>/dev/null || printf '0')"
+    [ "$fixed_calls" -gt "$mutant_calls" ] || {
+        echo "the FIXED handler made ${fixed_calls} request(s) too, so the mutant asking ${mutant_calls} time(s) is not evidence of anything"
         return 1
     }
+    [ "$fixed_calls" -ge 2 ]
 }
 
 # ---------------------------------------------------------------------------------------------
