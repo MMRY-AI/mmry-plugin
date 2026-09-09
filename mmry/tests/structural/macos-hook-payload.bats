@@ -101,6 +101,55 @@ SHIM
     printf '%s' "$dir"
 }
 
+# THE CONTROL MACHINE: a host on which `timeout` WORKS.
+#
+# Every "with the binary present" control needs one, and on the platform this ticket is about there
+# isn't one - which is the point. The macOS CI runner reports `timeout ABSENT` and `gtimeout ABSENT`,
+# so these controls used to FAIL there, on the very machine that best demonstrates the defect. That
+# is the wrong answer twice over: a control failing because its premise holds is not a finding, and
+# a red suite on macOS is how the Mac leg gets ignored again.
+#
+# So the control machine is the host's own GNU timeout where there is one, and a working bash
+# stand-in where there is not. Which one was used is reported by _control_timeout_kind and
+# asserted, so a control can never quietly run with no timeout at all.
+_control_timeout_dir() {
+    local dir="${BATS_TEST_TMPDIR}/control-bin"
+    mkdir -p "$dir"
+    # The kind goes to a FILE, not a variable: this function is called through $(...), so anything
+    # it assigns dies with the subshell. A marker that silently never gets set is exactly the dead
+    # control this suite keeps having to close.
+    if command -v timeout >/dev/null 2>&1; then
+        printf 'host' > "${BATS_TEST_TMPDIR}/control-timeout-kind"
+        printf '%s' ""
+        return 0
+    fi
+    cat > "${dir}/timeout" <<'STANDIN'
+#!/usr/bin/env bash
+# A working `timeout DURATION COMMAND...`, in bash, for hosts that have no GNU coreutils.
+# stdin is duplicated to fd 3 first: a shell redirects an asynchronous command's stdin from
+# /dev/null unless it is given one explicitly, and `timeout 2 cat` is nothing BUT its stdin.
+dur="$1"; shift
+exec 3<&0
+"$@" <&3 &
+pid=$!
+( sleep "$dur" 2>/dev/null; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+watcher=$!
+rc=0
+wait "$pid" || rc=$?
+kill "$watcher" 2>/dev/null
+wait "$watcher" 2>/dev/null
+exit "$rc"
+STANDIN
+    chmod +x "${dir}/timeout"
+    printf 'standin' > "${BATS_TEST_TMPDIR}/control-timeout-kind"
+    printf '%s' "${dir}:"
+}
+
+# What the control machine's timeout actually was, for the assertions that require one to exist.
+_control_timeout_kind() {
+    cat "${BATS_TEST_TMPDIR}/control-timeout-kind" 2>/dev/null || printf ''
+}
+
 # A copy of the handler directory with the shipped defect deliberately put back: the payload read
 # via `timeout 2 cat`. This is the positive control for every behavioural test below. A test that
 # only ever asserts correct behaviour has never been watched fail and cannot yet be trusted to
@@ -138,7 +187,8 @@ _run_hook() {
     if [[ "$machine" == "macos" ]]; then
         path="${shim}:${bin}:${PATH}"
     else
-        path="${bin}:${PATH}"
+        local ctl; ctl="$(_control_timeout_dir)"
+        path="${bin}:${ctl}${PATH}"
     fi
 
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
@@ -178,14 +228,27 @@ _run_hook() {
         return 1
     }
 
-    # And the control machine must genuinely have the binary, or "with it present" is not a control.
+    # And the control machine must genuinely have a WORKING timeout, or "with it present" is not a
+    # control. On the macOS runner the host has none - `timeout ABSENT`, `gtimeout ABSENT`, which is
+    # the ticket's premise confirmed rather than a fault - so a bash stand-in supplies one there.
+    local ctl; ctl="$(_control_timeout_dir)"
+    [ -n "$(_control_timeout_kind)" ] || { echo "the control machine did not report what it used"; return 1; }
     st=0
-    env PATH="${PATH}" bash -c 'timeout 2 echo PRESENT' > "$out" 2>&1 || st=$?
+    env PATH="${ctl}${PATH}" bash -c 'timeout 2 echo PRESENT' > "$out" 2>&1 || st=$?
     [ "$st" -eq 0 ] || {
-        echo "this host has no working GNU timeout, so the control half of test case 1 is meaningless"
+        echo "the control machine ($(_control_timeout_kind)) has no working timeout, so the control half of test case 1 is meaningless: $(cat "$out")"
         return 1
     }
     grep -q 'PRESENT' "$out"
+
+    # ...and it must really pass a payload through, which is the only thing the control uses it for.
+    st=0
+    printf '%s' 'PAYLOAD-THROUGH' | env PATH="${ctl}${PATH}" \
+        bash -c 'p="$(timeout 2 cat)"; printf "%s" "$p"' > "$out" 2>&1 || st=$?
+    [ "$st" -eq 0 ] && grep -q 'PAYLOAD-THROUGH' "$out" || {
+        echo "the control machine's timeout did not pass stdin through ($(_control_timeout_kind), exit ${st}): $(cat "$out")"
+        return 1
+    }
 }
 
 @test "tc1: with timeout ABSENT, the payload is read in full - both fields reach the handler" {

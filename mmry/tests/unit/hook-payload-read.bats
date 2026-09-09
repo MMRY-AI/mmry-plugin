@@ -87,10 +87,23 @@ _assert_path_was_empty() {
         return 1
     }
     [ -z "$output" ]
-    # ... and the same question asked WITH a PATH must answer yes, or the check above is vacuous.
-    run bash -c 'command -v timeout'
+    # ... and the same question asked WITH a PATH must answer yes for SOMETHING, or the check above
+    # is vacuous - "not found" would just be how this host answers everything.
+    #
+    # It used to ask specifically about `timeout`, which fails on the macOS runner because macOS has
+    # no timeout. That is the premise of the whole ticket holding, not a broken host, and a suite
+    # that goes red when its premise comes true is a suite that gets ignored on the one platform it
+    # was written for. So the question is asked about a command that exists everywhere, and the
+    # property under test - PATH="" makes external commands unreachable, a full PATH does not - is
+    # unchanged.
+    run bash -c 'command -v ls'
     [ "$status" -eq 0 ] || {
-        echo "this host has no timeout at all, so the control-vs-stripped comparison is meaningless"
+        echo "no external command at all resolves on this host with a full PATH, so the stripped-vs-full comparison is meaningless"
+        return 1
+    }
+    run bash -c 'PATH=""; export PATH; command -v ls'
+    [ "$status" -ne 0 ] || {
+        echo "ls still resolves with an empty PATH (${output}), so emptying PATH is not what removes reachability here"
         return 1
     }
 

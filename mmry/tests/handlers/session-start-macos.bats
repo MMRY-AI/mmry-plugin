@@ -85,6 +85,55 @@ _registered_session_id() {
 
 # ---------------------------------------------------------------------------------------------
 
+# THE CONTROL MACHINE: a host on which `timeout` WORKS.
+#
+# Every "with the binary present" control needs one, and on the platform this ticket is about there
+# isn't one - which is the point. The macOS CI runner reports `timeout ABSENT` and `gtimeout ABSENT`,
+# so these controls used to FAIL there, on the very machine that best demonstrates the defect. That
+# is the wrong answer twice over: a control failing because its premise holds is not a finding, and
+# a red suite on macOS is how the Mac leg gets ignored again.
+#
+# So the control machine is the host's own GNU timeout where there is one, and a working bash
+# stand-in where there is not. Which one was used is reported by _control_timeout_kind and
+# asserted, so a control can never quietly run with no timeout at all.
+_control_timeout_dir() {
+    local dir="${TEST_TMPDIR}/control-bin"
+    mkdir -p "$dir"
+    # The kind goes to a FILE, not a variable: this function is called through $(...), so anything
+    # it assigns dies with the subshell. A marker that silently never gets set is exactly the dead
+    # control this suite keeps having to close.
+    if command -v timeout >/dev/null 2>&1; then
+        printf 'host' > "${TEST_TMPDIR}/control-timeout-kind"
+        printf '%s' ""
+        return 0
+    fi
+    cat > "${dir}/timeout" <<'STANDIN'
+#!/usr/bin/env bash
+# A working `timeout DURATION COMMAND...`, in bash, for hosts that have no GNU coreutils.
+# stdin is duplicated to fd 3 first: a shell redirects an asynchronous command's stdin from
+# /dev/null unless it is given one explicitly, and `timeout 2 cat` is nothing BUT its stdin.
+dur="$1"; shift
+exec 3<&0
+"$@" <&3 &
+pid=$!
+( sleep "$dur" 2>/dev/null; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+watcher=$!
+rc=0
+wait "$pid" || rc=$?
+kill "$watcher" 2>/dev/null
+wait "$watcher" 2>/dev/null
+exit "$rc"
+STANDIN
+    chmod +x "${dir}/timeout"
+    printf 'standin' > "${TEST_TMPDIR}/control-timeout-kind"
+    printf '%s' "${dir}:"
+}
+
+# What the control machine's timeout actually was, for the assertions that require one to exist.
+_control_timeout_kind() {
+    cat "${TEST_TMPDIR}/control-timeout-kind" 2>/dev/null || printf ''
+}
+
 @test "harness: the shim shadows timeout, and this host really has one to shadow" {
     # Not via bats' `run`: an expected 127 triggers a BW01 warning that dumps the entire PATH into
     # the suite output.
@@ -93,9 +142,15 @@ _registered_session_id() {
     [ "$st" -eq 127 ] || { echo "the shim did not shadow timeout: ${st} $(cat "$out")"; return 1; }
     grep -q 'SHOULD-NOT-RUN' "$out" && { echo "the shim ran its argument"; return 1; }
 
+    # The contrast needs a host where timeout WORKS. The macOS runner has none - which is the
+    # ticket's premise, not a fault - so a bash stand-in supplies one there.
+    local ctl; ctl="$(_control_timeout_dir)"
     st=0
-    bash -c 'timeout 2 echo PRESENT' > "$out" 2>&1 || st=$?
-    [ "$st" -eq 0 ] || { echo "this host has no GNU timeout, so there is no contrast to draw"; return 1; }
+    env PATH="${ctl}${PATH}" bash -c 'timeout 2 echo PRESENT' > "$out" 2>&1 || st=$?
+    [ "$st" -eq 0 ] || {
+        echo "the control machine ($(_control_timeout_kind)) has no working timeout, so there is no contrast to draw: $(cat "$out")"
+        return 1
+    }
     grep -q 'PRESENT' "$out"
 }
 
@@ -127,13 +182,16 @@ _registered_session_id() {
     local mutant; mutant="$(_mutant_plugin)"
     : > "${TEST_TMPDIR}/curl-log.txt"
     printf '%s' '{"session_id":"REAL-UUID-1234","hook_event_name":"SessionStart"}' > "${TEST_TMPDIR}/payload.json"
-    # Note: no MACOS_BIN on PATH here.
-    run bash -c "env HOME='${HOME}' \
+    # Note: no MACOS_BIN on PATH here. A working timeout instead - the host's, or a stand-in on a
+    # host like the macOS runner that genuinely has none.
+    local ctl; ctl="$(_control_timeout_dir)"
+    run bash -c "env HOME='${HOME}' PATH='${ctl}${PATH}' \
             TEST_TMPDIR='${TEST_TMPDIR}' TMPDIR='${TEST_TMPDIR}' MMRY_TMPDIR='${TEST_TMPDIR}' \
             MMRY_CONFIG_FILE='${MMRY_CONFIG_FILE}' CLAUDE_PLUGIN_ROOT='${mutant}' \
             bash '${mutant}/hooks-handlers/session-start.sh' \
             < '${TEST_TMPDIR}/payload.json'"
 
+    [ -n "$(_control_timeout_kind)" ] || { echo "no control machine was established"; return 1; }
     [ "$status" -eq 0 ]
     [ "$(_registered_session_id)" = "REAL-UUID-1234" ] || {
         echo "the mutant is simply broken rather than platform-specific: $(cat "${TEST_TMPDIR}/curl-log.txt")"
