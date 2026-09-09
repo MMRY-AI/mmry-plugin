@@ -14,9 +14,9 @@
 #
 # HOW ABSENCE IS MADE THE CONDITION UNDER TEST, RATHER THAN HOPED FOR
 # --------------------------------------------------------------------
-# There is no Mac here. Stripping /usr/bin off PATH is not a substitute, because the handler
-# legitimately needs date, stat, mkdir, rmdir and tr from the same directory, so the test would fail
-# for reasons that have nothing to do with the defect and prove nothing about it.
+# Stripping /usr/bin off PATH is not a substitute, because the handler legitimately needs date,
+# stat, mkdir, rmdir and tr from the same directory, so the test would fail for reasons that have
+# nothing to do with the defect and prove nothing about it.
 #
 # So `timeout` and `gtimeout` are SHADOWED by shims that behave exactly as a missing command does:
 # "command not found" on stderr and exit 127, without running their argument. That is precisely what
@@ -24,8 +24,30 @@
 # could not survive. The shims also record every invocation, so a control can prove the mutant
 # really did reach for the missing binary rather than failing for some other reason.
 #
-# WHAT THIS STILL DOES NOT PROVE, recorded rather than glossed: real Darwin, and bash 3.2 (the bash
-# macOS ships at /bin/bash). Only a Mac settles those, and the ticket says so.
+# THIS RUNS ON A MAC, AND HERE IS WHAT THE MAC SAID
+# --------------------------------------------------
+# For a while this file carried "there is no Mac here" as a standing caveat. That was wrong. The
+# repository has had a macos-latest leg in .github/workflows/test.yml since the workflow was
+# written; the triggers just never named a branch anybody works on, so it had never fired for code
+# under review. `develop` is on the triggers now, and the first run reported:
+#
+#   which bash     = /Users/runner/stockbash/bash      (pinned to the stock shell by the workflow)
+#   bash --version = GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+#   /bin/bash      = GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+#   timeout        = ABSENT
+#   gtimeout       = ABSENT
+#
+# So the two things this file used to record as unproven - real Darwin, and bash 3.2 - are now
+# executed results rather than caveats, on the shell macOS actually ships and on a host that
+# genuinely lacks the binary. The whole file is green there.
+#
+# The shims below are kept, and are not redundant. They make absence the condition under test on
+# Linux and Windows too, so a regression is caught by whichever host runs first rather than only by
+# the Mac. On the Mac they shadow a command that was not there anyway.
+#
+# WHAT IS STILL NOT PROVEN, recorded rather than glossed: that Claude Code's hook runtime on Darwin
+# pipes stdin the way these fixtures do, and the two-machine leg of ticket test cases 3 and 4. Those
+# need BETA, not CI.
 
 setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"

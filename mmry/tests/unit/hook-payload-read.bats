@@ -3,18 +3,24 @@
 #
 # WHAT THESE TESTS CAN AND CANNOT PROVE, STATED UP FRONT
 # ------------------------------------------------------
-# The defect is "a command absent from macOS", and there is no Mac in this test environment. A test
-# that ran on a Mac and passed would prove the fix; a test that hopes the reader has a Mac proves
-# nothing at all. So absence is made the CONDITION UNDER TEST rather than a property of the host:
+# The defect is "a command absent from macOS", so absence is made the CONDITION UNDER TEST rather
+# than a property of the host:
 #
 #   PATH="" is the strongest available form of "the binary is not there". With an empty PATH the
 #   shell can execute NO external command whatsoever - not timeout, not gtimeout, not cat. Anything
 #   that still works under it is provably built out of shell builtins and nothing else, which is the
 #   exact property the fix claims and the exact property the old `timeout 2 cat` did not have.
 #
-# What that does NOT establish, and is recorded on the ticket rather than glossed here: that bash
-# 3.2 (the bash macOS ships at /bin/bash) behaves identically to the bash running this suite, and
-# that a real Darwin hook runtime pipes stdin the way the fixture does. Only a Mac settles those.
+# This file also RUNS ON A MAC. It used to say "there is no Mac in this test environment", and that
+# was never true - the repository has had a macos-latest leg since the workflow was written, and the
+# triggers simply never named a branch anybody works on. The first run reported bash 3.2.57 on
+# arm64-apple-darwin25 with both `timeout` and `gtimeout` ABSENT, and every test here green. So
+# "bash 3.2 behaves the way this assumes" is an executed result, not an assumption. One assertion
+# below tests bash 3.2's return-code behaviour explicitly, because it differs from bash 4+ and the
+# reader got it wrong at first.
+#
+# What is still NOT established, recorded rather than glossed: that Claude Code's hook runtime on
+# Darwin pipes stdin the way these fixtures do. That needs BETA on a real Mac session, not CI.
 
 setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"

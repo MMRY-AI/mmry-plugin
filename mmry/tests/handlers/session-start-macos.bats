@@ -15,6 +15,11 @@
 # command does: "command not found" on stderr, exit 127, argument never run. Removing /usr/bin from
 # PATH instead would take date, stat, sed and tr with it and the handler would fail for reasons that
 # have nothing to do with the defect.
+#
+# On the macos-latest CI leg the simulation is redundant and the file is green anyway: that runner
+# reports bash 3.2.57 on arm64-apple-darwin25 with `timeout` and `gtimeout` both ABSENT. The shims
+# stay because they make absence the condition under test on Linux and Windows too, so a regression
+# is caught by whichever host runs first.
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'

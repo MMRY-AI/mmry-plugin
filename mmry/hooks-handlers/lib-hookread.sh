@@ -33,6 +33,10 @@
 # /bin/bash, so this needs nothing installed on any supported platform. Nothing is forked, which
 # also makes it cheaper than the `timeout cat` it replaces in the hottest path in the plugin.
 #
+# Verified on the macos-latest CI leg: GNU bash 3.2.57 on arm64-apple-darwin25, with `timeout` and
+# `gtimeout` both reported ABSENT. Note the one place 3.2 differs and this code has to care - see
+# the deadline comment in the loop below.
+#
 # Deliberately NOT chosen: probing for `gtimeout` and falling back (still depends on something a
 # user has to install, and leaves two code paths where one has coverage), and bundling a coreutils
 # binary next to vendor/jq (weight and per-platform maintenance for a builtin we already have).
