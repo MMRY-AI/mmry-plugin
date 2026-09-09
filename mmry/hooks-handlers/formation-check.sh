@@ -455,7 +455,7 @@ case "$mode" in
             fi
             _now="$(date +%s 2>/dev/null || printf '0')"
             [[ "$_now" =~ ^[0-9]+$ ]] || exit 0
-            (( _now + MMRY_IDLE_POLL_INTERVAL <= _deadline )) || exit 0
+            exit 0  # MUTANT: polling deleted outright - one pass and give up
             # Keep the poller lock's mtime honest so a live poller is never mistaken for a stale one.
             touch "$_poller_dir" 2>/dev/null || true
             sleep "$MMRY_IDLE_POLL_INTERVAL" || exit 0
