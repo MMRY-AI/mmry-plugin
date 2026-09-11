@@ -78,7 +78,7 @@ All operations go through the MMRY AI REST API:
 | DELETE | `/api/memories/{id}/links/{targetId}` | Delete memory link |
 | GET | `/api/memories/{id}/related` | Get related memories |
 | POST | `/api/sessions` | Register/update session |
-| GET | `/api/sessions/active` | List active sessions |
+| GET | `/api/sessions/active` | List your active sessions |
 | GET | `/api/groups/mine` | List your permission groups |
 
 ## Mid-Session Loading
@@ -333,7 +333,11 @@ The `--project-id` parameter tags a memory with an Intervals Project ID (integer
 
 ## Session Coordination
 
-When multiple Claude sessions may work on the same project, use the session registration API to register your presence. Other sessions loading memories for the same project/directory will see your registration and can avoid collisions.
+When multiple Claude sessions may work on the same project, use the session registration API to register your presence.
+
+**Your session list shows your own sessions only.** Other people's sessions on the same account are not visible to you, and yours are not visible to them — a session belongs to the person who registered it. An account administrator additionally sees that another person's session exists and who owns it, but the identifier that binds it is withheld on every row but their own; being an administrator does not lift that, it only widens which sessions they can see listed.
+
+So registration is a record of your own presence, not a way to discover who else is working. **If you need to coordinate with another person's assistant, use a formation** — `/mmry:formation` — which is built for exactly that, and carries messages between sessions that cannot see each other's registrations.
 
 Sessions are automatically registered at session start. The 8-hour auto-expiry handles stale registrations naturally.
 
