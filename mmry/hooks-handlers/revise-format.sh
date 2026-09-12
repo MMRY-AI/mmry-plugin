@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # revise-format.sh - change a record type that already exists (#31460 QA round three, also-fix 9).
 #
-# WHY THIS FILE EXISTS. mmry-client.sh has carried mmry_revise_format, mmry_rename_format,
-# mmry_retire_format and mmry_reinstate_format since the surface was built, and NOTHING CALLED
-# ANY OF THEM: no handler script, no mention in SKILL.md. So a Claude Code assistant could design
+# WHY THIS FILE EXISTS. In the API repo, mmry-client.sh had carried the revise, rename, retire and
+# reinstate functions since the surface was built and NOTHING CALLED ANY OF THEM: no handler
+# script, no mention in SKILL.md. In THIS repo the published plugin had none of it - neither the
+# client functions nor a handler - so the gap was total rather than partial (#31460). Either way
+# the consequence for a user was identical: a Claude Code assistant could design
 # a type and record against it, and then could not add a field to it - the one thing a person
 # asks for the moment they use a type in anger, because the shape of what they are collecting is
 # never right on the first attempt. Their only route was to create a SECOND type for the same
