@@ -350,3 +350,20 @@ _mmry_no_jq() {
     [[ "$output" != *"Totally A Format"* ]]
     [[ "$output" == *"RecordedAs: (none"* ]]
 }
+
+@test "save-memory (no jq): a top-level name beside a null format is not read as the format" {
+    # THE CASE THAT ACTUALLY SEPARATES the scoped extractor from a whole-body grep. A name buried
+    # in the customer's content cannot be confused for a real one - the encoder escapes it as
+    # \"name\", so a naive grep for "name": never matches it and the earlier fixture stays green
+    # against BOTH implementations. A sibling key at the TOP LEVEL of the response is not escaped,
+    # and that is what a whole-body grep reads and reports as a stored format when nothing was
+    # stored at all. Without this test the scoping is asserted by comment only.
+    export MOCK_CURL_HTTP_CODE=201
+    export MOCK_CURL_RESPONSE='{"id":99,"name":"Totally A Format","content":"C","format":null}'
+    run _mmry_no_jq bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope health \
+        --topic "T" --content "C" --record-type "Migraine log"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"Totally A Format"* ]]
+    [[ "$output" == *"RecordedAs: (none"* ]]
+}
