@@ -311,3 +311,42 @@ setup() {
     [[ "$status" -eq 0 ]]
     grep -q '"entryKey":"Rewire the settings page"' "$LOG"
 }
+
+# --- the jq-less fallback ----------------------------------------------------
+#
+# WHY THESE EXIST. save-memory.sh's routed save reads the response twice over: with MMRY_JQ when
+# lib-jq.sh resolved one, and with shell builtins when it did not. The builtin path holds the
+# hand-rolled format-name extractor, which is exactly where #31460 QA round three found a
+# whole-body grep reporting the CUSTOMER'S OWN words as a stored format. Every other test in this
+# file runs with a jq on PATH (the suite helper guarantees one), so without these the builtin
+# branch is executed by nothing and a bug reintroduced there ships green.
+#
+# HOW FAR THIS ACTUALLY REACHES, stated plainly rather than implied. On a real machine this
+# branch is currently UNREACHABLE: _mmry_load_config parses mmry-config.json with MMRY_JQ and has
+# had no regex fallback since #30624, so with no jq no apiKey is ever read and the request fails
+# auth long before any response is parsed. These tests therefore supply the credentials through
+# the environment, which is the only way in. They pin the extractor's behaviour; they do not
+# demonstrate a customer-reachable path. See the PR notes on whether this fallback should be
+# deleted or config parsing should regain a jq-less route.
+
+_mmry_no_jq() {
+    mkdir -p "$TEST_TMPDIR/no-jq-vendor"
+    env MMRY_JQ_SKIP_SYSTEM=1 MMRY_JQ_VENDOR_DIR="$TEST_TMPDIR/no-jq-vendor"         MMRY_API_URL="http://localhost:5291" MMRY_API_KEY="test-api-key"         MMRY_AUTH_METHOD="apikey" "$@"
+}
+
+@test "save-memory (no jq): names the format the server stored, read from the format block" {
+    export MOCK_CURL_HTTP_CODE=201
+    export MOCK_CURL_RESPONSE='{"id":99,"content":"C","format":{"name":"Migraine log","rootId":42}}'
+    run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --record-type "Migraine log"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"RecordedAs: Migraine log"* ]]
+}
+
+@test "save-memory (no jq): a name inside the user's own content is not read as a format" {
+    export MOCK_CURL_HTTP_CODE=201
+    export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Format\"}","format":null}'
+    run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --record-type "Migraine log"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"Totally A Format"* ]]
+    [[ "$output" == *"RecordedAs: (none"* ]]
+}
