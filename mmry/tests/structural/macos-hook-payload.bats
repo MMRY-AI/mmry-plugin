@@ -812,7 +812,9 @@ _code_only() {
     [ -n "$ver" ]
 
     # The floor formation.md actually states for the macOS payload fix.
-    floor="$(grep -o 'Fixed in plugin [0-9][0-9.]*' "$doc" | head -1 | grep -o '[0-9][0-9.]*')"
+    # The trailing sentence period must not ride along into the version, or the comparison is
+    # made against "2.9.1." and the failure message reads as nonsense.
+    floor="$(grep -o 'Fixed in plugin [0-9][0-9.]*' "$doc" | head -1 | grep -o '[0-9][0-9.]*' | sed 's/\.$//')"
     [ -n "$floor" ] || {
         echo "formation.md no longer states a plugin floor for the macOS payload fix at all"
         return 1
