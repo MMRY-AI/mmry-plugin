@@ -104,6 +104,47 @@ case "$URL" in
             RESPONSE_BODY='{"id":1,"apiKey":"mock-generated-key-abc123","keyPrefix":"abcd1234","label":"test"}'
         fi
         ;;
+    # ── structured record types (#31460) ──
+    # Order matters: the most specific pattern first, because case takes the FIRST match.
+    */api/data-formats/*/entries*)
+        if [[ "$METHOD" == "POST" ]]; then
+            HTTP_CODE="201"
+            RESPONSE_BODY='{"outcome":"structured.created","memoryId":99,"entryId":7}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='{"total":2,"format":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"topic":"Tuesday","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"topic":"Friday","values":{"severity":3,"triggers":null}}]}'
+        fi
+        ;;
+    */api/data-formats/*/versions)
+        HTTP_CODE="201"
+        RESPONSE_BODY='{"format":{"rootId":42,"name":"Migraine log","version":2,"versions":2}}'
+        ;;
+    */api/data-formats/*/retire)
+        HTTP_CODE="200"
+        RESPONSE_BODY='{"entries":41}'
+        ;;
+    */api/data-formats/*/reinstate)
+        HTTP_CODE="200"
+        RESPONSE_BODY='{"entries":41}'
+        ;;
+    */api/data-formats/*)
+        if [[ "$METHOD" == "PUT" ]]; then
+            HTTP_CODE="200"
+            RESPONSE_BODY='{"format":{"rootId":42,"name":"Headache log","version":1,"versions":1}}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='{"format":{"rootId":42,"name":"Migraine log","version":1,"versions":1,"entries":41,"entryKeyMode":"append","identityField":null,"visibility":"Private","matchHints":"migraine, headache"},"fields":[{"key":"severity","type":"number","retired":false},{"key":"triggers","type":"list","retired":false}]}'
+        fi
+        ;;
+    */api/data-formats|*/api/data-formats\?*)
+        if [[ "$METHOD" == "POST" ]]; then
+            HTTP_CODE="201"
+            RESPONSE_BODY='{"format":{"rootId":42,"name":"Migraine log","version":1,"versions":1}}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='[{"rootId":42,"name":"Migraine log","entries":41,"matchHints":"migraine, headache"},{"rootId":43,"name":"Expenses","entries":3,"matchHints":""}]'
+        fi
+        ;;
     */api/groups/mine)
         HTTP_CODE="200"
         RESPONSE_BODY='[{"id":1,"groupName":"Finance Team","ownerUserId":10},{"id":2,"groupName":"Engineering","ownerUserId":10}]'

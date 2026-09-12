@@ -32,6 +32,11 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | `link-memories.sh` | Link two memories |
 | `search-memories.sh` | Search memories by keyword |
 | `list-groups.sh` | List your permission groups |
+| `list-formats.sh` | List the user's structured record types |
+| `create-format.sh` | Define a new structured record type |
+| `revise-format.sh` | Add a field to a type, rename it, retire it |
+| `save-record.sh` | Record something against a type, or update a record |
+| `query-records.sh` | Read records, filtered on their FIELDS |
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
@@ -57,7 +62,7 @@ mmry_get_active_sessions
 echo "$MMRY_RESPONSE"
 ```
 
-Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`.
+Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for structured records `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`.
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
@@ -80,6 +85,179 @@ All operations go through the MMRY AI REST API:
 | POST | `/api/sessions` | Register/update session |
 | GET | `/api/sessions/active` | List your active sessions |
 | GET | `/api/groups/mine` | List your permission groups |
+| POST | `/api/data-formats` | Define a structured record type |
+| GET | `/api/data-formats` | List the user's record types |
+| GET | `/api/data-formats/{id}` | One record type in full |
+| PUT | `/api/data-formats/{id}` | Rename it, or change what it is recognised by |
+| POST | `/api/data-formats/{id}/versions` | Publish a new shape for it |
+| POST | `/api/data-formats/{id}/retire` | Stop offering it (nothing is deleted) |
+| POST | `/api/data-formats/{id}/reinstate` | Offer it again |
+| POST | `/api/data-formats/{id}/entries` | Record something against it |
+| GET | `/api/data-formats/{id}/entries` | Read its records, filtered on their fields |
+
+## Structured Records
+
+### What they are, and when they are the right answer
+
+Almost everything the user saves is an ordinary memory, and the ordinary `save-memory.sh` call is
+the right tool for it. But when they are accumulating **examples of a recurring shape** — every
+migraine and what preceded it, every expense, every job application, every recipe — a **record
+type** stores the same words with **named fields** alongside them. "How many of these had X" then
+becomes an answer rather than a guess.
+
+A record is an ordinary memory that additionally carries fields. Everything else about it is
+unchanged: it appears in recall, in search and in the user's export, `DELETE` deactivates it like
+any other, and **the user's own words are always kept verbatim**. The one difference is
+retention: a record is **durable against the tier clock**, so a log the user is actively keeping
+does not stop appearing three months after they last read it. Removing one is a deactivation,
+not an expiry.
+
+**Do not create a type for a single fact, a one-off note, or anything you would not expect a
+second example of.** Left unchecked a model creates one type per conversation and leaves the
+account full of types holding one record each. Run `list-formats.sh` first and reuse what is
+already there.
+
+### Seeing what the user has
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh" --id 42   # one type in full
+```
+
+### Defining one
+
+Design the fields from what the user actually said, using **their** words as the labels. Rough is
+fine — an unrecognised field type is stored as text rather than refused.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
+  --name "Migraine log" \
+  --description "Every migraine and what preceded it" \
+  --fields '[{"key":"severity","label":"Severity","type":"number"},
+             {"key":"triggers","label":"Triggers","type":"list","of":"text"},
+             {"key":"duration","label":"Duration","type":"text"}]' \
+  --mode append \
+  --match-hints "migraine, headache, aura"
+```
+
+`--match-hints` is the important one and it is easy to skip. It is what lets a **later ordinary
+save** be recognised and recorded here without the user asking for it. Use the words they would
+actually write. Leave it out and the type must always be named explicitly.
+
+`--mode` decides what makes two records the same one:
+
+| Mode | Use it when | Also needs |
+|------|-------------|-----------|
+| `append` | every entry is new and nothing is ever revised — a symptom log, expenses | |
+| `keyed` | records are named things that each change on their own — tasks, contacts, recipes | `--identity-field` |
+| `singleton` | there is only ever one — "my spouse", "this laptop" | |
+
+### Recording against one
+
+Two ways, and the difference matters:
+
+**As part of an ordinary save.** The user asked you to remember something, and the record is a
+decoration on that. Name the type and hand over the values you read out of their words:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
+  --tier Operational --category Fact --scope health \
+  --topic "Migraine on Tuesday" \
+  --content "Woke up with a migraine this afternoon, lasted until the evening." \
+  --record-type "Migraine log" \
+  --record-fields '{"severity":7,"triggers":["red wine","poor sleep"],"duration":"about five hours"}'
+```
+
+**A save carrying a record type is classified by you, not by the server.** The ordinary save hands
+your context to the server's AI layer, which picks tier, category and scope and may extract
+several memories from one context — and a set of fields has no single memory to belong to there.
+So this one writes **one** memory directly, and `--tier`, `--category`, `--scope`, `--topic` and
+`--content` are all required. The script says which are missing rather than letting the server
+refuse.
+
+**This can never cost the save.** A type that does not exist, a field it does not declare, a
+value too long for its column — all of them cost the structure and keep the words. The script
+prints `RecordedAs:` so you can tell which happened. **Report what actually happened**: saying
+"recorded in your migraine log" when it was stored as ordinary text is worse than saying nothing.
+
+**As the request itself**, when writing the record *is* what the user asked for. This one
+**refuses** rather than falling back, so a mistyped field name comes back as an error naming the
+field:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-record.sh" \
+  --format-id 42 \
+  --content "That task is finished now." \
+  --fields '{"title":"Rewire the settings page","status":"done"}'
+```
+
+Read the outcome and report it: `structured.created` is a new record, `structured.updated`
+changed an existing one, and `text.degraded` means the words were saved and the fields were not.
+An update changes **only** the fields you send; anything you leave out keeps its current value,
+and sending a field as `null` clears it.
+
+### Changing a type that already exists
+
+The shape of what somebody is collecting is **never right the first time**. When they want a
+field the type does not have, do not create a second type for the same thing — revise the one
+they have.
+
+```bash
+# add a field: send the WHOLE field list, not just the new one
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 \
+  --fields '[{"key":"severity","type":"number"},{"key":"triggers","type":"list","of":"text"}]'
+
+# change what it is called, what it is for, or what a save is recognised by
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --rename "Headache log"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --match-hints "migraine, headache, aura"
+
+# stop it collecting, or start again. Neither deletes anything.
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --retire
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --reinstate
+```
+
+**`--fields` replaces the whole list rather than appending to it.** Read the type first with
+`list-formats.sh --id 42`, take the fields it reports, add yours, and send the lot. A field you
+leave out is not deleted — the records carrying it keep it and stay readable — but the new
+version stops collecting it, which is rarely what the user meant.
+
+**Revising publishes a new version and destroys nothing.** Every record already stored stays
+where it is and stays readable; records from before the change simply have no value for a field
+that did not exist yet. Filters and sorts span every version, so older records still come back.
+
+**Retiring is not deleting**, and it is worth saying so in those words — it sounds destructive
+and is not. A retired type keeps every record it holds, they stay searchable and stay in the
+user's export, and it simply stops collecting new ones. There is no way to delete a type, by
+design.
+
+### Asking questions of them
+
+This is what the whole thing is for. Use it when the question depends on the **values** rather
+than on the wording — how many, which ones, since when, sorted by what:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 --filter status=open
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 \
+  --filter severity=7 --order "createdDate desc" --page-size 20
+```
+
+Filters are ANDed and they span **every version** of the type, so improving a type's shape later
+does not strand what was recorded under the old one. Every record comes back with every field the
+type declares, blank where nothing was recorded.
+
+`--order` takes a field key the type declares, or `createdDate`, each optionally followed by
+` asc` or ` desc`. `recent` and `oldest` are aliases for `createdDate desc` and `createdDate asc`.
+**A field key on its own sorts ascending; leaving `--order` out sorts newest first.** A `number`
+field sorts numerically, so 7 comes before 10; a `date` field sorts chronologically; a record that
+never recorded the field sorts last in both directions. Ordering by a `list` field, or by a key
+the type does not declare, comes back as an error naming the key rather than being ignored.
+
+### One account, every surface
+
+The same record types and the same records are reached from the MMRY connector (ChatGPT, Cursor,
+Claude Desktop, Codex) through the `mmry_format_*` and `mmry_record` tools, and over the REST API.
+A type defined here is visible there, and a record written there is readable here. Say so if the
+user asks: this is one account, not one client's private feature.
 
 ## Mid-Session Loading
 
