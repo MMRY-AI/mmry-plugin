@@ -240,3 +240,74 @@ setup() {
     [[ "$status" -ne 0 ]]
     [[ "$output" == *"--filter takes key=value"* ]]
 }
+
+# --- save-memory, the routed save --------------------------------------------
+
+@test "save-memory: a record flag sends the structured block to POST /api/memories" {
+    # Not to /api/memories/process. That route carries no structured block and may extract
+    # several memories from one context, leaving no single memory for the fields to belong to.
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope health \
+        --topic "Migraine on Tuesday" --content "Woke up with a migraine." \
+        --record-type "Migraine log" --record-fields '{"severity":7}'
+    [[ "$status" -eq 0 ]]
+    grep -q "POST http://localhost:5291/api/memories " "$LOG"
+    ! grep -q "/api/memories/process" "$LOG"
+    grep -q '"structured":{"formatName":"Migraine log","fields":{"severity":7}}' "$LOG"
+}
+
+@test "save-memory: a routed save with no format in the response says so plainly" {
+    # The mock's plain {"id":99} is exactly what a degraded save looks like: the words were
+    # stored, the structure was not. Reporting "recorded in your migraine log" here is the lie.
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope health \
+        --topic "T" --content "C" --record-type "Migraine log"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"NewMemoryID: 99"* ]]
+    [[ "$output" == *"RecordedAs: (none - saved as ordinary text, the structure was not stored)"* ]]
+}
+
+@test "save-memory: a routed save names the format the SERVER stored" {
+    export MOCK_CURL_HTTP_CODE=201
+    export MOCK_CURL_RESPONSE='{"id":99,"format":{"rootId":42,"name":"Migraine log"}}'
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope health \
+        --topic "T" --content "C" --record-type "Migraine log"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"RecordedAs: Migraine log"* ]]
+}
+
+@test "save-memory: a name inside the user's own content is not read as a format" {
+    # The customer's content can contain anything, including a JSON snippet with a name key.
+    # Reading the whole body for "name" would report a format that was never stored.
+    export MOCK_CURL_HTTP_CODE=201
+    export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Format\"}","format":null}'
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope health \
+        --topic "T" --content "C" --record-type "Migraine log"
+    [[ "$status" -eq 0 ]]
+    [[ "$output" != *"Totally A Format"* ]]
+    [[ "$output" == *"RecordedAs: (none"* ]]
+}
+
+@test "save-memory: a record flag without the classification is refused, naming what is missing" {
+    run bash "$HANDLERS/save-memory.sh" --context "anything" --record-type "Migraine log"
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"--tier"* ]]
+    [[ "$output" == *"--content"* ]]
+}
+
+@test "save-memory: without a record flag nothing changes - it still goes to the AI route" {
+    run bash "$HANDLERS/save-memory.sh" --context "Remember that we use UPC as the identifier."
+    [[ "$status" -eq 0 ]]
+    grep -q "/api/memories/process" "$LOG"
+    [[ "$output" != *"RecordedAs"* ]]
+}
+
+@test "save-memory: --record-name rides along as the entry key" {
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope work \
+        --topic "T" --content "C" --record-type "Tasks" --record-name "Rewire the settings page"
+    [[ "$status" -eq 0 ]]
+    grep -q '"entryKey":"Rewire the settings page"' "$LOG"
+}
