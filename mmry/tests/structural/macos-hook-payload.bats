@@ -792,19 +792,43 @@ _code_only() {
     [ "$output" -ge 1 ]
 }
 
-@test "req5: the stated floor is the version this fix actually ships in" {
-    # A documented floor that does not match the manifest is worse than none: it sends support to
-    # check for a version that was never released. Read from the manifest rather than repeated here.
+@test "req5: the stated floor is a version that has actually been released" {
+    # WHAT THIS IS FOR. A documented floor that names a version nobody can install is worse than
+    # none: it sends support to check for something that was never released.
+    #
+    # WHAT IT MUST NOT DO, learned the hard way in #31460. This previously demanded the floor equal
+    # the CURRENT manifest version. That held for exactly one release - the one that shipped the
+    # macOS payload fix - and then broke the moment any later work bumped the version, which is
+    # every release forever. Worse, the only way to satisfy it was to rewrite a true statement
+    # ("fixed in plugin 2.9.1") into a false one, telling users already holding the fix to go and
+    # update for it. A test that can only be satisfied by making the documentation lie is a test
+    # that will be edited under release pressure, so it is fixed here instead.
+    #
+    # The real requirement is that the floor is RELEASED: at or below the version being shipped.
     local plugin_json="${BATS_TEST_DIRNAME}/../../.claude-plugin/plugin.json"
-    local ver
+    local doc="${BATS_TEST_DIRNAME}/../../commands/formation.md"
+    local ver floor
     ver="$(grep -o '"version"[^"]*"[^"]*"' "$plugin_json" | head -1 | grep -o '[0-9][^"]*')"
     [ -n "$ver" ]
 
-    run grep -c "$ver" "${BATS_TEST_DIRNAME}/../../commands/formation.md"
-    [ "$output" -ge 1 ] || {
-        echo "formation.md names a floor that is not the shipped version ${ver}"
+    # The floor formation.md actually states for the macOS payload fix.
+    floor="$(grep -o 'Fixed in plugin [0-9][0-9.]*' "$doc" | head -1 | grep -o '[0-9][0-9.]*')"
+    [ -n "$floor" ] || {
+        echo "formation.md no longer states a plugin floor for the macOS payload fix at all"
         return 1
     }
+
+    # Released means: not newer than what is shipping. sort -V puts the lower version first.
+    [ "$(printf '%s
+%s
+' "$floor" "$ver" | sort -V | head -1)" = "$floor" ] || {
+        echo "formation.md names floor ${floor}, which is NEWER than the shipped version ${ver} - nobody can install it"
+        return 1
+    }
+
+    # And the page must still tell a Mac user to check that floor.
+    run grep -c "$floor" "$doc"
+    [ "$output" -ge 1 ]
 }
 
 @test "req5: the shipped version is newer than the last released one, or nobody gets this fix" {
