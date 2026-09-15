@@ -129,7 +129,29 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     MMRY_FOUNDATION_WORKER=1 bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" \
         > "$OUTFILE" 2>/dev/null &
     WORKER_PID=$!
-    ( sleep "$DEADLINE"; kill -TERM "$WORKER_PID" 2>/dev/null ) >/dev/null 2>&1 &
+
+    # The watchdog POLLS instead of sleeping out the whole deadline in one go, and it closes
+    # every descriptor it could have inherited.
+    #
+    # This is not tidiness. The first cut was `( sleep "$DEADLINE"; kill ... ) &` killed after
+    # the wait. Killing the subshell ORPHANS its sleep, the orphan keeps the descriptors it
+    # inherited, and anything reading this hook's output waits for the last writer to close -
+    # not for the handler to exit. Measured: a bats test that should take under a second took
+    # 18, once per firing, for the full deadline. Every one of the 14 tests still passed. A
+    # hook that hands back its answer and then holds the pipe open for fifteen seconds is a
+    # worse defect than the one this ticket is about, and it passed a green suite twice.
+    #
+    # Polling also means the watchdog is GONE about a second after the worker finishes, so
+    # nothing has to kill it and there is nothing left to orphan.
+    (
+        _waited=0
+        while (( _waited < DEADLINE )); do
+            kill -0 "$WORKER_PID" 2>/dev/null || exit 0
+            sleep 1
+            _waited=$(( _waited + 1 ))
+        done
+        kill -TERM "$WORKER_PID" 2>/dev/null
+    ) >/dev/null 2>&1 <&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
     WATCHDOG_PID=$!
 
     wait "$WORKER_PID" 2>/dev/null

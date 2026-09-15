@@ -253,3 +253,37 @@ _registered_timeout() {
     # And a tab is a tab.
     printf '%s' "$ctx" | grep -q "$(printf 'Tab:\tafter')"
 }
+
+@test "userpromptsubmit-foundation: nothing is left holding an inherited descriptor after it exits (#31434)" {
+    # THE BUG THIS EXISTS FOR, and the reason to distrust a green suite.
+    #
+    # The supervisor's first watchdog was `( sleep "$DEADLINE"; kill ... ) &`, killed after the
+    # wait. Killing the subshell ORPHANS its sleep, and the orphan keeps every descriptor it
+    # inherited. Whoever reads the hook waits for the LAST WRITER to close, not for the handler
+    # to exit - so the reader sat there for the entire deadline while the handler had long since
+    # produced its answer.
+    #
+    # Two things this assertion had to get right, both learned by getting them wrong:
+    #
+    #  1. stdout alone does NOT catch it. The old watchdog redirected its own stdout to
+    #     /dev/null, so `bash handler | cat` finished in about 500 ms either way.
+    #  2. Measuring bats' own `run` does not catch it reliably either - the first version of
+    #     this test did that, and it passed against the broken watchdog.
+    #
+    # So it reproduces the condition directly: attach an EXTRA descriptor to the same pipe the
+    # output is read from, then measure time to EOF. Measured this way: 15155/15170/15155 ms
+    # with the orphan against a 15 s deadline, 494/515/604/567/572 ms without it.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+
+    local start elapsed captured
+    start="$(date +%s)"
+    captured="$( { MMRY_FOUNDATION_DEADLINE_SECS=12 bash "$HANDLER" </dev/null; } 3>&1 )"
+    elapsed=$(( $(date +%s) - start ))
+
+    # The answer is right...
+    [[ "$captured" == *'never overstate evidence'* ]]
+    # ...and the reader was released as soon as it was produced, not at the deadline.
+    echo "time to EOF with an extra inherited descriptor: ${elapsed}s against a 12s deadline" >&3
+    (( elapsed < 6 ))
+}
