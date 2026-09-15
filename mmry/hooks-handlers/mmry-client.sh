@@ -58,6 +58,17 @@ _mmry_urlencode() {
 }
 
 mmry_load_config() {
+    # Idempotent per process (#31434). Every entry-point handler sources this file - which
+    # runs mmry_load_config once at AUTO-INIT - and then calls mmry_load_config again. That
+    # second call re-parsed the same file for no benefit. On the UserPromptSubmit path that
+    # duplicate parse was a large fraction of a 5 s hook budget, so a loaded machine lost the
+    # whole Foundation block. Parse once; a caller that genuinely needs a re-read (none ship
+    # today) sets MMRY_CONFIG_RELOAD=1. Deliberately NOT exported: a child process is a new
+    # process and must load its own config.
+    if [[ "${_MMRY_CONFIG_LOADED:-}" == "1" && "${MMRY_CONFIG_RELOAD:-}" != "1" ]]; then
+        return 0
+    fi
+
     # Discovery order: $MMRY_CONFIG_FILE → plugin root → ~/.claude/
     local config_file=""
     local plugin_root="${CLAUDE_PLUGIN_ROOT:-}"
@@ -71,26 +82,45 @@ mmry_load_config() {
     fi
 
     if [[ -n "$config_file" ]]; then
-        local content
-        content="$(cat "$config_file")"
-
         # Parse config with the resolved jq (system or bundled). No regex
         # fallback: the slow, brittle grep/sed path was the #30608 silent-save
         # bug site and is removed now that jq is guaranteed by setup (#30624).
+        #
+        # ONE jq process for all six fields (#31434). This was six `cat | jq` pipelines,
+        # i.e. six process spawns per load. Measured on Windows Git Bash a load cost about
+        # 380 ms of which nearly all was spawn overhead, and the config was loaded twice per
+        # hook firing. jq reads the file directly, so the `cat` and the pipe go too.
+        #
+        # Fields are emitted one per line in a FIXED order. An absent field is an empty
+        # line, which keeps later fields on their own lines - so the reads below must not
+        # be reordered without reordering the jq array to match.
         if [[ -n "${MMRY_JQ:-}" ]]; then
-            local val
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.apiUrl // empty')"
-            [[ -z "$MMRY_API_URL" && -n "$val" ]] && MMRY_API_URL="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.authMethod // empty')"
-            [[ -z "$MMRY_AUTH_METHOD" && -n "$val" ]] && MMRY_AUTH_METHOD="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.apiKey // empty')"
-            [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationReinject // empty')"
-            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationReinjectTokenCap // empty')"
-            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationRefreshSeconds // empty')"
-            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
+            local _cfg_url="" _cfg_auth="" _cfg_key=""
+            local _cfg_reinject="" _cfg_cap="" _cfg_refresh=""
+            # `{ read; ... } < <(...)` rather than mapfile: macOS ships bash 3.2.
+            # Each read is `|| true`: on malformed JSON jq emits nothing, the first read
+            # hits EOF and returns 1, and this file runs under `set -e`. Without the guard
+            # a bad config would kill the sourcing shell instead of falling back to defaults.
+            {
+                IFS= read -r _cfg_url || true
+                IFS= read -r _cfg_auth || true
+                IFS= read -r _cfg_key || true
+                IFS= read -r _cfg_reinject || true
+                IFS= read -r _cfg_cap || true
+                IFS= read -r _cfg_refresh || true
+            } < <("$MMRY_JQ" -r '
+                    [ .apiUrl, .authMethod, .apiKey,
+                      .foundationReinject, .foundationReinjectTokenCap, .foundationRefreshSeconds ]
+                    | map(if . == null then "" else tostring end)
+                    | .[]
+                ' "$config_file" 2>/dev/null)
+
+            [[ -z "$MMRY_API_URL" && -n "$_cfg_url" ]] && MMRY_API_URL="$_cfg_url" || true
+            [[ -z "$MMRY_AUTH_METHOD" && -n "$_cfg_auth" ]] && MMRY_AUTH_METHOD="$_cfg_auth" || true
+            [[ -z "$MMRY_API_KEY" && -n "$_cfg_key" ]] && MMRY_API_KEY="$_cfg_key" || true
+            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$_cfg_reinject" ]] && MMRY_FOUNDATION_REINJECT="$_cfg_reinject" || true
+            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$_cfg_cap" ]] && MMRY_FOUNDATION_TOKEN_CAP="$_cfg_cap" || true
+            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$_cfg_refresh" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$_cfg_refresh" || true
         fi
     fi
 
@@ -104,6 +134,8 @@ mmry_load_config() {
     if [[ -z "$MMRY_AUTH_METHOD" && -n "$MMRY_API_KEY" ]]; then
         MMRY_AUTH_METHOD="apikey"
     fi
+
+    _MMRY_CONFIG_LOADED=1
 }
 
 # ============================================================================
