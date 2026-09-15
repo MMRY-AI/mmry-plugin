@@ -90,6 +90,10 @@ Foundation memories are restated to Claude on every prompt so they consistently 
 
 Env overrides: `MMRY_FOUNDATION_REINJECT`, `MMRY_FOUNDATION_TOKEN_CAP`, `MMRY_FOUNDATION_REFRESH_SECONDS`.
 
+**If re-injection is ever too slow to finish,** the hook stops itself after 15 seconds instead of letting Claude Code cut it off, and tells you that the turn ran without your Foundation directives so you can re-send the prompt. Previously that turn simply ran with none of your standing directives applied and the only sign was a generic hook-timeout warning.
+
+Override the 15 seconds with the `MMRY_FOUNDATION_DEADLINE_SECS` environment variable. This one is an environment variable only, with no matching config key, because the part of the hook that enforces the deadline runs *before* the config file is read — reading the config is the slow step it exists to guard against.
+
 ## What It Does
 
 | When | What Happens |
