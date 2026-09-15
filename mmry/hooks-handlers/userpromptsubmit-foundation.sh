@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# userpromptsubmit-foundation.sh — UserPromptSubmit hook (#30579).
+# userpromptsubmit-foundation.sh — UserPromptSubmit hook (#30579, #31434).
 #
 # Re-injects the account's Foundation-tier memories inline on EVERY prompt, framed as
 # authoritative directives, from a session-local cache written at SessionStart
@@ -10,17 +10,140 @@
 # Design guarantees:
 #   - NEVER blocks a prompt. Any problem (no cache, toggle off, parse error) -> emit
 #     nothing and exit 0.
-#   - No network call. Reads only the local cache, so it adds no per-prompt latency and
-#     cannot be rate-limited.
-#   - Bounded cost. A configurable token cap (default 1500) truncates oversized sets and
-#     logs the drop rather than silently ballooning every turn's context.
+#   - No network call on the critical path. Reads only the local cache.
+#   - Bounded cost. A configurable token cap (default 1500) truncates oversized sets.
 #   - Opt-out. foundationReinject=false (config or env) makes this a no-op.
+#   - BOUNDED WALL CLOCK, and it says so when it fails (#31434). See below.
+#
+# #31434 — why this file is split into a supervisor and a worker.
+#
+# When a hook exceeds its hooks.json timeout, Claude Code kills it and DISCARDS its
+# output. For this hook that means the turn silently runs with none of the account's
+# standing directives, and all the customer sees is a generic harness warning that reads
+# like noise. Three customer reports (feedback 21, 22, 27) across plugin 2.4.0, 2.6.0 and
+# 2.9.0 are all this.
+#
+# Raising the budget alone would only move the cliff. So:
+#   1. The real cost was removed - see the mmry_load_config change in mmry-client.sh.
+#   2. The hook budget went 5s -> 20s, in line with the other hooks this plugin registers
+#      (8, 10, 10, 10, 10, 15, 30, 300) and still under Claude Code's own 30s default for
+#      UserPromptSubmit.
+#   3. This file now enforces its OWN deadline, below the hook budget, so the plugin - not
+#      the harness - decides what happens on a slow turn. The supervisor runs the real work
+#      as a background worker and kills it at the deadline, which is what makes the failure
+#      REPORTABLE instead of silent. A trap cannot do this: bash does not run a trap while
+#      a foreground external command (jq, cat) is still running.
+#   4. If the harness kills the supervisor too, an in-flight marker left on disk is noticed
+#      on the NEXT firing and reported then. Belt and braces, because a silent loss is the
+#      whole defect.
 
 # NOTE: deliberately NOT `set -e` — a failure here must never fail the user's prompt.
 set -uo pipefail 2>/dev/null || true
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
+
+# Resolved without sourcing the client, so the supervisor stays cheap. Must match
+# MMRY_TMPDIR in mmry-client.sh.
+_FOUND_TMPDIR="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
+# KNOWN LIMITATION, stated rather than hidden: this marker is per-TMPDIR, not per-session,
+# exactly like the mmry-foundation.md cache it guards. Two Claude Code sessions sharing a
+# TMPDIR can therefore have one session report the other's cut-short turn. The report is
+# still true - directives were lost on some turn - but it may name the wrong one. Fixing it
+# properly means session-scoping the whole Foundation cache, which is a bigger change than
+# this ticket and would be smuggled in here.
+_INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight"
+
+# Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
+# text (may be empty). additionalContext must be nested under hookSpecificOutput or
+# Claude Code silently ignores it; systemMessage is the user-facing channel.
+_mmry_emit() {
+    local ctx="$1" msg="$2" esc_ctx="" esc_msg=""
+    [[ -z "$ctx" && -z "$msg" ]] && return 0
+    esc_ctx="$(printf '%s' "$ctx" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$esc_ctx"
+    # Omit systemMessage entirely when there is nothing to say, rather than emitting an
+    # empty string that a client could render as a blank notice.
+    if [[ -n "$msg" ]]; then
+        esc_msg="$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+        printf ',"systemMessage":"%s"' "$esc_msg"
+    fi
+    printf '}'
+}
+
+# ============================================================================
+# SUPERVISOR — bounds the wall clock and owns everything the customer sees.
+# ============================================================================
+if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+    DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-15}"
+    [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=15
+
+    # A marker left behind by a previous firing means that firing never reached its own
+    # exit — the harness killed the whole handler — so that turn ran without directives
+    # and nobody was told. Report it now.
+    MISSED_PREVIOUS=0
+    [[ -f "$_INFLIGHT" ]] && MISSED_PREVIOUS=1
+
+    # Sweep out-files whose supervisor no longer exists. When the harness SIGKILLs us the
+    # worker survives briefly and keeps writing, so its out-file is orphaned. `kill -0` is a
+    # bash builtin, so this costs no process spawn.
+    for _stale in "${_FOUND_TMPDIR}"/.mmry-foundation-out.*; do
+        [[ -e "$_stale" ]] || continue
+        _stale_pid="${_stale##*.}"
+        [[ "$_stale_pid" =~ ^[0-9]+$ ]] || continue
+        kill -0 "$_stale_pid" 2>/dev/null || rm -f "$_stale" 2>/dev/null || true
+    done
+
+    OUTFILE="${_FOUND_TMPDIR}/.mmry-foundation-out.$$"
+    : > "$OUTFILE" 2>/dev/null || true
+    : > "$_INFLIGHT" 2>/dev/null || true
+
+    MMRY_FOUNDATION_WORKER=1 bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" \
+        > "$OUTFILE" 2>/dev/null &
+    WORKER_PID=$!
+    ( sleep "$DEADLINE"; kill -TERM "$WORKER_PID" 2>/dev/null ) >/dev/null 2>&1 &
+    WATCHDOG_PID=$!
+
+    wait "$WORKER_PID" 2>/dev/null
+    WORKER_RC=$?
+    kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
+
+    BODY=""
+    [[ -s "$OUTFILE" ]] && BODY="$(cat "$OUTFILE" 2>/dev/null)"
+    rm -f "$OUTFILE" 2>/dev/null || true
+    rm -f "$_INFLIGHT" 2>/dev/null || true
+
+    if (( WORKER_RC != 0 )); then
+        # We stopped ourselves at the deadline. The turn proceeds either way; what matters
+        # is that the customer is told, in terms they can act on, that this turn is running
+        # WITHOUT their standing directives.
+        NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
+        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s). Re-send the prompt to try again. If it keeps happening, run /mmry:reload-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+        _mmry_emit "$NOTICE" "$USERMSG"
+        exit 0
+    fi
+
+    # Worker finished inside the deadline with nothing to inject (toggle off, no cache,
+    # empty cache). Nothing was lost, so say nothing — including about a previous miss,
+    # which would be a false alarm when there are no directives to apply.
+    [[ -n "${BODY//[[:space:]]/}" ]] || exit 0
+
+    USERMSG=""
+    if (( MISSED_PREVIOUS == 1 )); then
+        BODY="NOTE: on the PREVIOUS turn these directives were not applied - loading them was cut short and its output discarded. Treat that turn's response as having been produced without them.
+
+${BODY}"
+        USERMSG="MMRY AI: your Foundation directives were not applied to the previous turn (the hook was cut short). They are applied again now."
+    fi
+
+    _mmry_emit "$BODY" "$USERMSG"
+    exit 0
+fi
+
+# ============================================================================
+# WORKER — the real work. Writes PLAIN TEXT to stdout; the supervisor does the
+# JSON. Anything that goes wrong here means "emit nothing", never "fail".
+# ============================================================================
 
 # Source the client for MMRY_TMPDIR + config parsing. It runs `set -euo pipefail` at the
 # top, so relax those options again immediately after — we must not fail the prompt.
@@ -78,11 +201,7 @@ fi
 
 # Authoritative framing. These lead every turn, so they are stated as directives that
 # take precedence, distinct from transient memories.
-framed="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.${truncated_note}
+printf '%s' "The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.${truncated_note}
 
 ${content}"
-
-# JSON-escape (backslash, quote, then newlines) and emit as additionalContext.
-escaped="$(printf '%s' "$framed" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
-printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}' "$escaped"
 exit 0
