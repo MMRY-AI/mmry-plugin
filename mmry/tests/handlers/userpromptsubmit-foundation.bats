@@ -229,3 +229,27 @@ _registered_timeout() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'never overstate evidence'* ]]
 }
+
+@test "userpromptsubmit-foundation: awkward characters survive into valid JSON and come back out intact (#31434)" {
+    # The escaping used to be `sed ':a;N;$!ba;s/\n/\n/g'`. That label-and-branch form is a GNU
+    # extension and the BSD sed macOS ships rejects it, so on a Mac the error text went into the
+    # handler's output and the emitted "JSON" was not JSON. The macOS CI leg had been red on
+    # "emits valid JSON" since before this ticket, which is what an unread CI leg buys you.
+    #
+    # Asserted by ROUND-TRIPPING the content back out of the JSON, not by eyeballing the string:
+    # a test that only checked "contains a backslash" would pass on double-escaped output too.
+    printf -- '- Quote: he said "no".\n- Backslash: C:\Users\x\n- Tab:\tafter\n- Ampersand & percent %%\n' > "$CACHE"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+
+    local ctx
+    ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    [[ "$ctx" == *'he said "no".'* ]]
+    [[ "$ctx" == *'C:\Users\x'* ]]
+    [[ "$ctx" == *'Ampersand & percent %'* ]]
+    # The newlines are real newlines again after the round trip, not a literal backslash-n.
+    [ "$(printf '%s' "$ctx" | wc -l)" -ge 4 ]
+    # And a tab is a tab.
+    printf '%s' "$ctx" | grep -q "$(printf 'Tab:\tafter')"
+}

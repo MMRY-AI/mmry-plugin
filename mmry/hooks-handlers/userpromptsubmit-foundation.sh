@@ -57,16 +57,36 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight"
 # Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
 # text (may be empty). additionalContext must be nested under hookSpecificOutput or
 # Claude Code silently ignores it; systemMessage is the user-facing channel.
+# JSON-escape a string using nothing but parameter expansion.
+#
+# This replaces `sed ':a;N;$!ba;s/\n/\\n/g'` (#31434). That label-and-branch form is a GNU
+# extension; the BSD sed macOS ships rejects it, the error text landed in the handler's
+# output, and the emitted "JSON" was not JSON at all on every Mac. The macOS CI leg has been
+# failing "userpromptsubmit-foundation: emits valid JSON" on that since before this ticket.
+#
+# Pure expansion is also faster than two sed processes, which is the point of the ticket, and
+# it now escapes tab and CR as well - previously those went into the string raw, which is
+# invalid JSON. Other control characters below 0x20 are still passed through unescaped; that
+# is unchanged behaviour and Foundation memories are prose, not binary.
+_mmry_json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"       # backslash FIRST or it re-escapes the escapes below
+    s="${s//\"/\\\"}"
+    s="${s//$'\015'/\\r}"
+    s="${s//$'\011'/\\t}"
+    s="${s//$'\012'/\\n}"
+    printf '%s' "$s"
+}
+
 _mmry_emit() {
-    local ctx="$1" msg="$2" esc_ctx="" esc_msg=""
+    local ctx="$1" msg="$2"
     [[ -z "$ctx" && -z "$msg" ]] && return 0
-    esc_ctx="$(printf '%s' "$ctx" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
-    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$esc_ctx"
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' \
+        "$(_mmry_json_escape "$ctx")"
     # Omit systemMessage entirely when there is nothing to say, rather than emitting an
     # empty string that a client could render as a blank notice.
     if [[ -n "$msg" ]]; then
-        esc_msg="$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
-        printf ',"systemMessage":"%s"' "$esc_msg"
+        printf ',"systemMessage":"%s"' "$(_mmry_json_escape "$msg")"
     fi
     printf '}'
 }
@@ -75,6 +95,14 @@ _mmry_emit() {
 # SUPERVISOR — bounds the wall clock and owns everything the customer sees.
 # ============================================================================
 if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+    # This handler's contract is "one JSON object on stdout, or nothing at all". It has no
+    # business writing to stderr either, and it must not, because the supervisor deliberately
+    # kills a background job: the shell announces that ("Terminated") on ITS stderr, at a
+    # moment we do not control, and anything a hook prints is noise the customer has to
+    # interpret. Silenced for the whole supervisor. Nothing here reports errors by printing;
+    # every path exits 0 and says what it has to say inside the JSON.
+    exec 2>/dev/null
+
     DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-15}"
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=15
 
