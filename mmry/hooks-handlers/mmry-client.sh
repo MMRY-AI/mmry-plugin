@@ -115,6 +115,22 @@ mmry_load_config() {
                     | .[]
                 ' "$config_file" 2>/dev/null)
 
+            # Strip a trailing CR. jq.exe on Windows opens stdout in TEXT mode and emits
+            # CRLF, and `read` only consumes the LF. The old six-`cat | jq` form never saw
+            # this because MSYS bash strips a trailing CR from command substitution - so the
+            # bug appears the moment you stop using $(). A CR here is invisible in an echo
+            # and breaks every string comparison downstream, which is exactly how it was
+            # found: an eyeball check of the parsed values looked perfect and the suite did
+            # not. Pure parameter expansion, no extra process. Written as the octal escape
+            # 015 rather than backslash-r: a literal CR pasted into the source by a careless
+            # editor looks identical, expands to nothing, and silently does nothing.
+            _cfg_url="${_cfg_url%$'\015'}"
+            _cfg_auth="${_cfg_auth%$'\015'}"
+            _cfg_key="${_cfg_key%$'\015'}"
+            _cfg_reinject="${_cfg_reinject%$'\015'}"
+            _cfg_cap="${_cfg_cap%$'\015'}"
+            _cfg_refresh="${_cfg_refresh%$'\015'}"
+
             [[ -z "$MMRY_API_URL" && -n "$_cfg_url" ]] && MMRY_API_URL="$_cfg_url" || true
             [[ -z "$MMRY_AUTH_METHOD" && -n "$_cfg_auth" ]] && MMRY_AUTH_METHOD="$_cfg_auth" || true
             [[ -z "$MMRY_API_KEY" && -n "$_cfg_key" ]] && MMRY_API_KEY="$_cfg_key" || true

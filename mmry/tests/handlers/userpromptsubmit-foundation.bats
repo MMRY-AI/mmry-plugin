@@ -85,3 +85,147 @@ setup() {
     [[ "$output" == *'truncated'* ]]
     [ -f "$TEST_TMPDIR/mmry-foundation.log" ]
 }
+
+# ============================================================================
+# #31434 — the hook budget, the self-imposed deadline, and telling the customer.
+#
+# These tests drive the failure deliberately by making the handler SLOW, using the
+# MMRY_JQ seam that lib-jq.sh already honours. No production test seam was added: a
+# slow jq is exactly what a loaded machine produces. The shim answers --version
+# instantly (the resolver probes it) and sleeps only on a real parse.
+#
+# Note the config file: with no config, mmry_load_config never invokes jq at all and
+# the shim would never fire — a delay test that silently delays nothing is precisely
+# the kind of check that cannot fail.
+# ============================================================================
+
+_make_slow_jq() {
+    # $1 = seconds to sleep on a real parse
+    local shim="$TEST_TMPDIR/slow-jq.sh"
+    cat > "$shim" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [[ "\$a" == "--version" ]] && exec jq "\$@"; done
+sleep $1
+exec jq "\$@"
+EOF
+    chmod +x "$shim"
+    printf '%s' "$shim"
+}
+
+_make_config() {
+    cat > "$MMRY_CONFIG_FILE" <<'EOF'
+{
+  "apiUrl": "http://127.0.0.1:9",
+  "authMethod": "apikey",
+  "apiKey": "test-key",
+  "foundationReinject": "true",
+  "foundationReinjectTokenCap": 1500,
+  "foundationRefreshSeconds": 0
+}
+EOF
+}
+
+_registered_timeout() {
+    # The SHIPPED budget for this hook, read from the repo's hooks.json — not from an
+    # installed cache and not from a hand-edited copy.
+    jq -r '.hooks.UserPromptSubmit[].hooks[]
+           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
+        "$PLUGIN_ROOT/hooks/hooks.json"
+}
+
+@test "userpromptsubmit-foundation: slowed past the OLD 5s budget, still delivers the directives inside the shipped one" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    _make_config
+    local shim budget start elapsed
+    shim="$(_make_slow_jq 7)"
+    budget="$(_registered_timeout)"
+    # The premise of the test: 7s must be past the old budget and inside the new one.
+    (( 7 > 5 ))
+    (( 7 < budget ))
+
+    start="$(date +%s)"
+    MMRY_JQ="$shim" run bash "$HANDLER"
+    elapsed=$(( $(date +%s) - start ))
+
+    [ "$status" -eq 0 ]
+    # Asserted on the INJECTED CONTENT, not on the absence of a warning.
+    [[ "$output" == *'never overstate evidence'* ]]
+    [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]]
+    # It really was slow — otherwise this test proves nothing about the budget.
+    (( elapsed >= 6 ))
+    # And it still finished inside the budget the plugin actually ships.
+    (( elapsed < budget ))
+}
+
+@test "userpromptsubmit-foundation: slowed past the DEADLINE, the turn proceeds and the customer is told" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    _make_config
+    local shim start elapsed budget
+    shim="$(_make_slow_jq 20)"
+    budget="$(_registered_timeout)"
+
+    start="$(date +%s)"
+    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+    elapsed=$(( $(date +%s) - start ))
+
+    # Did not hang: stopped itself at its own deadline, well inside the hook budget.
+    [ "$status" -eq 0 ]
+    (( elapsed >= 3 ))
+    (( elapsed < 12 ))
+    (( elapsed < budget ))
+    # The user is told, in terms they can act on.
+    [[ "$output" == *'systemMessage'* ]]
+    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'/mmry:reload-memories'* ]]
+    # The model is told too, so it cannot claim to be following directives it never got.
+    [[ "$output" == *'running WITHOUT the account'* ]]
+    # And it is still one valid JSON object.
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+    # It must NOT pretend to have delivered the Foundation set.
+    [[ "$output" != *'never overstate evidence'* ]]
+}
+
+@test "userpromptsubmit-foundation: a firing cut short by the harness is reported on the NEXT firing" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    # The marker the supervisor leaves behind when it never reaches its own exit.
+    : > "$TEST_TMPDIR/.mmry-foundation-inflight"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PREVIOUS turn'* ]]
+    [[ "$output" == *'previous turn'* ]]          # the user-facing half
+    # The miss is reported AND this turn's directives are still delivered.
+    [[ "$output" == *'never overstate evidence'* ]]
+    # The marker is consumed, so the report is not repeated forever.
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+}
+
+@test "userpromptsubmit-foundation: a clean firing reports nothing and leaves no marker" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'never overstate evidence'* ]]
+    # No notice of any kind on a healthy turn — a nag on every prompt would be its own bug.
+    [[ "$output" != *'systemMessage'* ]]
+    [[ "$output" != *'PREVIOUS turn'* ]]
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+}
+
+@test "userpromptsubmit-foundation: no false alarm when there were no directives to lose" {
+    # Marker present, but nothing to inject. Reporting a loss here would be a lie.
+    rm -f "$CACHE"
+    : > "$TEST_TMPDIR/.mmry-foundation-inflight"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "userpromptsubmit-foundation: an absurd deadline value falls back to the default rather than disabling the guard" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    MMRY_FOUNDATION_DEADLINE_SECS="not-a-number" run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'never overstate evidence'* ]]
+}
