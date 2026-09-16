@@ -53,26 +53,48 @@ BATS="${MMRY_BATS_BIN:-$TESTS/libs/bats-core/bin/bats}"
 
 cd "$REPO_ROOT" || exit 1
 
-# ---- Pin the interpreter. --------------------------------------------------------------------
+# ---- Pin the interpreter, BY BEHAVIOUR AND NOT BY NAME. ---------------------------------------
+#
+# Three traps live in this six-line problem, and this harness fell into all of them:
+#
+#   `python`  on this machine is 2.7.2, a different language from the one these fragments are
+#             written in.
+#   `python3` on this machine is the Windows Store app execution alias in
+#             %LOCALAPPDATA%/Microsoft/WindowsApps. It answers `-c` and reports version 3.12, so a
+#             version probe passes - and then it IGNORES the `-` that means "read the program from
+#             stdin" and runs argv[1] instead. argv[1] here is a .sh file, so it read the shebang
+#             and tried to launch bash: "A shebang 'bash' was found ... treated as an arbitrary
+#             command", exit 127, on all 50 experiments.
+#   A launcher that forwards to a real interpreter reports the real one in sys.executable, which is
+#             the path that actually works.
+#
+# So: find a candidate, ask it where the real interpreter is, and then PROVE the stdin form works
+# by running it, before trusting it with fifty file edits. A harness that cannot verify its own
+# tool has no business reporting on anyone else's.
 PYBIN=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' 2>/dev/null; then
-            PYBIN="$candidate"
-            break
-        fi
+_probe_stdin_form() {
+    # Echoes nothing; returns 0 only if "$1" runs a program from stdin AND sees argv[1].
+    printf 'import sys
+sys.exit(0 if len(sys.argv) > 1 and sys.version_info[0] >= 3 else 1)
+'         | "$1" - probe-argument >/dev/null 2>&1
+}
+for candidate in python3 python py; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    _real="$("$candidate" -c 'import sys; print(sys.executable)' 2>/dev/null)" || continue
+    [[ -n "$_real" && -f "$_real" ]] || continue
+    if _probe_stdin_form "$_real"; then
+        PYBIN="$_real"
+        break
     fi
 done
-if [[ -z "$PYBIN" ]] && command -v py >/dev/null 2>&1 && py -3 -c 'pass' 2>/dev/null; then
-    PYBIN="py -3"
-fi
 if [[ -z "$PYBIN" ]]; then
-    echo "REFUSING: no Python 3 found. Tried python3, python and 'py -3'." >&2
-    echo "This harness edits files with Python, and a run under Python 2 produces results that" >&2
-    echo "cannot be compared with anyone else's." >&2
+    echo "REFUSING: no usable Python 3 found." >&2
+    echo "Tried python3, python and py. A candidate has to be Python 3 AND has to run a program" >&2
+    echo "from stdin with arguments - the Windows Store alias named 'python3' does neither, while" >&2
+    echo "reporting version 3.12, which is how 50 experiments came back as exit 127." >&2
     exit 1
 fi
-echo "interpreter: $($PYBIN -c 'import sys; print(sys.executable + "  " + sys.version.split()[0])')"
+echo "interpreter: $PYBIN  $("$PYBIN" -c 'import sys; print(sys.version.split()[0])')"
 
 if [[ -n "$(git status --porcelain -- mmry)" ]]; then
     echo "REFUSING: the working tree under mmry/ is dirty. Commit or stash first, because each" >&2
@@ -110,7 +132,7 @@ mutate() {
     # another harness fault that looks like a finding.
     local pyerr applied
     local errfile="${TMPDIR:-/tmp}/mmry-mutation-stderr.$$"
-    $PYBIN - "$PLUGIN/$file" 2>"$errfile" <<PY
+    "$PYBIN" - "$PLUGIN/$file" 2>"$errfile" <<PY
 import io, sys
 p = sys.argv[1]
 
