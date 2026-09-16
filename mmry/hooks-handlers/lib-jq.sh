@@ -92,7 +92,15 @@ mmry_jq_unavailable_message() {
         echo "MMRY AI: no usable jq was found for this platform (${os} ${arch})."
         echo "jq is required for fast memory operations."
         echo "Re-run setup to restore the bundled jq:"
-        echo "  bash ~/.claude/mmry/setup/mmry-setup.sh"
+        # #31245: the setup path belongs to whichever host this is. lib-host.sh is sourced lazily
+        # here, not at the top of the file: this library is pulled in by mmry-client.sh, which is
+        # itself sourced by twenty-odd handlers, and this message is the only line in it that needs
+        # to know the host. The guard keeps the previous literal if the resolver is unavailable.
+        if source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-host.sh" 2>/dev/null; then
+            echo "  $(mmry_host_setup_hint)"
+        else
+            echo "  bash ~/.claude/mmry/setup/mmry-setup.sh"
+        fi
         echo "Or install jq (https://jqlang.github.io/jq/) and put it on your PATH."
     } >&2
 }

@@ -7,6 +7,11 @@ set -euo pipefail
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 
+# #31245: which assistant this session belongs to. Unset MMRY_HOST means Claude Code, so every
+# value below is the one this file already used.
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh"
+
 # Self-update check — runs before anything else, debounced to once per hour
 bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
 
@@ -17,7 +22,7 @@ source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 # slow fallback (#30624 absorbs #30319).
 if [[ -z "${MMRY_JQ:-}" ]]; then
     mmry_jq_unavailable_message
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not find a usable jq on this machine, so memories were not loaded. Ask the user to re-run setup to restore the bundled jq: bash ~/.claude/mmry/setup/mmry-setup.sh"}}'
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not find a usable jq on this machine, so memories were not loaded. Ask the user to re-run setup to restore the bundled jq: %s"}}' "$(mmry_host_setup_hint)"
     exit 0
 fi
 
@@ -56,7 +61,15 @@ fi
 MMRY_HOOK_FAULT_NOTE=""
 if [[ "$HOOK_READ_STATUS" == "empty" || "$HOOK_READ_STATUS" == "timeout" ]]; then
     mmry_note_hook_read_fault "session-start" "$HOOK_READ_STATUS" || true
-    MMRY_HOOK_FAULT_NOTE="WARNING FROM MMRY AI: the Claude Code hook payload could not be read from stdin (${HOOK_READ_STATUS}), so this session could not learn its own session id and coordination features will not work correctly. Tell the user, and ask them to report it with /mmry:feedback. "
+    # The host is named rather than assumed. Telling a Codex customer that "the Claude Code hook
+    # payload" failed sends them looking for a product they are not running (#31245). The report
+    # route differs too: there is no /mmry:feedback to type on Codex.
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        _mmry_report_hint="ask them to report it by saying so - the memory system's feedback script will be used"
+    else
+        _mmry_report_hint="ask them to report it with /mmry:feedback"
+    fi
+    MMRY_HOOK_FAULT_NOTE="WARNING FROM MMRY AI: the $(mmry_host_label) hook payload could not be read from stdin (${HOOK_READ_STATUS}), so this session could not learn its own session id and coordination features will not work correctly. Tell the user, and ${_mmry_report_hint}. "
 fi
 
 # stdin may not be JSON outside a hook context; jq returns empty and we fall
@@ -72,22 +85,29 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 # Check if config is loaded — guide unconfigured users to run setup
 if [[ -z "${MMRY_API_KEY:-}" ]]; then
     API_URL="https://mmryai.com"
-    # shellcheck disable=SC2016
-    SETUP_MSG='MMRY AI is installed but needs to be set up. Run the setup script to authenticate via the browser.
+    # #31245: the setup command, the product to restart and the way to get help all differ by host.
+    # A Codex customer told to type /mmry:help is being told to do something this platform does not
+    # let them do - it converts plugin commands into skills and there is nothing to type.
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        _mmry_help_line='Tell them they can ask "what can MMRY do here" any time; there are no slash commands to type on this platform.'
+    else
+        _mmry_help_line='Mention /mmry:help for a quick reference.'
+    fi
+    SETUP_MSG="MMRY AI is installed but needs to be set up. Run the setup script to authenticate via the browser.
 
 ## Setup
 
 Run this command using the Bash tool:
 
-bash ~/.claude/mmry/setup/mmry-setup.sh
+$(mmry_host_setup_hint)
 
 This will open a browser window where the user can log in or create an account on mmryai.com. Once they authorize, the script writes the config file and permissions automatically.
 
 If the browser does not open, the script prints a URL the user can copy and paste.
 
-After setup completes, tell the user: "You are all set. Restart Claude Code and your memories will start loading automatically." Mention /mmry:help for a quick reference.
+After setup completes, tell the user: \"You are all set. Restart $(mmry_host_label) and your memories will start loading automatically.\" ${_mmry_help_line}
 
-If the user does not have an account yet, direct them to https://mmryai.com to sign up first, then run setup again.'
+If the user does not have an account yet, direct them to https://mmryai.com to sign up first, then run setup again."
 
     # Escape for JSON output
     SETUP_MSG_ESCAPED="$(printf '%s' "$SETUP_MSG" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
@@ -141,7 +161,9 @@ mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"
 # Register session — uses session_id read from hook stdin (see top of file).
 # WORK_DIR is persisted server-side here; subsequent save calls reference it
 # via session_id rather than reading a (collidable) /tmp file.
-mmry_register_session "$SESSION_ID" "claude-code" "$WORK_DIR" "" 2>/dev/null || true
+# #31245: the client name is the host's, not a constant. A Codex session listed as "claude-code" is
+# a session the customer cannot find in their own session list.
+mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
 
 # Escape path for JSON
 escaped_path="$(echo "$MEM_FILE" | sed 's/\\/\\\\/g')"
@@ -150,7 +172,13 @@ escaped_path="$(echo "$MEM_FILE" | sed 's/\\/\\\\/g')"
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it
 # would be read after the model has already decided what to do with the turn (#31385).
 if [[ "$count" == "0" ]]; then
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know they can always say remember this to save something new, or /mmry:help for a quick reference."}}' "$MMRY_HOOK_FAULT_NOTE"
+    # #31245: the closing hint differs by host. There is no slash command to type on Codex.
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        _mmry_onboard_hint="they can always say remember this to save something new, or ask what MMRY can do here"
+    else
+        _mmry_onboard_hint="they can always say remember this to save something new, or /mmry:help for a quick reference"
+    fi
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know %s."}}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_hint"
 else
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path"
 fi

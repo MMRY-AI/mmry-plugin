@@ -103,6 +103,12 @@ MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
 source "${HANDLER_DIR}/lib-jq.sh" 2>/dev/null || exit 0
 mmry_resolve_jq >/dev/null 2>&1 || true
 
+# Which host this is, because the delivery routes below are not the same on both (#31245). Sourced
+# with the same fail-open guard as everything else here: if it is missing, mmry_host is undefined
+# and the hook exits silently rather than guessing.
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
+
 # ---- Resolve this session's id and the event we are running in. ----
 # CLAUDE_SESSION_ID is unreliable (session-init.sh says so and reads stdin instead), and the join
 # that wrote our state runs in the command runtime, which provides CLAUDE_CODE_SESSION_ID. This hook
@@ -395,8 +401,27 @@ _poll_once() {
 case "$mode" in
 
     tool)
-        # PostToolUse: stderr plus exit 2, the original contract. Exit 0 means "nothing to say".
+        # PostToolUse. Exit 0 means "nothing to say" on both hosts.
+        #
+        # THE DELIVERY ROUTE DIFFERS BY HOST, AND THE CODEX ONE IS BETTER (#31245).
+        #
+        # Claude Code: stderr plus exit 2, the original #31012 contract, kept exactly. Claude Code
+        # had no additionalContext channel on PostToolUse when that was built, so exit 2 was the
+        # only way to reach the model and a blocked tool call was the price.
+        #
+        # Codex: additionalContext on stdout with exit 0. post-tool-use.command.output.schema.json
+        # defines PostToolUseHookSpecificOutputWire carrying an additionalContext string, and
+        # events/post_tool_use.rs appends it to the contexts shown to the model. It reaches the
+        # model identically and does NOT set should_block, so a colleague's message stops costing
+        # the customer a cancelled tool call. Exit 2 also works on Codex and is deliberately not
+        # used.
         _poll_once || exit 0
+        if [[ "$(mmry_host)" == "codex" ]]; then
+            printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rs \
+                '{hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:.}}' \
+                2>/dev/null || exit 0
+            exit 0
+        fi
         printf '%s\n' "$FORMATION_BLOCK" >&2
         exit 2
         ;;
@@ -444,6 +469,31 @@ case "$mode" in
         #
         # Exit 0 on every path except an actual message. A Stop hook that exits 2 with nothing to say
         # would wake the model for no reason, which is the "worse defect" requirement 2 warns about.
+        #
+        # CODEX CANNOT DO THIS, AND MUST NOT TRY (#31245). The whole mechanism rests on
+        # "asyncRewake": true, which Codex does not have: its hook handler schema
+        # (codex-rs/config/src/hook_config.rs, HookHandlerConfig::Command) carries command,
+        # commandWindows, timeout, async, statusMessage and additionalContextLimit and nothing else,
+        # and its own Claude-settings importer explicitly SKIPS any handler carrying asyncRewake
+        # (external-agent-migration/src/hooks_cla.rs line 158). An async Codex hook additionally
+        # cannot apply control effects at all (engine/mod.rs: can_apply_control_effects requires
+        # Sync), so its exit 2 is discarded.
+        #
+        # A synchronous poller would therefore not deliver anything AND would hold the end of every
+        # turn open for up to four minutes. hooks/codex-hooks.json does not register this handler on
+        # Stop for that reason; this guard is the second line of defence, for a customer or a test
+        # that registers it by hand.
+        #
+        # What Codex DOES support on Stop is one synchronous pass: events/stop.rs line 343 takes
+        # exit 2 with non-empty stderr and makes it the continuation prompt. So a message that is
+        # already waiting is delivered; one that arrives while the session sits idle is not, and is
+        # picked up instead by the PostToolUse and UserPromptSubmit routes on the next thing that
+        # happens. NOT hookSpecificOutput: stop.command.output.schema.json has no such property.
+        if [[ "$(mmry_host)" == "codex" ]]; then
+            _poll_once || exit 0
+            printf '%s\n' "$FORMATION_BLOCK" >&2
+            exit 2
+        fi
         _acquire "$_poller_dir" $(( MMRY_IDLE_POLL_SECONDS + 60 )) || exit 0
         _held_poller=1
 

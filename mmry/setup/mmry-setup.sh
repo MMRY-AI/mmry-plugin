@@ -7,6 +7,13 @@
 #   bash mmry-setup.sh
 #   bash mmry-setup.sh --email user@acme.com --password "Pass1234!"
 #   bash mmry-setup.sh --api-url http://localhost:5291
+#   bash mmry-setup.sh --host codex
+#
+# #31245: --host names the assistant being set up. It defaults to claude, so an existing customer
+# running this script with no arguments gets byte-for-byte what they got before: the credential in
+# ~/.claude/mmry-config.json, the Claude Code settings permissions written, and the Claude Code
+# plugin install path taken. --host codex changes where the credential goes and skips the two steps
+# that are Claude Code's alone.
 
 set -euo pipefail
 
@@ -25,15 +32,22 @@ while [[ $# -gt 0 ]]; do
         --email)       EMAIL="$2"; shift 2 ;;
         --password)    PASSWORD="$2"; shift 2 ;;
         --api-url)     API_URL="$2"; shift 2 ;;
+        --host)        MMRY_HOST="$2"; shift 2 ;;
         --help|-h)
             echo "Usage:"
             echo "  Setup (browser):     bash mmry-setup.sh"
             echo "  Setup (CI/automation): bash mmry-setup.sh --email EMAIL --password PASS"
-            echo "  Options:             [--api-url URL]"
+            echo "  Options:             [--api-url URL] [--host claude|codex]"
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+# Resolve the host BEFORE anything writes a path. An unrecognised --host value resolves to claude,
+# which is the same answer an absent one gives.
+export MMRY_HOST="${MMRY_HOST:-claude}"
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh"
 
 # Check dependencies
 if ! command -v curl &>/dev/null; then
@@ -328,9 +342,10 @@ fi
 
 # --- Write config and configure plugin ---
 
-# Write config file
-CONFIG_DIR="${HOME}/.claude"
-CONFIG_FILE="${CONFIG_DIR}/mmry-config.json"
+# Write config file. On Claude Code these two lines resolve to ${HOME}/.claude and
+# ${HOME}/.claude/mmry-config.json, which is what they were literally before #31245.
+CONFIG_DIR="$(mmry_host_config_dir)"
+CONFIG_FILE="$(mmry_host_config_file)"
 
 mkdir -p "$CONFIG_DIR"
 
@@ -342,8 +357,15 @@ mkdir -p "$CONFIG_DIR"
 
 echo "  Config written to ${CONFIG_FILE}"
 
-# Auto-approve MMRY AI scripts in Claude Code settings
-SETTINGS_FILE="${HOME}/.claude/settings.json"
+# Auto-approve MMRY AI scripts in Claude Code settings.
+#
+# CLAUDE CODE ONLY, AND DELIBERATELY SO (#31245). This block writes a Claude Code settings file in
+# Claude Code's own permission schema. Codex has no equivalent: it gates a hook through the startup
+# trust review (codex-rs/tui/src/startup_hooks_review.rs), which is a prompt the customer answers
+# and which nothing here can pre-answer. Writing this file during a Codex setup would silently
+# modify the customer's Claude Code configuration on a run that has nothing to do with Claude Code.
+if [[ "$(mmry_host)" == "claude" ]]; then
+SETTINGS_FILE="$(mmry_host_config_dir)/settings.json"
 MMRY_PERMISSIONS=(
     "Bash(*save-memory.sh*)"
     "Bash(*reinforce-memory.sh*)"
@@ -369,10 +391,17 @@ done
 "$MMRY_JQ" "$JQ_FILTER" "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" \
     && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
 echo "  Script permissions configured."
+fi
 
-# Install plugin (skip for marketplace/stable installs — already handled by Claude Code)
+# Install plugin (skip for marketplace/stable installs — already handled by the host).
+#
+# On Codex this whole block is skipped: the plugin arrives through "codex plugin add", the hooks
+# are declared by .codex-plugin/plugin.json, and install.sh / install.ps1 write Claude Code's
+# settings.json. There is nothing here for Codex to do, and plenty for it to break.
 SCRIPT_DIR_RESOLVED="$(cd "$SCRIPT_DIR" && pwd)"
-if [[ "$SCRIPT_DIR_RESOLVED" == *"/.claude/plugins/cache/"* || "$SCRIPT_DIR_RESOLVED" == *"/.claude/mmry/"* ]]; then
+if [[ "$(mmry_host)" == "codex" ]]; then
+    echo "  Plugin installed by Codex; nothing further to install."
+elif [[ "$SCRIPT_DIR_RESOLVED" == *"/.claude/plugins/cache/"* || "$SCRIPT_DIR_RESOLVED" == *"/.claude/mmry/"* ]]; then
     echo "  Plugin already installed via marketplace."
 else
     echo "Installing plugin..."
@@ -413,6 +442,20 @@ echo ""
 echo "MMRY AI will remember your decisions, conventions, and context across every"
 echo "session. You don't need to do anything special — it works in the background."
 echo ""
-echo "Restart Claude Code to get started."
+echo "Restart $(mmry_host_label) to get started."
 echo ""
-echo "Anytime you need help, type: /mmry:help"
+if [[ "$(mmry_host)" == "codex" ]]; then
+    # #31245: there is no slash command to type on Codex. Telling a Codex customer to type
+    # /mmry:help is telling them to do something the platform does not support - it converts a
+    # plugin's commands into skills the model chooses, so nothing is typed.
+    echo "There are no slash commands to type on Codex. Just ask in plain words:"
+    echo "  \"remember this\", \"what do you know about X\", \"make that private\"."
+    echo ""
+    echo "One more step the first time: when Codex starts it asks whether to trust MMRY's"
+    echo "hooks. Choose \"Trust all and continue\". If you choose not to trust them, MMRY"
+    echo "appears installed and does nothing."
+    echo ""
+    echo "What is not available on Codex: https://mmryai.com/docs/codex"
+else
+    echo "Anytime you need help, type: /mmry:help"
+fi
