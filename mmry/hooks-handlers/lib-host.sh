@@ -165,3 +165,54 @@ mmry_host_script_ref() {
 if [[ -z "${MMRY_CONFIG_FILE:-}" ]] && [[ "$(mmry_host)" == "codex" ]]; then
     export MMRY_CONFIG_FILE="$(mmry_host_config_file)"
 fi
+
+# ---------------------------------------------------------------------------------------------
+# AND WHEN THAT FILE IS NOT THERE, REFUSE - DO NOT LET THE CLIENT WALK ON TO THE CLAUDE FILE.
+#
+# Setting MMRY_CONFIG_FILE is only half an answer, and the missing half is what a sentinel found
+# in QA round 2. mmry-client.sh's discovery is:
+#
+#     if   [[ -n "$MMRY_CONFIG_FILE" && -f "$MMRY_CONFIG_FILE" ]]   # ours, on Codex
+#     elif [[ -n "$CLAUDE_PLUGIN_ROOT" && -f ".../mmry-config.json" ]]
+#     elif [[ -f "${HOME}/.claude/mmry-config.json" ]]              # THE OTHER PRODUCT'S ACCOUNT
+#
+# The first branch tests that the file EXISTS. On a Codex install that has not been set up - or
+# whose credential was moved, renamed or removed - that test is false and the chain walks on to
+# the third branch, which is the Claude account. Reproduced with a sentinel key on 2026-09-16:
+# the Codex copy loaded ${HOME}/.claude/mmry-config.json and would have saved this customer's
+# Codex memories into whatever account that file names.
+#
+# mmry-client.sh cannot be edited in this task, so the refusal has to happen before it is asked
+# the question. Every path that resolves a credential reaches mmry_load_config, every path that
+# reaches mmry_load_config sources mmry-client.sh, and mmry-client.sh sources lib-jq.sh as its
+# first executable line, which sources this file. So this function is called from there, at the
+# one point every credential-resolving path in the plugin passes through.
+#
+# IT IS LOUD, AND IT IS NOT A CRASH. It names the host, names the file it looked for, and names
+# the command that creates it. A hook that refuses this way exits 1 with a sentence on stderr,
+# which Codex reports without blocking the session - unlike silently borrowing another account,
+# which nothing anywhere reports.
+#
+# ON CLAUDE CODE IT IS A NO-OP: the host is "claude" and the function returns 0 before looking at
+# anything, so the existing discovery order runs exactly as it always has.
+
+mmry_host_credential_present() {
+    [[ -f "$(mmry_host_config_file)" ]]
+}
+
+# Return 0 to proceed, 1 to refuse. MMRY_ALLOW_NO_CREDENTIAL=1 is the documented opt-out for the
+# one program that legitimately runs before a credential exists: mmry-setup.sh, which creates it.
+mmry_host_assert_own_credential() {
+    [[ "$(mmry_host)" == "codex" ]] || return 0
+    [[ "${MMRY_ALLOW_NO_CREDENTIAL:-}" != "1" ]] || return 0
+    [[ -n "${MMRY_CONFIG_FILE:-}" && -f "${MMRY_CONFIG_FILE}" ]] && return 0
+    {
+        printf 'MMRY AI: no %s credential was found, and MMRY will not fall back to another product'"'"'s account.
+' "$(mmry_host_label)"
+        printf '  looked for: %s
+' "${MMRY_CONFIG_FILE:-$(mmry_host_config_file)}"
+        printf '  create it:  %s
+' "$(mmry_host_setup_hint)"
+    } >&2
+    return 1
+}

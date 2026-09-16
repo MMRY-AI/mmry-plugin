@@ -37,6 +37,9 @@ if [[ ! -f "$SETTINGS_PATH" ]]; then
 else
     # Prefer the resolved jq (system or bundled). #30624. The Python block below
     # remains as a teardown safety net so uninstall can always clean settings.
+    # Uninstall runs when the credential is being removed, so it must not be gated on one
+    # existing. See the refusal in lib-jq.sh (#31245 QA round 2).
+    export MMRY_ALLOW_NO_CREDENTIAL=1
     source "$(cd "$(dirname "$0")/../hooks-handlers" && pwd)/lib-jq.sh" 2>/dev/null || true
 
     if command -v mmry_resolve_jq &>/dev/null && mmry_resolve_jq; then

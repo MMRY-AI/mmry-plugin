@@ -67,6 +67,11 @@ fi
 
 # jq is required for setup; it ships bundled with the plugin (#30624). Resolve a
 # usable one (system or bundled) and stop with a clear message if none works.
+# THIS SCRIPT IS THE ONE THAT CREATES THE CREDENTIAL, so it is the one program that must be able
+# to run before one exists. lib-jq.sh refuses on Codex when the host's own credential file is
+# absent, to stop the client borrowing the other product's account (#31245 QA round 2); without
+# this opt-out that refusal would make setup impossible to run, which is the opposite of the fix.
+export MMRY_ALLOW_NO_CREDENTIAL=1
 source "${PLUGIN_ROOT}/hooks-handlers/lib-jq.sh"
 if ! mmry_resolve_jq; then
     mmry_jq_unavailable_message

@@ -31,9 +31,34 @@ set -euo pipefail
 # all on a machine that has only Codex.
 #
 # It is a no-op on Claude Code: lib-host.sh resolves the host to claude and sets nothing.
-# Guarded, because a missing lib-host.sh must not take jq resolution down with it.
-# shellcheck source=/dev/null
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-host.sh" 2>/dev/null || true
+# Guarded, because a missing lib-host.sh must not take jq resolution down with it - hence the
+# existence test rather than a swallowed source. STDERR IS DELIBERATELY NOT REDIRECTED HERE: the
+# refusal below is the only warning a customer gets that MMRY is not set up for this host, and a
+# 2>/dev/null on this line would discard it.
+_mmry_libjq_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_mmry_libjq_dir}/lib-host.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${_mmry_libjq_dir}/lib-host.sh" || true
+fi
+
+# AND THIS IS WHERE A FOREIGN CREDENTIAL IS REFUSED (#31245 QA round 2).
+#
+# Pointing MMRY_CONFIG_FILE at the Codex credential is not enough on its own: mmry-client.sh tests
+# that the file EXISTS and, when it does not, walks on to ${HOME}/.claude/mmry-config.json - the
+# other product's account. Reproduced with a sentinel on 2026-09-16.
+#
+# This is the one line every credential-resolving path in the plugin passes through. mmry-client.sh
+# sources this file as its first executable statement, and mmry_load_config - the only function
+# anywhere that opens a credential file - is defined below that point in the same file. So a
+# refusal here happens before any caller can ask the question, without editing the client.
+#
+# On Claude Code the function returns 0 immediately, so nothing changes. The opt-out exists for
+# mmry-setup.sh and uninstall.sh, the two programs that legitimately run before or after a
+# credential exists.
+if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
+    mmry_host_assert_own_credential || exit 1
+fi
+unset _mmry_libjq_dir
 
 # Directory holding the bundled binaries.
 _mmry_jq_vendor_dir() {
