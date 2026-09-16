@@ -117,3 +117,38 @@ SKILL="mmry/skills-codex/memory-system/SKILL.md"
     [ "$status" -eq 0 ]
     [ "$output" -ge 1 ]
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE WINDOWS UNINSTALLER IS CLAUDE CODE'S, AND SAYS SO (#31245 QA round 2)
+#
+# session-init.sh copies setup/*.bat into the host's MMRY directory, so on Windows Codex a copy of
+# uninstall.bat lands under the Codex home. Everything in that file names ~/.claude - the
+# credential, the state directory, the plugin cache, the settings file - so running the Codex copy
+# would uninstall the OTHER product and leave the Codex install exactly where it was.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: the Windows uninstaller carries the guard that makes it refuse a Codex copy" {
+    # A SOURCE CHECK, AND HONEST ABOUT IT. The behaviour was verified by EXECUTION on 2026-09-16 -
+    # the Codex copy printed "uninstalls the CLAUDE CODE installation" and exited 1; the Claude copy
+    # went on into the PowerShell block exactly as the pristine file does - but running cmd.exe from
+    # bats under Git Bash mangles the /c switch and leaves an INTERACTIVE cmd waiting for input,
+    # which hangs the suite. A test that can hang CI is worse than one that reads the file.
+    local f="$PLUGIN_ROOT/setup/uninstall.bat"
+    grep -q 'goto :codex_install' "$f"
+    grep -q ':codex_install' "$f"
+    grep -q 'uninstalls the CLAUDE CODE installation' "$f"
+    # The pattern must not end in a backslash: in a cmd string \" escapes the quote and findstr
+    # then gets a pattern that never matches. That is how the first version of this guard silently
+    # did nothing, and only executing it showed that.
+    run grep -cF 'findstr /i /l /c:"\.codex"' "$f"
+    assert_output "1"
+}
+
+@test "req4: the Claude Code uninstall path in that file is untouched by the guard" {
+    # The guard is a branch taken before anything else; everything the Claude uninstall does must
+    # still be there, and the file must still end by telling the customer to restart Claude Code.
+    local f="$PLUGIN_ROOT/setup/uninstall.bat"
+    grep -q "Remove-Item \$configPath -Force" "$f"
+    grep -q 'Restart Claude Code to take effect' "$f"
+    grep -q "Join-Path \$env:USERPROFILE '.claude" "$f"
+}

@@ -1,4 +1,17 @@
 @echo off
+rem #31245 QA round 2: THIS UNINSTALLER IS CLAUDE CODE'S, AND SAYS SO RATHER THAN GUESSING.
+rem
+rem Everything below names ~/.claude: the credential, the state directory, the plugin cache, the
+rem settings file, and the closing line telling the customer to restart Claude Code.
+rem session-init.sh copies setup/*.bat into the host MMRY directory, so on Windows Codex a copy of
+rem this file lands under the Codex home - where running it would uninstall the OTHER product and
+rem leave the Codex install untouched. It refuses instead of doing that quietly.
+set "MMRY_SELF_DIR=%~dp0"
+rem The pattern deliberately has no TRAILING backslash: in a cmd string, \" escapes the quote,
+rem and findstr then receives a pattern that never matches - which is how the first version of
+rem this guard silently did nothing. /l keeps it a literal, not a regex.
+echo "%MMRY_SELF_DIR%" | findstr /i /l /c:"\.codex" >nul
+if %ERRORLEVEL% EQU 0 goto :codex_install
 powershell.exe -ExecutionPolicy Bypass -Command ^
   "$settingsPath = Join-Path $env:USERPROFILE '.claude\settings.json';" ^
   "$configPath = Join-Path $env:USERPROFILE '.claude\mmry-config.json';" ^
@@ -98,3 +111,15 @@ powershell.exe -ExecutionPolicy Bypass -Command ^
   "Write-Host 'MMRY AI uninstalled.' -ForegroundColor Green;" ^
   "Write-Host 'Restart Claude Code to take effect.';" ^
   "Write-Host ''"
+
+exit /b 0
+
+:codex_install
+echo.
+echo MMRY AI: this script uninstalls the CLAUDE CODE installation, and you are running the copy
+echo that was placed in your Codex directory. It has changed nothing.
+echo.
+echo To remove MMRY from Codex: remove the plugin through Codex, then delete the mmry-config.json
+echo and mmry directory inside your Codex home (%%CODEX_HOME%%, or %USERPROFILE%\.codex).
+echo.
+exit /b 1
