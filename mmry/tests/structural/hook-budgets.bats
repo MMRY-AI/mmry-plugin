@@ -119,6 +119,56 @@ EOF
     (( budget * 1000 >= cost * 5 ))
 }
 
+@test "hook-budgets: the SHIPPED default deadline sits below the registered budget (#31434)" {
+    # THE INVARIANT THE WHOLE SUPERVISOR DESIGN RESTS ON, and until now nothing asserted it.
+    #
+    # Found by mutation, and found by a reviewer rather than by me. Raising the handler's
+    # default DEADLINE from 15 to 900 disables the self-imposed guard completely: the harness
+    # reaches its own 20 s budget first, kills the hook and DISCARDS its output, which is
+    # precisely the silent-loss defect this ticket exists to close. Every handler test and
+    # every budget test stayed green, because every deadline test injects
+    # MMRY_FOUNDATION_DEADLINE_SECS explicitly and therefore never exercises the number
+    # customers actually run.
+    #
+    # So this reads the SHIPPED source - the same discipline the rest of this file applies to
+    # hooks.json, for the same reason: a value the test supplied proves nothing about what
+    # ships.
+    local handler default fallback budget documented
+    handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [[ -f "$handler" ]]
+
+    # The `:-N` default, and the N the handler falls back to when the env override is not a
+    # positive integer. Both are shipped constants and a disagreement between them is its own
+    # bug, so both are extracted and compared rather than trusting either alone.
+    default="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*' "$handler" | head -1 | sed 's/.*:-//')"
+    fallback="$(grep -o '^[[:space:]]*.*|| DEADLINE=[0-9][0-9]*' "$handler" | head -1 | sed 's/.*DEADLINE=//')"
+    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
+                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
+
+    echo "shipped default deadline: ${default}s (fallback ${fallback}s); registered budget: ${budget}s" >&3
+
+    # SAMPLE SIZE, in the form this file uses everywhere else: an extraction that found
+    # nothing must fail loudly, not silently pass a comparison against an empty string.
+    [[ "$default" =~ ^[0-9]+$ ]]
+    [[ "$fallback" =~ ^[0-9]+$ ]]
+    [[ "$budget" =~ ^[0-9]+$ ]]
+    (( default > 0 ))
+    [[ "$default" == "$fallback" ]]
+
+    # The plugin must stop ITSELF before the harness stops it, with room left over to write
+    # the JSON that tells the customer what happened. Without that margin the whole supervisor
+    # is decoration: the harness wins the race and the output is discarded regardless.
+    (( default < budget ))
+    (( default + 3 <= budget ))
+
+    # And the number the customer is told in the README is the number that ships. A doc
+    # promising a 15 s stop against a handler that waits 900 is the same defect wearing
+    # a different hat.
+    documented="$(grep -o 'stops itself after [0-9][0-9]* seconds' "$PLUGIN_ROOT/README.md" | head -1 | sed 's/[^0-9]//g')"
+    [[ "$documented" =~ ^[0-9]+$ ]]
+    [[ "$documented" == "$default" ]]
+}
+
 @test "hook-budgets: no hook is budgeted below the startup cost every handler pays" {
     _write_config
 

@@ -176,13 +176,96 @@ _registered_timeout() {
     # The user is told, in terms they can act on.
     [[ "$output" == *'systemMessage'* ]]
     [[ "$output" == *'NOT applied to this turn'* ]]
-    [[ "$output" == *'/mmry:reload-memories'* ]]
+    # The remedy must name a command that EXISTS. This assertion previously read
+    # '/mmry:reload-memories', which this plugin does not ship - so a green suite actively
+    # defended handing a confused customer an unknown command at the one moment their
+    # directives had just vanished. Now checked against commands/, not by eye.
+    [[ "$output" == *'/mmry:load-memories'* ]]
+    [ -f "$PLUGIN_ROOT/commands/load-memories.md" ]
     # The model is told too, so it cannot claim to be following directives it never got.
     [[ "$output" == *'running WITHOUT the account'* ]]
     # And it is still one valid JSON object.
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
     # It must NOT pretend to have delivered the Foundation set.
     [[ "$output" != *'never overstate evidence'* ]]
+    # It must say the DEADLINE was hit, in the words reserved for that cause.
+    [[ "$output" == *'exceeded'* ]]
+    [[ "$output" != *'exit code'* ]]
+    # And it must leave a trace. A failure that drops the customer's directives and records
+    # nothing is how this defect survived three reports without anyone being able to act on it.
+    grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
+    grep -q 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log"
+}
+
+@test "userpromptsubmit-foundation: a worker that CRASHES is not reported as a slow one (#31434)" {
+    # Found by review. The supervisor branched on a non-zero worker exit alone, so every
+    # worker failure was announced as a timeout: with a broken install the worker exits 127
+    # in well under a second and the customer was told "loading took over 15s" and to re-send
+    # the prompt. A false cause, a false duration, and a remedy that cannot work. The watchdog
+    # now records that it was the one who killed the worker, and the absence of that record is
+    # what makes this path distinguishable.
+    #
+    # Induced without adding any test seam to production code. The supervisor re-executes this
+    # file as a worker via `bash`, resolved from PATH; a broken environment where that `bash`
+    # fails is exactly how the field produces a fast non-zero. 127 is the code the review
+    # observed. The supervisor itself is invoked by absolute path so that only the WORKER
+    # spawn is affected.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    local start elapsed shimdir real_bash
+    real_bash="$(command -v bash)"
+    shimdir="$TEST_TMPDIR/broken-bash"
+    mkdir -p "$shimdir"
+    printf '#!/bin/sh\nexit 127\n' > "$shimdir/bash"
+    chmod +x "$shimdir/bash"
+
+    start="$(date +%s)"
+    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    elapsed=$(( $(date +%s) - start ))
+
+    [ "$status" -eq 0 ]
+    # It failed FAST. Anything that took a deadline's worth of time is not this scenario.
+    (( elapsed < 5 ))
+    # Told as a failure, with the real exit code, and explicitly NOT as a duration.
+    [[ "$output" == *'systemMessage'* ]]
+    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'exit code'* ]]
+    [[ "$output" == *'failure, not a slow turn'* ]]
+    # The three lies the old single-branch version told, each asserted absent.
+    [[ "$output" != *'exceeded'* ]]
+    [[ "$output" != *'took over'* ]]
+    [[ "$output" != *'Re-send the prompt to try again'* ]]
+    # Still exactly one valid JSON object, and still no false claim of delivery.
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+    [[ "$output" != *'never overstate evidence'* ]]
+    # Logged as a crash, not as a deadline, so the log agrees with what the customer was told.
+    grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
+    grep -q 'without hitting' "$TEST_TMPDIR/mmry-foundation.log"
+    ! grep -q 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log"
+}
+
+@test "userpromptsubmit-foundation: MMRY_DEBUG captures the stderr the handler otherwise discards (#31434)" {
+    # The supervisor must never let stderr reach the terminal - it deliberately kills a
+    # background job and the shell announces that at a moment nobody controls. But a feature
+    # born of three unreproducible customer reports cannot also ship with field diagnostics
+    # hard-wired to /dev/null, or the fourth report is just as unreproducible. MMRY_DEBUG
+    # redirects rather than discards; the terminal contract is unchanged either way.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    local dbg="$TEST_TMPDIR/mmry-foundation-debug.log"
+
+    # Default: nothing is captured anywhere.
+    rm -f "$dbg"
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ ! -f "$dbg" ]
+
+    # Debug on: the same run is still clean on both of the customer's channels...
+    rm -f "$dbg"
+    MMRY_DEBUG=1 run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'never overstate evidence'* ]]
+    # ...and the diagnostics now have somewhere to land.
+    [ -f "$dbg" ]
 }
 
 @test "userpromptsubmit-foundation: a firing cut short by the harness is reported on the NEXT firing" {
@@ -316,6 +399,13 @@ EOF
     # The evidence that a turn was lost has to survive the kill, or nobody can ever be told.
     [ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
 
+    # The same kill ORPHANS this firing's out-file - the worker outlives its supervisor and
+    # goes on writing to a file no one will ever read. Deleting the sweep that reaps it turned
+    # nothing red until these two lines existed, so a leak that grows with every timeout in the
+    # customer's temp directory was shipping untested. The condition already existed here; only
+    # the assertions were missing.
+    [ -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
+
     # And the next firing picks it up and says so, on both channels.
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -323,4 +413,6 @@ EOF
     [[ "$output" == *'previous turn'* ]]
     [[ "$output" == *'never overstate evidence'* ]]
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    # ...and that same firing reaps the orphan, because its supervisor no longer exists.
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
 }

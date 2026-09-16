@@ -15,6 +15,15 @@ setup() {
     mkdir -p "$HOME/.claude"
 }
 
+# The plugin-root-priority test below writes a config INTO THE REPOSITORY WORKING TREE, and
+# removed it only on its own success path - so any failing assertion left a stray
+# mmry/mmry-config.json behind. That file is the HIGHEST-priority config source, so it then
+# silently fed every later run in that checkout, including other suites. It did exactly that
+# during review. Cleanup belongs in a teardown, which runs whether the test passes or not.
+teardown() {
+    rm -f "$PLUGIN_ROOT/mmry-config.json"
+}
+
 # Helper to source client fresh (it runs mmry_load_config on source)
 _source_client() {
     source "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"

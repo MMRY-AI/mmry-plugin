@@ -26,8 +26,13 @@
 # Raising the budget alone would only move the cliff. So:
 #   1. The real cost was removed - see the mmry_load_config change in mmry-client.sh.
 #   2. The hook budget went 5s -> 20s, in line with the other hooks this plugin registers
-#      (8, 10, 10, 10, 10, 15, 30, 300) and still under Claude Code's own 30s default for
-#      UserPromptSubmit.
+#      (8, 10, 10, 10, 10, 15, 30, 300) and still under the default Claude Code would apply
+#      if we declared no timeout at all. That default was an unverified assertion when first
+#      written here; it is now checked against the hooks reference, which states that Claude
+#      Code lowers the `command`, `http` and `mcp_tool` default to 30 seconds specifically on
+#      UserPromptSubmit (the general default for those types is 600). The 30 does NOT apply to
+#      `prompt` or `agent` hooks, which this plugin does not register.
+#      https://code.claude.com/docs/en/hooks.md
 #   3. This file now enforces its OWN deadline, below the hook budget, so the plugin - not
 #      the harness - decides what happens on a slow turn. The supervisor runs the real work
 #      as a background worker and kills it at the deadline, which is what makes the failure
@@ -101,7 +106,20 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # moment we do not control, and anything a hook prints is noise the customer has to
     # interpret. Silenced for the whole supervisor. Nothing here reports errors by printing;
     # every path exits 0 and says what it has to say inside the JSON.
-    exec 2>/dev/null
+    #
+    # But this feature exists because of three customer reports nobody could reproduce, and
+    # shipping it with stderr hard-wired to /dev/null would guarantee the next one is just as
+    # unreproducible. MMRY_DEBUG=1 REDIRECTS that stderr to a file instead of discarding it.
+    # The customer-facing contract is identical either way: stderr never reaches the terminal,
+    # so a debug session cannot turn the handler into a source of noise.
+    _FOUND_ERR=/dev/null
+    [[ -n "${MMRY_DEBUG:-}" ]] && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.log"
+    exec 2>>"$_FOUND_ERR"
+
+    # Every abnormal exit below appends here regardless of MMRY_DEBUG. A failure that tells the
+    # customer their directives were dropped and leaves no trace of WHY is the reason this
+    # ticket needed three reports before anyone could act on it.
+    _FOUND_LOG="${_FOUND_TMPDIR}/mmry-foundation.log"
 
     DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-15}"
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=15
@@ -112,10 +130,14 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     MISSED_PREVIOUS=0
     [[ -f "$_INFLIGHT" ]] && MISSED_PREVIOUS=1
 
-    # Sweep out-files whose supervisor no longer exists. When the harness SIGKILLs us the
-    # worker survives briefly and keeps writing, so its out-file is orphaned. `kill -0` is a
-    # bash builtin, so this costs no process spawn.
-    for _stale in "${_FOUND_TMPDIR}"/.mmry-foundation-out.*; do
+    # Sweep per-firing files whose supervisor no longer exists. When the harness SIGKILLs us
+    # the worker survives briefly and keeps writing, so its out-file is orphaned. `kill -0` is
+    # a bash builtin, so this costs no process spawn.
+    #
+    # Both file families end in the supervisor's PID deliberately, so one loop reaps both and
+    # neither can accumulate in the customer's temp directory across a long session.
+    for _stale in "${_FOUND_TMPDIR}"/.mmry-foundation-out.* \
+                  "${_FOUND_TMPDIR}"/.mmry-foundation-deadline.*; do
         [[ -e "$_stale" ]] || continue
         _stale_pid="${_stale##*.}"
         [[ "$_stale_pid" =~ ^[0-9]+$ ]] || continue
@@ -123,11 +145,19 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     done
 
     OUTFILE="${_FOUND_TMPDIR}/.mmry-foundation-out.$$"
+    # The watchdog touches this immediately BEFORE it kills the worker, and nothing else ever
+    # creates it. It is therefore the only evidence that distinguishes "we stopped it at the
+    # deadline" from "it died on its own", which the supervisor previously could not tell
+    # apart: it branched on a non-zero exit alone, so a worker that exited 127 in 414 ms on a
+    # broken install produced "loading took over 15s" - a false cause, a false duration and a
+    # remedy that could not possibly help.
+    DEADLINE_MARK="${_FOUND_TMPDIR}/.mmry-foundation-deadline.$$"
+    rm -f "$DEADLINE_MARK" 2>/dev/null || true
     : > "$OUTFILE" 2>/dev/null || true
     : > "$_INFLIGHT" 2>/dev/null || true
 
     MMRY_FOUNDATION_WORKER=1 bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" \
-        > "$OUTFILE" 2>/dev/null &
+        > "$OUTFILE" 2>>"$_FOUND_ERR" &
     WORKER_PID=$!
 
     # The watchdog POLLS instead of sleeping out the whole deadline in one go, and it closes
@@ -156,6 +186,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             sleep 1
             _waited=$(( _waited + 1 ))
         done
+        # Record the REASON before causing it. Written first so that by the time `wait` can
+        # possibly return, the marker the supervisor reads is already on disk.
+        : > "$DEADLINE_MARK" 2>/dev/null || true
         kill -TERM "$WORKER_PID" 2>/dev/null
     ) >/dev/null 2>&1 <&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
     WATCHDOG_PID=$!
@@ -164,17 +197,35 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     WORKER_RC=$?
     kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
 
+    # Read the marker BEFORE deleting anything, then clean up whatever this firing created.
+    HIT_DEADLINE=0
+    [[ -f "$DEADLINE_MARK" ]] && HIT_DEADLINE=1
+
     BODY=""
     [[ -s "$OUTFILE" ]] && BODY="$(cat "$OUTFILE" 2>/dev/null)"
     rm -f "$OUTFILE" 2>/dev/null || true
+    rm -f "$DEADLINE_MARK" 2>/dev/null || true
     rm -f "$_INFLIGHT" 2>/dev/null || true
 
     if (( WORKER_RC != 0 )); then
-        # We stopped ourselves at the deadline. The turn proceeds either way; what matters
-        # is that the customer is told, in terms they can act on, that this turn is running
-        # WITHOUT their standing directives.
-        NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s). Re-send the prompt to try again. If it keeps happening, run /mmry:reload-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+        # The turn proceeds either way; what matters is that the customer is told, in terms
+        # they can act on, that this turn is running WITHOUT their standing directives — and
+        # told the RIGHT thing. A crash and a deadline need different remedies, so they are
+        # reported as different events rather than both as "it was slow".
+        if (( HIT_DEADLINE == 1 )); then
+            NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run /mmry:load-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+            _FOUND_EVENT="deadline exceeded (${DEADLINE}s), worker killed"
+        else
+            # NOT a timeout. Saying "it took too long" here would be three lies at once: a
+            # false cause, an invented duration, and a remedy (re-send the prompt) that cannot
+            # work, because whatever made the worker exit non-zero will do it again.
+            NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: the loader failed with exit code ${WORKER_RC}. This was a failure, not a slow turn. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run /mmry:load-memories to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+            _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
+        fi
+        printf '%s foundation reinjection FAILED: %s\n' \
+            "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
         exit 0
     fi
@@ -225,7 +276,7 @@ esac
 # a Claude restart. This is non-blocking - the CURRENT prompt still uses the existing cache;
 # the refreshed cache is picked up on the next prompt. A lock file (touched on each attempt)
 # bounds this to one refresh per window per session even when a fetch fails. Default daily;
-# users can force an immediate refresh with /mmry:reload-memories or by restarting.
+# users can force an immediate refresh with /mmry:load-memories or by restarting.
 if [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_API_KEY:-}" ]]; then
     _now="$(date +%s 2>/dev/null || echo 0)"
     _lock="${MMRY_TMPDIR}/.mmry-foundation-refresh"
