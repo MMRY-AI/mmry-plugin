@@ -1,0 +1,75 @@
+{
+  "description": "MMRY AI lifecycle hooks for OpenAI Codex. Loads your memories at session start, re-states your Foundation memories each turn, delivers formation messages as you work, and prompts you to save before the session ends.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" session-init",
+            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" session-init",
+            "statusMessage": "MMRY AI: loading your memories",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" formation-check",
+            "statusMessage": "MMRY AI: checking for formation messages",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation",
+            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" formation-check",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" formation-check",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
+            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" stop-check",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

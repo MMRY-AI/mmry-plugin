@@ -1,0 +1,19 @@
+{
+  "name": "mmry",
+  "description": "Persistent memory for OpenAI Codex. Your memories load automatically at session start, your Foundation memories are re-stated every turn, and messages from a coordination group reach you as you work.",
+  "keywords": ["memory", "context", "persistence", "coordination"],
+  "hooks": "./hooks/codex-hooks.json",
+  "skills": "./skills-codex/",
+  "commands": "./commands-codex/",
+  "interface": {
+    "displayName": "MMRY AI",
+    "shortDescription": "Persistent memory that follows you between sessions.",
+    "longDescription": "MMRY AI remembers your decisions, conventions and project context, and restores them at the start of every session so you are not re-explaining yourself. On Codex it loads your memories when a session starts, re-states your Foundation memories on each prompt, delivers coordination-group messages while you work, and prompts you to save what is new before the session ends. Typed slash commands are not available on this platform; you ask for what you want in plain words and the matching skill is used.",
+    "developerName": "MMRY AI",
+    "category": "productivity",
+    "capabilities": ["memory", "coordination"],
+    "websiteURL": "https://mmryai.com",
+    "privacyPolicyURL": "https://mmryai.com/privacy",
+    "termsOfServiceURL": "https://mmryai.com/terms"
+  }
+}
