@@ -20,10 +20,24 @@ if [[ -z "$SCRIPT_NAME" ]]; then
     exit 0
 fi
 
+# THE RESOLVER IS OPTIONAL HERE, AND THE FALLBACK IS THE OLD LITERAL.
+#
+# This script runs from the COPIED handler directory, not from the plugin root, and that directory
+# is assembled by whoever did the copying. session-init.sh copies hooks-handlers/*.sh so a real
+# install always has lib-host.sh - but a curated copy may not, and one such copy exists in the test
+# suite today. An unguarded source there kills the hook with "No such file or directory" on a line
+# number, which is a sentence about nothing.
+#
+# So a missing resolver falls back to exactly the path this file carried before #31245. That is
+# strictly no worse than the previous behaviour, which is the right bar for a guard whose whole job
+# is to never break a session.
+_mmry_guard_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-host.sh"
-
-TARGET="$(mmry_host_state_dir)/hooks-handlers/${SCRIPT_NAME}.sh"
+if source "${_mmry_guard_dir}/lib-host.sh" 2>/dev/null; then
+    TARGET="$(mmry_host_state_dir)/hooks-handlers/${SCRIPT_NAME}.sh"
+else
+    TARGET="${HOME}/.claude/mmry/hooks-handlers/${SCRIPT_NAME}.sh"
+fi
 
 if [[ -f "$TARGET" ]]; then
     exec bash "$TARGET"

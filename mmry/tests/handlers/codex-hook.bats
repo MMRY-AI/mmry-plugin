@@ -348,3 +348,44 @@ _resolve_from() {
         bash -c "source '$TEST_HOME/.codex/mmry/hooks-handlers/mmry-client.sh' >/dev/null 2>&1; printf '%s' \"\$MMRY_API_KEY\""
     assert_output "explicit-key"
 }
+
+# ---------------------------------------------------------------------------------------------
+# A CURATED COPY THAT LACKS lib-host.sh MUST STILL BEHAVE EXACTLY AS IT DID BEFORE #31245.
+#
+# hook-guard.sh and stop-check.sh both run from the COPIED handler directory, which is assembled
+# by whoever did the copying. session-init.sh copies hooks-handlers/*.sh, so a real install always
+# has the resolver - but a curated copy may not, and one exists in this suite today. Before these
+# guards an incomplete copy killed the hook with "No such file or directory" on a line number.
+# ---------------------------------------------------------------------------------------------
+
+@test "req4: hook-guard with NO lib-host.sh falls back to the Claude path it always used" {
+    local dir="$TEST_TMPDIR/nolib"
+    mkdir -p "$dir" "$TEST_HOME/.claude/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/hook-guard.sh" "$dir/"
+    [[ ! -f "$dir/lib-host.sh" ]]
+    printf '#!/usr/bin/env bash\necho "FALLBACK TARGET"\n' > "$TEST_HOME/.claude/mmry/hooks-handlers/probe.sh"
+    run env -u MMRY_HOST HOME="$TEST_HOME" bash "$dir/hook-guard.sh" probe
+    assert_success
+    assert_output "FALLBACK TARGET"
+}
+
+@test "req4: stop-check with NO lib-host.sh still produces the Claude Code directive" {
+    local dir="$TEST_TMPDIR/nolib2"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" "$dir/"
+    [[ ! -f "$dir/lib-host.sh" ]]
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-count" "$TMPDIR/.mmry-last-save"
+    run env -u MMRY_HOST HOME="$TEST_HOME" bash -c "bash '$dir/stop-check.sh' 2>&1 >/dev/null"
+    assert_output --partial '"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh"'
+    refute_output --partial "trimmed"
+}
+
+@test "control: with lib-host.sh present the same stop-check call still works" {
+    # Without this the test above is satisfied by a stop-check that is broken in both cases.
+    local dir="$TEST_TMPDIR/withlib"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-count" "$TMPDIR/.mmry-last-save"
+    run env -u MMRY_HOST HOME="$TEST_HOME" bash -c "bash '$dir/stop-check.sh' 2>&1 >/dev/null"
+    assert_output --partial '"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh"'
+}

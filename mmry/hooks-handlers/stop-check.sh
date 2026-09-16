@@ -39,8 +39,17 @@
 
 set -euo pipefail
 
+# Optional, with the pre-#31245 behaviour as the fallback. This handler is reached through
+# hook-guard.sh from the COPIED handler directory, which is assembled by whoever did the copying
+# and is not guaranteed complete. A missing resolver must produce the directive this file has
+# always produced, not a dead hook.
+_mmry_sc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-host.sh"
+if ! source "${_mmry_sc_dir}/lib-host.sh" 2>/dev/null; then
+    mmry_host() { printf 'claude'; }
+    mmry_host_label() { printf 'Claude Code'; }
+    mmry_host_script_ref() { printf '${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' "$1"; }
+fi
 
 TMPDIR="${TMPDIR:-/tmp}"
 MARKER="${TMPDIR}/.mmry-stop-checked"

@@ -23,6 +23,12 @@
 # installed the other product. Anything that is neither declared nor installed under a Codex home
 # is Claude Code, which is the behaviour every existing install already has.
 
+# set -euo pipefail is the repository convention for every script in this directory
+# (structural/file-integrity.bats enforces it). It is safe in a sourced library here because
+# every conditional below is written as an `if` or as a `&&` list, both of which bash exempts
+# from -e, so a false test can never terminate the shell that sourced this file.
+set -euo pipefail
+
 # Guard against double-sourcing. Handlers source this both directly and transitively.
 [[ -n "${_MMRY_LIB_HOST_SOURCED:-}" ]] && return 0
 _MMRY_LIB_HOST_SOURCED=1
