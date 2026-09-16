@@ -104,8 +104,13 @@ mutate() {
     RUN=$((RUN + 1))
     CURRENT_FILE="$file"
 
+    # The interpreter is run as a plain statement with stderr to a file, NOT inside a command
+    # substitution. `$( ... <<HEREDOC )` around a Windows python spawns unreliably under Git Bash
+    # ("fatal error - couldn't create signal pipe") and every experiment came back as exit 127 -
+    # another harness fault that looks like a finding.
     local pyerr applied
-    pyerr="$($PYBIN - "$PLUGIN/$file" 2>&1 >/dev/null <<PY
+    local errfile="${TMPDIR:-/tmp}/mmry-mutation-stderr.$$"
+    $PYBIN - "$PLUGIN/$file" 2>"$errfile" <<PY
 import io, sys
 p = sys.argv[1]
 
@@ -124,8 +129,9 @@ if s == before:
 out = s.replace('\n', '\r\n') if was_crlf else s
 io.open(p, 'wb').write(out.encode('utf-8'))
 PY
-)"
     applied=$?
+    pyerr="$(cat "$errfile" 2>/dev/null || true)"
+    rm -f "$errfile" 2>/dev/null || true
 
     if [[ $applied -eq 3 ]]; then
         printf '[%2d/%2d] NOT APPLIED  %s\n' "$RUN" "$TOTAL" "$label"
