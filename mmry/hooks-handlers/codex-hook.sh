@@ -55,18 +55,18 @@ source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
 # suite, none of which set it. Deriving it from our own location is correct in all four cases.
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 
-# The credential. mmry-client.sh's discovery order is ${MMRY_CONFIG_FILE}, then the plugin root,
-# then ${HOME}/.claude/mmry-config.json. Setting the first means the client reads the Codex
-# credential without the client having to know Codex exists - which is why mmry-client.sh is
-# untouched by this task.
+# THE CREDENTIAL IS SET BY lib-host.sh, SOURCED ABOVE, AND DELIBERATELY NOT AGAIN HERE.
 #
-# An already-set MMRY_CONFIG_FILE is left alone: it is the documented override and a customer or a
-# test that set it deliberately outranks this default.
-_mmry_cfg="${MMRY_CONFIG_FILE:-}"
-if [[ -z "$_mmry_cfg" ]]; then
-    _mmry_cfg="$(mmry_host_config_file)" || exit 0
-fi
-export MMRY_CONFIG_FILE="$_mmry_cfg"
+# mmry-client.sh's discovery order is ${MMRY_CONFIG_FILE}, then the plugin root, then
+# ${HOME}/.claude/mmry-config.json, so setting the first is what lets the client serve a second
+# host without being edited. That has to happen for the handlers the MODEL runs directly as well,
+# and those never come through this file, so it belongs in lib-host.sh where every consumer of the
+# client reaches it.
+#
+# This file used to repeat it. The repetition was removed after the mutation harness showed the
+# line could be deleted without a single test failing - lib-host.sh was already doing the work, so
+# the second copy was unreachable code that looked load-bearing. An already-set MMRY_CONFIG_FILE is
+# still left alone, by lib-host.sh, because it is the documented override.
 
 TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 [[ -f "$TARGET" ]] || exit 0

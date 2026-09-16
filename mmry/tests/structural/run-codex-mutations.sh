@@ -109,7 +109,10 @@ mutate "shim drops the path-separator guard" hooks-handlers/codex-hook.sh \
 
 mutate "shim swallows the handler exit code" hooks-handlers/codex-hook.sh   's = s.replace("exec bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34), "bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34) + " || true", 1)'   handlers/codex-hook.bats "exit code is passed through"
 
-mutate "shim stops setting MMRY_CONFIG_FILE" hooks-handlers/codex-hook.sh   's = s.replace("export MMRY_CONFIG_FILE=" + chr(34) + "$_mmry_cfg" + chr(34), "_mmry_unused=" + chr(34) + "$_mmry_cfg" + chr(34), 1)'   handlers/codex-hook.bats "MMRY_CONFIG_FILE"
+# NOTE: there is no "shim stops setting MMRY_CONFIG_FILE" mutation any more. The shim used to
+# repeat that export and the repetition was deleted precisely because this harness showed it could
+# be removed with no test failing. The assertion is covered by "lib-host stops exporting
+# MMRY_CONFIG_FILE" further down, which does refuse.
 
 # ---- codex-hooks.json ------------------------------------------------------------------------
 mutate "PreCompact gets registered" hooks/codex-hooks.json \
