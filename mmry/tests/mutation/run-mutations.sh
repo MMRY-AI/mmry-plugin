@@ -154,7 +154,36 @@ file_m09="$CLIENT_REL"
 targets_m09="$CONFIG_TESTS"
 desc_m09="config parse back to newline-delimited fields (values can shear the parse)"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09"
+# Move the re-injection OFF-SWITCH to after the worker is spawned. The opt-out then costs an
+# opted-out customer the entire ~3 s of process spawns it exists to avoid, and the crash
+# notice's own remedy ("set foundationReinject to false") stops working, because the thing
+# that crashes is spawned before the setting is consulted.
+#
+# This mutation exists because the check guarding that ordering was INERT (#31434 QA round 2):
+# it took the first line naming the function, which is its DEFINITION near the top of the file,
+# so the comparison held wherever the call actually sat. A reviewer proved it by making exactly
+# this move. A one-off proof is not a guard, so the move is a mutation now.
+#
+# awk rather than sed: this is a MOVE across lines, and a multi-line move is not something BRE
+# sed does the same way on GNU and BSD.
+mutate_m10() {
+    local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m10"
+    awk '
+        /^    if _mmry_reinject_is_off_here; then$/ { skip = 3 }
+        skip > 0 { skip--; next }
+        { print }
+        /^    WORKER_PID=\$!$/ {
+            print ""
+            print "    if _mmry_reinject_is_off_here; then"
+            print "        exit 0"
+            print "    fi"
+        }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+targets_m10="$BUDGET_TESTS"
+desc_m10="re-injection off-switch moved to after the worker spawn (opt-out pays for the spawn)"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
