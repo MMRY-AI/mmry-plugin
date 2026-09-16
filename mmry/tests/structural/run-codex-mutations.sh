@@ -84,9 +84,7 @@ mutate "claude client name becomes codex" hooks-handlers/lib-host.sh \
   "s = s.replace(\"printf 'claude-code'\", \"printf 'codex'\")" \
   unit/lib-host.bats "Claude client name"
 
-mutate "claude script ref becomes absolute" hooks-handlers/lib-host.sh \
-  "s = s.replace(\"printf '\\\\\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' \\\"\$script\\\"\", \"printf '/abs/%s' \\\"\$script\\\"\")" \
-  unit/lib-host.bats "unexpanded"
+mutate "claude script ref becomes absolute" hooks-handlers/lib-host.sh   's = s.replace("${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s", "/abs/%s")'   unit/lib-host.bats "unexpanded"
 
 mutate "default host becomes codex" hooks-handlers/lib-host.sh \
   "s = s.replace('        *)     printf \\'claude\\' ;;', '        *)     printf \\'codex\\' ;;')" \
@@ -126,9 +124,7 @@ mutate "a handler gains asyncRewake" hooks/codex-hooks.json \
   "s = s.replace('\"timeout\": 10', '\"asyncRewake\": true, \"timeout\": 10', 1)" \
   structural/codex-manifest.bats "fields HookHandlerConfig"
 
-mutate "the PostToolUse group gains a matcher" hooks/codex-hooks.json \
-  "s = s.replace('    \"PostToolUse\": [\n      {\n        \"hooks\": [', '    \"PostToolUse\": [\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [')" \
-  structural/codex-manifest.bats "NO matcher"
+mutate "the PostToolUse group gains a matcher" hooks/codex-hooks.json   's = s.replace(chr(34)+"PostToolUse"+chr(34)+": [", chr(34)+"PostToolUse"+chr(34)+": [{"+chr(34)+"matcher"+chr(34)+":"+chr(34)+"Bash"+chr(34)+","+chr(34)+"hooks"+chr(34)+":[]},", 1)'   structural/codex-manifest.bats "NO matcher"
 
 mutate "a handler loses commandWindows" hooks/codex-hooks.json \
   "import re; s = re.sub(r'\n *\"commandWindows\":[^\n]*\n', '\n', s, count=1)" \
@@ -171,9 +167,7 @@ mutate "a manifest path loses its ./ prefix" .codex-plugin/plugin.json \
   "s = s.replace('\"./commands-codex/\"', '\"commands-codex/\"')" \
   structural/codex-manifest.bats "./ form"
 
-mutate "codex manifest inherits the default commands dir" .codex-plugin/plugin.json \
-  "s = s.replace('  \"commands\": \"./commands-codex/\",\n', '')" \
-  structural/codex-manifest.bats "explicitly rather than inheriting"
+mutate "codex manifest inherits the default commands dir" .codex-plugin/plugin.json   's = s.replace(chr(34)+"commands"+chr(34)+":", chr(34)+"commandsX"+chr(34)+":", 1)'   structural/codex-manifest.bats "explicitly rather than inheriting"
 
 # ---- stop-check.sh ---------------------------------------------------------------------------
 mutate "the compaction sentence fires on Claude Code too" hooks-handlers/stop-check.sh \
@@ -202,9 +196,7 @@ mutate "a Claude command file gains frontmatter" commands/setup.md \
   "s = '---\ndescription: x\n---\n' + s" \
   structural/codex-manifest.bats "gained YAML frontmatter"
 
-mutate "the e2e fixture stops copying lib-host" tests/e2e/setup-join.bats \
-  "s = s.replace('    cp \"\$PLUGIN_ROOT/hooks-handlers/lib-host.sh\" \"\$HOME/.claude/mmry/hooks-handlers/\"\n', '')" \
-  structural/codex-manifest.bats "mirrored by the e2e fixture"
+mutate "the e2e fixture stops copying lib-host" tests/e2e/setup-join.bats   's = s.replace("cp \\"$PLUGIN_ROOT/hooks-handlers/lib-host.sh\\"", "true #", 1)'   structural/codex-manifest.bats "mirrored by the e2e fixture"
 
 echo
 echo "=== refused: $PASS   survived: $FAIL ==="
