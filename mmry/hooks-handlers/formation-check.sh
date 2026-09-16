@@ -417,7 +417,7 @@ case "$mode" in
         # used.
         _poll_once || exit 0
         if [[ "$(mmry_host)" == "codex" ]]; then
-            printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rs \
+            printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rsc \
                 '{hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:.}}' \
                 2>/dev/null || exit 0
             exit 0
