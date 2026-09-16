@@ -136,12 +136,25 @@ _registered_timeout() {
 @test "userpromptsubmit-foundation: slowed past the OLD 5s budget, still delivers the directives inside the shipped one" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     _make_config
+    # 6 s of extra latency, not the 7 s this used to inject (#31434 QA).
+    #
+    # NOT a weakened premise - the premise is "past the OLD 5 s budget", and 6 is. What
+    # changed underneath it is the SHIPPED DEADLINE, cut from 15 s to 10 s so the plugin wins
+    # its race against the harness with a stated margin instead of losing it. The handler's own
+    # overhead measured 2.5-3 s on Windows Git Bash, so a 10 s deadline tolerates roughly 7 s
+    # of added latency, and a 7 s injection sat exactly on that boundary: measured three times
+    # outside the harness at 10.0/10.9/11.2 s it delivered, and inside the harness it was
+    # killed. A test that flips on which side of a boundary the machine lands is not evidence
+    # either way.
+    #
+    # The narrowed tolerance is a real consequence of the lower deadline and it is recorded
+    # rather than papered over: see the residual-exposure note in hook-budgets.bats.
     local shim budget start elapsed
-    shim="$(_make_slow_jq 7)"
+    shim="$(_make_slow_jq 6)"
     budget="$(_registered_timeout)"
-    # The premise of the test: 7s must be past the old budget and inside the new one.
-    (( 7 > 5 ))
-    (( 7 < budget ))
+    # The premise of the test: 6s must be past the old budget and inside the new one.
+    (( 6 > 5 ))
+    (( 6 < budget ))
 
     start="$(date +%s)"
     MMRY_JQ="$shim" run bash "$HANDLER"
@@ -152,7 +165,7 @@ _registered_timeout() {
     [[ "$output" == *'never overstate evidence'* ]]
     [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]]
     # It really was slow — otherwise this test proves nothing about the budget.
-    (( elapsed >= 6 ))
+    (( elapsed >= 5 ))
     # And it still finished inside the budget the plugin actually ships.
     (( elapsed < budget ))
 }
@@ -415,4 +428,128 @@ EOF
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
     # ...and that same firing reaps the orphan, because its supervisor no longer exists.
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
+}
+
+# ============================================================================
+# #31434 QA - the off switch the failure notices recommend.
+#
+# Both failure notices tell the customer to set foundationReinject to false. That advice was
+# INERT on the path that gave it: the toggle was read only by the worker, via mmry_load_config,
+# and the crash branch runs precisely when the worker could not run. A reviewer set it in the
+# config AND in the environment and the banner fired anyway, on every prompt, with no way to
+# stop it. These tests exist so that cannot ship again.
+#
+# Each one carries its CONTROL in the same test - a run that must produce the banner - because
+# "no banner" is the passing state here, and a test whose pass condition is silence will also
+# pass when the handler has simply stopped working.
+# ============================================================================
+
+_make_broken_bash() {
+    # A PATH bash that fails instantly: the supervisor re-execs this file as a worker via
+    # `bash` resolved from PATH, so this is how the field produces a fast non-zero exit.
+    local d="$TEST_TMPDIR/broken-bash"
+    mkdir -p "$d"
+    printf '#!/bin/sh
+exit 127
+' > "$d/bash"
+    chmod +x "$d/bash"
+    printf '%s' "$d"
+}
+
+_write_toggle_config() {
+    # $1 = the raw JSON value for foundationReinject
+    cat > "$MMRY_CONFIG_FILE" <<EOF
+{
+  "apiUrl": "http://127.0.0.1:9",
+  "authMethod": "apikey",
+  "apiKey": "test-key",
+  "foundationReinject": $1,
+  "foundationReinjectTokenCap": 1500,
+  "foundationRefreshSeconds": 0
+}
+EOF
+}
+
+@test "userpromptsubmit-foundation: foundationReinject=false in CONFIG silences the crash notice it recommends (#31434 QA)" {
+    printf -- '- Truthfulness: never overstate evidence.
+' > "$CACHE"
+    local real_bash shimdir
+    real_bash="$(command -v bash)"
+    shimdir="$(_make_broken_bash)"
+
+    # CONTROL FIRST: with the toggle ON, this exact scenario must produce the banner.
+    # Without it the test would also pass against a handler that did nothing at all.
+    _write_toggle_config '"true"'
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'NOT applied to this turn'* ]]
+
+    # Now the remedy the notice just handed the customer.
+    _write_toggle_config '"false"'
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "userpromptsubmit-foundation: a JSON boolean false is honoured too, not just the string (#31434 QA)" {
+    # The README documents `false`; mmry_load_config tostring's it into "false". The supervisor
+    # reads the file without jq, so the bare boolean is the spelling most likely to be missed.
+    printf -- '- Truthfulness: never overstate evidence.
+' > "$CACHE"
+    local real_bash shimdir
+    real_bash="$(command -v bash)"
+    shimdir="$(_make_broken_bash)"
+
+    _write_toggle_config 'true'
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    [[ "$output" == *'NOT applied to this turn'* ]]
+
+    _write_toggle_config 'false'
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "userpromptsubmit-foundation: the ENVIRONMENT off switch silences the crash notice, and outranks the config (#31434 QA)" {
+    printf -- '- Truthfulness: never overstate evidence.
+' > "$CACHE"
+    local real_bash shimdir
+    real_bash="$(command -v bash)"
+    shimdir="$(_make_broken_bash)"
+    # The config says ON throughout, so a pass here can only come from the environment override
+    # being honoured - and it must be honoured by the SUPERVISOR, since no worker ever starts.
+    _write_toggle_config '"true"'
+
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    [[ "$output" == *'NOT applied to this turn'* ]]
+
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    MMRY_FOUNDATION_REINJECT=false PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "userpromptsubmit-foundation: the off switch also silences the DEADLINE notice (#31434 QA)" {
+    # The other half of the same promise, and the path the customer is most likely trying to
+    # escape. The opt-out is answered before the worker exists, so an opted-out customer does
+    # not even wait out a deadline to be told about a feature they switched off.
+    printf -- '- Truthfulness: never overstate evidence.
+' > "$CACHE"
+    local shim start elapsed
+    shim="$(_make_slow_jq 30)"
+
+    _write_toggle_config '"false"'
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    start="$(date +%s)"
+    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+    elapsed=$(( $(date +%s) - start ))
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    (( elapsed < 3 ))
 }

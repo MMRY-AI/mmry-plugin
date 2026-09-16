@@ -51,6 +51,19 @@ TEST_TMPDIR="$(mktemp -d)"
 export TMPDIR="$TEST_TMPDIR"
 export MMRY_TMPDIR="$TEST_TMPDIR"
 
+# Isolate HOME for EVERY suite, not just the ones that remembered (#31434 QA).
+#
+# MMRY_CONFIG_FILE below only wins while the file it names exists. mmry_load_config's
+# discovery order falls through a NON-EXISTENT MMRY_CONFIG_FILE to the plugin root and then
+# to ${HOME}/.claude/mmry-config.json - so every test that does not write a config first was
+# reading the developer's real one, complete with its live API key. Six suites had already
+# set a fake HOME in their own setup(); the handler and budget suites had not, and reached
+# mmry-client.sh:76 against the real file. No key was ever printed, but "we were one echo
+# away" is the live half of the credential incident's root cause, and per-suite discipline is
+# what let two suites miss it. It belongs here, once, where no new suite can forget it.
+export HOME="$TEST_TMPDIR/fakehome"
+mkdir -p "$HOME/.claude"
+
 # Disable any real config from interfering
 export MMRY_CONFIG_FILE="$TEST_TMPDIR/mmry-config.json"
 export MMRY_API_URL=""

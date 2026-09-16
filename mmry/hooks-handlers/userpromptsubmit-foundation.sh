@@ -96,6 +96,89 @@ _mmry_emit() {
     printf '}'
 }
 
+# Lowercase an ASCII string using nothing but parameter expansion (#31434 QA).
+#
+# This replaces `printf '%s' "$x" | tr '[:upper:]' '[:lower:]'`, which cost a subshell AND a
+# `tr` process on EVERY firing of a hook that runs on every prompt. On Windows Git Bash a
+# process spawn measured ~300 ms, so that one idiom was ~10% of the handler's whole cost.
+# bash 3.2 (what macOS ships) has no `${x,,}`, so this does the mapping by hand: the index of
+# the character within the uppercase alphabet is the length of the prefix before it, and a
+# character that is absent leaves the alphabet unchanged at length 26.
+_mmry_tolower() {
+    local s="$1" out="" c pre
+    local up="ABCDEFGHIJKLMNOPQRSTUVWXYZ" lo="abcdefghijklmnopqrstuvwxyz"
+    local i=0
+    while (( i < ${#s} )); do
+        c="${s:i:1}"
+        pre="${up%%"$c"*}"
+        if (( ${#pre} < 26 )); then
+            out="${out}${lo:${#pre}:1}"
+        else
+            out="${out}${c}"
+        fi
+        i=$(( i + 1 ))
+    done
+    printf '%s' "$out"
+}
+
+# Is Foundation re-injection switched OFF by this value? Same vocabulary the worker has always
+# honoured, now in one place because the SUPERVISOR has to answer the question too (#31434 QA).
+_mmry_reinject_off() {
+    case "$(_mmry_tolower "$1")" in
+        false|off|0|no|disabled) return 0 ;;
+    esac
+    return 1
+}
+
+# Is Foundation re-injection switched off, answered WITHOUT spawning a single process?
+# Environment override first, then the config file the client would have used (#31434 QA).
+#
+# Discovery order is kept identical to mmry_load_config in mmry-client.sh. If the two ever
+# disagree, the customer's setting is honoured on one path and ignored on the other, which
+# is the whole bug this closes.
+#
+# HOW THE CONFIG IS READ, and what that is and is not worth. This is a TEXT SCAN, not a JSON
+# parse: `$(<file)` costs a subshell and no exec, where jq would cost a process on every
+# prompt and would fail in exactly the circumstances this check matters most. The scan is
+# therefore deliberately CONSERVATIVE - it acts only on a confident match of the key in key
+# position followed by a bare or quoted scalar, and anything it cannot read that way is
+# treated as "not switched off".
+#
+# That asymmetry is the safe one in both directions. A false "off" would silently disable a
+# feature the customer wants, so the scan refuses to guess; a false "on" costs at worst a
+# notice the customer did not want, and the WORKER still holds the authoritative jq-parsed
+# answer, so a healthy firing that this scan could not read is decided correctly downstream.
+# The only thing that changes here is whether the SUPERVISOR can answer when the worker cannot.
+_mmry_reinject_is_off_here() {
+    local v="" cfg="" txt=""
+
+    # 1. Environment override. Free, and it wins, matching mmry-client.sh precedence.
+    if [[ -n "${MMRY_FOUNDATION_REINJECT:-}" ]]; then
+        _mmry_reinject_off "${MMRY_FOUNDATION_REINJECT}"
+        return $?
+    fi
+
+    # 2. The config file, same discovery order as mmry_load_config.
+    if [[ -n "${MMRY_CONFIG_FILE:-}" && -f "${MMRY_CONFIG_FILE}" ]]; then
+        cfg="$MMRY_CONFIG_FILE"
+    elif [[ -n "${PLUGIN_ROOT:-}" && -f "${PLUGIN_ROOT}/mmry-config.json" ]]; then
+        cfg="${PLUGIN_ROOT}/mmry-config.json"
+    elif [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
+        cfg="${HOME}/.claude/mmry-config.json"
+    fi
+    [[ -n "$cfg" && -r "$cfg" ]] || return 1
+
+    txt="$(<"$cfg")" 2>/dev/null || return 1
+    [[ -n "$txt" ]] || return 1
+
+    # Key in key position, then a JSON scalar: `false`, `"false"`, `0`, `"off"`. A value that
+    # is not a bare word (an object, an array, a spaced-out string) simply does not match, and
+    # an unmatched scan returns "not off".
+    [[ "$txt" =~ \"foundationReinject\"[[:space:]]*:[[:space:]]*\"?([A-Za-z0-9]+)\"? ]] || return 1
+    v="${BASH_REMATCH[1]}"
+    _mmry_reinject_off "$v"
+}
+
 # ============================================================================
 # SUPERVISOR — bounds the wall clock and owns everything the customer sees.
 # ============================================================================
@@ -121,8 +204,40 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # ticket needed three reports before anyone could act on it.
     _FOUND_LOG="${_FOUND_TMPDIR}/mmry-foundation.log"
 
-    DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-15}"
-    [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=15
+    # THE OFF SWITCH, honoured HERE and not only in the worker (#31434 QA).
+    #
+    # The crash notice below tells the customer to set foundationReinject false. That advice
+    # was inert on the very path that gave it: the toggle was read only by the worker, by way
+    # of mmry_load_config, and the crash branch runs precisely when the worker could not run.
+    # A customer who followed the instruction - in the config, in the environment, or both -
+    # saw the same banner on every prompt with no way to stop it. A remedy printed in a
+    # customer-facing string has to work.
+    #
+    # Checked UP FRONT, so the opt-out also skips the worker and the watchdog entirely: an
+    # opted-out customer pays one subshell instead of the ~3 s of process spawns a firing
+    # costs on Windows Git Bash.
+    #
+    # NOT by way of jq, deliberately. jq is a process, and this runs on every prompt; worse,
+    # the most likely reason the worker failed is a jq that is slow or broken, so deciding
+    # whether to REPORT a jq failure by invoking jq is how the check inherits the fault it is
+    # reporting on. An earlier cut of this fix did exactly that and measured 33 s against a
+    # 20 s budget with a 20 s-slow jq - it reintroduced the ticket's own defect inside the
+    # remedy for it. This reads the file with no process at all.
+    if _mmry_reinject_is_off_here; then
+        exit 0
+    fi
+
+    # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
+    # story: the supervisor still has to start, reap the worker, decide WHY it failed and
+    # write the JSON afterwards, and on Windows Git Bash every one of those steps is a
+    # ~300 ms process spawn. Measured enforced wall clock against the 20 s registered budget,
+    # three runs each, this machine: a 15 s deadline finished in 17-18 s, inside the budget
+    # but with under 2 s to spare on an IDLE box; a 10 s deadline finished in 12-13 s. The
+    # margin is the point - a guard that only wins the race against the harness on a quiet
+    # machine is not a guard. The enforced figure is asserted, not assumed: see
+    # "the ENFORCED wall clock" test in tests/structural/hook-budgets.bats.
+    DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-10}"
+    [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=10
 
     # A marker left behind by a previous firing means that firing never reached its own
     # exit — the harness killed the whole handler — so that turn ran without directives
@@ -149,7 +264,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # creates it. It is therefore the only evidence that distinguishes "we stopped it at the
     # deadline" from "it died on its own", which the supervisor previously could not tell
     # apart: it branched on a non-zero exit alone, so a worker that exited 127 in 414 ms on a
-    # broken install produced "loading took over 15s" - a false cause, a false duration and a
+    # broken install produced "loading took over the deadline" - a false cause, a false duration and a
     # remedy that could not possibly help.
     DEADLINE_MARK="${_FOUND_TMPDIR}/.mmry-foundation-deadline.$$"
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
@@ -179,12 +294,20 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     #
     # Polling also means the watchdog is GONE about a second after the worker finishes, so
     # nothing has to kill it and there is nothing left to orphan.
+    #
+    # It measures ELAPSED TIME, not iterations (#31434 QA). Counting `sleep 1` rounds made the
+    # effective deadline DEADLINE x (1 s + the cost of spawning `sleep`), and on Windows Git
+    # Bash that spawn measured ~300 ms - so the shipped 15 s deadline really fired at 15 x 1.3
+    # plus the supervisor's own overhead, and the whole handler measured 23-29 s against a 20 s
+    # registered budget. The harness won the race it exists to lose, and discarded the output:
+    # the exact silent loss this ticket closes. `SECONDS` is a bash builtin, so the drift and
+    # the per-iteration spawn cost go together. Reset inside the subshell so it counts from
+    # the watchdog's own start.
     (
-        _waited=0
-        while (( _waited < DEADLINE )); do
+        SECONDS=0
+        while (( SECONDS < DEADLINE )); do
             kill -0 "$WORKER_PID" 2>/dev/null || exit 0
             sleep 1
-            _waited=$(( _waited + 1 ))
         done
         # Record the REASON before causing it. Written first so that by the time `wait` can
         # possibly return, the marker the supervisor reads is already on disk.
@@ -202,7 +325,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     [[ -f "$DEADLINE_MARK" ]] && HIT_DEADLINE=1
 
     BODY=""
-    [[ -s "$OUTFILE" ]] && BODY="$(cat "$OUTFILE" 2>/dev/null)"
+    # `$(<file)`, not `$(cat file)` - one fewer process on every prompt (#31434 QA).
+    [[ -s "$OUTFILE" ]] && BODY="$(<"$OUTFILE")"
     rm -f "$OUTFILE" 2>/dev/null || true
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
     rm -f "$_INFLIGHT" 2>/dev/null || true
@@ -266,10 +390,9 @@ REFRESH_SECS="${MMRY_FOUNDATION_REFRESH_SECONDS:-86400}"
 CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
 LOG="${MMRY_TMPDIR}/mmry-foundation.log"
 
-# Toggle off -> no-op.
-case "$(printf '%s' "$REINJECT" | tr '[:upper:]' '[:lower:]')" in
-    false|off|0|no|disabled) exit 0 ;;
-esac
+# Toggle off -> no-op. NOTE the supervisor checks this too, before it ever spawns this
+# worker, so that the remedy the crash notice recommends actually works (#31434 QA).
+_mmry_reinject_off "$REINJECT" && exit 0
 
 # TTL-gated BACKGROUND refresh (#30579): if the cache is older than the refresh window,
 # re-fetch Foundation memories in the background so an admin-added memory propagates without
@@ -290,7 +413,9 @@ fi
 
 # No cache, or cache is empty/whitespace -> no-op.
 [[ -s "$CACHE" ]] || exit 0
-content="$(cat "$CACHE" 2>/dev/null)"
+# `$(<file)` rather than `$(cat file)`: same value, one fewer process on a path that runs
+# on every prompt. Measured ~300 ms per spawn on Windows Git Bash (#31434 QA).
+content="$(<"$CACHE")"
 [[ -n "${content//[[:space:]]/}" ]] || exit 0
 
 # Guard against a non-numeric cap.

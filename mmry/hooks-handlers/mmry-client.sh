@@ -101,9 +101,29 @@ mmry_load_config() {
         # validation is the exact failure shape this ticket exists to remove, so it is not
         # acceptable to ship it inside the fix for it.
         #
-        # NUL cannot appear in a JSON string value that jq will emit as raw text, so it is
-        # the only delimiter no value can forge. Every field is terminated (not separated),
-        # so the sixth read sees its delimiter too and the count is unambiguous.
+        # WHAT NUL DOES AND DOES NOT GUARANTEE (corrected #31434 QA - the first version of
+        # this comment claimed NUL "cannot appear in a JSON string value that jq will emit as
+        # raw text, so it is the only delimiter no value can forge". That is false, and it was
+        # the load-bearing justification for the whole scheme, so it is stated accurately here
+        # rather than left as a claim nobody could rely on.
+        #
+        # JSON permits the escape \u0000 inside a string. jq parses it, and `-j` writes the
+        # raw byte. Reproduced against this exact parse: a config whose apiKey is
+        # "k<U+0000>EXTRA" yields reinject="EXTRA", cap="true" and foundationRefreshSeconds=
+        # "1500" - the same shear, and the same wrong-but-numeric refresh value that clears
+        # its own ^[0-9]+$ guard downstream, that moving off newlines was meant to remove.
+        #
+        # So the honest bound is narrower than "impossible", and it is a bound of REACH, not
+        # of encoding: no MMRY code path writes a NUL into a config value - setup writes the
+        # apiKey from the server's response and the Foundation keys are numbers and booleans -
+        # so producing one takes a hand-authored or hostile config file. That makes NUL a
+        # strictly better delimiter than newline, which ordinary values really do contain,
+        # without making it unforgeable. Closing the remaining gap (rejecting or stripping
+        # NUL from values before they are delimited) is tracked separately; it is not folded
+        # in here because a delimiter change is its own change with its own evidence.
+        #
+        # Every field is terminated (not separated), so the sixth read sees its delimiter too
+        # and the count is unambiguous.
         #
         # This also removes the trailing-CR strip the line-based form needed: jq.exe on
         # Windows opens stdout in TEXT mode and turns each emitted LF into CRLF, but with

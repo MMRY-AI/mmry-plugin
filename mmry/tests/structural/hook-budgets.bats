@@ -116,7 +116,33 @@ EOF
     (( cost > 0 ))
     # Headroom of at least 5x. At the 5 s budget this refuses for any cost above 1000 ms,
     # which is exactly the range that was measured in the field.
+    #
+    # This bar was NOT moved to make it pass (#31434 QA). It went red on Windows at 4800 ms
+    # against its 4000 ms limit, four consecutive runs, and the bar was right: the handler was
+    # spending ~2 s per firing on process spawns that a hook running on every prompt has no
+    # business paying. Removing them (`$(<file)` for two `cat`s, parameter expansion for a
+    # `tr` pipeline, and the opt-out answered before the worker is spawned at all) brought the
+    # same measurement to 2600-3200 ms on the same machine.
     (( budget * 1000 >= cost * 5 ))
+
+    # AND against the number that now actually stops this handler (#31434 QA). The registered
+    # budget is the HARNESS's limit; since the supervisor landed, the plugin's own deadline is
+    # reached first by design, so a cost that is comfortable against the budget can still be
+    # one slow turn away from the handler killing itself. Asserting only the budget would
+    # leave the operative limit unmeasured.
+    local deadline
+    deadline="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*'         "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" | head -1 | sed 's/.*:-//')"
+    [[ "$deadline" =~ ^[0-9]+$ ]]
+    echo "measured cost: ${cost} ms; shipped deadline: ${deadline} s" >&3
+    # 3x. Stated rather than assumed, and it is not a comfortable multiple: on Windows Git
+    # Bash every process spawn costs ~300 ms, this handler cannot get below about half a dozen
+    # of them, and a machine three times slower than an idle developer box would trip the
+    # handler's own guard. That is a real residual exposure and it is recorded here rather
+    # than rounded off - see the QA notes on this ticket. It degrades honestly (the customer
+    # is told the directives were dropped) rather than silently, which is what the ticket
+    # exists to guarantee; making it comfortable means cutting the spawn count further, which
+    # is its own change.
+    (( deadline * 1000 >= cost * 3 ))
 }
 
 @test "hook-budgets: the SHIPPED default deadline sits below the registered budget (#31434)" {
@@ -188,4 +214,59 @@ EOF
     # SAMPLE SIZE, stated beside the verdict.
     echo "hooks checked against the floor: ${count}" >&3
     (( count >= 9 ))
+}
+
+@test "hook-budgets: the ENFORCED wall clock stays under the registered budget (#31434 QA)" {
+    # THE INVARIANT THAT ACTUALLY FAILED QA, and nothing measured it before.
+    #
+    # Every other check here reads CONFIGURED numbers - the deadline constant, the registered
+    # timeout - and compares them. That is exactly how the defect survived: the configured
+    # deadline was 15 and the configured budget was 20, so every declarative check agreed the
+    # plugin stopped itself first, while the handler really took 23-29 s and the harness
+    # killed it and discarded its output. The watchdog counted `sleep 1` ITERATIONS rather
+    # than elapsed time, so its effective deadline was DEADLINE x (1 s + the cost of spawning
+    # `sleep`) - about 1.3 s per round on Windows Git Bash - and the supervisor's own startup
+    # and reporting sat on top of that.
+    #
+    # So this asserts the ENFORCED figure: a stopwatch around a real firing that is made to
+    # hang, using the SHIPPED default deadline with no environment override, because the
+    # override is what let every other deadline test avoid the number customers run.
+    _write_config
+    printf -- '- Truthfulness: never overstate evidence.
+' > "$TEST_TMPDIR/mmry-foundation.md"
+
+    # A jq that never returns in time. --version stays fast because the resolver probes it.
+    local shim="$TEST_TMPDIR/hang-jq.sh"
+    cat > "$shim" <<'SHIMEOF'
+#!/usr/bin/env bash
+for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done
+sleep 60
+exec jq "$@"
+SHIMEOF
+    chmod +x "$shim"
+
+    local handler budget start elapsed_ms out margin_ms
+    handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
+                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '')"
+    [[ "$budget" =~ ^[0-9]+$ ]]
+
+    start="$(date +%s)"
+    out="$(MMRY_JQ="$shim" bash "$handler" 2>/dev/null)"
+    elapsed_ms=$(( ( $(date +%s) - start ) * 1000 ))
+    margin_ms=$(( budget * 1000 - elapsed_ms ))
+    echo "ENFORCED wall clock: ${elapsed_ms} ms; registered budget: ${budget}s; margin: ${margin_ms} ms" >&3
+
+    # The premise: it really did hang, so this measures the guard and not a fast path.
+    (( elapsed_ms >= 9000 ))
+    # THE ASSERTION. The plugin stopped itself before the harness could, with a stated margin.
+    # 5 s, not "under the budget": finishing at 19.5 s would satisfy the letter of the
+    # invariant on an idle box and still lose the race on a loaded one.
+    (( elapsed_ms < budget * 1000 ))
+    (( margin_ms >= 5000 ))
+    # And the customer was told. A guard that wins the race and says nothing is the silent
+    # loss wearing a different hat.
+    [[ "$out" == *'NOT applied to this turn'* ]]
+    [[ "$out" == *'exceeded'* ]]
+    echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
