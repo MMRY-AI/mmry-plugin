@@ -287,3 +287,40 @@ _registered_timeout() {
     echo "time to EOF with an extra inherited descriptor: ${elapsed}s against a 12s deadline" >&3
     (( elapsed < 6 ))
 }
+
+@test "userpromptsubmit-foundation: a firing killed outright LEAVES the marker, end to end (#31434)" {
+    # Found by mutation, not by inspection. The test above creates the in-flight marker by hand
+    # and asserts it is READ. Deleting the line that WRITES it therefore changed nothing and the
+    # whole suite stayed green - a handler that never records a firing can never report a lost
+    # one, which is the entire feature. This drives the real sequence instead.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    cat > "$MMRY_CONFIG_FILE" <<'EOF'
+{
+  "apiUrl": "http://127.0.0.1:9",
+  "authMethod": "apikey",
+  "apiKey": "test-key",
+  "foundationReinject": "true",
+  "foundationRefreshSeconds": 0
+}
+EOF
+    local shim; shim="$(_make_slow_jq 20)"
+
+    # SIGKILL, because that is what the harness does on timeout: no trap, no cleanup, nothing.
+    MMRY_JQ="$shim" bash "$HANDLER" >/dev/null 2>&1 </dev/null &
+    local victim=$!
+    sleep 2
+    kill -9 "$victim" 2>/dev/null
+    wait "$victim" 2>/dev/null || true
+
+    # The evidence that a turn was lost has to survive the kill, or nobody can ever be told.
+    [ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+
+    # And the next firing picks it up and says so, on both channels.
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PREVIOUS turn'* ]]
+    [[ "$output" == *'previous turn'* ]]
+    [[ "$output" == *'never overstate evidence'* ]]
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+}
