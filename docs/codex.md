@@ -41,6 +41,12 @@ It opens a browser so you can sign in at [mmryai.com](https://mmryai.com), then 
 credential to `~/.codex/mmry-config.json`. If the browser does not open, the script prints a URL to
 paste.
 
+**If you have moved your Codex home.** Codex reads `CODEX_HOME` to find its own configuration, and
+MMRY follows it: everything above lives under `$CODEX_HOME` instead of `~/.codex` when that
+variable is set. Every command in this document and in the skill works unchanged if you write it
+as `"${CODEX_HOME:-$HOME/.codex}/mmry/..."`, which resolves to the same place either way. MMRY's
+own hooks and handlers resolve it for themselves and need no help from you.
+
 **4. Restart Codex once more.** Your memories load on the next session start.
 
 ### On Windows

@@ -8,9 +8,19 @@ description: The MMRY AI persistent memory system for Codex. Memories load autom
 You have a persistent memory store reached over the MMRY AI REST API. It is how context survives
 between sessions.
 
-**All operations are bash scripts.** They live in `~/.codex/mmry/hooks-handlers/`, which the
-SessionStart hook populates at the start of every session. Use that path, not a variable: it is
-correct in any shell you reach for.
+**All operations are bash scripts.** They live in the MMRY directory inside the customer's Codex
+home, which the SessionStart hook populates at the start of every session.
+
+**WRITE THE PATH AS `"${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/<script>"`.** Every command
+below does, and it matters: Codex reads `CODEX_HOME` to find its own configuration, and a customer
+who has moved their Codex home has no `~/.codex` directory at all. That form resolves correctly in
+both cases, needs nothing set up beforehand, and is safe to paste into any shell you reach for -
+unlike a variable you set in one Bash call, which is gone by the next one.
+
+The examples below spell it out in full for that reason. `~/.codex/mmry/...` is the same path on a
+default install, and is fine to SAY to a customer, but do not RUN it: on a relocated home it names
+a directory that does not exist, and the failure is a confusing "No such file or directory" rather
+than anything that names the real problem.
 
 ## What happens without you doing anything
 
@@ -41,7 +51,7 @@ State these plainly if asked. Do not imply a capability this platform does not h
 ## Saving a memory
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/save-memory.sh \
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh" \
   --tier "Operational" \
   --category "Decision" \
   --scope "backend" \
@@ -74,8 +84,8 @@ Bad: `We had a long discussion about identifiers and decided UPC was best for va
 ## Recalling and searching
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/search-memories.sh "UPC"
-bash ~/.codex/mmry/hooks-handlers/search-memories.sh "refund" "backend"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" "UPC"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" "refund" "backend"
 ```
 
 Search ignores age, which is the point: it is how a memory that has aged out of normal loading is
@@ -83,7 +93,7 @@ recovered. When a search result genuinely guides the work, reinforce it so it co
 next time:
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/reinforce-memory.sh 42
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/reinforce-memory.sh" 42
 ```
 
 ## Tiers
@@ -107,12 +117,12 @@ Memories default to Global, meaning everyone on the account. The alternatives ar
 person who saved it) and Group (only members of one permission group).
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/list-groups.sh
-bash ~/.codex/mmry/hooks-handlers/visibility.sh                # show the current default
-bash ~/.codex/mmry/hooks-handlers/visibility.sh private        # default new saves to Private
-bash ~/.codex/mmry/hooks-handlers/visibility.sh group "Sales"  # default to one group
-bash ~/.codex/mmry/hooks-handlers/make-private.sh              # restrict the last one saved
-bash ~/.codex/mmry/hooks-handlers/make-private.sh 1234 group 7
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/list-groups.sh"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/visibility.sh"                # show the current default
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/visibility.sh" private        # default new saves to Private
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/visibility.sh" group "Sales"  # default to one group
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/make-private.sh"              # restrict the last one saved
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/make-private.sh" 1234 group 7
 ```
 
 Re-scoping is creator-only and the server enforces it; an administrator cannot re-scope someone
@@ -126,7 +136,7 @@ question, never wait, and never change visibility on your own.
 ## Linking
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/link-memories.sh 42 87 "related"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/link-memories.sh" 42 87 "related"
 ```
 
 Types: `related` and `contradicts` (symmetric), `supersedes` and `elaborates` (directional). When a
@@ -135,7 +145,7 @@ decision changes, save the new one with `--supersedes <old-id>` rather than dele
 ## Retiring a memory
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/deactivate-memory.sh 42
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/deactivate-memory.sh" 42
 ```
 
 Deactivate; never delete. The historical record is the point.
@@ -146,12 +156,12 @@ A formation carries messages between assistant sessions that cannot otherwise se
 two people's assistants can work the same job without colliding.
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/formation-list.sh
-bash ~/.codex/mmry/hooks-handlers/formation-start.sh "Ship the v2 checkout"
-bash ~/.codex/mmry/hooks-handlers/formation-join.sh <formation-id>
-bash ~/.codex/mmry/hooks-handlers/formation-say.sh "Heads up: I am editing the payment module"
-bash ~/.codex/mmry/hooks-handlers/formation-roster.sh
-bash ~/.codex/mmry/hooks-handlers/formation-leave.sh
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-list.sh"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-start.sh" "Ship the v2 checkout"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-join.sh" <formation-id>
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-say.sh" "Heads up: I am editing the payment module"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-roster.sh"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-leave.sh"
 ```
 
 Messages from the formation arrive on their own, marked `FORMATION TRANSMISSION`. A line marked
@@ -163,7 +173,7 @@ from the memory system rather than from a colleague.
 If memories are not loading, the account may not be authenticated on this machine:
 
 ```bash
-bash ~/.codex/mmry/setup/mmry-setup.sh
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 ```
 
 It opens a browser for the customer to sign in at mmryai.com and writes the credential. After it
@@ -182,5 +192,5 @@ plan-accepted prompt. Never imply any of them works here.
 ## Reporting a problem
 
 ```bash
-bash ~/.codex/mmry/hooks-handlers/submit-feedback.sh --type bug --title "..." --description "..."
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/submit-feedback.sh" --type bug --title "..." --description "..."
 ```

@@ -1,2 +1,25 @@
-# Force LF line endings for shell scripts (CRLF breaks shebang on Windows Git Bash)
+# Line endings are not cosmetic here: every file in this repository is a script that some runtime
+# executes directly, and two different runtimes disagree about what a line ends with.
+
+# Force LF for shell scripts (CRLF breaks the shebang on Windows Git Bash: the kernel reads
+# "#!/usr/bin/env bash\r" and looks for an interpreter literally named "bash\r").
 *.sh text eol=lf
+
+# The test harness is shell too, and it is run on Linux and macOS in CI. A .bats or .bash file that
+# reaches those machines with CRLF fails at `load`, with an error that names a carriage return.
+# Found on 2026-09-16 running this suite in a Linux container (#31245 QA round 2).
+*.bats text eol=lf
+*.bash text eol=lf
+
+# And the Windows scripts are the mirror image. cmd.exe and PowerShell are CRLF runtimes, and
+# nothing here pinned them, so what a customer received depended on the core.autocrlf setting of
+# whoever last checked the file out - LF with autocrlf=false, CRLF with autocrlf=true. Two
+# different files from one commit.
+#
+# This matters more since #31245 than it did before: codex-hook.cmd is on the hot path of EVERY
+# MMRY hook on Windows Codex - four registrations route through it - where the other Windows
+# scripts run once, at install time. cmd.exe's handling of LF-only input is not something to leave
+# to chance in a file that runs after every tool call.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
