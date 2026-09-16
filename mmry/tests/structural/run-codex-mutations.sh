@@ -196,8 +196,6 @@ mutate "a Claude command file gains frontmatter" commands/setup.md \
   "s = '---\ndescription: x\n---\n' + s" \
   structural/codex-manifest.bats "gained YAML frontmatter"
 
-mutate "the e2e fixture stops copying lib-host" tests/e2e/setup-join.bats   's = s.replace("cp \\"$PLUGIN_ROOT/hooks-handlers/lib-host.sh\\"", "true #", 1)'   structural/codex-manifest.bats "mirrored by the e2e fixture"
-
-echo
+mutate "the e2e fixture stops copying lib-host" tests/e2e/setup-join.bats   's = s.replace("cp "+chr(34)+chr(36)+"PLUGIN_ROOT/hooks-handlers/lib-host.sh"+chr(34), "true #", 1)'   structural/codex-manifest.bats "mirrored by the e2e fixture"
 echo "=== refused: $PASS   survived: $FAIL ==="
 [[ "$FAIL" -eq 0 ]]
