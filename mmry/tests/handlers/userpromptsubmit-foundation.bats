@@ -254,7 +254,10 @@ _registered_timeout() {
     # Logged as a crash, not as a deadline, so the log agrees with what the customer was told.
     grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
     grep -q 'without hitting' "$TEST_TMPDIR/mmry-foundation.log"
-    ! grep -q 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log"
+    # Counted, not `! grep -q`: a `!`-negated command is exempt from `set -e`, so the
+    # original form could not fail this test even when the log DID say 'deadline exceeded'
+    # - the one thing this assertion exists to catch (#31434 QA).
+    (( $(grep -c 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log" || true) == 0 ))
 }
 
 @test "userpromptsubmit-foundation: MMRY_DEBUG captures the stderr the handler otherwise discards (#31434)" {

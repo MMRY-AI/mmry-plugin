@@ -248,7 +248,12 @@ SHIMEOF
     local handler budget start elapsed_ms out margin_ms
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
-                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '')"
+                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" )"
+    # Trim anything that is not a digit, rather than naming a carriage return: jq.exe
+    # opens stdout in text mode on Windows and appends one. An earlier form used
+    # `tr -d` with a LITERAL CR in the source, which git's CRLF normalisation turned
+    # into a line break on checkout and silently broke this extraction (#31434 QA).
+    budget="${budget%%[![:digit:]]*}"
     [[ "$budget" =~ ^[0-9]+$ ]]
 
     start="$(date +%s)"
@@ -269,4 +274,104 @@ SHIMEOF
     [[ "$out" == *'NOT applied to this turn'* ]]
     [[ "$out" == *'exceeded'* ]]
     echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+}
+
+@test "hook-budgets: the watchdog measures ELAPSED TIME, not sleep iterations (#31434 QA)" {
+    # Isolates the DRIFT, which the wall-clock test above cannot always see.
+    #
+    # The shipped-to-QA watchdog counted `sleep 1` ROUNDS, so one configured second really
+    # bought 1 s plus the cost of spawning `sleep`. That is how a 15 s deadline produced a
+    # 23-29 s handler against a 20 s budget. The wall-clock test catches that combination -
+    # measured here at 23 s, margin -3000 ms - but it cannot catch the drift ALONE, because
+    # the size of the drift is the size of a process spawn, and that is a property of the
+    # machine, not of the code. Measured on this Windows box: ~300 ms per spawn under load,
+    # giving a 25% overrun, but under 100 ms when the box was quiet, giving almost none. A
+    # timing assertion for drift would therefore pass or fail on how busy the machine was,
+    # which is not evidence about the code. Two runs proved exactly that: the same iteration
+    # counter measured 125% of real time once and 86% another time.
+    #
+    # So the drift is asserted where it is deterministic - in the source. This file already
+    # reads shipped source for the deadline constant, for the same reason: some invariants are
+    # not observable from the outside cheaply or reliably, and asserting them weakly is worse
+    # than asserting them structurally and saying so.
+    local handler block
+    handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [[ -f "$handler" ]]
+
+    # The watchdog subshell: from its `while` to the kill that ends it.
+    block="$(sed -n '/^        while /,/kill -TERM/p' "$handler")"
+    # SAMPLE SIZE, as everywhere else in this file: an extraction that found nothing must fail
+    # loudly rather than pass a comparison against an empty string.
+    (( $(printf '%s
+' "$block" | grep -c .) >= 3 ))
+    printf '%s
+' "$block" | grep -q 'kill -TERM'
+
+    # The loop bound must be a CLOCK. `SECONDS` is a bash builtin, so this also removes the
+    # per-round spawn that caused the drift in the first place.
+    printf '%s
+' "$block" | grep -q 'while (( SECONDS < DEADLINE ))'
+    # And nothing in it may be a per-iteration counter standing in for elapsed time.
+    #
+    # Counted rather than written as `! ... | grep -q` (#31434 QA). A `!`-negated command is
+    # EXEMT from `set -e` by the shell standard, so `! grep -q x` never fails a bats test -
+    # it just returns 1 and execution carries on to the next line. Demonstrated on this suite:
+    # a test whose body was `! true` followed by `false` reported the failure at `false`. Every
+    # negative assertion in this file is therefore written as a count compared to zero, which
+    # `(( ))` does fail on.
+    (( $(printf '%s
+' "$block" | grep -cE '_waited|\+ 1 \)\)' || true) == 0 ))
+    # The clock must be reset before the loop, or it counts from the supervisor's start and
+    # fires early.
+    grep -q '^        SECONDS=0$' "$handler"
+}
+
+@test "hook-budgets: the per-prompt path spawns no process it does not need (#31434 QA)" {
+    # The complement to the MEASURED-cost test above, and the reason both exist.
+    #
+    # That test is a wall-clock bar, so it only bites when the machine is slow enough to make
+    # the cost visible. It did bite - 4800 ms against its 4000 ms limit, four consecutive runs
+    # on a loaded Windows box, which is what sent this ticket back. But re-running the same
+    # regression on a QUIET box passes it: restoring every spawn this fix removed still came in
+    # under the bar. A guard that only works when the machine is busy will let the regression
+    # back in on the day CI happens to be idle, which is precisely how the original 5 s budget
+    # survived a green suite.
+    #
+    # So the thing that actually matters is asserted directly: on Windows Git Bash a process
+    # spawn measured ~300 ms, so for a hook that runs on EVERY PROMPT the spawn count is the
+    # cost. These three idioms were the removable ones; each has a builtin equivalent that
+    # this handler now uses.
+    local handler body
+    handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [[ -f "$handler" ]]
+
+    # Comments in this file discuss the idioms by name, so strip them before matching or the
+    # test fails on its own explanation.
+    body="$(grep -v '^[[:space:]]*#' "$handler")"
+    # SAMPLE SIZE: the strip must leave a handler behind, not an empty string.
+    (( $(printf '%s
+' "$body" | grep -c .) >= 100 ))
+
+    # Counted, not `! ... grep -q`: see the note in the watchdog test above - a `!`-negated
+    # command cannot fail a bats test. Written as `! grep`, both of these passed against a
+    # handler with every removed spawn restored.
+    #
+    # `cat` to read a file into a variable - `$(<file)` is a builtin and costs no exec.
+    (( $(printf '%s
+' "$body" | grep -c 'cat "\$' || true) == 0 ))
+    # A `tr` pipeline to case-fold a short string - _mmry_tolower does it in the shell.
+    (( $(printf '%s
+' "$body" | grep -c "tr '\[:upper:\]'" || true) == 0 ))
+    # And the opt-out must be answered before the worker is spawned, not after: an opted-out
+    # customer should pay nothing, and the crash notice's own remedy depends on it.
+    printf '%s
+' "$body" | grep -q '_mmry_reinject_is_off_here'
+    local off_line worker_line
+    off_line="$(printf '%s
+' "$body" | grep -n '_mmry_reinject_is_off_here' | head -1 | cut -d: -f1)"
+    worker_line="$(printf '%s
+' "$body" | grep -n 'MMRY_FOUNDATION_WORKER=1 bash' | head -1 | cut -d: -f1)"
+    [[ "$off_line" =~ ^[0-9]+$ ]]
+    [[ "$worker_line" =~ ^[0-9]+$ ]]
+    (( off_line < worker_line ))
 }
