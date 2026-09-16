@@ -313,10 +313,15 @@ setup() {
     # "No such file or directory" and named a temp path, which is a sentence about nothing.
     local setup_script="$PLUGIN_ROOT/setup/mmry-setup.sh"
     local fixture="$PLUGIN_ROOT/tests/e2e/setup-join.bats"
+    # THE SEARCH IS ANCHORED ON AN ACTUAL cp COMMAND, NOT ON THE LIBRARY NAME ANYWHERE IN THE FILE.
+    # The first version of this check looked for the bare name, and the explanatory comment in
+    # setup-join.bats mentions lib-host.sh twice - so deleting the cp line left the check green.
+    # Proven by deleting the line and watching this test pass: an assertion that cannot fail.
+    # Comment lines are stripped before matching for the same reason.
     local lib
     for lib in $(grep -o 'hooks-handlers/lib-[a-z]*\.sh' "$setup_script" | sort -u); do
-        grep -q "$lib" "$fixture" || {
-            echo "mmry-setup.sh sources $lib but tests/e2e/setup-join.bats does not copy it into the isolated tree"
+        grep -v '^[[:space:]]*#' "$fixture" | grep -q "^[[:space:]]*cp .*${lib}" || {
+            echo "mmry-setup.sh sources $lib but tests/e2e/setup-join.bats has no cp line copying it into the isolated tree"
             return 1
         }
     done
