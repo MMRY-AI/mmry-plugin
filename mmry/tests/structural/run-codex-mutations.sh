@@ -353,7 +353,7 @@ mutate "session-init installs into the Claude directory on every host" hooks-han
 
 mutate "session-init stops copying the Windows entry point" hooks-handlers/session-init.sh   's = s.replace("cp " + chr(34) + "$P" + chr(34) + "/hooks-handlers/*.cmd", "true # cp " + chr(34) + "$P" + chr(34) + "/hooks-handlers/*.cmd", 1)'   handlers/codex-session.bats "copies the Windows entry point"
 
-mutate "session-init loses the pipefail guard on the plugin-root search" hooks-handlers/session-init.sh   "s = s.replace(chr(39) + '|/hooks-handlers\$||' + chr(39) + ' || true)', chr(39) + '|/hooks-handlers\$||' + chr(39) + ')', 1)"   handlers/codex-session.bats "plugin root cannot be found"
+mutate "session-init loses the pipefail guard on the plugin-root search" hooks-handlers/session-init.sh   's = s.replace("|| true)" + chr(34), ")" + chr(34), 1)'   handlers/codex-session.bats "plugin root cannot be found"
 
 mutate "session-start registers every session as claude-code" hooks-handlers/session-start.sh   's = s.replace(chr(34) + "$(mmry_host_client_name)" + chr(34), chr(34) + "claude-code" + chr(34), 1)'   handlers/codex-session.bats "registered as codex"
 
