@@ -107,13 +107,9 @@ mutate "shim drops the path-separator guard" hooks-handlers/codex-hook.sh \
   "s = s.replace('    *[/\\\\\\\\]*|.*|\"\") exit 0 ;;', '    \"\") exit 0 ;;')" \
   handlers/codex-hook.bats "path separator"
 
-mutate "shim swallows the handler exit code" hooks-handlers/codex-hook.sh \
-  "s = s.replace('exec bash \"\$TARGET\" \"\$@\"', 'bash \"\$TARGET\" \"\$@\"; exit 0')" \
-  handlers/codex-hook.bats "exit code is passed through"
+mutate "shim swallows the handler exit code" hooks-handlers/codex-hook.sh   's = s.replace("exec bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34), "bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34) + " || true", 1)'   handlers/codex-hook.bats "exit code is passed through"
 
-mutate "shim stops setting MMRY_CONFIG_FILE" hooks-handlers/codex-hook.sh \
-  "s = s.replace('export MMRY_CONFIG_FILE=\"\${MMRY_CONFIG_FILE:-\$(mmry_host_config_file)}\"', ':')" \
-  handlers/codex-hook.bats "MMRY_CONFIG_FILE"
+mutate "shim stops setting MMRY_CONFIG_FILE" hooks-handlers/codex-hook.sh   's = s.replace("export MMRY_CONFIG_FILE=" + chr(34) + "$_mmry_cfg" + chr(34), "_mmry_unused=" + chr(34) + "$_mmry_cfg" + chr(34), 1)'   handlers/codex-hook.bats "MMRY_CONFIG_FILE"
 
 # ---- codex-hooks.json ------------------------------------------------------------------------
 mutate "PreCompact gets registered" hooks/codex-hooks.json \
