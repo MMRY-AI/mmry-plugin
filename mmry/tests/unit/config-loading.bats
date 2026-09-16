@@ -298,3 +298,68 @@ EOF
     [[ "$output" == *"keylen=13"* ]]    # secret-key-42
     [[ "$output" == *"authlen=6"* ]]    # apikey
 }
+
+@test "config: a value containing a newline does not shear every field after it (#31434 QA)" {
+    # THE REGRESSION THIS FILE EXISTS TO CATCH, and it was introduced by #31434 itself.
+    #
+    # The first cut of the single-jq parse emitted one field per LINE. A value containing a
+    # newline produced more lines than fields, so every later field shifted up one - and
+    # nothing anywhere said so. Measured against this exact config before the fix:
+    #
+    #     key=line-one   reinject=5   cap=true   refresh=1500
+    #
+    # foundationRefreshSeconds inherited "1500", which PASSES the `^[0-9]+$` guard in
+    # userpromptsubmit-foundation.sh and silently turns a daily background refresh into one
+    # every 25 minutes. A wrong-but-numeric value that clears its own validation is precisely
+    # the silent-failure shape #31434 exists to eliminate.
+    #
+    # NUL-delimiting the jq output fixes it: no JSON string value can contain a NUL, so no
+    # value can forge the delimiter.
+    printf '%s\n' \
+        '{' \
+        '  "apiUrl": "https://mmryai.com",' \
+        '  "authMethod": "apikey",' \
+        '  "apiKey": "line-one\n5",' \
+        '  "foundationReinject": "true",' \
+        '  "foundationReinjectTokenCap": 1500,' \
+        '  "foundationRefreshSeconds": 86400' \
+        '}' > "$MMRY_CONFIG_FILE"
+
+    run bash -c "
+        export MMRY_CONFIG_FILE='$MMRY_CONFIG_FILE'
+        export CLAUDE_PLUGIN_ROOT='$PLUGIN_ROOT'
+        export MMRY_API_URL='' MMRY_API_KEY='' MMRY_AUTH_METHOD=''
+        unset MMRY_FOUNDATION_REINJECT MMRY_FOUNDATION_TOKEN_CAP MMRY_FOUNDATION_REFRESH_SECONDS
+        source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'
+        echo \"url=\$MMRY_API_URL\"
+        echo \"auth=\$MMRY_AUTH_METHOD\"
+        echo \"reinject=\$MMRY_FOUNDATION_REINJECT\"
+        echo \"cap=\$MMRY_FOUNDATION_TOKEN_CAP\"
+        echo \"refresh=\$MMRY_FOUNDATION_REFRESH_SECONDS\"
+        # The key is multi-line by construction, so report it as a single flattened token
+        # rather than letting it break the line-oriented assertions below.
+        printf 'keyflat=%s\n' \"\$(printf '%s' \"\$MMRY_API_KEY\" | tr -d '\r' | tr '\n' '~')\"
+    "
+    [ "$status" -eq 0 ]
+
+    # Every field after the multi-line value still holds ITS OWN value.
+    [[ "$output" == *"url=https://mmryai.com"* ]]
+    [[ "$output" == *"auth=apikey"* ]]
+    [[ "$output" == *"reinject=true"* ]]
+    [[ "$output" == *"cap=1500"* ]]
+    [[ "$output" == *"refresh=86400"* ]]
+
+    # Named explicitly, because these are the exact wrong values the line-based parse
+    # produced. Asserting the right value alone would still pass if a future change made
+    # reinject empty and the default filled it back in.
+    [[ "$output" != *"reinject=5"* ]]
+    [[ "$output" != *"refresh=1500"* ]]
+    [[ "$output" != *"cap=true"* ]]
+
+    # And the multi-line value itself survives whole rather than being cut at its newline.
+    # CRs are stripped for the comparison ONLY because jq.exe on Windows opens stdout in
+    # TEXT mode and turns the LF inside the value into CRLF. That is documented in
+    # mmry_load_config; it does not shear anything, and asserting on it would make this a
+    # platform test instead of a shearing test.
+    [[ "$output" == *"keyflat=line-one~5"* ]]
+}

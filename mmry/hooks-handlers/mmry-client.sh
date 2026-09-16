@@ -91,45 +91,52 @@ mmry_load_config() {
         # 380 ms of which nearly all was spawn overhead, and the config was loaded twice per
         # hook firing. jq reads the file directly, so the `cat` and the pipe go too.
         #
-        # Fields are emitted one per line in a FIXED order. An absent field is an empty
-        # line, which keeps later fields on their own lines - so the reads below must not
-        # be reordered without reordering the jq array to match.
+        # NUL-DELIMITED, not newline-delimited (#31434 QA). The first cut of this parse
+        # emitted one field per LINE and read them with plain `read`. A value containing a
+        # newline then produced more lines than fields, every later field SHEARED up by one,
+        # and the shear was silent: measured on the six-key config below, apiKey "line-one\n5"
+        # gave reinject="5", cap="true" and foundationRefreshSeconds="1500" - a value that
+        # passes the `^[0-9]+$` guard downstream and quietly turns a daily background refresh
+        # into one every 25 minutes. A wrong-but-plausible number that clears its own
+        # validation is the exact failure shape this ticket exists to remove, so it is not
+        # acceptable to ship it inside the fix for it.
+        #
+        # NUL cannot appear in a JSON string value that jq will emit as raw text, so it is
+        # the only delimiter no value can forge. Every field is terminated (not separated),
+        # so the sixth read sees its delimiter too and the count is unambiguous.
+        #
+        # This also removes the trailing-CR strip the line-based form needed: jq.exe on
+        # Windows opens stdout in TEXT mode and turns each emitted LF into CRLF, but with
+        # `-j` there are no LFs between fields for it to touch. The one residue, stated
+        # rather than hidden: a value that itself contains a newline still gains a CR on
+        # Windows. Nothing shears, the field stays whole, and none of the six config keys
+        # is a multi-line value in practice - but it is not lossless there.
+        #
+        # Fields are emitted in a FIXED order and an absent field is an empty string, so the
+        # reads below must not be reordered without reordering the jq array to match.
         if [[ -n "${MMRY_JQ:-}" ]]; then
             local _cfg_url="" _cfg_auth="" _cfg_key=""
             local _cfg_reinject="" _cfg_cap="" _cfg_refresh=""
-            # `{ read; ... } < <(...)` rather than mapfile: macOS ships bash 3.2.
-            # Each read is `|| true`: on malformed JSON jq emits nothing, the first read
-            # hits EOF and returns 1, and this file runs under `set -e`. Without the guard
-            # a bad config would kill the sourcing shell instead of falling back to defaults.
+            # `{ read; ... } < <(...)` rather than mapfile: macOS ships bash 3.2, which has
+            # no mapfile but does have `read -d`.
+            # Each read is `|| true` twice over: `read -d ''` returns non-zero at EOF even
+            # when it assigned a value, and on malformed JSON jq emits nothing at all. This
+            # file runs under `set -e`, so without the guard a bad config would kill the
+            # sourcing shell mid-hook instead of falling back to defaults.
             {
-                IFS= read -r _cfg_url || true
-                IFS= read -r _cfg_auth || true
-                IFS= read -r _cfg_key || true
-                IFS= read -r _cfg_reinject || true
-                IFS= read -r _cfg_cap || true
-                IFS= read -r _cfg_refresh || true
-            } < <("$MMRY_JQ" -r '
+                IFS= read -r -d '' _cfg_url || true
+                IFS= read -r -d '' _cfg_auth || true
+                IFS= read -r -d '' _cfg_key || true
+                IFS= read -r -d '' _cfg_reinject || true
+                IFS= read -r -d '' _cfg_cap || true
+                IFS= read -r -d '' _cfg_refresh || true
+            } < <("$MMRY_JQ" -j '
                     [ .apiUrl, .authMethod, .apiKey,
                       .foundationReinject, .foundationReinjectTokenCap, .foundationRefreshSeconds ]
                     | map(if . == null then "" else tostring end)
+                    | map(. + "\u0000")
                     | .[]
                 ' "$config_file" 2>/dev/null)
-
-            # Strip a trailing CR. jq.exe on Windows opens stdout in TEXT mode and emits
-            # CRLF, and `read` only consumes the LF. The old six-`cat | jq` form never saw
-            # this because MSYS bash strips a trailing CR from command substitution - so the
-            # bug appears the moment you stop using $(). A CR here is invisible in an echo
-            # and breaks every string comparison downstream, which is exactly how it was
-            # found: an eyeball check of the parsed values looked perfect and the suite did
-            # not. Pure parameter expansion, no extra process. Written as the octal escape
-            # 015 rather than backslash-r: a literal CR pasted into the source by a careless
-            # editor looks identical, expands to nothing, and silently does nothing.
-            _cfg_url="${_cfg_url%$'\015'}"
-            _cfg_auth="${_cfg_auth%$'\015'}"
-            _cfg_key="${_cfg_key%$'\015'}"
-            _cfg_reinject="${_cfg_reinject%$'\015'}"
-            _cfg_cap="${_cfg_cap%$'\015'}"
-            _cfg_refresh="${_cfg_refresh%$'\015'}"
 
             [[ -z "$MMRY_API_URL" && -n "$_cfg_url" ]] && MMRY_API_URL="$_cfg_url" || true
             [[ -z "$MMRY_AUTH_METHOD" && -n "$_cfg_auth" ]] && MMRY_AUTH_METHOD="$_cfg_auth" || true

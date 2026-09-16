@@ -45,6 +45,8 @@ REPO_ROOT="$(cd "$PLUGIN_SRC/.." && pwd)"
 HANDLER_REL="hooks-handlers/userpromptsubmit-foundation.sh"
 HANDLER_TESTS="handlers/userpromptsubmit-foundation.bats"
 BUDGET_TESTS="structural/hook-budgets.bats"
+CONFIG_TESTS="unit/config-loading.bats"
+CLIENT_REL="hooks-handlers/mmry-client.sh"
 
 WORK_BASE="${TMPDIR:-/tmp}/mmry-mutation-$$"
 mkdir -p "$WORK_BASE"
@@ -54,6 +56,10 @@ trap 'rm -rf "$WORK_BASE" 2>/dev/null' EXIT
 # The mutations. Each is a function taking the scratch plugin root. Keep every
 # sed script anchored on text unique to the line it targets: a mutation that
 # silently hits two places is a mutation nobody can reason about.
+#
+# A mutation that breaks a file OTHER than the handler declares file_mNN. The no-op guard
+# diffs THAT file, so a mutation pointed at the wrong file is caught as a no-op rather than
+# scored against a file it never touched.
 # ---------------------------------------------------------------------------
 
 # Point the customer at a command that does not exist. This is the #31434 QA finding: the
@@ -110,7 +116,25 @@ mutate_m08() { sed -i "/foundation reinjection FAILED/d" "$1/$HANDLER_REL"; }
 targets_m08="$HANDLER_TESTS"
 desc_m08="abnormal exits stop writing to the log"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08"
+# Put the config parse back on NEWLINE-delimited fields - the regression #31434 shipped in
+# its own first cut and which this pass removed. A config value containing a newline then
+# emits more lines than there are fields, every later field shears up one, and
+# foundationRefreshSeconds inherits a wrong-but-numeric value that passes its `^[0-9]+$`
+# guard. Silent, plausible and wrong, which is the failure shape the whole ticket is about.
+#
+# Three seds because the line-based form is three separate decisions: `-r` instead of `-j`,
+# no NUL terminator, and reads without `-d ''`. Reverting only one of them would not compile
+# into a working line parser and the mutation would prove nothing.
+mutate_m09() {
+    sed -i 's/"\$MMRY_JQ" -j/"$MMRY_JQ" -r/' "$1/$CLIENT_REL"
+    sed -i '/u0000/d' "$1/$CLIENT_REL"   # the only occurrence in that file
+    sed -i "s/read -r -d '' _cfg_/read -r _cfg_/g" "$1/$CLIENT_REL"
+}
+file_m09="$CLIENT_REL"
+targets_m09="$CONFIG_TESTS"
+desc_m09="config parse back to newline-delimited fields (values can shear the parse)"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
@@ -144,7 +168,13 @@ _run_suite() {
 
 _show_failures() {
     # The assertion that bit, so a REFUSED verdict can be checked rather than believed.
-    grep -E '^not ok|in test file|^# *\(' "$1" | head -8 | sed 's/^/        /'
+    #
+    # ALL of them, not the first eight (#31434 QA). A mutation that breaks a shared code
+    # path fails several tests at once, and the one that proves the mutation was understood
+    # is not reliably among the first few - m09 fails four alphabetically-earlier tests
+    # before it reaches the shearing assertion it exists to exercise. Truncating the list
+    # hid exactly the line a reader needs to check the verdict against.
+    grep -E '^not ok|in test file|^# *\(' "$1" | sed 's/^/        /'
 }
 
 # --- Self-check. Proves the guard rather than describing it. ---------------------------
@@ -166,7 +196,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
@@ -190,13 +220,14 @@ for m in $SELECTED; do
     mkdir -p "$DIR"
     _make_copy "$DIR"
 
+    eval "mfile=\${file_$m:-$HANDLER_REL}"
     before="$WORK_BASE/$m.before"
-    cp "$DIR/mmry/$HANDLER_REL" "$before"
+    cp "$DIR/mmry/$mfile" "$before"
     "mutate_$m" "$DIR/mmry"
 
     # GUARD 1: a mutation that changed nothing would run a green suite against untouched
     # code and score it as a coverage hole. This is the defect the harness itself had.
-    if cmp -s "$before" "$DIR/mmry/$HANDLER_REL"; then
+    if cmp -s "$before" "$DIR/mmry/$mfile"; then
         printf '%s: NO-OP MUTATION — the sed matched nothing. Aborting rather than reporting a\n' "$m"
         printf '     verdict about code that was never modified.\n'
         exit 1
