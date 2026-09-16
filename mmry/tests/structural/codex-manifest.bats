@@ -15,8 +15,8 @@
 #
 # Read at openai/codex commit 5bf132c (2026-09-15) against the installed codex-cli 0.154.0.
 #
-# EVERY ASSERTION HERE WAS SEEN TO REFUSE. See codex-mutation-log.md in this directory for the
-# deliberate break applied to each one and what it produced.
+# EVERY ASSERTION HERE WAS SEEN TO REFUSE under tests/structural/run-codex-mutations.sh. The
+# mutation applied to each is recorded in tests/structural/CODEX-MUTATIONS.md, beside it.
 
 load '../helpers/test-helper'
 

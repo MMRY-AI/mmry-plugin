@@ -4,7 +4,21 @@ set -euo pipefail
 
 CLAUDE_DIR="${HOME}/.claude"
 SETTINGS_PATH="${CLAUDE_DIR}/settings.json"
-CONFIG_PATH="${CLAUDE_DIR}/mmry-config.json"
+
+# #31245 QA round 2: THE CREDENTIAL THIS REMOVES BELONGS TO WHICHEVER HOST THIS COPY IS INSTALLED
+# UNDER. Spelled as ~/.claude/mmry-config.json, a Codex uninstall deleted the OTHER product's
+# credential - signing the customer out of Claude Code - and left the Codex one exactly where it
+# was. The resolver answers "${HOME}/.claude/mmry-config.json" for every Claude Code install, which
+# is the literal this line used to carry, so nothing changes there.
+export MMRY_ALLOW_NO_CREDENTIAL=1
+_mmry_uninstall_libs="$(cd "$(dirname "$0")/../hooks-handlers" && pwd)"
+if [[ -f "${_mmry_uninstall_libs}/lib-host.sh" ]] && source "${_mmry_uninstall_libs}/lib-host.sh" 2>/dev/null; then
+    CONFIG_PATH="$(mmry_host_config_file)"
+    MMRY_UNINSTALL_HOST="$(mmry_host)"
+else
+    CONFIG_PATH="${CLAUDE_DIR}/mmry-config.json"
+    MMRY_UNINSTALL_HOST="claude"
+fi
 
 # Handle both marketplace and local install key names
 PLUGIN_NAMES=("mmry@mmry-plugin" "mmry@internal-plugins")
@@ -32,7 +46,13 @@ else
 fi
 
 # Step 2: Clean settings.json (plugin, marketplace, permissions)
-if [[ ! -f "$SETTINGS_PATH" ]]; then
+#
+# Claude Code's file, and only ever Claude Code's. A Codex uninstall that edited it would silently
+# change an unrelated product's permissions and plugin list - the same trespass the installer is
+# already guarded against (#31245).
+if [[ "$MMRY_UNINSTALL_HOST" != "claude" ]]; then
+    echo "  Codex install: leaving Claude Code's settings.json untouched."
+elif [[ ! -f "$SETTINGS_PATH" ]]; then
     echo "  No settings.json found."
 else
     # Prefer the resolved jq (system or bundled). #30624. The Python block below

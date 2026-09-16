@@ -13,10 +13,35 @@
 #   stop.command.output.schema.json           no hookSpecificOutput at all
 #   codex-rs/hooks/src/events/stop.rs L343    exit 2 + stderr becomes the continuation prompt
 #
-# EVERY ASSERTION HERE WAS SEEN TO REFUSE. See codex-mutation-log.md.
+# EVERY ASSERTION HERE WAS SEEN TO REFUSE under tests/structural/run-codex-mutations.sh.
+# The mutation applied to each is recorded in tests/structural/CODEX-MUTATIONS.md.
+
+# The assertions below parse JSON with bare `jq`, and this file does not load the shared test
+# helper. On a machine with no system jq - a stock Linux container, or Windows Git Bash - four of
+# these failed with "jq: command not found" and said nothing about the product (found running this
+# suite under Linux, #31245 QA round 2). MMRY bundles jq for exactly this reason; use it.
+_shim_bundled_jq() {
+    command -v jq >/dev/null 2>&1 && return 0
+    local os arch name bundled shim
+    os="$(uname -s 2>/dev/null || echo unknown)"; arch="$(uname -m 2>/dev/null || echo unknown)"
+    case "$os" in Linux) os=linux ;; Darwin) os=macos ;; MINGW*|MSYS*|CYGWIN*|Windows_NT) os=windows ;; esac
+    case "$arch" in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; esac
+    name="jq-${os}-${arch}"; [[ "$os" == "windows" ]] && name="${name}.exe"
+    bundled="${BATS_TEST_DIRNAME}/../../vendor/jq/${name}"
+    [[ -f "$bundled" ]] || return 0
+    chmod +x "$bundled" 2>/dev/null || true
+    shim="${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}/jq-shim"
+    mkdir -p "$shim"
+    printf '#!/usr/bin/env bash
+exec "%s" "$@"
+' "$bundled" > "$shim/jq"
+    chmod +x "$shim/jq"
+    export PATH="$shim:$PATH"
+}
 
 setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"
+    _shim_bundled_jq
     export TMPDIR="${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
     export CLAUDE_SESSION_ID="bats-codexform-$$"
     bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_SESSION_ID" || true
@@ -234,4 +259,43 @@ FAKECURL
 
     [ "$status" -eq 0 ]
     [ "$(( ended - started ))" -ge 2 ]
+}
+
+# ---------------------------------------------------------------------------------------------
+# AND ON AN UNCONFIGURED CODEX INSTALL, THIS HOOK STAYS SILENT (#31245 QA round 2)
+#
+# lib-jq.sh refuses when a Codex install has no credential of its own, rather than let the client
+# fall through to the Claude account, and it refuses by exiting 1 with a message. That is right for
+# a handler the model runs and wrong HERE: this runs after every tool call in every session, and
+# its governing rule at the top of the file is to fail open and SILENT. formation-check.sh
+# therefore asks the same question first and answers it with exit 0.
+#
+# The mutation run of 2026-09-16 found this guard had no assertion at all: replacing it with `true`
+# left the file green, because every other test here supplies a credential through the environment.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: an unconfigured Codex install makes this hook silent, not noisy" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local fakehome="${BATS_TEST_TMPDIR}/nocred-home"
+    mkdir -p "$fakehome"
+    [ ! -f "$fakehome/.codex/mmry-config.json" ]
+
+    run env -u MMRY_API_KEY -u MMRY_CONFIG_FILE -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME         HOME="$fakehome" MMRY_HOST=codex MMRY_FORMATION_MODE=tool         bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "control: the same call WITH a credential still does its job" {
+    # Without this the test above is satisfied by a hook that does nothing under any conditions.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local fakehome="${BATS_TEST_TMPDIR}/cred-home"
+    mkdir -p "$fakehome/.codex"
+    printf '%s' '{"apiUrl":"http://fake.invalid","authMethod":"apikey","apiKey":"codex-key"}'         > "$fakehome/.codex/mmry-config.json"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION"         run env -u MMRY_API_KEY -u MMRY_CONFIG_FILE -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME         HOME="$fakehome" MMRY_HOST=codex MMRY_FORMATION_MODE=tool PATH="${bin}:${PATH}"         bash "${HANDLERS}/formation-check.sh"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"FormationService.cs"* ]]
 }

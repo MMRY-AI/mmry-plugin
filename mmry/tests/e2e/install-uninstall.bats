@@ -78,3 +78,35 @@ setup() {
     run jq 'has("autoMemoryEnabled")' "$HOME/.claude/settings.json"
     assert_output "false"
 }
+
+# ══════════════════════════════════════════════
+# uninstall.sh — WHOSE credential it removes (#31245 QA round 2)
+# ══════════════════════════════════════════════
+
+@test "req4: uninstall removes the Claude credential on a Claude install, as it always did" {
+    printf '%s' '{"apiUrl":"https://mmryai.com","authMethod":"apikey","apiKey":"claude-key"}'         > "$HOME/.claude/mmry-config.json"
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$HOME" bash "$UNINSTALL_SCRIPT"
+    [[ "$status" -eq 0 ]]
+    [[ ! -f "$HOME/.claude/mmry-config.json" ]]
+}
+
+@test "codex: uninstall removes the CODEX credential and leaves the Claude one alone" {
+    # Spelled as ~/.claude/mmry-config.json, a Codex uninstall signed the customer out of the other
+    # product and left the Codex credential exactly where it was.
+    mkdir -p "$HOME/.codex"
+    printf '%s' '{"apiUrl":"https://mmryai.com","authMethod":"apikey","apiKey":"codex-key"}'         > "$HOME/.codex/mmry-config.json"
+    printf '%s' '{"apiUrl":"https://mmryai.com","authMethod":"apikey","apiKey":"claude-key"}'         > "$HOME/.claude/mmry-config.json"
+    run env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" bash "$UNINSTALL_SCRIPT"
+    [[ "$status" -eq 0 ]]
+    [[ ! -f "$HOME/.codex/mmry-config.json" ]]
+    [[ -f "$HOME/.claude/mmry-config.json" ]]
+}
+
+@test "codex: uninstall does not touch Claude Code's settings.json either" {
+    mkdir -p "$HOME/.codex"
+    printf '%s' '{"autoMemoryEnabled": false, "otherSetting": true}' > "$HOME/.claude/settings.json"
+    run env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" bash "$UNINSTALL_SCRIPT"
+    [[ "$status" -eq 0 ]]
+    run jq '.autoMemoryEnabled' "$HOME/.claude/settings.json"
+    assert_output "false"
+}
