@@ -197,5 +197,18 @@ mutate "a Claude command file gains frontmatter" commands/setup.md \
   structural/codex-manifest.bats "gained YAML frontmatter"
 
 mutate "the e2e fixture stops copying lib-host" tests/e2e/setup-join.bats   's = s.replace("cp "+chr(34)+chr(36)+"PLUGIN_ROOT/hooks-handlers/lib-host.sh"+chr(34), "true #", 1)'   structural/codex-manifest.bats "mirrored by the e2e fixture"
+# ---- the model-invoked credential path, and the incomplete-copy fallbacks -------------------
+mutate "lib-host stops reading the host off its own location" hooks-handlers/lib-host.sh   's = s.replace("*/.codex/*", "*/.no-such-marker/*", 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
+
+mutate "lib-host stops exporting MMRY_CONFIG_FILE" hooks-handlers/lib-host.sh   's = s.replace("export MMRY_CONFIG_FILE=", "_MMRY_UNUSED=", 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
+
+mutate "lib-jq stops sourcing the host resolver" hooks-handlers/lib-jq.sh   's = s.replace("/lib-host.sh" + chr(34) + " 2>/dev/null || true", "/lib-host-absent.sh" + chr(34) + " 2>/dev/null || true", 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
+
+mutate "location detection overreaches to any CODEX_HOME in the environment" hooks-handlers/lib-host.sh   's = s.replace("if [[ -z " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]]; then", "if [[ -z " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]]; then\n    [[ -n " + chr(34) + "${CODEX_HOME:-}" + chr(34) + " ]] && MMRY_HOST=codex", 1)'   handlers/codex-hook.bats "does NOT make a Claude install think it is Codex"
+
+mutate "hook-guard loses its missing-resolver fallback" hooks-handlers/hook-guard.sh   's = s.replace("TARGET=" + chr(34) + "${HOME}/.claude/mmry/hooks-handlers/${SCRIPT_NAME}.sh" + chr(34), "TARGET=" + chr(34) + "/nonexistent/${SCRIPT_NAME}.sh" + chr(34), 1)'   handlers/codex-hook.bats "hook-guard with NO lib-host.sh"
+
+mutate "stop-check loses its missing-resolver fallback" hooks-handlers/stop-check.sh   's = s.replace("    mmry_host_script_ref() { printf ", "    _unused_ref() { printf ", 1)'   handlers/codex-hook.bats "stop-check with NO lib-host.sh"
+
 echo "=== refused: $PASS   survived: $FAIL ==="
 [[ "$FAIL" -eq 0 ]]
