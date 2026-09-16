@@ -20,6 +20,21 @@
 
 set -euo pipefail
 
+# #31245: resolve the host before anything reads a path or a credential.
+#
+# WHY HERE, OF ALL PLACES. mmry-client.sh sources this file as its very first action, before it
+# loads config, and nearly every handler in the plugin reaches the client through that one line. So
+# sourcing lib-host.sh here is what makes a handler invoked directly by the model - which is how
+# save-memory.sh, search-memories.sh and the rest are actually run - resolve the credential of the
+# assistant it is installed under. Without it those scripts fall through to
+# ${HOME}/.claude/mmry-config.json on every host, which is the wrong file on Codex and no file at
+# all on a machine that has only Codex.
+#
+# It is a no-op on Claude Code: lib-host.sh resolves the host to claude and sets nothing.
+# Guarded, because a missing lib-host.sh must not take jq resolution down with it.
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-host.sh" 2>/dev/null || true
+
 # Directory holding the bundled binaries.
 _mmry_jq_vendor_dir() {
     if [[ -n "${MMRY_JQ_VENDOR_DIR:-}" ]]; then

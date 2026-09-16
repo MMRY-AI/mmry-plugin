@@ -12,16 +12,54 @@
 # hard-coded. That is not a convention, it is the acceptance criterion, and tests/unit/lib-host.bats
 # asserts it string by string so a future edit that drifts the Claude path fails rather than ships.
 #
-# HOST DETECTION IS EXPLICIT, NEVER SNIFFED. MMRY_HOST is set by the Codex entry point
-# (codex-hook.sh) and by nothing else. It is deliberately NOT inferred from the presence of
-# CODEX_HOME or a codex binary on PATH: a developer who has Codex installed still runs Claude Code
-# sessions, and a resolver that guessed from the machine would silently relocate that developer's
-# Claude config the day they installed the other product. An unset or unrecognised MMRY_HOST means
-# Claude Code, which is the behaviour every existing install already has.
+# HOST DETECTION IS DECLARED FIRST, AND OTHERWISE READ OFF THIS FILE'S OWN LOCATION. MMRY_HOST is
+# set by the Codex entry point (codex-hook.sh); when it is absent the block below asks whether this
+# copy of the plugin is installed inside a Codex home, which is a fact about the install rather
+# than a guess about the machine.
+#
+# It is deliberately NOT inferred from the presence of CODEX_HOME in the environment or a codex
+# binary on PATH. A developer who has Codex installed still runs Claude Code sessions, and a
+# resolver that guessed from the machine would relocate that developer's Claude config the day they
+# installed the other product. Anything that is neither declared nor installed under a Codex home
+# is Claude Code, which is the behaviour every existing install already has.
 
 # Guard against double-sourcing. Handlers source this both directly and transitively.
 [[ -n "${_MMRY_LIB_HOST_SOURCED:-}" ]] && return 0
 _MMRY_LIB_HOST_SOURCED=1
+
+# ---------------------------------------------------------------------------------------------
+# WHEN NOBODY DECLARED A HOST, THIS FILE'S OWN LOCATION IS THE ANSWER.
+#
+# The scripts a customer's assistant runs are NOT run through codex-hook.sh. session-init.sh copies
+# every handler into the host's MMRY directory, and the model then invokes, say,
+# ~/.codex/mmry/hooks-handlers/save-memory.sh in a shell of its own where MMRY_HOST is not set and
+# never will be.
+#
+# Before this block that was a silent defect, reproduced on 2026-09-15: sourcing mmry-client.sh
+# from the Codex copy with no MMRY_CONFIG_FILE resolved the credential at
+# ${HOME}/.claude/mmry-config.json - the OTHER product's. On a machine with both installed a Codex
+# save went out under whatever account the Claude file named; on a Codex-only machine there is no
+# such file, so every model-invoked save failed with "No API key configured. Run /mmry:setup",
+# naming a command Codex customers cannot type.
+#
+# THIS IS A LOCATION TEST, NOT MACHINE SNIFFING. It asks where this copy of the file is installed,
+# which is a fact about the install, not a guess about the machine. A Claude Code install lives
+# under ${HOME}/.claude or the Claude plugin cache and is unaffected; the check below can only ever
+# answer "codex" for a file sitting inside a Codex home.
+if [[ -z "${MMRY_HOST:-}" ]]; then
+    _mmry_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)" || _mmry_self_dir=""
+    if [[ -n "$_mmry_self_dir" ]]; then
+        # Normalise to forward slashes so the comparison works from Git Bash on Windows.
+        _mmry_self_dir="${_mmry_self_dir//\\//}"
+        if [[ -n "${CODEX_HOME:-}" ]]; then
+            _mmry_codex_home="${CODEX_HOME//\\//}"
+            [[ "$_mmry_self_dir" == "${_mmry_codex_home}"/* ]] && MMRY_HOST="codex"
+        fi
+        # The default Codex home, and any path segment that is literally ".codex".
+        [[ -z "${MMRY_HOST:-}" && "$_mmry_self_dir" == */.codex/* ]] && MMRY_HOST="codex"
+    fi
+    unset _mmry_self_dir _mmry_codex_home 2>/dev/null || true
+fi
 
 # The host this process is serving. "claude" or "codex"; anything else is treated as "claude".
 mmry_host() {
@@ -106,3 +144,18 @@ mmry_host_script_ref() {
         printf '${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' "$script"
     fi
 }
+
+# ---------------------------------------------------------------------------------------------
+# POINT THE CLIENT AT THE RIGHT CREDENTIAL, ONCE, AT SOURCE TIME.
+#
+# mmry-client.sh discovers its config as ${MMRY_CONFIG_FILE}, then ${CLAUDE_PLUGIN_ROOT}, then
+# ${HOME}/.claude/mmry-config.json. Only the first of those can be right on a second host, and
+# mmry-client.sh is not ours to change in this task. Setting it here means every consumer of the
+# client - which is nearly every handler, through lib-jq.sh - resolves the correct credential
+# without a single edit to the client.
+#
+# ON CLAUDE CODE THIS DOES NOTHING. mmry_host() is "claude", the branch is not taken, and the
+# client's existing discovery order runs exactly as it always has.
+if [[ -z "${MMRY_CONFIG_FILE:-}" ]] && [[ "$(mmry_host)" == "codex" ]]; then
+    export MMRY_CONFIG_FILE="$(mmry_host_config_file)"
+fi

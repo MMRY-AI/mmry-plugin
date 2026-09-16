@@ -23,7 +23,10 @@
 # exit 2 is how Stop and PostToolUse handlers deliver text to the model and swallowing it would
 # silently disable delivery.
 
-set -uo pipefail
+# set -e is the repository convention (structural/file-integrity.bats enforces it) and is safe here
+# only because every step below is explicitly guarded with `|| exit 0`. The fail-open promise is
+# carried by those guards, not by the absence of -e.
+set -euo pipefail
 
 HANDLER_NAME="${1:-}"
 [[ -n "$HANDLER_NAME" ]] || exit 0
@@ -59,7 +62,11 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 #
 # An already-set MMRY_CONFIG_FILE is left alone: it is the documented override and a customer or a
 # test that set it deliberately outranks this default.
-export MMRY_CONFIG_FILE="${MMRY_CONFIG_FILE:-$(mmry_host_config_file)}"
+_mmry_cfg="${MMRY_CONFIG_FILE:-}"
+if [[ -z "$_mmry_cfg" ]]; then
+    _mmry_cfg="$(mmry_host_config_file)" || exit 0
+fi
+export MMRY_CONFIG_FILE="$_mmry_cfg"
 
 TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 [[ -f "$TARGET" ]] || exit 0

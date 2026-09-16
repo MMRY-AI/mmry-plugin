@@ -255,3 +255,96 @@ stop_run() {
     run bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --not-a-real-flag
     [[ "$status" -ne 0 ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# The model-invoked path: a handler the assistant runs itself, with nothing declared.
+#
+# These scripts are NOT run through codex-hook.sh. session-init.sh copies them into the host's MMRY
+# directory and the model invokes them in a shell of its own, where MMRY_HOST is unset and always
+# will be. Reproduced on 2026-09-15, before the fix: the Codex copy resolved
+# ${HOME}/.claude/mmry-config.json, the other product's credential.
+# ---------------------------------------------------------------------------------------------
+
+_install_two_hosts() {
+    # Builds a machine with BOTH products installed and a DIFFERENT credential under each, so
+    # "it found a credential" cannot be mistaken for "it found the right one".
+    mkdir -p "$TEST_HOME/.codex/mmry/hooks-handlers" "$TEST_HOME/.claude/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$TEST_HOME/.codex/mmry/hooks-handlers/"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$TEST_HOME/.claude/mmry/hooks-handlers/"
+    cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.codex/mmry/" 2>/dev/null || true
+    cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.claude/mmry/" 2>/dev/null || true
+    printf '{"apiUrl":"https://claude.example","authMethod":"apikey","apiKey":"claude-key"}' \
+        > "$TEST_HOME/.claude/mmry-config.json"
+    printf '{"apiUrl":"https://codex.example","authMethod":"apikey","apiKey":"codex-key"}' \
+        > "$TEST_HOME/.codex/mmry-config.json"
+}
+
+_resolve_from() {
+    # Source the client from one install with nothing declared, and report what it resolved.
+    local dir="$1"
+    env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME" \
+        bash -c "source '${dir}/mmry-client.sh' >/dev/null 2>&1; printf '%s' \"\$MMRY_API_KEY\""
+}
+
+@test "codex: a model-invoked handler resolves the CODEX credential, not the Claude one" {
+    _install_two_hosts
+    run _resolve_from "$TEST_HOME/.codex/mmry/hooks-handlers"
+    assert_output "codex-key"
+}
+
+@test "req4: the same machine's Claude install still resolves the Claude credential" {
+    # The control. Without it the test above is satisfied by any change that breaks both.
+    _install_two_hosts
+    run _resolve_from "$TEST_HOME/.claude/mmry/hooks-handlers"
+    assert_output "claude-key"
+}
+
+@test "codex: a Codex install with no Claude config at all still resolves, rather than failing" {
+    # The worse half of the original defect: on a Codex-only machine there is no
+    # ${HOME}/.claude/mmry-config.json, so every model-invoked save failed with "No API key
+    # configured. Run /mmry:setup" - naming a command Codex customers cannot type.
+    mkdir -p "$TEST_HOME/.codex/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$TEST_HOME/.codex/mmry/hooks-handlers/"
+    cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.codex/mmry/" 2>/dev/null || true
+    printf '{"apiUrl":"https://codex.example","authMethod":"apikey","apiKey":"codex-only-key"}' \
+        > "$TEST_HOME/.codex/mmry-config.json"
+    [[ ! -f "$TEST_HOME/.claude/mmry-config.json" ]]
+    run _resolve_from "$TEST_HOME/.codex/mmry/hooks-handlers"
+    assert_output "codex-only-key"
+}
+
+@test "codex: CODEX_HOME in the environment alone does NOT make a Claude install think it is Codex" {
+    # The sniffing failure this deliberately avoids: a developer who installs Codex should not have
+    # their Claude Code sessions silently repointed at a different config directory.
+    _install_two_hosts
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT \
+        CODEX_HOME="$TEST_HOME/.codex" HOME="$TEST_HOME" \
+        bash -c "source '$TEST_HOME/.claude/mmry/hooks-handlers/mmry-client.sh' >/dev/null 2>&1; printf '%s' \"\$MMRY_API_KEY\""
+    assert_output "claude-key"
+}
+
+@test "codex: a relocated CODEX_HOME is recognised by location" {
+    local ch="$TEST_TMPDIR/custom-codex"
+    mkdir -p "$ch/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$ch/mmry/hooks-handlers/"
+    cp -r "$PLUGIN_ROOT/vendor" "$ch/mmry/" 2>/dev/null || true
+    mkdir -p "$TEST_HOME/.claude"
+    printf '{"apiUrl":"https://codex.example","authMethod":"apikey","apiKey":"relocated-key"}' \
+        > "$ch/mmry-config.json"
+    printf '{"apiUrl":"https://claude.example","authMethod":"apikey","apiKey":"claude-key"}' \
+        > "$TEST_HOME/.claude/mmry-config.json"
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT \
+        CODEX_HOME="$ch" HOME="$TEST_HOME" \
+        bash -c "source '$ch/mmry/hooks-handlers/mmry-client.sh' >/dev/null 2>&1; printf '%s' \"\$MMRY_API_KEY\""
+    assert_output "relocated-key"
+}
+
+@test "req4: an explicit MMRY_CONFIG_FILE still outranks everything, on both hosts" {
+    _install_two_hosts
+    printf '{"apiUrl":"https://explicit.example","authMethod":"apikey","apiKey":"explicit-key"}' \
+        > "$TEST_TMPDIR/explicit.json"
+    run env -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME" \
+        MMRY_CONFIG_FILE="$TEST_TMPDIR/explicit.json" \
+        bash -c "source '$TEST_HOME/.codex/mmry/hooks-handlers/mmry-client.sh' >/dev/null 2>&1; printf '%s' \"\$MMRY_API_KEY\""
+    assert_output "explicit-key"
+}
