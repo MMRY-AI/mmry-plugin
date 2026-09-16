@@ -8,7 +8,8 @@
 # character fails here rather than reaching a customer.
 #
 # Every assertion below was confirmed to REFUSE before it was kept: see
-# tests/structural/codex-mutation-manifest.md for the mutation applied to each and what it broke.
+# tests/structural/CODEX-MUTATIONS.md, committed beside run-codex-mutations.sh, for the mutation
+# applied to each, what it broke, and the run it was observed in.
 
 load '../helpers/test-helper'
 
@@ -79,8 +80,25 @@ host_eval() {
     assert_output "/home/testuser/.claude"
 }
 
-@test "req4: sourcing lib-host.sh twice is a no-op, not a redefinition" {
-    run bash -c "source '$LIB'; source '$LIB'; mmry_host_config_dir"
+@test "req4: sourcing lib-host.sh twice does not clobber a caller's own override" {
+    # THIS ASSERTION USED TO BE UNFALSIFIABLE (#31245 QA round 2). It sourced the file twice and
+    # checked that a path still came out, which it does with the double-source guard replaced by a
+    # no-op, because every function here is idempotent. It proved nothing.
+    #
+    # What the guard actually protects is a caller that defines its own fallback and then pulls in
+    # a library that transitively sources this file again - which is exactly what hook-guard.sh and
+    # stop-check.sh do with their missing-resolver fallbacks. Without the guard the second source
+    # silently redefines the caller's function out from under it.
+    run bash -c "source '$LIB'
+        mmry_host_label() { printf 'CALLER-OWN-DEFINITION'; }
+        source '$LIB'
+        mmry_host_label"
+    assert_success
+    assert_output "CALLER-OWN-DEFINITION"
+}
+
+@test "req4: and the second source still returns success, so a caller under set -e survives it" {
+    run bash -c "set -e; source '$LIB'; source '$LIB'; mmry_host_config_dir"
     assert_success
     assert_output "/home/testuser/.claude"
 }

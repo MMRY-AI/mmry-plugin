@@ -4,7 +4,9 @@
 # These exercise behaviour, not shape. The structural file checks that the registration says the
 # right thing; this one checks that running it does the right thing.
 #
-# EVERY ASSERTION HERE WAS SEEN TO REFUSE. See structural/codex-mutation-log.md.
+# EVERY ASSERTION HERE WAS SEEN TO REFUSE under tests/structural/run-codex-mutations.sh.
+# The mutation applied to each, and the run it was observed in, are recorded in
+# tests/structural/CODEX-MUTATIONS.md, which is committed beside the harness.
 
 load '../helpers/test-helper'
 
@@ -235,15 +237,16 @@ stop_run() {
     assert_output "1"
 }
 
-@test "req4: setup with no --host still writes the Claude credential to ~/.claude" {
-    run env -u MMRY_HOST bash -c "
-        cd '$PLUGIN_ROOT'
-        HOME='$TEST_HOME'
-        MMRY_HOST=\${MMRY_HOST:-claude}
-        source hooks-handlers/lib-host.sh
-        mmry_host_config_file"
-    assert_output "${TEST_HOME}/.claude/mmry-config.json"
-}
+# "setup with no --host still writes the Claude credential to ~/.claude" USED TO BE HERE AND WAS
+# DEAD (#31245 QA round 2). It never invoked the installer: it sourced lib-host.sh and applied
+# `MMRY_HOST=${MMRY_HOST:-claude}` itself, which is precisely the defect pattern commit ab7c5ab
+# deleted FROM the installer - so the test reproduced the bug it claimed to guard against, and
+# deleting mmry-setup.sh entirely left it green.
+#
+# The behaviour it claimed is now asserted where it can fail, by running the real script:
+# tests/e2e/codex-setup.bats, "req4 control: the same command from a Claude install still writes
+# ~/.claude/mmry-config.json" - which stages the installer, runs it with MMRY_HOST unset through
+# the mocked device flow, and looks at the file on disk.
 
 @test "codex: setup --host codex is accepted by the argument parser" {
     run bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --host codex --help
@@ -252,8 +255,13 @@ stop_run() {
 }
 
 @test "codex: an unknown argument is still rejected, so --host did not loosen the parser" {
+    # A BARE non-zero status is not evidence here (#31245 QA round 2): deleting mmry-setup.sh
+    # produces exit 127, which is also non-zero, so the assertion passed on a file that no longer
+    # existed. The script must exist, must refuse the flag by name, and must say so.
+    [[ -f "$PLUGIN_ROOT/setup/mmry-setup.sh" ]]
     run bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --not-a-real-flag
-    [[ "$status" -ne 0 ]]
+    [[ "$status" -eq 1 ]]
+    assert_output --partial "Unknown argument: --not-a-real-flag"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -337,6 +345,69 @@ _resolve_from() {
         CODEX_HOME="$ch" HOME="$TEST_HOME" \
         bash -c "source '$ch/mmry/hooks-handlers/mmry-client.sh' >/dev/null 2>&1; printf '%s' \"\$MMRY_API_KEY\""
     assert_output "relocated-key"
+}
+
+# ---------------------------------------------------------------------------------------------
+# AND WHEN THE CODEX CREDENTIAL IS MISSING, NOTHING MAY BORROW THE CLAUDE ONE (#31245 QA round 2).
+#
+# Setting MMRY_CONFIG_FILE was only half the fix. mmry-client.sh's first branch tests that the file
+# EXISTS; on a Codex install that has not been set up, that test is false and the chain walks on to
+# ${HOME}/.claude/mmry-config.json. A sentinel key proved it on 2026-09-16. These assert the
+# refusal, with a sentinel that makes "it found a credential" impossible to mistake for "it found
+# the right one".
+# ---------------------------------------------------------------------------------------------
+
+_install_codex_only_unconfigured() {
+    # A Codex install with NO Codex credential, on a machine that has a Claude credential.
+    mkdir -p "$TEST_HOME/.codex/mmry/hooks-handlers" "$TEST_HOME/.claude"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$TEST_HOME/.codex/mmry/hooks-handlers/"
+    cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.codex/mmry/" 2>/dev/null || true
+    printf '{"apiUrl":"https://claude.example","authMethod":"apikey","apiKey":"claude-sentinel"}'         > "$TEST_HOME/.claude/mmry-config.json"
+    [[ ! -f "$TEST_HOME/.codex/mmry-config.json" ]]
+}
+
+@test "codex: with no Codex credential the client REFUSES rather than resolving the Claude one" {
+    _install_codex_only_unconfigured
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME"         bash -c "source '$TEST_HOME/.codex/mmry/hooks-handlers/mmry-client.sh' 2>/dev/null; printf 'RESOLVED:%s' \"\$MMRY_API_KEY\""
+    [[ "$status" -ne 0 ]]
+    refute_output --partial "claude-sentinel"
+    refute_output --partial "RESOLVED:"
+}
+
+@test "codex: the refusal SAYS SO, naming the file it wanted and the command that makes it" {
+    # Silence here would be the same failure in a different costume: an install that appears to
+    # work and quietly does nothing.
+    _install_codex_only_unconfigured
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME"         bash -c "source '$TEST_HOME/.codex/mmry/hooks-handlers/mmry-client.sh' 2>&1 >/dev/null"
+    assert_output --partial "no Codex credential was found"
+    assert_output --partial "${TEST_HOME}/.codex/mmry-config.json"
+    assert_output --partial "bash ~/.codex/mmry/setup/mmry-setup.sh"
+}
+
+@test "req4: a Claude install with no credential at all is unaffected, as it always was" {
+    # The control. The refusal is Codex-only; on Claude Code an absent credential still produces
+    # the client's own "No API key configured" path, not an exit from sourcing.
+    mkdir -p "$TEST_HOME/.claude/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$TEST_HOME/.claude/mmry/hooks-handlers/"
+    cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.claude/mmry/" 2>/dev/null || true
+    [[ ! -f "$TEST_HOME/.claude/mmry-config.json" ]]
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME"         bash -c "source '$TEST_HOME/.claude/mmry/hooks-handlers/mmry-client.sh' 2>/dev/null; printf 'SOURCED-OK'"
+    assert_success
+    assert_output --partial "SOURCED-OK"
+}
+
+@test "codex: the installer itself still runs with no credential, or setup would be impossible" {
+    # The opt-out is load-bearing: mmry-setup.sh is the program that CREATES the credential, and
+    # lib-jq.sh refuses when there is none. Without MMRY_ALLOW_NO_CREDENTIAL the fix above would
+    # make a first install unreachable. --help exercises the same preamble without a browser.
+    _install_codex_only_unconfigured
+    cp "$PLUGIN_ROOT/setup/mmry-setup.sh" "$TEST_HOME/.codex/mmry/setup-copy.sh" 2>/dev/null || {
+        mkdir -p "$TEST_HOME/.codex/mmry/setup"
+        cp "$PLUGIN_ROOT/setup/mmry-setup.sh" "$TEST_HOME/.codex/mmry/setup/mmry-setup.sh"
+    }
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME"         MMRY_JQ_VENDOR_DIR="$PLUGIN_ROOT/vendor/jq"         bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --host codex --help
+    assert_success
+    assert_output --partial "--host claude|codex"
 }
 
 @test "req4: an explicit MMRY_CONFIG_FILE still outranks everything, on both hosts" {
