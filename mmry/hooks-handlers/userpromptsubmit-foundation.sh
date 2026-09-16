@@ -134,12 +134,18 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # every descriptor it could have inherited.
     #
     # This is not tidiness. The first cut was `( sleep "$DEADLINE"; kill ... ) &` killed after
-    # the wait. Killing the subshell ORPHANS its sleep, the orphan keeps the descriptors it
-    # inherited, and anything reading this hook's output waits for the last writer to close -
-    # not for the handler to exit. Measured: a bats test that should take under a second took
-    # 18, once per firing, for the full deadline. Every one of the 14 tests still passed. A
-    # hook that hands back its answer and then holds the pipe open for fifteen seconds is a
-    # worse defect than the one this ticket is about, and it passed a green suite twice.
+    # the wait. Killing the subshell ORPHANS its sleep, and the orphan keeps every descriptor
+    # it inherited. A reader waits for the LAST WRITER to close, not for the handler to exit,
+    # so it sat there for the whole deadline after the answer had already been produced.
+    #
+    # Measured, same fixture, only the watchdog differing, with one extra descriptor attached
+    # to the pipe being read: 15155/15170/15155 ms (n=3, 15 s deadline) against 494/515/604/
+    # 567/572 ms (n=5). Plain stdout showed NOTHING - the old watchdog redirected its own
+    # stdout to /dev/null, so `bash handler | cat` finished in about 500 ms either way, which
+    # is how this survived both a hand measurement and a green fourteen-test suite.
+    #
+    # What a real Claude Code hook invocation inherits beyond stdout is not something I could
+    # verify, so the size of the production impact is unknown. The defect is not.
     #
     # Polling also means the watchdog is GONE about a second after the worker finishes, so
     # nothing has to kill it and there is nothing left to orphan.
