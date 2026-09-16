@@ -112,8 +112,24 @@ EOF
 
     echo "measured cost: ${cost} ms over 5 runs; registered budget: ${budget} s" >&3
 
-    # The measurement must be real. A handler that cost 0 ms did not run.
-    (( cost > 0 ))
+    # THE PREMISE: the thing that was timed actually ran, and actually did the work.
+    #
+    # This was `(( cost > 0 ))`, and it could not fail (#31434 QA round 2). `_avg_ms` adds a
+    # whole second before dividing, so its floor is 1000/runs = 200 ms; a reviewer pointed it
+    # at a handler that DOES NOT EXIST and it reported 200 ms, cheerfully positive. A premise
+    # check that cannot go red is not a premise check, and this file's whole subject is checks
+    # that cannot fail.
+    #
+    # So the premise is checked by OBSERVATION rather than by the clock: run the handler once,
+    # require exit 0, and require its stdout to be the hook JSON carrying the fixture directive
+    # written above. A handler that is missing exits 127 with empty stdout; one that ran but
+    # injected nothing emits nothing at all. Both go red here.
+    local probe_rc=0 probe_out
+    probe_out="$(bash "$handler" 2>/dev/null </dev/null)" || probe_rc=$?
+    (( probe_rc == 0 ))
+    [[ -n "$probe_out" ]]
+    printf '%s' "$probe_out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+    [[ "$probe_out" == *'Truthfulness: never overstate evidence'* ]]
     # Headroom of at least 5x. At the 5 s budget this refuses for any cost above 1000 ms,
     # which is exactly the range that was measured in the field.
     #
@@ -134,14 +150,28 @@ EOF
     deadline="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*'         "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" | head -1 | sed 's/.*:-//')"
     [[ "$deadline" =~ ^[0-9]+$ ]]
     echo "measured cost: ${cost} ms; shipped deadline: ${deadline} s" >&3
-    # 3x. Stated rather than assumed, and it is not a comfortable multiple: on Windows Git
-    # Bash every process spawn costs ~300 ms, this handler cannot get below about half a dozen
-    # of them, and a machine three times slower than an idle developer box would trip the
-    # handler's own guard. That is a real residual exposure and it is recorded here rather
-    # than rounded off - see the QA notes on this ticket. It degrades honestly (the customer
-    # is told the directives were dropped) rather than silently, which is what the ticket
-    # exists to guarantee; making it comfortable means cutting the spawn count further, which
-    # is its own change.
+    # A 3x BAR, WHICH IS NOT THE SAME THING AS A 3x MARGIN - and the difference was reported
+    # the wrong way round, so it is stated correctly here (#31434 QA round 2).
+    #
+    # What this line asserts is a ratio of the shipped deadline to the measured handler cost:
+    # 10 s against 2600-3200 ms. That is the bar, and it is a fair bar for the thing it guards
+    # (a handler drifting back up toward its own deadline).
+    #
+    # What it is NOT is the margin on the failure customers actually suffer. That failure is
+    # the HARNESS killing the hook and discarding its output, and it happens when the whole
+    # firing exceeds the 20 s registered budget. Since the deadline is 10 s, the breach
+    # condition is the SUPERVISOR'S OWN OVERHEAD - start-up, reaping the worker, deciding why
+    # it failed, writing the JSON - exceeding the remaining 10 s. Measured under load that
+    # overhead was 3.9-5.7 s, so the true margin on the customer-visible failure is about
+    # 1.8x to 2.6x, not 3x.
+    #
+    # It is still a real residual exposure, recorded rather than rounded off: on Windows Git
+    # Bash every process spawn costs ~300 ms and this handler cannot get below about half a
+    # dozen of them, so a machine roughly twice as slow as a loaded developer box would trip
+    # the handler's own guard. It degrades HONESTLY when it does - the customer is told the
+    # directives were dropped, verified 5 of 5 - which is what the ticket exists to guarantee.
+    # Making the margin comfortable means cutting the spawn count further, which is its own
+    # change.
     (( deadline * 1000 >= cost * 3 ))
 }
 
@@ -203,7 +233,15 @@ EOF
     local floor t timeouts count
     floor="$(_avg_ms 5 bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'")"
     echo "shared startup floor: ${floor} ms over 5 runs" >&3
-    (( floor > 0 ))
+
+    # THE PREMISE, by observation rather than by the clock - same defect and same fix as the
+    # measured-cost test above (#31434 QA round 2). `(( floor > 0 ))` cannot go red: _avg_ms
+    # rounds up by a whole second before dividing, so sourcing a file that does not exist
+    # still measures 200 ms. What matters is that the source SUCCEEDED and produced the
+    # client's API, so that is what is asserted.
+    local sourced
+    sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'         && declare -F mmry_load_config >/dev/null         && declare -F mmry_get_startup_memories >/dev/null         && printf SOURCED" 2>/dev/null)"
+    [[ "$sourced" == "SOURCED" ]]
 
     timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$HOOKS_FILE" | tr -d '\r')"
     count=0
@@ -366,12 +404,28 @@ SHIMEOF
     # customer should pay nothing, and the crash notice's own remedy depends on it.
     printf '%s
 ' "$body" | grep -q '_mmry_reinject_is_off_here'
-    local off_line worker_line
+    # THE CALL, NOT THE DEFINITION (#31434 QA round 2). This took the FIRST line mentioning
+    # _mmry_reinject_is_off_here - which is the function's own DEFINITION, and the definition
+    # sits near the top of the file, so `off_line < worker_line` held no matter where the call
+    # was. A reviewer proved it inert by moving the call to AFTER the worker spawn, which is
+    # exactly the regression this check exists to catch, and the test still passed.
+    #
+    # So the definition line is excluded explicitly, and every line number is identified rather
+    # than assumed: a definition that stopped matching, or a call that disappeared, fails here
+    # instead of quietly leaving an empty string to be compared.
+    local def_line off_line worker_line
+    def_line="$(printf '%s
+' "$body" | grep -n '_mmry_reinject_is_off_here()' | head -1 | cut -d: -f1)"
     off_line="$(printf '%s
-' "$body" | grep -n '_mmry_reinject_is_off_here' | head -1 | cut -d: -f1)"
+' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()'                 | head -1 | cut -d: -f1)"
     worker_line="$(printf '%s
 ' "$body" | grep -n 'MMRY_FOUNDATION_WORKER=1 bash' | head -1 | cut -d: -f1)"
+    [[ "$def_line" =~ ^[0-9]+$ ]]
     [[ "$off_line" =~ ^[0-9]+$ ]]
     [[ "$worker_line" =~ ^[0-9]+$ ]]
+    # The line this check is about must be a CALL, not the definition it used to find.
+    (( off_line != def_line ))
+    printf '%s
+' "$body" | sed -n "${off_line}p" | grep -q 'if _mmry_reinject_is_off_here'
     (( off_line < worker_line ))
 }

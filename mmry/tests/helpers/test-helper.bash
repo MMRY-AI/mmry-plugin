@@ -51,16 +51,16 @@ TEST_TMPDIR="$(mktemp -d)"
 export TMPDIR="$TEST_TMPDIR"
 export MMRY_TMPDIR="$TEST_TMPDIR"
 
-# Isolate HOME for EVERY suite, not just the ones that remembered (#31434 QA).
+# Per-test HOME, on top of the isolation that already happened (#31434 QA round 2).
 #
-# MMRY_CONFIG_FILE below only wins while the file it names exists. mmry_load_config's
-# discovery order falls through a NON-EXISTENT MMRY_CONFIG_FILE to the plugin root and then
-# to ${HOME}/.claude/mmry-config.json - so every test that does not write a config first was
-# reading the developer's real one, complete with its live API key. Six suites had already
-# set a fake HOME in their own setup(); the handler and budget suites had not, and reached
-# mmry-client.sh:76 against the real file. No key was ever printed, but "we were one echo
-# away" is the live half of the credential incident's root cause, and per-suite discipline is
-# what let two suites miss it. It belongs here, once, where no new suite can forget it.
+# THIS IS NO LONGER THE GUARANTEE. It was, for one round, and that was the defect: eleven
+# suites never load this file, so the guarantee did not cover them and two rounds of review
+# read "isolated in the helper" as "isolated". The isolation now happens in
+# helpers/isolate-home.bash, applied from run-tests.sh and from each test directory's
+# setup_suite.bash - neither of which a test file can decline.
+#
+# What remains here is narrower and still worth having: a FRESH home per suite, inside this
+# suite's own TEST_TMPDIR, so one suite cannot see what another wrote under ~/.claude.
 export HOME="$TEST_TMPDIR/fakehome"
 mkdir -p "$HOME/.claude"
 
