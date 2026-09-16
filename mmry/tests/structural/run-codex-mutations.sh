@@ -9,16 +9,70 @@
 # Requires a clean working tree: each mutation is reverted with `git checkout -- <file>`.
 #
 # This is a developer tool, not part of the suite. It is committed so the claim "every assertion
-# was seen to refuse" is reproducible by whoever reviews it rather than taken on trust.
+# was seen to refuse" is reproducible by whoever reviews it rather than taken on trust. The runs it
+# has been put through are recorded in CODEX-MUTATIONS.md beside this file.
+#
+# ---------------------------------------------------------------------------------------------
+# WHAT WENT WRONG WITH THE FIRST VERSION, AND WHY THIS ONE IS SHAPED THIS WAY (#31245 QA round 2)
+#
+# Three people ran it and got three different answers: 37 refused / 0 survived, 25 / 0, and
+# 15 refused / 5 "survived" - where re-running those five ONE AT A TIME reproduced every one of
+# them as REFUSED. The harness was telling a reviewer that a working assertion cannot fail, which
+# is worse than telling them nothing. Four causes, all fixed here:
+#
+#   1. AN EXPERIMENT THAT COULD NOT BE PERFORMED WAS COUNTED AS A SURVIVING MUTANT. "NOT APPLIED"
+#      incremented the same counter the summary printed as "survived". A harness fault and a dead
+#      assertion are opposite findings and they were reported as the same number. They are now
+#      three separate counters, and the summary refuses to collapse them.
+#   2. THE INTERPRETER WAS UNPINNED. `python` on the machine this was written on is 2.7.2, while
+#      `python3` is 3.12. Two reviewers ran two different languages. It now resolves an explicit
+#      Python 3 and stops with a message if it cannot find one, instead of silently producing
+#      "NOT APPLIED" for everything.
+#   3. ANY PYTHON FAILURE LOOKED LIKE A MISSING PATTERN. Exit 3 means "the pattern is not in the
+#      file"; every other non-zero exit means the experiment did not run at all. They were
+#      conflated and the interpreter's own error message was discarded. Both are reported now.
+#   4. LINE ENDINGS. .gitattributes pins LF for *.sh only. On a machine with core.autocrlf=true the
+#      .json, .md and .bats files in the working tree are CRLF, and every mutation whose pattern
+#      spans a newline silently failed to match. Demonstrated on one commit: the stop-check
+#      mutations apply against an LF tree and report "MUTATION DID NOT APPLY" against a CRLF one.
+#      The file is normalised to LF for matching and written back in its original form, so a
+#      mutation now means the same thing on every machine.
+#
+# It also restores the file from an EXIT trap. A run killed by an impatient timeout used to leave a
+# mutation applied in the working tree, which is how the next run starts from a state nobody chose.
+# And it prints [i/N], so a truncated run is visibly truncated rather than looking like a smaller
+# suite that passed.
+# ---------------------------------------------------------------------------------------------
 
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PLUGIN="$REPO_ROOT/mmry"
 TESTS="$PLUGIN/tests"
-BATS="$TESTS/libs/bats-core/bin/bats"
+BATS="${MMRY_BATS_BIN:-$TESTS/libs/bats-core/bin/bats}"
 
 cd "$REPO_ROOT" || exit 1
+
+# ---- Pin the interpreter. --------------------------------------------------------------------
+PYBIN=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' 2>/dev/null; then
+            PYBIN="$candidate"
+            break
+        fi
+    fi
+done
+if [[ -z "$PYBIN" ]] && command -v py >/dev/null 2>&1 && py -3 -c 'pass' 2>/dev/null; then
+    PYBIN="py -3"
+fi
+if [[ -z "$PYBIN" ]]; then
+    echo "REFUSING: no Python 3 found. Tried python3, python and 'py -3'." >&2
+    echo "This harness edits files with Python, and a run under Python 2 produces results that" >&2
+    echo "cannot be compared with anyone else's." >&2
+    exit 1
+fi
+echo "interpreter: $($PYBIN -c 'import sys; print(sys.executable + "  " + sys.version.split()[0])')"
 
 if [[ -n "$(git status --porcelain -- mmry)" ]]; then
     echo "REFUSING: the working tree under mmry/ is dirty. Commit or stash first, because each" >&2
@@ -26,54 +80,97 @@ if [[ -n "$(git status --porcelain -- mmry)" ]]; then
     exit 1
 fi
 
-PASS=0
-FAIL=0
+REFUSED=0
+SURVIVED=0
+ERRORS=0
+RUN=0
+TOTAL=50
+SURVIVOR_LIST=""
+ERROR_LIST=""
+CURRENT_FILE=""
+
+# A run that is killed part-way must not leave a mutation behind.
+_restore() {
+    if [[ -n "$CURRENT_FILE" ]]; then
+        git checkout -- "mmry/$CURRENT_FILE" 2>/dev/null
+        CURRENT_FILE=""
+    fi
+}
+trap _restore EXIT INT TERM
 
 # mutate <label> <file> <python-expression-file-edit> <test-file> <expected-failing-test-substring>
 mutate() {
     local label="$1" file="$2" pyfrag="$3" testfile="$4" expect="$5"
+    RUN=$((RUN + 1))
+    CURRENT_FILE="$file"
 
-    python - "$PLUGIN/$file" <<PY
+    local pyerr applied
+    pyerr="$($PYBIN - "$PLUGIN/$file" 2>&1 >/dev/null <<PY
 import io, sys
 p = sys.argv[1]
-s = io.open(p, encoding='utf-8', newline='').read()
+
+# Read as bytes and normalise to LF for matching. The patterns below are written with '\n', and a
+# working tree with CRLF endings - which is what core.autocrlf=true produces for every file
+# .gitattributes does not pin - would silently fail to match every multi-line pattern. The original
+# form is restored on write, so the only change to the file is the mutation itself.
+raw = io.open(p, 'rb').read().decode('utf-8')
+was_crlf = '\r\n' in raw
+s = raw.replace('\r\n', '\n')
 before = s
 $pyfrag
 if s == before:
-    sys.stderr.write("MUTATION DID NOT APPLY\n")
+    sys.stderr.write("pattern not present in the file\n")
     sys.exit(3)
-io.open(p, 'w', encoding='utf-8', newline='').write(s)
+out = s.replace('\n', '\r\n') if was_crlf else s
+io.open(p, 'wb').write(out.encode('utf-8'))
 PY
-    local applied=$?
+)"
+    applied=$?
+
+    if [[ $applied -eq 3 ]]; then
+        printf '[%2d/%2d] NOT APPLIED  %s\n' "$RUN" "$TOTAL" "$label"
+        printf '                     the pattern is not in mmry/%s. The mutation is STALE and this\n' "$file"
+        printf '                     assertion was NOT tested by this run. It is not a survivor.\n'
+        ERRORS=$((ERRORS + 1))
+        ERROR_LIST="${ERROR_LIST}
+  stale pattern: ${label}"
+        _restore
+        return
+    fi
     if [[ $applied -ne 0 ]]; then
-        printf 'NOT APPLIED  %s\n' "$label"
-        FAIL=$((FAIL + 1))
-        git checkout -- "mmry/$file" 2>/dev/null
+        printf '[%2d/%2d] HARNESS ERROR %s\n' "$RUN" "$TOTAL" "$label"
+        printf '                     %s failed (exit %s): %s\n' "$PYBIN" "$applied" "$pyerr"
+        ERRORS=$((ERRORS + 1))
+        ERROR_LIST="${ERROR_LIST}
+  interpreter failure: ${label}"
+        _restore
         return
     fi
 
     local out
     out="$("$BATS" "$TESTS/$testfile" 2>&1)"
-    git checkout -- "mmry/$file"
+    _restore
 
     if printf '%s' "$out" | grep -q "^not ok.*${expect}"; then
-        printf 'REFUSED      %s\n' "$label"
-        PASS=$((PASS + 1))
+        printf '[%2d/%2d] REFUSED      %s\n' "$RUN" "$TOTAL" "$label"
+        REFUSED=$((REFUSED + 1))
     else
         local n
         n="$(printf '%s' "$out" | grep -c '^not ok' || true)"
         if [[ "$n" -gt 0 ]]; then
-            printf 'REFUSED(*)   %s   [%s test(s) failed, but not the named one]\n' "$label" "$n"
-            printf '%s' "$out" | grep '^not ok' | sed 's/^/                 /'
-            PASS=$((PASS + 1))
+            printf '[%2d/%2d] REFUSED(*)   %s   [%s test(s) failed, but not the named one]\n' "$RUN" "$TOTAL" "$label" "$n"
+            printf '%s' "$out" | grep '^not ok' | sed 's/^/                     /'
+            REFUSED=$((REFUSED + 1))
         else
-            printf 'SURVIVED     %s   <-- THIS ASSERTION CANNOT FAIL\n' "$label"
-            FAIL=$((FAIL + 1))
+            printf '[%2d/%2d] SURVIVED     %s   <-- THIS ASSERTION CANNOT FAIL\n' "$RUN" "$TOTAL" "$label"
+            SURVIVED=$((SURVIVED + 1))
+            SURVIVOR_LIST="${SURVIVOR_LIST}
+  ${label}   (expected a failure matching: ${expect})"
         fi
     fi
 }
 
-echo "=== #31245 mutation run ==="
+echo "=== #31245 mutation run: $TOTAL experiments ==="
 
 # ---- lib-host.sh: the requirement-4 literals -------------------------------------------------
 mutate "claude config dir drifts" hooks-handlers/lib-host.sh \
@@ -97,6 +194,8 @@ mutate "CODEX_HOME ignored" hooks-handlers/lib-host.sh \
 mutate "codex script ref keeps the variable" hooks-handlers/lib-host.sh \
   "s = s.replace(\"printf '%s/hooks-handlers/%s' \\\"\$(mmry_host_state_dir)\\\" \\\"\$script\\\"\", \"printf '\\\\\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' \\\"\$script\\\"\")" \
   unit/lib-host.bats "ABSOLUTE path"
+
+mutate "the double-source guard becomes a no-op" hooks-handlers/lib-host.sh   's = s.replace(chr(34) + "${_MMRY_LIB_HOST_SOURCED:-}" + chr(34) + " ]] && return 0", chr(34) + "${_MMRY_LIB_HOST_SOURCED:-}" + chr(34) + " ]] && true", 1)'   unit/lib-host.bats "clobber"
 
 # ---- codex-hook.sh ---------------------------------------------------------------------------
 mutate "shim stops declaring the host" hooks-handlers/codex-hook.sh \
@@ -190,18 +289,21 @@ mutate "codex idle guard removed, so the poller waits" hooks-handlers/formation-
   "s = s.replace('        if [[ \"\$(mmry_host)\" == \"codex\" ]]; then\n            _poll_once || exit 0\n            printf \\'%s\\\\n\\' \"\$FORMATION_BLOCK\" >&2\n            exit 2\n        fi\n', '')" \
   structural/codex-formation-delivery.bats "ONE pass"
 
+mutate "formation-check stops guarding the credential, so a hot-path hook exits 1" hooks-handlers/formation-check.sh   's = s.replace("mmry_host_assert_own_credential 2>/dev/null || exit 0", "true", 1)'   structural/codex-formation-delivery.bats "no formation pays nothing"
+
 # ---- requirement-4 guards on the Claude surface ----------------------------------------------
 mutate "a Claude command file gains frontmatter" commands/setup.md \
   "s = '---\ndescription: x\n---\n' + s" \
   structural/codex-manifest.bats "gained YAML frontmatter"
 
 mutate "the e2e fixture stops copying lib-host" tests/e2e/setup-join.bats   's = s.replace("cp "+chr(34)+chr(36)+"PLUGIN_ROOT/hooks-handlers/lib-host.sh"+chr(34), "true #", 1)'   structural/codex-manifest.bats "mirrored by the e2e fixture"
+
 # ---- the model-invoked credential path, and the incomplete-copy fallbacks -------------------
 mutate "lib-host stops reading the host off its own location" hooks-handlers/lib-host.sh   's = s.replace("*/.codex/*", "*/.no-such-marker/*", 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
 
 mutate "lib-host stops exporting MMRY_CONFIG_FILE" hooks-handlers/lib-host.sh   's = s.replace("export MMRY_CONFIG_FILE=", "_MMRY_UNUSED=", 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
 
-mutate "lib-jq stops sourcing the host resolver" hooks-handlers/lib-jq.sh   's = s.replace("/lib-host.sh" + chr(34) + " 2>/dev/null || true", "/lib-host-absent.sh" + chr(34) + " 2>/dev/null || true", 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
+mutate "lib-jq stops sourcing the host resolver" hooks-handlers/lib-jq.sh   's = s.replace("source " + chr(34) + "${_mmry_libjq_dir}/lib-host.sh" + chr(34), "source " + chr(34) + "${_mmry_libjq_dir}/lib-host-absent.sh" + chr(34), 1)'   handlers/codex-hook.bats "resolves the CODEX credential"
 
 mutate "location detection overreaches to any CODEX_HOME in the environment" hooks-handlers/lib-host.sh   's = s.replace("if [[ -z " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]]; then", "if [[ -z " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]]; then\n    [[ -n " + chr(34) + "${CODEX_HOME:-}" + chr(34) + " ]] && MMRY_HOST=codex", 1)'   handlers/codex-hook.bats "does NOT make a Claude install think it is Codex"
 
@@ -209,8 +311,44 @@ mutate "hook-guard loses its missing-resolver fallback" hooks-handlers/hook-guar
 
 mutate "stop-check loses its missing-resolver fallback" hooks-handlers/stop-check.sh   's = s.replace("    mmry_host_script_ref() { printf ", "    _unused_ref() { printf ", 1)'   handlers/codex-hook.bats "stop-check with NO lib-host.sh"
 
+# ---- the refusal to borrow the other product's credential (QA round 2) -----------------------
+mutate "lib-jq stops asserting, so the client walks on to the Claude file" hooks-handlers/lib-jq.sh   's = s.replace("    mmry_host_assert_own_credential || exit 1", "    true", 1)'   handlers/codex-hook.bats "REFUSES rather than resolving the Claude one"
+
+mutate "the assertion always passes" hooks-handlers/lib-host.sh   's = s.replace("mmry_host_assert_own_credential() {", "mmry_host_assert_own_credential() {\n    return 0", 1)'   handlers/codex-hook.bats "REFUSES rather than resolving the Claude one"
+
+mutate "the refusal goes quiet" hooks-handlers/lib-host.sh   's = s.replace("MMRY AI: no %s credential was found", "", 1)'   handlers/codex-hook.bats "SAYS SO"
+
+mutate "the refusal fires on Claude Code too" hooks-handlers/lib-host.sh   's = s.replace(chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " ]] || return 0", chr(34) + "$(mmry_host)" + chr(34) + " != " + chr(34) + "no-such-host" + chr(34) + " ]] || return 0", 1)'   handlers/codex-hook.bats "Claude install with no credential at all is unaffected"
+
+# ---- session-init.sh and session-start.sh, which had no mutation coverage at all -------------
+mutate "session-init installs into the Claude directory on every host" hooks-handlers/session-init.sh   's = s.replace("MMRY_STATE_DIR=" + chr(34) + "$(mmry_host_state_dir)" + chr(34), "MMRY_STATE_DIR=" + chr(34) + "${HOME}/.claude/mmry" + chr(34), 1)'   handlers/codex-session.bats "installs the handlers under"
+
+mutate "session-init stops copying the Windows entry point" hooks-handlers/session-init.sh   's = s.replace("cp " + chr(34) + "$P" + chr(34) + "/hooks-handlers/*.cmd", "true # cp " + chr(34) + "$P" + chr(34) + "/hooks-handlers/*.cmd", 1)'   handlers/codex-session.bats "copies the Windows entry point"
+
+mutate "session-init loses the pipefail guard on the plugin-root search" hooks-handlers/session-init.sh   "s = s.replace(chr(39) + '|/hooks-handlers\$||' + chr(39) + ' || true)', chr(39) + '|/hooks-handlers\$||' + chr(39) + ')', 1)"   handlers/codex-session.bats "plugin root cannot be found"
+
+mutate "session-start registers every session as claude-code" hooks-handlers/session-start.sh   's = s.replace(chr(34) + "$(mmry_host_client_name)" + chr(34), chr(34) + "claude-code" + chr(34), 1)'   handlers/codex-session.bats "registered as codex"
+
+mutate "session-start sources the client before asking about the credential" hooks-handlers/session-start.sh   's = s.replace("if ! mmry_host_assert_own_credential 2>/dev/null; then", "if false; then", 1)'   handlers/codex-session.bats "told how to set up"
+
+mutate "session-start stops reporting an absent session_id field" hooks-handlers/session-start.sh   's = s.replace("if [[ -z " + chr(34) + "$SESSION_ID" + chr(34) + " && " + chr(34) + "$HOOK_READ_STATUS" + chr(34) + " == " + chr(34) + "ok" + chr(34) + " ]]; then", "if false; then", 1)'   handlers/codex-session.bats "no session_id field"
+
 # ---- the one command a new Codex customer runs -----------------------------------------------
 mutate "setup forces the host to claude before resolving" setup/mmry-setup.sh   's = s.replace("[[ -n " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]] && export MMRY_HOST", "export MMRY_HOST=" + chr(34) + "${MMRY_HOST:-claude}" + chr(34), 1)'   e2e/codex-setup.bats "writes ~/.codex/mmry-config.json"
 
-echo "=== refused: $PASS   survived: $FAIL ==="
-[[ "$FAIL" -eq 0 ]]
+mutate "setup loses its opt-out and can no longer run before a credential exists" setup/mmry-setup.sh   's = s.replace("export MMRY_ALLOW_NO_CREDENTIAL=1", "true", 1)'   e2e/codex-setup.bats "writes ~/.codex/mmry-config.json"
+
+echo
+echo "=== refused: $REFUSED   survived: $SURVIVED   experiments not performed: $ERRORS   (ran $RUN of $TOTAL) ==="
+if [[ "$RUN" -ne "$TOTAL" ]]; then
+    echo "INCOMPLETE: this run stopped after $RUN of $TOTAL experiments. Do not report its counts" >&2
+    echo "as a result - a truncated run says nothing about the mutations it never reached." >&2
+fi
+if [[ -n "$SURVIVOR_LIST" ]]; then
+    echo "SURVIVING MUTANTS - these assertions cannot fail:${SURVIVOR_LIST}" >&2
+fi
+if [[ -n "$ERROR_LIST" ]]; then
+    echo "EXPERIMENTS THAT DID NOT RUN. This is a fault in the harness, NOT a finding about a" >&2
+    echo "test, and the counts above are incomplete until it is fixed:${ERROR_LIST}" >&2
+fi
+[[ "$SURVIVED" -eq 0 && "$ERRORS" -eq 0 && "$RUN" -eq "$TOTAL" ]]
