@@ -94,6 +94,10 @@ Env overrides: `MMRY_FOUNDATION_REINJECT`, `MMRY_FOUNDATION_TOKEN_CAP`, `MMRY_FO
 
 Override the 15 seconds with the `MMRY_FOUNDATION_DEADLINE_SECS` environment variable. This one is an environment variable only, with no matching config key, because the part of the hook that enforces the deadline runs *before* the config file is read — reading the config is the slow step it exists to guard against.
 
+**If re-injection fails outright** — rather than merely running slowly — you are told that instead, with the exit code, and without the suggestion to re-send the prompt, because re-sending cannot help when the loader is broken. The usual cause is an incomplete install: run `/mmry:load-memories` to rebuild the cache, and reinstall the plugin if that does not clear it. Either way the turn still proceeds, and Claude is told not to claim it is following directives it never received.
+
+Both failures are recorded in `mmry-foundation.log` in your temp directory. Setting `MMRY_DEBUG=1` additionally captures the hook's internal stderr to `mmry-foundation-debug.log` alongside it. Neither is ever printed to your terminal, in debug mode or out of it.
+
 ## What It Does
 
 | When | What Happens |
