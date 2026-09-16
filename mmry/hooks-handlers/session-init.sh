@@ -28,7 +28,13 @@ P="${CLAUDE_PLUGIN_ROOT:-}"
 P="${P//\\//}"  # Normalize backslashes to forward slashes (Windows)
 
 if [[ -z "$P" ]] || [[ ! -d "$P/hooks-handlers" ]]; then
-    P="$(find "${MMRY_CONFIG_DIR}/plugins" -path "*/mmry/hooks-handlers" -type d 2>/dev/null | head -1 | sed 's|/hooks-handlers$||')"
+    # `|| true` is load-bearing under `set -euo pipefail` (#31245 QA round 2). When the plugins
+    # directory does not exist, find exits non-zero, pipefail promotes that to the pipeline, and
+    # set -e killed this script THERE - before the message below could be printed. The customer
+    # got a SessionStart hook that exited 1 and said nothing at all, which is the failure this
+    # whole ticket exists to stop. It is likelier on Codex than on Claude Code, where
+    # ~/.claude/plugins nearly always exists.
+    P="$(find "${MMRY_CONFIG_DIR}/plugins" -path "*/mmry/hooks-handlers" -type d 2>/dev/null | head -1 | sed 's|/hooks-handlers$||' || true)"
 fi
 
 if [[ -z "$P" ]]; then

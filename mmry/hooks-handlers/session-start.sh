@@ -12,6 +12,49 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 # shellcheck source=/dev/null
 source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh"
 
+# WHAT A SESSION WITH NO CREDENTIAL IS TOLD. Defined here, ahead of the client, because on Codex
+# this message has to be delivered WITHOUT sourcing the client at all (#31245 QA round 2): an
+# unconfigured Codex install used to resolve ${HOME}/.claude/mmry-config.json and run under the
+# other product's account, and lib-jq.sh now refuses rather than allow that. Refusing would have
+# cost the customer this message - the one that tells them how to fix it - so it is emitted from
+# here instead. On Claude Code the text is identical to what this file has always printed.
+_mmry_emit_setup_message() {
+    local help_line setup_msg escaped
+    # #31245: the setup command, the product to restart and the way to get help all differ by host.
+    # A Codex customer told to type /mmry:help is being told to do something this platform does not
+    # let them do - it converts plugin commands into skills and there is nothing to type.
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        help_line='Tell them they can ask "what can MMRY do here" any time; there are no slash commands to type on this platform.'
+    else
+        help_line='Mention /mmry:help for a quick reference.'
+    fi
+    setup_msg="MMRY AI is installed but needs to be set up. Run the setup script to authenticate via the browser.
+
+## Setup
+
+Run this command using the Bash tool:
+
+$(mmry_host_setup_hint)
+
+This will open a browser window where the user can log in or create an account on mmryai.com. Once they authorize, the script writes the config file and permissions automatically.
+
+If the browser does not open, the script prints a URL the user can copy and paste.
+
+After setup completes, tell the user: \"You are all set. Restart $(mmry_host_label) and your memories will start loading automatically.\" ${help_line}
+
+If the user does not have an account yet, direct them to https://mmryai.com to sign up first, then run setup again."
+
+    escaped="$(printf '%s' "$setup_msg" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' "$escaped"
+}
+
+# THIS HOST HAS NO CREDENTIAL: say how to get one, and do not source the client. Sourcing it is
+# what would reach for another product's account, and lib-jq.sh exits rather than do that.
+if ! mmry_host_assert_own_credential 2>/dev/null; then
+    _mmry_emit_setup_message
+    exit 0
+fi
+
 # Self-update check — runs before anything else, debounced to once per hour
 bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
 
@@ -75,6 +118,24 @@ fi
 # stdin may not be JSON outside a hook context; jq returns empty and we fall
 # back to the env var, then "unknown". This is a data fallback, not a jq one.
 SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
+
+# AND IF THE PAYLOAD ARRIVED BUT DID NOT CARRY session_id, SAY SO (#31245 QA round 2).
+#
+# "session_id" is CLAUDE CODE's field name. It is an assumption about Codex, not a fact: no
+# captured Codex hook payload exists yet, and every Codex delivery test in this suite bypasses the
+# question by setting MMRY_FORMATION_MODE, a variable whose own comment says it exists for the test
+# suite. If Codex names the field differently, registration silently degrades to the literal
+# "unknown" and formation delivery silently does nothing - installed, quiet, useless.
+#
+# So a payload that arrived and parsed but does not contain the field is reported through the one
+# channel this handler has. The KEYS are named and no value is printed: a hook payload can carry a
+# prompt or a tool result, and this note goes to the model verbatim.
+if [[ -z "$SESSION_ID" && "$HOOK_READ_STATUS" == "ok" ]]; then
+    _mmry_keys="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r 'if type=="object" then (keys | join(", ")) else "not a JSON object" end' 2>/dev/null || true)"
+    mmry_note_hook_read_fault "session-start-session-id-absent" "${_mmry_keys:-unparsable}" || true
+    MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: the $(mmry_host_label) hook payload was read successfully but carried no 'session_id' field (fields present: ${_mmry_keys:-none - it did not parse as JSON}). MMRY assumes the Claude Code payload field names; this session is being registered without a real id, so coordination features will not work. Tell the user and ask them to report it. "
+fi
+
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
@@ -84,34 +145,7 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 
 # Check if config is loaded — guide unconfigured users to run setup
 if [[ -z "${MMRY_API_KEY:-}" ]]; then
-    API_URL="https://mmryai.com"
-    # #31245: the setup command, the product to restart and the way to get help all differ by host.
-    # A Codex customer told to type /mmry:help is being told to do something this platform does not
-    # let them do - it converts plugin commands into skills and there is nothing to type.
-    if [[ "$(mmry_host)" == "codex" ]]; then
-        _mmry_help_line='Tell them they can ask "what can MMRY do here" any time; there are no slash commands to type on this platform.'
-    else
-        _mmry_help_line='Mention /mmry:help for a quick reference.'
-    fi
-    SETUP_MSG="MMRY AI is installed but needs to be set up. Run the setup script to authenticate via the browser.
-
-## Setup
-
-Run this command using the Bash tool:
-
-$(mmry_host_setup_hint)
-
-This will open a browser window where the user can log in or create an account on mmryai.com. Once they authorize, the script writes the config file and permissions automatically.
-
-If the browser does not open, the script prints a URL the user can copy and paste.
-
-After setup completes, tell the user: \"You are all set. Restart $(mmry_host_label) and your memories will start loading automatically.\" ${_mmry_help_line}
-
-If the user does not have an account yet, direct them to https://mmryai.com to sign up first, then run setup again."
-
-    # Escape for JSON output
-    SETUP_MSG_ESCAPED="$(printf '%s' "$SETUP_MSG" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' "$SETUP_MSG_ESCAPED"
+    _mmry_emit_setup_message
     exit 0
 fi
 

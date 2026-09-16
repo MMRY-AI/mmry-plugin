@@ -206,6 +206,14 @@ mmry_host_assert_own_credential() {
     [[ "$(mmry_host)" == "codex" ]] || return 0
     [[ "${MMRY_ALLOW_NO_CREDENTIAL:-}" != "1" ]] || return 0
     [[ -n "${MMRY_CONFIG_FILE:-}" && -f "${MMRY_CONFIG_FILE}" ]] && return 0
+    # A credential supplied through the environment is a credential. mmry_load_config only fills
+    # values that are EMPTY, so a key set here cannot be replaced by one read from a file, and the
+    # leak this function exists to stop cannot happen. The URL is pinned to the same default the
+    # client applies, so that nothing at all is taken from the other product's file.
+    if [[ -n "${MMRY_API_KEY:-}" ]]; then
+        export MMRY_API_URL="${MMRY_API_URL:-https://mmryai.com}"
+        return 0
+    fi
     {
         printf 'MMRY AI: no %s credential was found, and MMRY will not fall back to another product'"'"'s account.
 ' "$(mmry_host_label)"

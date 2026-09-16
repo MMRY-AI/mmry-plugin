@@ -99,15 +99,24 @@ MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
 # two. Measured, not assumed: 20 invocations of a session that is in no formation averaged 961ms
 # on round 1 and 743ms on this, on the same machine, both figures dominated by bash startup. On a
 # machine with no system jq it is the difference between working and not working at all.
+#
+# THE HOST RESOLVER IS SOURCED FIRST, and the credential is checked before lib-jq.sh is reached.
+# lib-jq.sh refuses on a Codex install that has no credential of its own, rather than let the
+# client fall through to the other product's account (#31245 QA round 2) - and it refuses by
+# exiting 1. That is the right answer for a handler the model runs, and the wrong one HERE: this
+# hook runs after every tool call in every session, and its governing rule at the top of the file
+# is to fail open and SILENT. So the same question is asked here first and answered with exit 0.
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
+mmry_host_assert_own_credential 2>/dev/null || exit 0
+
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-jq.sh" 2>/dev/null || exit 0
 mmry_resolve_jq >/dev/null 2>&1 || true
 
-# Which host this is, because the delivery routes below are not the same on both (#31245). Sourced
-# with the same fail-open guard as everything else here: if it is missing, mmry_host is undefined
-# and the hook exits silently rather than guessing.
-# shellcheck source=/dev/null
-source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
+# lib-host.sh is already sourced above, before lib-jq.sh, because the credential question has to be
+# asked before anything can answer it wrongly. The delivery routes below are not the same on both
+# hosts (#31245), and mmry_host is what tells them apart.
 
 # ---- Resolve this session's id and the event we are running in. ----
 # CLAUDE_SESSION_ID is unreliable (session-init.sh says so and reads stdin instead), and the join
@@ -163,6 +172,21 @@ if [[ ! -t 0 ]]; then
         fi
     fi
 fi
+# A PAYLOAD THAT ARRIVED WITHOUT THE FIELDS WE ASSUME IS A FAULT, NOT SILENCE (#31245 QA round 2).
+#
+# "session_id" and "hook_event_name" are CLAUDE CODE's field names. On Codex they are an
+# assumption: no captured Codex payload exists yet, and every Codex delivery test in this suite
+# sets MMRY_FORMATION_MODE instead, a variable whose own comment says it exists for the test suite.
+# If Codex spells these differently, this handler exits 0 at the line below on every single event -
+# installed, silent, and doing nothing, which is the exact failure mode this work exists to end.
+#
+# This hook may not speak to the model, so it leaves the breadcrumb session-start.sh reads and
+# reports out loud. Keys only, never values: this payload can carry a prompt or a tool result.
+if [[ -z "$session_id" && "$hook_read_status" == "ok" ]]; then
+    _fc_keys="$(printf '%s' "${payload:-}" | "${MMRY_JQ:-jq}" -r 'if type=="object" then (keys | join(",")) else "not-an-object" end' 2>/dev/null || true)"
+    mmry_note_hook_read_fault "formation-check-session-id-absent" "fields=${_fc_keys:-unparsable}" || true
+fi
+
 session_id="${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
 [[ -n "$session_id" ]] || exit 0
 
