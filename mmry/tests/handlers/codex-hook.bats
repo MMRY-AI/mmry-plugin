@@ -391,52 +391,15 @@ _resolve_from() {
 }
 
 # ---------------------------------------------------------------------------------------------
-# THE ONE COMMAND A NEW CODEX CUSTOMER RUNS.
+# THE ONE COMMAND A NEW CODEX CUSTOMER RUNS is covered in tests/e2e/codex-setup.bats, which RUNS
+# mmry-setup.sh through the mocked device-authorization flow and looks at where the credential
+# file actually landed.
 #
-# The published instructions say: bash ~/.codex/mmry/setup/mmry-setup.sh, with no arguments.
-# session-init.sh puts the script there. The first draft of this task defaulted MMRY_HOST to
-# "claude" before sourcing the resolver, so that command wrote the credential to
-# ~/.claude/mmry-config.json - silently, on the one command that has to work.
+# It is not covered here any more. The first version of these tests asserted against a helper that
+# reproduced the script's host-resolution preamble, and that helper passed while the real script
+# was broken - a replica of the code under test is not the code under test. The one check kept
+# below reads the script's source, and is honest about being a source check.
 # ---------------------------------------------------------------------------------------------
-
-_stage_setup() {
-    # Stage the setup script and the libraries the way session-init.sh does, under one host.
-    local root="$1"
-    mkdir -p "$root/setup" "$root/hooks-handlers"
-    cp "$PLUGIN_ROOT/setup/mmry-setup.sh" "$root/setup/"
-    cp "$PLUGIN_ROOT"/hooks-handlers/lib-*.sh "$root/hooks-handlers/"
-}
-
-_where_would_setup_write() {
-    # Replays mmry-setup.sh's host resolution exactly: PLUGIN_ROOT from the script's location,
-    # MMRY_HOST exported only when --host was given, then the resolver.
-    local root="$1" host_arg="${2:-}"
-    env -u MMRY_HOST -u CODEX_HOME HOME="$TEST_HOME" bash -c "
-        PLUGIN_ROOT='$root'
-        [[ -n '$host_arg' ]] && export MMRY_HOST='$host_arg'
-        source \"\$PLUGIN_ROOT/hooks-handlers/lib-host.sh\"
-        mmry_host_config_file"
-}
-
-@test "req3 codex: the published setup command, run with NO arguments, writes the CODEX credential" {
-    _stage_setup "$TEST_HOME/.codex/mmry"
-    run _where_would_setup_write "$TEST_HOME/.codex/mmry"
-    assert_output "$TEST_HOME/.codex/mmry-config.json"
-    refute_output --partial "/.claude/"
-}
-
-@test "req4: the same command from a Claude install still writes the Claude credential" {
-    # The control. Without it the assertion above is satisfied by anything that sends both to Codex.
-    _stage_setup "$TEST_HOME/.claude/mmry"
-    run _where_would_setup_write "$TEST_HOME/.claude/mmry"
-    assert_output "$TEST_HOME/.claude/mmry-config.json"
-}
-
-@test "codex: an explicit --host codex still outranks the location" {
-    _stage_setup "$TEST_HOME/.claude/mmry"
-    run _where_would_setup_write "$TEST_HOME/.claude/mmry" codex
-    assert_output "$TEST_HOME/.codex/mmry-config.json"
-}
 
 @test "req4: mmry-setup.sh does not force MMRY_HOST before sourcing the resolver" {
     # The defect in source form, because the behavioural tests above depend on the staging helper

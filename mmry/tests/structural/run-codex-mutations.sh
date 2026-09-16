@@ -210,7 +210,7 @@ mutate "hook-guard loses its missing-resolver fallback" hooks-handlers/hook-guar
 mutate "stop-check loses its missing-resolver fallback" hooks-handlers/stop-check.sh   's = s.replace("    mmry_host_script_ref() { printf ", "    _unused_ref() { printf ", 1)'   handlers/codex-hook.bats "stop-check with NO lib-host.sh"
 
 # ---- the one command a new Codex customer runs -----------------------------------------------
-mutate "setup forces the host to claude before resolving" setup/mmry-setup.sh   's = s.replace("[[ -n " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]] && export MMRY_HOST", "export MMRY_HOST=" + chr(34) + "${MMRY_HOST:-claude}" + chr(34), 1)'   handlers/codex-hook.bats "writes the CODEX credential"
+mutate "setup forces the host to claude before resolving" setup/mmry-setup.sh   's = s.replace("[[ -n " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]] && export MMRY_HOST", "export MMRY_HOST=" + chr(34) + "${MMRY_HOST:-claude}" + chr(34), 1)'   e2e/codex-setup.bats "writes ~/.codex/mmry-config.json"
 
 echo "=== refused: $PASS   survived: $FAIL ==="
 [[ "$FAIL" -eq 0 ]]
