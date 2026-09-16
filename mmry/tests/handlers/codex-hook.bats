@@ -389,3 +389,58 @@ _resolve_from() {
     run env -u MMRY_HOST HOME="$TEST_HOME" bash -c "bash '$dir/stop-check.sh' 2>&1 >/dev/null"
     assert_output --partial '"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh"'
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE ONE COMMAND A NEW CODEX CUSTOMER RUNS.
+#
+# The published instructions say: bash ~/.codex/mmry/setup/mmry-setup.sh, with no arguments.
+# session-init.sh puts the script there. The first draft of this task defaulted MMRY_HOST to
+# "claude" before sourcing the resolver, so that command wrote the credential to
+# ~/.claude/mmry-config.json - silently, on the one command that has to work.
+# ---------------------------------------------------------------------------------------------
+
+_stage_setup() {
+    # Stage the setup script and the libraries the way session-init.sh does, under one host.
+    local root="$1"
+    mkdir -p "$root/setup" "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/setup/mmry-setup.sh" "$root/setup/"
+    cp "$PLUGIN_ROOT"/hooks-handlers/lib-*.sh "$root/hooks-handlers/"
+}
+
+_where_would_setup_write() {
+    # Replays mmry-setup.sh's host resolution exactly: PLUGIN_ROOT from the script's location,
+    # MMRY_HOST exported only when --host was given, then the resolver.
+    local root="$1" host_arg="${2:-}"
+    env -u MMRY_HOST -u CODEX_HOME HOME="$TEST_HOME" bash -c "
+        PLUGIN_ROOT='$root'
+        [[ -n '$host_arg' ]] && export MMRY_HOST='$host_arg'
+        source \"\$PLUGIN_ROOT/hooks-handlers/lib-host.sh\"
+        mmry_host_config_file"
+}
+
+@test "req3 codex: the published setup command, run with NO arguments, writes the CODEX credential" {
+    _stage_setup "$TEST_HOME/.codex/mmry"
+    run _where_would_setup_write "$TEST_HOME/.codex/mmry"
+    assert_output "$TEST_HOME/.codex/mmry-config.json"
+    refute_output --partial "/.claude/"
+}
+
+@test "req4: the same command from a Claude install still writes the Claude credential" {
+    # The control. Without it the assertion above is satisfied by anything that sends both to Codex.
+    _stage_setup "$TEST_HOME/.claude/mmry"
+    run _where_would_setup_write "$TEST_HOME/.claude/mmry"
+    assert_output "$TEST_HOME/.claude/mmry-config.json"
+}
+
+@test "codex: an explicit --host codex still outranks the location" {
+    _stage_setup "$TEST_HOME/.claude/mmry"
+    run _where_would_setup_write "$TEST_HOME/.claude/mmry" codex
+    assert_output "$TEST_HOME/.codex/mmry-config.json"
+}
+
+@test "req4: mmry-setup.sh does not force MMRY_HOST before sourcing the resolver" {
+    # The defect in source form, because the behavioural tests above depend on the staging helper
+    # reproducing the script's control flow rather than running the script's browser flow.
+    run grep -c 'export MMRY_HOST="${MMRY_HOST:-claude}"' "$PLUGIN_ROOT/setup/mmry-setup.sh"
+    assert_output "0"
+}

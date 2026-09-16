@@ -43,9 +43,19 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve the host BEFORE anything writes a path. An unrecognised --host value resolves to claude,
-# which is the same answer an absent one gives.
-export MMRY_HOST="${MMRY_HOST:-claude}"
+# Resolve the host BEFORE anything writes a path.
+#
+# MMRY_HOST IS DELIBERATELY NOT DEFAULTED HERE. Forcing it to "claude" before sourcing the resolver
+# is a bug, and it shipped in the first draft of this task: session-init.sh copies this script into
+# ~/.codex/mmry/setup/, the published Codex instructions tell a customer to run it from there with
+# no arguments, and a forced default made it write the credential to ~/.claude/mmry-config.json.
+# Silently, on the one command a new Codex customer runs.
+#
+# Leaving it unset lets lib-host.sh answer from this script's own install location, which is right
+# for both hosts: a copy under ~/.claude resolves to claude, a copy under a Codex home resolves to
+# codex, and an explicit --host still outranks both. An unrecognised --host value resolves to
+# claude, which is the same answer an absent one gives.
+[[ -n "${MMRY_HOST:-}" ]] && export MMRY_HOST
 # shellcheck source=/dev/null
 source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh"
 
