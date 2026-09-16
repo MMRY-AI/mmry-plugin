@@ -455,7 +455,10 @@ if [[ "$(mmry_host)" == "codex" ]]; then
     echo "hooks. Choose \"Trust all and continue\". If you choose not to trust them, MMRY"
     echo "appears installed and does nothing."
     echo ""
-    echo "What is not available on Codex: https://mmryai.com/docs/codex"
+    # A URL that exists TODAY. mmryai.com has no /docs/codex page yet, and printing one would be
+    # the v1.18 failure again: an announcement promising something a customer cannot reach.
+    echo "What is and is not available on Codex:"
+    echo "  https://github.com/MMRY-AI/mmry-plugin/blob/master/docs/codex.md"
 else
     echo "Anytime you need help, type: /mmry:help"
 fi

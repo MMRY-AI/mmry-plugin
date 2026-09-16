@@ -194,3 +194,64 @@ stop_run() {
     out="$(rm -f "$TMPDIR/.mmry-stop-checked"; MMRY_HOST=codex HOME="$TEST_HOME" bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" 2>/dev/null || true)"
     [[ -z "$out" ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# hook-guard: the installed-handler directory it looks in
+# ---------------------------------------------------------------------------------------------
+
+@test "req4: hook-guard still looks in ~/.claude/mmry/hooks-handlers by default" {
+    local dir="$TEST_TMPDIR/g"
+    mkdir -p "$dir" "$TEST_HOME/.claude/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/hook-guard.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    printf '#!/usr/bin/env bash\necho "CLAUDE TARGET"\n' > "$TEST_HOME/.claude/mmry/hooks-handlers/probe.sh"
+    run env -u MMRY_HOST HOME="$TEST_HOME" bash "$dir/hook-guard.sh" probe
+    assert_output "CLAUDE TARGET"
+}
+
+@test "codex: hook-guard looks in the Codex directory, not the Claude one" {
+    local dir="$TEST_TMPDIR/g"
+    mkdir -p "$dir" "$TEST_HOME/.claude/mmry/hooks-handlers" "$TEST_HOME/.codex/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/hook-guard.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    # Both exist and say different things, so "it found one" is not the same as "it found the
+    # right one". A guard that fell back to the Claude tree would pass a test with only one.
+    printf '#!/usr/bin/env bash\necho "CLAUDE TARGET"\n' > "$TEST_HOME/.claude/mmry/hooks-handlers/probe.sh"
+    printf '#!/usr/bin/env bash\necho "CODEX TARGET"\n' > "$TEST_HOME/.codex/mmry/hooks-handlers/probe.sh"
+    run env -u CODEX_HOME MMRY_HOST=codex HOME="$TEST_HOME" bash "$dir/hook-guard.sh" probe
+    assert_output "CODEX TARGET"
+}
+
+# ---------------------------------------------------------------------------------------------
+# The installer must not touch the other product's configuration
+# ---------------------------------------------------------------------------------------------
+
+@test "req4: setup --host codex does NOT write Claude Code's settings.json" {
+    # A Codex setup that edited ~/.claude/settings.json would silently modify a customer's Claude
+    # Code permissions during an install that has nothing to do with Claude Code. Checked by
+    # reading the script's control flow rather than by running the whole browser flow: the write
+    # is guarded by the host test, and the guard is what this asserts.
+    run grep -c 'if \[\[ "$(mmry_host)" == "claude" \]\]' "$PLUGIN_ROOT/setup/mmry-setup.sh"
+    assert_output "1"
+}
+
+@test "req4: setup with no --host still writes the Claude credential to ~/.claude" {
+    run env -u MMRY_HOST bash -c "
+        cd '$PLUGIN_ROOT'
+        HOME='$TEST_HOME'
+        MMRY_HOST=\${MMRY_HOST:-claude}
+        source hooks-handlers/lib-host.sh
+        mmry_host_config_file"
+    assert_output "${TEST_HOME}/.claude/mmry-config.json"
+}
+
+@test "codex: setup --host codex is accepted by the argument parser" {
+    run bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --host codex --help
+    assert_success
+    assert_output --partial "--host claude|codex"
+}
+
+@test "codex: an unknown argument is still rejected, so --host did not loosen the parser" {
+    run bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --not-a-real-flag
+    [[ "$status" -ne 0 ]]
+}

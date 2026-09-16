@@ -169,6 +169,16 @@ bash ~/.codex/mmry/setup/mmry-setup.sh
 It opens a browser for the customer to sign in at mmryai.com and writes the credential. After it
 finishes, the customer restarts Codex.
 
+## What is not available here, stated plainly
+
+If a customer asks what MMRY can do on Codex, or seems to expect something that is not here, point
+them at the full statement rather than improvising:
+https://github.com/MMRY-AI/mmry-plugin/blob/master/docs/codex.md
+
+The four things that are genuinely unavailable on this platform are: typed slash commands, the
+prompt before context is trimmed, waking an idle session with a formation message, and the
+plan-accepted prompt. Never imply any of them works here.
+
 ## Reporting a problem
 
 ```bash
