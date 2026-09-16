@@ -182,7 +182,13 @@ if [[ "${1:-}" == "--self-check" ]]; then
     printf '=== SELF-CHECK: a mutation that changes nothing must ABORT, not be scored ===\n'
     _sc_out="$("$0" m99 2>&1)"; _sc_rc=$?
     if (( _sc_rc != 0 )) && [[ "$_sc_out" == *'NO-OP MUTATION'* ]]; then
-        printf 'self-check: PASS — the no-op guard aborted the run, as it must.\n'
+        # Print what the guard actually SAID, and the status it exited with. A self-check
+        # that reports only its own verdict asks to be trusted on exactly the point it
+        # exists to prove (#31434 QA).
+        printf 'self-check: the guard said, verbatim:\n'
+        printf '%s\n' "$_sc_out" | sed 's/^/    | /'
+        printf 'self-check: exit status was %s (non-zero, as it must be).\n' "$_sc_rc"
+        printf 'self-check: PASS - the no-op guard aborted the run instead of scoring it.\n'
         exit 0
     fi
     printf 'self-check: FAIL — a mutation that modified nothing was SCORED. Every verdict this\n'
@@ -228,8 +234,8 @@ for m in $SELECTED; do
     # GUARD 1: a mutation that changed nothing would run a green suite against untouched
     # code and score it as a coverage hole. This is the defect the harness itself had.
     if cmp -s "$before" "$DIR/mmry/$mfile"; then
-        printf '%s: NO-OP MUTATION — the sed matched nothing. Aborting rather than reporting a\n' "$m"
-        printf '     verdict about code that was never modified.\n'
+        printf '%s: NO-OP MUTATION - the sed matched nothing in %s. Aborting rather than\n' "$m" "$mfile"
+        printf '     reporting a verdict about code that was never modified.\n'
         exit 1
     fi
 
