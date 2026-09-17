@@ -230,3 +230,66 @@ _fake_plugin_root() {
         bash -c "source '$HOME/.claude/mmry/hooks-handlers/lib-host.sh'; mmry_host; printf ' '; mmry_host_config_file"
     assert_output "claude $HOME/.claude/mmry-config.json"
 }
+
+# ---------------------------------------------------------------------------------------------
+# AN EXPIRED CREDENTIAL IS THE ONE MOMENT THE CUSTOMER MUST BE ABLE TO ACT ON (#31245 QA round 3)
+#
+# session-start.sh branches on the host in three of its messages and, until now, not in the
+# fourth: the HTTP 401 reply told every customer to "run /mmry:setup". On Codex there is nothing
+# to type - the platform converts plugin commands into skills - so the single instruction that
+# would have fixed their sign-in was the one they could not follow.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: an expired credential is met with a command a Codex customer can actually run" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey"
+    printf '401' > "$TEST_TMPDIR/mock-override-startup-code"
+    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_SESSION_ID="s-401-codex" \
+        bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    assert_success
+    [[ "$output" == *"invalid or expired"* ]]
+    [[ "$output" == *"mmry-setup.sh"* ]]
+    [[ "$output" != *"/mmry:setup"* ]]
+}
+
+@test "req4: on Claude Code the same reply still names /mmry:setup, exactly as it did" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey"
+    printf '401' > "$TEST_TMPDIR/mock-override-startup-code"
+    run env -u MMRY_HOST HOME="$HOME" CLAUDE_SESSION_ID="s-401-claude" \
+        bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    assert_success
+    [[ "$output" == *"invalid or expired"* ]]
+    [[ "$output" == *"/mmry:setup"* ]]
+}
+
+# ---------------------------------------------------------------------------------------------
+# A FORMATION JOINED FROM CODEX IS LISTED AS CODEX
+#
+# formation-join.sh and formation-start.sh registered the session with the literal "claude-code"
+# while session-start.sh had already been taught to use the host's own name - and docs/codex.md
+# tells the customer, in as many words, that their Codex sessions appear as `codex`. A session
+# under the wrong name is one the customer cannot find in their own list.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: joining a formation registers the session as codex, not claude-code" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey"
+    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_CODE_SESSION_ID="s-join-codex" \
+        bash "$PLUGIN_ROOT/hooks-handlers/formation-join.sh" 4242
+    grep -q '"clientType":"codex"\|"clientType": "codex"\|codex' "$TEST_TMPDIR/curl-log.txt"
+    run grep -c 'claude-code' "$TEST_TMPDIR/curl-log.txt"
+    assert_output "0"
+}
+
+@test "req4: joining from Claude Code still registers claude-code" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey"
+    run env -u MMRY_HOST HOME="$HOME" CLAUDE_CODE_SESSION_ID="s-join-claude" \
+        bash "$PLUGIN_ROOT/hooks-handlers/formation-join.sh" 4242
+    grep -q 'claude-code' "$TEST_TMPDIR/curl-log.txt"
+}
+
+@test "codex: starting a formation registers the session as codex too" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey"
+    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_CODE_SESSION_ID="s-start-codex" \
+        bash "$PLUGIN_ROOT/hooks-handlers/formation-start.sh" "ship the thing"
+    run grep -c 'claude-code' "$TEST_TMPDIR/curl-log.txt"
+    assert_output "0"
+}

@@ -71,8 +71,15 @@ fi
 # to run before one exists. lib-jq.sh refuses on Codex when the host's own credential file is
 # absent, to stop the client borrowing the other product's account (#31245 QA round 2); without
 # this opt-out that refusal would make setup impossible to run, which is the opposite of the fix.
-export MMRY_ALLOW_NO_CREDENTIAL=1
+#
+# IT IS NOT EXPORTED, AND IT IS UNSET AS SOON AS IT HAS DONE ITS JOB (#31245 QA round 3). The only
+# consumer is lib-jq.sh, which is SOURCED into this same shell on the next line, so a plain shell
+# variable reaches it. Exporting it handed a credential-check override to every process this script
+# spawns afterwards - including the installers at the end of it - for the rest of the run, which is
+# a much longer life than the one line of work it exists for.
+MMRY_ALLOW_NO_CREDENTIAL=1
 source "${PLUGIN_ROOT}/hooks-handlers/lib-jq.sh"
+unset MMRY_ALLOW_NO_CREDENTIAL
 if ! mmry_resolve_jq; then
     mmry_jq_unavailable_message
     exit 1

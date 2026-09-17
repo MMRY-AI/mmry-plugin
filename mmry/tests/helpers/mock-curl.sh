@@ -113,8 +113,16 @@ case "$URL" in
         RESPONSE_BODY='[{"id":1,"topic":"Test Result","content":"Found via search","memoryTier":"Operational","scope":"global","category":"Fact"}]'
         ;;
     */api/memories/startup*)
-        HTTP_CODE="200"
-        RESPONSE_BODY='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
+        # Per-URL override, same pattern as the auth endpoints above: write an HTTP code to
+        # $TEST_TMPDIR/mock-override-startup-code to exercise the 401/402/403 branches of
+        # session-start.sh, each of which speaks to the customer in different words (#31245).
+        if [[ -f "${TEST_TMPDIR}/mock-override-startup-code" ]]; then
+            HTTP_CODE="$(cat "${TEST_TMPDIR}/mock-override-startup-code")"
+            RESPONSE_BODY='{"error":"overridden by the test"}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
+        fi
         ;;
     */api/memories/*/visibility)
         HTTP_CODE="204"

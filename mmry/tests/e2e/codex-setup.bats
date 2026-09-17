@@ -155,3 +155,42 @@ _stage() {
     [[ "$output" == *"Restart Claude Code"* ]]
     [[ "$output" == *"/mmry:help"* ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE CREDENTIAL-CHECK OPT-OUT LIVES FOR ONE LINE, NOT FOR THE WHOLE RUN (#31245 QA round 3)
+#
+# mmry-setup.sh has to be able to run before a credential exists - it is the program that creates
+# one - so it turns off lib-jq.sh's refusal while it sources the resolver. Round 2 did that with
+# `export`, which handed the override to every process the script spawns for the rest of the run,
+# including the installers it calls at the end. An opt-out that outlives its reason is a hole
+# nobody is looking at.
+#
+# This observes a REAL child process rather than reading the source: curl is spawned by the
+# device-authorization flow, and the wrapper below records whether the variable reached it.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: the setup opt-out does not leak into the processes setup spawns" {
+    local real_curl; real_curl="$(command -v curl)"
+    local spy="$TEST_TMPDIR/spy-bin"
+    mkdir -p "$spy"
+    cat > "$spy/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\${MMRY_ALLOW_NO_CREDENTIAL:-<unset>}" >> "$TEST_TMPDIR/child-env.log"
+exec "$real_curl" "\$@"
+EOF
+    chmod +x "$spy/curl"
+
+    local script; script="$(_stage "$HOME/.codex/mmry")"
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        MMRY_NO_BROWSER=1 MMRY_JQ_VENDOR_DIR="$MMRY_JQ_VENDOR_DIR" PATH="$spy:$PATH" \
+        bash "$script"
+    [ "$status" -eq 0 ]
+
+    # The spy must actually have run, or this test proves nothing.
+    [ -s "$TEST_TMPDIR/child-env.log" ] || { echo "no child process was observed"; return 1; }
+    run grep -c '^1$' "$TEST_TMPDIR/child-env.log"
+    [ "$output" -eq 0 ] || {
+        echo "the credential-check opt-out was inherited by $output spawned process(es)"
+        return 1
+    }
+}

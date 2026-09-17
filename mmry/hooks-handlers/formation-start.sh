@@ -51,7 +51,16 @@ fi
 
 # The server refuses a session it has never seen, which would otherwise read as a permission
 # problem. Same ordering as formation-join.sh.
-mmry_register_session "$session_id" "claude-code" "$PWD" 2>/dev/null || true
+# #31245 QA round 3: the client name is the HOST's, not the constant "claude-code". A Codex session
+# registered as claude-code is a session the customer cannot find in their own session list - and
+# docs/codex.md tells them, in as many words, that Codex sessions are listed as `codex`. The
+# resolver is reached through mmry-client.sh; the fallback keeps the old literal if it is not.
+if declare -F mmry_host_client_name >/dev/null 2>&1; then
+    _mmry_client_name="$(mmry_host_client_name)"
+else
+    _mmry_client_name="claude-code"
+fi
+mmry_register_session "$session_id" "$_mmry_client_name" "$PWD" 2>/dev/null || true
 
 if ! mmry_create_formation "$objective" "$session_id" "$task_id"; then
     code="${MMRY_HTTP_CODE:-0}"

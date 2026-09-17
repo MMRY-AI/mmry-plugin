@@ -170,7 +170,18 @@ if ! mmry_get_startup_memories "$WORK_DIR"; then
     if [[ "${MMRY_HTTP_CODE:-}" == "401" ]]; then
         # #30321: the stored credential is present but invalid or expired. Tell the assistant
         # so it warns the user, instead of falling through to the generic failure below.
-        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI: the stored sign-in credential is invalid or expired. Tell the user that their memories may not be saved or loaded, and direct them to run /mmry:setup to re-authenticate."}}'
+        #
+        # #31245 QA round 3: this was the last line in the file still naming a Claude Code slash
+        # command unconditionally, three host-branched messages after the others were fixed. A
+        # Codex customer told to run /mmry:setup is being told to type something this platform does
+        # not give them - Codex converts plugin commands into skills and there is nothing to type -
+        # so the fix that re-authenticates them is the one instruction they cannot follow.
+        if [[ "$(mmry_host)" == "codex" ]]; then
+            _mmry_reauth_hint="ask the assistant to run $(mmry_host_setup_hint)"
+        else
+            _mmry_reauth_hint="run /mmry:setup"
+        fi
+        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI: the stored sign-in credential is invalid or expired. Tell the user that their memories may not be saved or loaded, and direct them to %s to re-authenticate."}}' "$_mmry_reauth_hint"
         exit 0
     fi
     escaped_err="$(echo "$MMRY_RESPONSE" | sed "s/\"/'/g" | sed 's/\\/\\\\/g')"
