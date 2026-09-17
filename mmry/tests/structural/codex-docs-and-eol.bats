@@ -112,10 +112,62 @@ SKILL="mmry/skills-codex/memory-system/SKILL.md"
     }
 }
 
-@test "docs: the customer-facing Codex document says what happens if the Codex home was moved" {
-    run grep -c 'CODEX_HOME' "$(cd "$PLUGIN_ROOT/.." && pwd)/docs/codex.md"
-    [ "$status" -eq 0 ]
-    [ "$output" -ge 1 ]
+# ---------------------------------------------------------------------------------------------
+# THE CUSTOMER-FACING PAGE, CHECKED ON ITS COMMANDS RATHER THAN ITS VOCABULARY
+#
+# The check this replaces asserted that docs/codex.md mentions CODEX_HOME AT LEAST ONCE, in two
+# lines of which the second could not fail: `grep -c` already exits non-zero when the count is
+# zero, so `[ "$output" -ge 1 ]` was re-stating a test that had just been made. It passed happily
+# while the page carried four hard-coded ~/.codex paths, two of them commands a customer is told to
+# run - which on a relocated Codex home name a directory that does not exist. A mention is not a
+# property of the instructions; these tests are about the instructions (#31245 QA round 3).
+# ---------------------------------------------------------------------------------------------
+
+_codex_doc() { printf '%s' "$(cd "$PLUGIN_ROOT/.." && pwd)/docs/codex.md"; }
+
+# Every line of the document a customer could paste into a shell. Fenced blocks whose content is a
+# shell command, and inline `code` after the word "Run".
+_runnable_lines() {
+    local doc; doc="$(_codex_doc)"
+    grep -nE '(^[[:space:]]*bash |Run `)' "$doc" || true
+}
+
+@test "docs: the customer-facing page has runnable commands at all" {
+    # Without this the two tests below are satisfied by a page with no commands in it.
+    local n; n="$(_runnable_lines | wc -l | tr -d ' ')"
+    [ "$n" -ge 2 ] || { echo "found $n runnable lines; the page is supposed to tell people what to run"; return 1; }
+}
+
+@test "docs: no runnable command on the page hard-codes ~/.codex" {
+    # A customer who set CODEX_HOME gets "No such file or directory", which names nothing.
+    local bad
+    bad="$(_runnable_lines | grep -F '~/.codex' || true)"
+    [[ -z "$bad" ]] || {
+        echo "these runnable commands name a path that does not exist on a relocated Codex home:"
+        printf '%s\n' "$bad"
+        return 1
+    }
+}
+
+@test "docs: every runnable command on the page uses the relocatable form" {
+    local line missing=""
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        [[ "$line" == *'.codex'* ]] || continue    # commands that name no Codex path are fine
+        [[ "$line" == *'CODEX_HOME:-$HOME/.codex'* ]] || missing="${missing}
+  ${line}"
+    done < <(_runnable_lines)
+    [[ -z "$missing" ]] || {
+        echo "these runnable commands are not written in the form that survives a moved home:${missing}"
+        return 1
+    }
+}
+
+@test "docs: and the page still explains WHY the commands are written that way" {
+    # The form is unusual enough that a customer will wonder. Losing the explanation would leave
+    # the commands looking like a typo.
+    run grep -c 'CODEX_HOME' "$(_codex_doc)"
+    [ "$output" -ge 3 ]
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -127,21 +179,79 @@ SKILL="mmry/skills-codex/memory-system/SKILL.md"
 # would uninstall the OTHER product and leave the Codex install exactly where it was.
 # ---------------------------------------------------------------------------------------------
 
-@test "codex: the Windows uninstaller carries the guard that makes it refuse a Codex copy" {
-    # A SOURCE CHECK, AND HONEST ABOUT IT. The behaviour was verified by EXECUTION on 2026-09-16 -
-    # the Codex copy printed "uninstalls the CLAUDE CODE installation" and exited 1; the Claude copy
-    # went on into the PowerShell block exactly as the pristine file does - but running cmd.exe from
-    # bats under Git Bash mangles the /c switch and leaves an INTERACTIVE cmd waiting for input,
-    # which hangs the suite. A test that can hang CI is worse than one that reads the file.
+@test "codex: the Windows uninstaller carries all three guard clauses" {
     local f="$PLUGIN_ROOT/setup/uninstall.bat"
     grep -q 'goto :codex_install' "$f"
     grep -q ':codex_install' "$f"
     grep -q 'uninstalls the CLAUDE CODE installation' "$f"
-    # The pattern must not end in a backslash: in a cmd string \" escapes the quote and findstr
-    # then gets a pattern that never matches. That is how the first version of this guard silently
-    # did nothing, and only executing it showed that.
+    # 1. The install marker, which is the only signal that survives a relocated home with nothing
+    #    exported - the hole QA found in round 2's guard.
+    grep -qF '.mmry-host' "$f"
+    # 2. CODEX_HOME, guarded by `if defined` because findstr with an empty pattern matches
+    #    everything and would refuse on every machine on earth.
+    grep -qF 'if defined CODEX_HOME' "$f"
+    # 3. The literal segment. The pattern must not end in a backslash: in a cmd string \" escapes
+    #    the quote and findstr then gets a pattern that never matches, which is how the first
+    #    version of this guard silently did nothing.
     run grep -cF 'findstr /i /l /c:"\.codex"' "$f"
     assert_output "1"
+}
+
+# EXECUTED, NOT READ - AND SAFE TO EXECUTE (#31245 QA round 3).
+#
+# Round 2 left this as a source check because running cmd.exe from bats under Git Bash dropped into
+# an INTERACTIVE cmd and hung the suite. The cause was path conversion mangling the /c switch;
+# MSYS_NO_PATHCONV=1 with stdin closed runs it properly, which was established on 2026-09-16.
+#
+# Only the REFUSAL cases are executed, and USERPROFILE is pointed at a temporary directory for the
+# run. So a guard that failed to fire would uninstall from an empty temp profile - visible in the
+# assertions, harmless to the developer's own machine - rather than from their real one.
+_run_bat() {
+    local batdir="$1"; shift
+    command -v cmd.exe >/dev/null 2>&1 || skip "cmd.exe is not available on this platform"
+    command -v cygpath >/dev/null 2>&1 || skip "cygpath is needed to hand cmd.exe a Windows path"
+    local profile="$TEST_TMPDIR/winprofile"
+    mkdir -p "$profile/.claude"
+    MSYS_NO_PATHCONV=1 env USERPROFILE="$(cygpath -w "$profile")" "$@" \
+        cmd.exe /c "$(cygpath -w "$batdir/uninstall.bat")" </dev/null 2>&1
+}
+
+_codex_tree() {
+    local root="$1" marker="$2"
+    mkdir -p "$root/setup"
+    cp "$PLUGIN_ROOT/setup/uninstall.bat" "$root/setup/uninstall.bat"
+    [[ -z "$marker" ]] || printf '%s\r\n' "$marker" > "$root/.mmry-host"
+    printf '%s' "$root/setup"
+}
+
+@test "codex: executed - the marker alone makes the Windows uninstaller refuse" {
+    local d; d="$(_codex_tree "$TEST_TMPDIR/relocated-marker" "codex")"
+    run _run_bat "$d" env
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"changed nothing"* ]]
+}
+
+@test "codex: executed - CODEX_HOME alone makes it refuse, with no .codex in the path" {
+    local d; d="$(_codex_tree "$TEST_TMPDIR/relocated-envvar" "")"
+    run _run_bat "$d" env CODEX_HOME="$(cygpath -w "$TEST_TMPDIR/relocated-envvar")"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"changed nothing"* ]]
+}
+
+@test "codex: executed - a literal .codex segment still refuses, as it did before" {
+    local d; d="$(_codex_tree "$TEST_TMPDIR/.codex/mmry" "")"
+    run _run_bat "$d" env
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"changed nothing"* ]]
+}
+
+@test "req4: executed - a marker reading claude does NOT make it refuse" {
+    # The control for the marker clause. Without it, a guard that refused on the mere presence of
+    # a marker file would pass every test above and break every Windows Claude Code uninstall.
+    local d; d="$(_codex_tree "$TEST_TMPDIR/claude-marker" "claude")"
+    run _run_bat "$d" env
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"changed nothing"* ]]
 }
 
 @test "req4: the Claude Code uninstall path in that file is untouched by the guard" {

@@ -84,7 +84,29 @@ setup() {
 @test "codex manifest: points skills at its own directory, so Claude Code gains no skills" {
     run jq -r '.skills' "$CODEX_MANIFEST"
     assert_output "./skills-codex/"
-    refute_output "./skills/"
+}
+
+@test "codex manifest: and that directory is a DIFFERENT document from the Claude Code skill" {
+    # THE REFUTATION THIS REPLACES COULD NOT FAIL (#31245 QA round 3). It read
+    # `refute_output "./skills/"` on the line after `assert_output "./skills-codex/"`, which had
+    # already pinned the value to a different string - so the refutation restated a test that had
+    # just been made and would have been satisfied by any manifest the assertion accepted.
+    #
+    # What it was reaching for is a real property, and this asserts that instead: the Codex skill
+    # exists, it is not a copy of the Claude Code one, and it is the one that describes THIS
+    # platform. Pointing the manifest at ./skills/ - or copying the Claude document into
+    # skills-codex/ - fails here, and either would ship a Codex customer instructions telling them
+    # to type slash commands Codex does not have.
+    local codex_skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    local claude_skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    [[ -f "$codex_skill" ]] || { echo "the declared Codex skill directory has no SKILL.md"; return 1; }
+    [[ -f "$claude_skill" ]] || { echo "the Claude Code skill has moved; this test needs updating"; return 1; }
+    cmp -s "$codex_skill" "$claude_skill" && { echo "the Codex skill is byte-identical to the Claude Code one"; return 1; }
+    grep -qi 'codex' "$codex_skill" || { echo "the Codex skill never mentions the platform it is for"; return 1; }
+    # And the Claude Code document is still the Claude Code document, unmentioning Codex - which is
+    # requirement 4 stated about the file a Claude Code customer actually receives.
+    run bash -c "grep -ci codex '$claude_skill' || true"
+    assert_output "0"
 }
 
 @test "codex manifest: names a commands directory explicitly rather than inheriting the default" {

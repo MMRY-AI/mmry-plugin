@@ -34,18 +34,18 @@ MMRY's hooks cannot be installed at all. Ask your administrator.
 Ask Codex to run MMRY setup, or run it yourself:
 
 ```
-bash ~/.codex/mmry/setup/mmry-setup.sh
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 ```
 
 It opens a browser so you can sign in at [mmryai.com](https://mmryai.com), then writes your
-credential to `~/.codex/mmry-config.json`. If the browser does not open, the script prints a URL to
-paste.
+credential to `${CODEX_HOME:-$HOME/.codex}/mmry-config.json`. If the browser does not open, the
+script prints a URL to paste.
 
-**If you have moved your Codex home.** Codex reads `CODEX_HOME` to find its own configuration, and
-MMRY follows it: everything above lives under `$CODEX_HOME` instead of `~/.codex` when that
-variable is set. Every command in this document and in the skill works unchanged if you write it
-as `"${CODEX_HOME:-$HOME/.codex}/mmry/..."`, which resolves to the same place either way. MMRY's
-own hooks and handlers resolve it for themselves and need no help from you.
+**Why the command is written that way.** Codex reads `CODEX_HOME` to find its own configuration and
+MMRY follows it, so your files are under `$CODEX_HOME` if you have set it and under `~/.codex` if
+you have not. `"${CODEX_HOME:-$HOME/.codex}"` resolves to the right one either way, which is why
+every runnable command on this page is written with it - paste any of them as they are. MMRY's own
+hooks and handlers work this out for themselves and need no help from you.
 
 **4. Restart Codex once more.** Your memories load on the next session start.
 
@@ -137,7 +137,7 @@ memory.
 | Symptom | First thing to check |
 |---|---|
 | No memories at session start | Did you answer **Trust all and continue** at the hook review? Restart Codex and look for it. |
-| "MMRY AI is installed but needs to be set up" | Run `bash ~/.codex/mmry/setup/mmry-setup.sh`. |
+| "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Nothing at all happens, on Windows | Is Git for Windows installed? Try setting `MMRY_BASH` to your `bash.exe`. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |

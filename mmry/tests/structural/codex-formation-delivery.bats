@@ -111,6 +111,13 @@ FAKECURL
 @test "req2 codex: the tool-call route exits 0, so a colleague's message never cancels a tool call" {
     # This is the reason for choosing additionalContext over exit 2 on Codex. Exit 2 works here
     # too - events/post_tool_use.rs turns stderr into Feedback - but it also sets should_block.
+    #
+    # THIS TEST USED TO ASSERT ONLY `status != 2`, WHICH IS NOT A TEST (#31245 QA round 3). A
+    # handler that crashed on line one, that could not find jq, that refused for want of a
+    # credential, or that was deleted outright all exit something other than 2 and all passed it.
+    # A mutation demonstrated it inert. What the route actually promises is three things at once:
+    # exit 0, the message delivered, and delivered on the channel that does not block - so all
+    # three are asserted, and the "not 2" is now a consequence of them rather than the whole claim.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
 
@@ -119,6 +126,12 @@ FAKECURL
         MMRY_FORMATION_MODE=tool MMRY_HOST=codex \
         run bash "${HANDLERS}/formation-check.sh"
 
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+    printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
+    printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("FormationService.cs")' >/dev/null
+    # And the delivery is NOT on the blocking channel: nothing was written to stderr as the exit-2
+    # route does, and the status is not the one Codex reads as should_block.
     [ "$status" -ne 2 ]
 }
 
