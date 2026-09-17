@@ -206,10 +206,17 @@ _runnable_lines() {
 # Only the REFUSAL cases are executed, and USERPROFILE is pointed at a temporary directory for the
 # run. So a guard that failed to fire would uninstall from an empty temp profile - visible in the
 # assertions, harmless to the developer's own machine - rather than from their real one.
-_run_bat() {
-    local batdir="$1"; shift
+# THE PLATFORM CHECK IS ITS OWN FUNCTION AND IS CALLED FROM THE TEST BODY, NOT FROM INSIDE _run_bat.
+# `skip` inside a function invoked through `run` does not skip anything - run captures it as a
+# failed command - so a Linux box reported three failures here instead of three skips. Found on a
+# Debian container on 2026-09-16 while re-measuring the Linux count.
+_require_windows_shell() {
     command -v cmd.exe >/dev/null 2>&1 || skip "cmd.exe is not available on this platform"
     command -v cygpath >/dev/null 2>&1 || skip "cygpath is needed to hand cmd.exe a Windows path"
+}
+
+_run_bat() {
+    local batdir="$1"; shift
     local profile="$TEST_TMPDIR/winprofile"
     mkdir -p "$profile/.claude"
     MSYS_NO_PATHCONV=1 env USERPROFILE="$(cygpath -w "$profile")" "$@" \
@@ -225,6 +232,7 @@ _codex_tree() {
 }
 
 @test "codex: executed - the marker alone makes the Windows uninstaller refuse" {
+    _require_windows_shell
     local d; d="$(_codex_tree "$TEST_TMPDIR/relocated-marker" "codex")"
     run _run_bat "$d" env
     [ "$status" -eq 1 ]
@@ -232,6 +240,7 @@ _codex_tree() {
 }
 
 @test "codex: executed - CODEX_HOME alone makes it refuse, with no .codex in the path" {
+    _require_windows_shell
     local d; d="$(_codex_tree "$TEST_TMPDIR/relocated-envvar" "")"
     run _run_bat "$d" env CODEX_HOME="$(cygpath -w "$TEST_TMPDIR/relocated-envvar")"
     [ "$status" -eq 1 ]
@@ -239,6 +248,7 @@ _codex_tree() {
 }
 
 @test "codex: executed - a literal .codex segment still refuses, as it did before" {
+    _require_windows_shell
     local d; d="$(_codex_tree "$TEST_TMPDIR/.codex/mmry" "")"
     run _run_bat "$d" env
     [ "$status" -eq 1 ]
@@ -246,6 +256,7 @@ _codex_tree() {
 }
 
 @test "req4: executed - a marker reading claude does NOT make it refuse" {
+    _require_windows_shell
     # The control for the marker clause. Without it, a guard that refused on the mere presence of
     # a marker file would pass every test above and break every Windows Claude Code uninstall.
     local d; d="$(_codex_tree "$TEST_TMPDIR/claude-marker" "claude")"
