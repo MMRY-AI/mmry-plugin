@@ -4,20 +4,50 @@ set -euo pipefail
 
 CLAUDE_DIR="${HOME}/.claude"
 SETTINGS_PATH="${CLAUDE_DIR}/settings.json"
+CONFIG_PATH="${CLAUDE_DIR}/mmry-config.json"
 
-# #31245 QA round 2: THE CREDENTIAL THIS REMOVES BELONGS TO WHICHEVER HOST THIS COPY IS INSTALLED
-# UNDER. Spelled as ~/.claude/mmry-config.json, a Codex uninstall deleted the OTHER product's
-# credential - signing the customer out of Claude Code - and left the Codex one exactly where it
-# was. The resolver answers "${HOME}/.claude/mmry-config.json" for every Claude Code install, which
-# is the literal this line used to carry, so nothing changes there.
-export MMRY_ALLOW_NO_CREDENTIAL=1
-_mmry_uninstall_libs="$(cd "$(dirname "$0")/../hooks-handlers" && pwd)"
-if [[ -f "${_mmry_uninstall_libs}/lib-host.sh" ]] && source "${_mmry_uninstall_libs}/lib-host.sh" 2>/dev/null; then
-    CONFIG_PATH="$(mmry_host_config_file)"
-    MMRY_UNINSTALL_HOST="$(mmry_host)"
-else
-    CONFIG_PATH="${CLAUDE_DIR}/mmry-config.json"
-    MMRY_UNINSTALL_HOST="claude"
+# ---------------------------------------------------------------------------------------------
+# THIS UNINSTALLER IS CLAUDE CODE'S, AND IT REFUSES TO RUN AS ANY OTHER (#31245 QA round 3).
+#
+# Round 2 made Step 1 and Step 2 host-aware and stopped, which was worse than the defect it fixed.
+# Steps 3 and 4 and the closing message still named ~/.claude, so the Codex copy - which
+# session-init.sh puts at ${CODEX_HOME:-~/.codex}/mmry/setup/uninstall.sh on EVERY Codex install -
+# deleted ~/.claude/mmry/, cleared the Claude plugin cache, left the Codex install exactly where it
+# was, and closed by telling the customer to restart the wrong product. Reproduced on 2026-09-16.
+#
+# A partial fix that half succeeds is the worst of the three options. uninstall.bat already refuses
+# outright; this file now does the same thing, for the same reason: everything below this block
+# names ~/.claude - the credential, the settings file, the state directory, the plugin cache and
+# the closing line - and there is no reading of it that is correct for another product.
+#
+# ON CLAUDE CODE NOTHING CHANGES. mmry_host() answers "claude" for every Claude Code install, the
+# branch is not taken, and the script proceeds into the same steps it always ran.
+# ---------------------------------------------------------------------------------------------
+_mmry_uninstall_libs="$(cd "$(dirname "$0")/../hooks-handlers" && pwd 2>/dev/null)" || _mmry_uninstall_libs=""
+MMRY_UNINSTALL_HOST="claude"
+if [[ -n "$_mmry_uninstall_libs" && -f "${_mmry_uninstall_libs}/lib-host.sh" ]]; then
+    # No MMRY_ALLOW_NO_CREDENTIAL here. lib-host.sh only RESOLVES the host when sourced; the
+    # refusal that needs the opt-out lives in lib-jq.sh, which this script no longer sources on the
+    # Codex path because it no longer has a Codex path. Exporting an opt-out that then survives for
+    # the lifetime of the process - and is inherited by everything this script spawns - was itself a
+    # QA finding (#31245 QA round 2).
+    # shellcheck source=/dev/null
+    if source "${_mmry_uninstall_libs}/lib-host.sh" 2>/dev/null; then
+        MMRY_UNINSTALL_HOST="$(mmry_host)"
+    fi
+fi
+
+if [[ "$MMRY_UNINSTALL_HOST" != "claude" ]]; then
+    _mmry_codex_home="${CODEX_HOME:-${HOME}/.codex}"
+    echo ""
+    echo "MMRY AI: this script uninstalls the CLAUDE CODE installation, and you are running the"
+    echo "copy that was placed in your Codex directory. It has changed nothing."
+    echo ""
+    echo "To remove MMRY from Codex: remove the plugin through Codex, then delete these two:"
+    echo "  ${_mmry_codex_home}/mmry-config.json"
+    echo "  ${_mmry_codex_home}/mmry"
+    echo ""
+    exit 1
 fi
 
 # Handle both marketplace and local install key names
@@ -47,19 +77,19 @@ fi
 
 # Step 2: Clean settings.json (plugin, marketplace, permissions)
 #
-# Claude Code's file, and only ever Claude Code's. A Codex uninstall that edited it would silently
-# change an unrelated product's permissions and plugin list - the same trespass the installer is
-# already guarded against (#31245).
-if [[ "$MMRY_UNINSTALL_HOST" != "claude" ]]; then
-    echo "  Codex install: leaving Claude Code's settings.json untouched."
-elif [[ ! -f "$SETTINGS_PATH" ]]; then
+# Claude Code's file, and only ever Claude Code's. Nothing here needs a host test any more: the
+# refusal at the top of this file is the host test, and it is the only one, so there is no second
+# place for the two answers to disagree (#31245 QA round 3).
+if [[ ! -f "$SETTINGS_PATH" ]]; then
     echo "  No settings.json found."
 else
     # Prefer the resolved jq (system or bundled). #30624. The Python block below
     # remains as a teardown safety net so uninstall can always clean settings.
-    # Uninstall runs when the credential is being removed, so it must not be gated on one
-    # existing. See the refusal in lib-jq.sh (#31245 QA round 2).
-    export MMRY_ALLOW_NO_CREDENTIAL=1
+    #
+    # No MMRY_ALLOW_NO_CREDENTIAL opt-out is needed or set. lib-jq.sh's refusal only fires when the
+    # host is Codex, and this line is unreachable on Codex - the script exited at the top. Setting
+    # it here exported a credential-check override into every child process for the rest of the
+    # run, which was a QA finding in its own right (#31245 QA round 3).
     source "$(cd "$(dirname "$0")/../hooks-handlers" && pwd)/lib-jq.sh" 2>/dev/null || true
 
     if command -v mmry_resolve_jq &>/dev/null && mmry_resolve_jq; then
