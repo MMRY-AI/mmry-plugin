@@ -101,3 +101,81 @@ EOF
     # Within the debounce window we should NOT reach the network fetch at all.
     [[ "$output" != *"failed to fetch marketplace.json"* ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# WHICH INSTALLED COPY IT UPDATES (#31245 QA round 3)
+#
+# self-update.sh runs from session-start.sh on EVERY host, and the second destination it writes to
+# was spelled ${HOME}/.claude/mmry outright. On a Codex session that reached across and overwrote
+# the OTHER product's installed handlers mid-run, while the Codex copy was never updated at all -
+# so a Codex customer would have stayed on whatever version they first installed, forever.
+#
+# These run the real copy path with a fabricated remote archive rather than asserting on the source
+# text, because the defect was in what the script DID, not in what it said.
+# ---------------------------------------------------------------------------------------------
+
+# A plugin tree with the libraries the resolver needs, and a version behind the "remote" one.
+_updatable_plugin() {
+    local root="$1"
+    mkdir -p "$root/hooks-handlers" "$root/.claude-plugin"
+    cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$root/hooks-handlers/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$root/hooks-handlers/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$root/hooks-handlers/"
+    printf '%s' '{ "name": "mmry", "version": "0.0.1" }' > "$root/.claude-plugin/plugin.json"
+}
+
+# curl that answers the marketplace with a newer version and hands back a real archive.
+_mock_remote() {
+    local stage="$TEST_TMPDIR/remote/mmry-plugin-master/mmry/hooks-handlers"
+    mkdir -p "$stage"
+    printf 'delivered by the update\n' > "$stage/updated-marker.txt"
+    ( cd "$TEST_TMPDIR/remote" && tar -czf "$TEST_TMPDIR/remote.tar.gz" mmry-plugin-master )
+    cat > "$TEST_TMPDIR/mock-bin/curl" <<EOF
+#!/usr/bin/env bash
+out=""; prev=""
+for arg in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$arg"; prev="\$arg"; done
+if [[ -n "\$out" ]]; then cp "$TEST_TMPDIR/remote.tar.gz" "\$out"; exit 0; fi
+printf '%s' '{"plugins":[{"name":"mmry","version":"9.9.9"}]}'
+EOF
+    chmod +x "$TEST_TMPDIR/mock-bin/curl"
+}
+
+@test "codex: self-update writes into the CODEX state directory, not the Claude one" {
+    _mock_remote
+    mkdir -p "$HOME/.codex/mmry/hooks-handlers" "$HOME/.claude/mmry/hooks-handlers"
+    local root="$TEST_TMPDIR/codex-cache/mmry"
+    _updatable_plugin "$root"
+
+    run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]]
+    [ -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
+    [ ! -f "$HOME/.claude/mmry/hooks-handlers/updated-marker.txt" ]
+}
+
+@test "req4: on Claude Code self-update still writes into ~/.claude/mmry, as it always did" {
+    _mock_remote
+    mkdir -p "$HOME/.codex/mmry/hooks-handlers" "$HOME/.claude/mmry/hooks-handlers"
+    local root="$TEST_TMPDIR/claude-cache/mmry"
+    _updatable_plugin "$root"
+
+    run env -u MMRY_HOST -u CODEX_HOME HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]]
+    [ -f "$HOME/.claude/mmry/hooks-handlers/updated-marker.txt" ]
+    [ ! -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
+}
+
+@test "codex: an unconfigured Codex install still gets its update check, it does not die silently" {
+    # lib-jq.sh refuses when a Codex install has no credential of its own. An update check needs no
+    # credential - it reads a public file - and before the opt-out it exited 1 saying nothing,
+    # which is how a Codex install would have stopped receiving updates entirely.
+    _mock_remote
+    mkdir -p "$HOME/.codex/mmry/hooks-handlers"
+    [ ! -f "$HOME/.codex/mmry-config.json" ]
+    local root="$TEST_TMPDIR/nocred/mmry"
+    _updatable_plugin "$root"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_API_KEY MMRY_HOST=codex HOME="$HOME" \
+        bash "$root/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]]
+    [ -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
+}
