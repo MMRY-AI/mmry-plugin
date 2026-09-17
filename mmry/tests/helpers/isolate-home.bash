@@ -101,6 +101,12 @@ mmry_isolate_home() {
 mmry_release_home() {
     [[ -n "${MMRY_TEST_HOME_BASE:-}" ]] || return 0
 
+    # Already gone, nothing to do and nothing to report. run-tests.sh's EXIT trap fires after
+    # the bats run whose teardown_suite already released the shared base, so this is the
+    # ordinary end of every sanctioned run - not a refusal, and warning about it would train
+    # the reader to ignore the warning that matters.
+    [[ -e "$MMRY_TEST_HOME_BASE" ]] || { unset MMRY_TEST_HOME_BASE; return 0; }
+
     # teardown_suite calls this unconditionally, so the guard has to live here. Refusing
     # leaks a temp directory; not refusing deletes a directory this process never created.
     if ! _mmry_owns_test_home; then
