@@ -85,7 +85,8 @@ Stated here so the next reviewer does not have to derive it from absence.
 | Date | Machine | Result |
 |---|---|---|
 | 2026-09-16 | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 49 refused, 1 survived, 0 not performed, 50 of 50 run. The survivor is analysed below and is now closed. |
-| 2026-09-16 (QA round 3) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 66 refused, 2 survived, 1 not performed, 69 of 69 run. **All three were faults in the EXPERIMENTS, not findings about the tests.** Each was corrected and re-run individually; all three now REFUSE. Detail below. |
+| 2026-09-17 (QA round 3, clean re-run) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | **69 refused, 0 survived, 0 not performed, 69 of 69 run.** The run below, repeated end to end after the four experiment corrections. |
+| 2026-09-16 (QA round 3, first run) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 66 refused, 2 survived, 1 not performed, 69 of 69 run. **All three were faults in the EXPERIMENTS, not findings about the tests.** Each was corrected and re-run individually; all three now REFUSE. Detail below. |
 
 ### 2026-09-16 (QA round 3) - nineteen new experiments, and what the run found
 
@@ -104,6 +105,12 @@ One more label had drifted: `formation-check stops guarding the credential` repo
 refused, but not by the test the harness named - because the expectation still said "no formation
 pays nothing" while the test that fails is "an unconfigured Codex install makes this hook silent,
 not noisy". The expectation was corrected.
+
+The whole suite was then re-run end to end on the corrected harness, from a clean tree:
+
+    === refused: 69   survived: 0   experiments not performed: 0   (ran 69 of 69) ===
+
+and the working tree was clean afterwards, as the EXIT trap requires.
 
 After the four corrections each was re-run on its own, with the new filter:
 
