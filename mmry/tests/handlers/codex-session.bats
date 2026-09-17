@@ -184,3 +184,49 @@ _fake_plugin_root() {
     assert_success
     assert_output --partial "Claude Code hook payload was read successfully"
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE INSTALL WRITES DOWN WHOSE IT IS (#31245 QA round 3)
+#
+# The handlers the MODEL runs are the copies in the state directory, invoked in a shell where
+# MMRY_HOST is unset and CODEX_HOME very likely is too. When the Codex home has been relocated to a
+# path with no ".codex" segment there is nothing left for lib-host.sh to read the host off, and it
+# resolved Claude and loaded the other product's credential. The marker written here is that
+# missing fact, and it is written before the handlers are copied so the two cannot come apart.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: session-init writes a host marker beside the handlers it installs" {
+    local root; root="$(_fake_plugin_root)"
+    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root" \
+        bash "$root/hooks-handlers/session-init.sh"
+    assert_success
+    [ -f "$HOME/.codex/mmry/.mmry-host" ]
+    run cat "$HOME/.codex/mmry/.mmry-host"
+    assert_output "codex"
+}
+
+@test "codex: and a handler installed at a RELOCATED home then resolves its own credential" {
+    # The end-to-end of it: install into a directory with no ".codex" in the name, then source the
+    # INSTALLED lib-host.sh the way the model's shell would - nothing exported at all.
+    local root; root="$(_fake_plugin_root)"
+    run env MMRY_HOST=codex HOME="$HOME" CODEX_HOME="$HOME/relocated" CLAUDE_PLUGIN_ROOT="$root" \
+        bash "$root/hooks-handlers/session-init.sh"
+    assert_success
+    [ -f "$HOME/relocated/mmry/.mmry-host" ]
+
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        bash -c "source '$HOME/relocated/mmry/hooks-handlers/lib-host.sh'; mmry_host; printf ' '; mmry_host_config_file"
+    assert_output "codex $HOME/relocated/mmry-config.json"
+}
+
+@test "req4: on Claude Code the marker says claude, and changes nothing" {
+    local root; root="$(_fake_plugin_root)"
+    run env -u MMRY_HOST HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root" \
+        bash "$root/hooks-handlers/session-init.sh"
+    assert_success
+    run cat "$HOME/.claude/mmry/.mmry-host"
+    assert_output "claude"
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        bash -c "source '$HOME/.claude/mmry/hooks-handlers/lib-host.sh'; mmry_host; printf ' '; mmry_host_config_file"
+    assert_output "claude $HOME/.claude/mmry-config.json"
+}

@@ -52,19 +52,93 @@ _MMRY_LIB_HOST_SOURCED=1
 # which is a fact about the install, not a guess about the machine. A Claude Code install lives
 # under ${HOME}/.claude or the Claude plugin cache and is unaffected; the check below can only ever
 # answer "codex" for a file sitting inside a Codex home.
+# PUT A PATH IN ONE SPELLING, SO THAT TWO OF THEM CAN BE COMPARED (#31245 QA round 3).
+#
+# The prefix test below compares a path this file derived with `pwd` against one a customer or
+# Codex put in CODEX_HOME. On Windows those are routinely different spellings of the same
+# directory: `pwd` under Git Bash answers /c/Users/x/codexhome while CODEX_HOME is very likely
+# C:\Users\x\codexhome. The previous version flipped the backslashes and stopped there, so
+# "C:/Users/x/codexhome" was still compared against "/c/Users/x/codexhome" and never matched - the
+# variable was set, the customer had done everything right, and the comparison was dead. Reproduced
+# on 2026-09-16 with sentinel credentials: the handler resolved the host as Claude and loaded the
+# other product's key.
+#
+# The string half is its own function so it can be tested on a machine where cygpath exists and
+# would otherwise mask it. It is also the only half Linux and macOS ever run.
+_mmry_norm_path_str() {
+    local p="${1//\\//}"
+    if [[ "$p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+        local _d="${BASH_REMATCH[1]}" _r="${BASH_REMATCH[2]:-/}"
+        p="/$(printf '%s' "$_d" | tr '[:upper:]' '[:lower:]')${_r}"
+    fi
+    while [[ "$p" == */ && "$p" != "/" ]]; do p="${p%/}"; done
+    printf '%s' "$p"
+}
+
+_mmry_norm_path() {
+    local p="$1"
+    # AND WHERE THE MOUNT TABLE MATTERS, ASK THE TOOL THAT HAS IT. Under Git Bash
+    # C:\Users\x\AppData\Local\Temp\t and /tmp/t are the same directory, and no amount of string
+    # surgery will make those two match. cygpath knows; when it is absent - Linux, macOS - the
+    # string form above is the whole answer and is correct there.
+    if [[ "$p" == *\\* || "$p" =~ ^[A-Za-z]: ]] && command -v cygpath >/dev/null 2>&1; then
+        p="$(cygpath -u "$p" 2>/dev/null || printf '%s' "$p")"
+    fi
+    _mmry_norm_path_str "$p"
+}
+
 if [[ -z "${MMRY_HOST:-}" ]]; then
     _mmry_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)" || _mmry_self_dir=""
     if [[ -n "$_mmry_self_dir" ]]; then
-        # Normalise to forward slashes so the comparison works from Git Bash on Windows.
-        _mmry_self_dir="${_mmry_self_dir//\\//}"
-        if [[ -n "${CODEX_HOME:-}" ]]; then
-            _mmry_codex_home="${CODEX_HOME//\\//}"
-            [[ "$_mmry_self_dir" == "${_mmry_codex_home}"/* ]] && MMRY_HOST="codex"
+        _mmry_self_dir="$(_mmry_norm_path "$_mmry_self_dir")"
+
+        # 1. THE MARKER THE INSTALL WROTE ABOUT ITSELF, WHICH IS THE ONLY ANSWER THAT SURVIVES A
+        #    RELOCATED HOME NOBODY EXPORTED.
+        #
+        # The two tests after this one are guesses read off a path, and both fail on the install a
+        # customer is most likely to have: a Codex home moved somewhere with no ".codex" segment,
+        # in a shell where CODEX_HOME is not set. Codex sets CODEX_HOME for its own hook processes;
+        # the shell the MODEL runs save-memory.sh in is not one of those, and that is the shell
+        # every model-invoked handler runs in. Reproduced on 2026-09-16: the handler resolved the
+        # host as Claude and loaded the Claude account's key.
+        #
+        # session-init.sh knows the answer - it runs as a Codex hook, with MMRY_HOST set, at the
+        # moment it copies these files - so it writes the answer down beside them. Reading it back
+        # is not a guess about the machine; it is the install stating what it is.
+        #
+        # ONLY "codex" IS ACTED ON. A marker reading "claude", an empty marker, a directory, or no
+        # marker at all all leave MMRY_HOST unset, which is the answer every existing Claude Code
+        # install already has. head -c bounds what a corrupt or hostile file can do.
+        _mmry_marker="${_mmry_self_dir}/../.mmry-host"
+        if [[ -f "$_mmry_marker" ]]; then
+            _mmry_marker_host="$(head -c 64 "$_mmry_marker" 2>/dev/null | head -1 | tr -d '[:space:]')" || _mmry_marker_host=""
+            if [[ "$_mmry_marker_host" == "codex" ]]; then
+                MMRY_HOST="codex"
+                # AND WHERE, NOT JUST WHICH. The marker sits at <config-dir>/mmry/.mmry-host, so
+                # its own location names the config directory - which is the part CODEX_HOME would
+                # otherwise have had to supply. Without this, a relocated home resolved the host
+                # correctly and then looked for the credential in ~/.codex, where there is none,
+                # and refused. Two directories up from the marker is where these files actually
+                # are, which beats any guess.
+                _MMRY_HOST_DIR_FROM_MARKER="$(cd "${_mmry_self_dir}/../.." && pwd 2>/dev/null)" || _MMRY_HOST_DIR_FROM_MARKER=""
+                [[ -n "$_MMRY_HOST_DIR_FROM_MARKER" ]] && export _MMRY_HOST_DIR_FROM_MARKER
+            fi
         fi
-        # The default Codex home, and any path segment that is literally ".codex".
+
+        # 2. AN EXPORTED CODEX_HOME THIS FILE SITS INSIDE.
+        if [[ -z "${MMRY_HOST:-}" && -n "${CODEX_HOME:-}" ]]; then
+            _mmry_codex_home="$(_mmry_norm_path "$CODEX_HOME")"
+            if [[ -n "$_mmry_codex_home" && "$_mmry_codex_home" != "/" ]]; then
+                if [[ "$_mmry_self_dir" == "$_mmry_codex_home" || "$_mmry_self_dir" == "${_mmry_codex_home}"/* ]]; then
+                    MMRY_HOST="codex"
+                fi
+            fi
+        fi
+
+        # 3. The default Codex home, and any path segment that is literally ".codex".
         [[ -z "${MMRY_HOST:-}" && "$_mmry_self_dir" == */.codex/* ]] && MMRY_HOST="codex"
     fi
-    unset _mmry_self_dir _mmry_codex_home 2>/dev/null || true
+    unset _mmry_self_dir _mmry_codex_home _mmry_marker _mmry_marker_host 2>/dev/null || true
 fi
 
 # The host this process is serving. "claude" or "codex"; anything else is treated as "claude".
@@ -84,7 +158,15 @@ mmry_host() {
 #              place they put it rather than in the place we assumed.
 mmry_host_config_dir() {
     if [[ "$(mmry_host)" == "codex" ]]; then
-        printf '%s' "${CODEX_HOME:-${HOME}/.codex}"
+        # The install marker's own location first, when there is one: it is where these files
+        # demonstrably are, rather than where a variable says they should be. CODEX_HOME next,
+        # because it is Codex's documented override and the only signal available to a copy running
+        # from the plugin cache. The default last (#31245 QA round 3).
+        if [[ -n "${_MMRY_HOST_DIR_FROM_MARKER:-}" ]]; then
+            printf '%s' "${_MMRY_HOST_DIR_FROM_MARKER}"
+        else
+            printf '%s' "${CODEX_HOME:-${HOME}/.codex}"
+        fi
     else
         printf '%s' "${HOME}/.claude"
     fi
