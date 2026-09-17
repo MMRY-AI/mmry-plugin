@@ -337,7 +337,7 @@ mutate "codex idle guard removed, so the poller waits" hooks-handlers/formation-
   "s = s.replace('        if [[ \"\$(mmry_host)\" == \"codex\" ]]; then\n            _poll_once || exit 0\n            printf \\'%s\\\\n\\' \"\$FORMATION_BLOCK\" >&2\n            exit 2\n        fi\n', '')" \
   structural/codex-formation-delivery.bats "ONE pass"
 
-mutate "formation-check stops guarding the credential, so a hot-path hook exits 1" hooks-handlers/formation-check.sh   's = s.replace("mmry_host_assert_own_credential 2>/dev/null || exit 0", "true", 1)'   structural/codex-formation-delivery.bats "no formation pays nothing"
+mutate "formation-check stops guarding the credential, so a hot-path hook exits 1" hooks-handlers/formation-check.sh   's = s.replace("mmry_host_assert_own_credential 2>/dev/null || exit 0", "true", 1)'   structural/codex-formation-delivery.bats "silent, not noisy"
 
 # ---- requirement-4 guards on the Claude surface ----------------------------------------------
 mutate "a Claude command file gains frontmatter" commands/setup.md \
