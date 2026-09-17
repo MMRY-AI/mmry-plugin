@@ -16,6 +16,18 @@ if [[ ! -x "$BATS" ]]; then
     exit 1
 fi
 
+# ISOLATE HOME BEFORE ANY TEST RUNS (#31434 QA round 2).
+#
+# Not in helpers/test-helper.bash, because eleven suites do not load it and therefore ran
+# against the developer's real ~/.claude/mmry-config.json and its live API key. Isolation a
+# suite can decline is isolation some suite will decline. Applied here, where nothing in a
+# test file can opt out of it, and again from each directory's setup_suite.bash so a direct
+# `bats structural/one.bats` is isolated too. See helpers/isolate-home.bash.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/helpers/isolate-home.bash"
+mmry_isolate_home
+trap 'mmry_release_home' EXIT
+
 case "$CATEGORY" in
     structural)  "$BATS" structural/ ;;
     unit)        "$BATS" unit/ ;;

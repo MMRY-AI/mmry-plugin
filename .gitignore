@@ -12,3 +12,11 @@ Desktop.ini
 
 # Logs
 *.log
+
+# A stray mmry-config.json at the plugin root is the SECOND branch of mmry_load_config's
+# discovery order ($MMRY_CONFIG_FILE -> $CLAUDE_PLUGIN_ROOT/mmry-config.json ->
+# $HOME/.claude/mmry-config.json), and it outranks $HOME. The tests isolate HOME and empty
+# MMRY_CONFIG_FILE, but the plugin root IS the repo, so a real config dropped there would be
+# picked up by every suite and could be committed with a live API key in it. The example file
+# (mmry-config.example.json) is a different name and stays tracked. #31434
+mmry-config.json

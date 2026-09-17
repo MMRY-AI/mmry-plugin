@@ -51,6 +51,19 @@ TEST_TMPDIR="$(mktemp -d)"
 export TMPDIR="$TEST_TMPDIR"
 export MMRY_TMPDIR="$TEST_TMPDIR"
 
+# Per-test HOME, on top of the isolation that already happened (#31434 QA round 2).
+#
+# THIS IS NO LONGER THE GUARANTEE. It was, for one round, and that was the defect: eleven
+# suites never load this file, so the guarantee did not cover them and two rounds of review
+# read "isolated in the helper" as "isolated". The isolation now happens in
+# helpers/isolate-home.bash, applied from run-tests.sh and from each test directory's
+# setup_suite.bash - neither of which a test file can decline.
+#
+# What remains here is narrower and still worth having: a FRESH home per suite, inside this
+# suite's own TEST_TMPDIR, so one suite cannot see what another wrote under ~/.claude.
+export HOME="$TEST_TMPDIR/fakehome"
+mkdir -p "$HOME/.claude"
+
 # Disable any real config from interfering
 export MMRY_CONFIG_FILE="$TEST_TMPDIR/mmry-config.json"
 export MMRY_API_URL=""

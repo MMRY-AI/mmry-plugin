@@ -58,6 +58,17 @@ _mmry_urlencode() {
 }
 
 mmry_load_config() {
+    # Idempotent per process (#31434). Every entry-point handler sources this file - which
+    # runs mmry_load_config once at AUTO-INIT - and then calls mmry_load_config again. That
+    # second call re-parsed the same file for no benefit. On the UserPromptSubmit path that
+    # duplicate parse was a large fraction of a 5 s hook budget, so a loaded machine lost the
+    # whole Foundation block. Parse once; a caller that genuinely needs a re-read (none ship
+    # today) sets MMRY_CONFIG_RELOAD=1. Deliberately NOT exported: a child process is a new
+    # process and must load its own config.
+    if [[ "${_MMRY_CONFIG_LOADED:-}" == "1" && "${MMRY_CONFIG_RELOAD:-}" != "1" ]]; then
+        return 0
+    fi
+
     # Discovery order: $MMRY_CONFIG_FILE → plugin root → ~/.claude/
     local config_file=""
     local plugin_root="${CLAUDE_PLUGIN_ROOT:-}"
@@ -71,26 +82,88 @@ mmry_load_config() {
     fi
 
     if [[ -n "$config_file" ]]; then
-        local content
-        content="$(cat "$config_file")"
-
         # Parse config with the resolved jq (system or bundled). No regex
         # fallback: the slow, brittle grep/sed path was the #30608 silent-save
         # bug site and is removed now that jq is guaranteed by setup (#30624).
+        #
+        # ONE jq process for all six fields (#31434). This was six `cat | jq` pipelines,
+        # i.e. six process spawns per load. Measured on Windows Git Bash a load cost about
+        # 380 ms of which nearly all was spawn overhead, and the config was loaded twice per
+        # hook firing. jq reads the file directly, so the `cat` and the pipe go too.
+        #
+        # NUL-DELIMITED, not newline-delimited (#31434 QA). The first cut of this parse
+        # emitted one field per LINE and read them with plain `read`. A value containing a
+        # newline then produced more lines than fields, every later field SHEARED up by one,
+        # and the shear was silent: measured on the six-key config below, apiKey "line-one\n5"
+        # gave reinject="5", cap="true" and foundationRefreshSeconds="1500" - a value that
+        # passes the `^[0-9]+$` guard downstream and quietly turns a daily background refresh
+        # into one every 25 minutes. A wrong-but-plausible number that clears its own
+        # validation is the exact failure shape this ticket exists to remove, so it is not
+        # acceptable to ship it inside the fix for it.
+        #
+        # WHAT NUL DOES AND DOES NOT GUARANTEE (corrected #31434 QA - the first version of
+        # this comment claimed NUL "cannot appear in a JSON string value that jq will emit as
+        # raw text, so it is the only delimiter no value can forge". That is false, and it was
+        # the load-bearing justification for the whole scheme, so it is stated accurately here
+        # rather than left as a claim nobody could rely on.
+        #
+        # JSON permits the escape \u0000 inside a string. jq parses it, and `-j` writes the
+        # raw byte. Reproduced against this exact parse: a config whose apiKey is
+        # "k<U+0000>EXTRA" yields reinject="EXTRA", cap="true" and foundationRefreshSeconds=
+        # "1500" - the same shear, and the same wrong-but-numeric refresh value that clears
+        # its own ^[0-9]+$ guard downstream, that moving off newlines was meant to remove.
+        #
+        # So the honest bound is narrower than "impossible", and it is a bound of REACH, not
+        # of encoding: no MMRY code path writes a NUL into a config value - setup writes the
+        # apiKey from the server's response and the Foundation keys are numbers and booleans -
+        # so producing one takes a hand-authored or hostile config file. That makes NUL a
+        # strictly better delimiter than newline, which ordinary values really do contain,
+        # without making it unforgeable. Closing the remaining gap (rejecting or stripping
+        # NUL from values before they are delimited) is tracked separately; it is not folded
+        # in here because a delimiter change is its own change with its own evidence.
+        #
+        # Every field is terminated (not separated), so the sixth read sees its delimiter too
+        # and the count is unambiguous.
+        #
+        # This also removes the trailing-CR strip the line-based form needed: jq.exe on
+        # Windows opens stdout in TEXT mode and turns each emitted LF into CRLF, but with
+        # `-j` there are no LFs between fields for it to touch. The one residue, stated
+        # rather than hidden: a value that itself contains a newline still gains a CR on
+        # Windows. Nothing shears, the field stays whole, and none of the six config keys
+        # is a multi-line value in practice - but it is not lossless there.
+        #
+        # Fields are emitted in a FIXED order and an absent field is an empty string, so the
+        # reads below must not be reordered without reordering the jq array to match.
         if [[ -n "${MMRY_JQ:-}" ]]; then
-            local val
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.apiUrl // empty')"
-            [[ -z "$MMRY_API_URL" && -n "$val" ]] && MMRY_API_URL="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.authMethod // empty')"
-            [[ -z "$MMRY_AUTH_METHOD" && -n "$val" ]] && MMRY_AUTH_METHOD="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.apiKey // empty')"
-            [[ -z "$MMRY_API_KEY" && -n "$val" ]] && MMRY_API_KEY="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationReinject // empty')"
-            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$val" ]] && MMRY_FOUNDATION_REINJECT="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationReinjectTokenCap // empty')"
-            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$val" ]] && MMRY_FOUNDATION_TOKEN_CAP="$val" || true
-            val="$(printf '%s' "$content" | "$MMRY_JQ" -r '.foundationRefreshSeconds // empty')"
-            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$val" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$val" || true
+            local _cfg_url="" _cfg_auth="" _cfg_key=""
+            local _cfg_reinject="" _cfg_cap="" _cfg_refresh=""
+            # `{ read; ... } < <(...)` rather than mapfile: macOS ships bash 3.2, which has
+            # no mapfile but does have `read -d`.
+            # Each read is `|| true` twice over: `read -d ''` returns non-zero at EOF even
+            # when it assigned a value, and on malformed JSON jq emits nothing at all. This
+            # file runs under `set -e`, so without the guard a bad config would kill the
+            # sourcing shell mid-hook instead of falling back to defaults.
+            {
+                IFS= read -r -d '' _cfg_url || true
+                IFS= read -r -d '' _cfg_auth || true
+                IFS= read -r -d '' _cfg_key || true
+                IFS= read -r -d '' _cfg_reinject || true
+                IFS= read -r -d '' _cfg_cap || true
+                IFS= read -r -d '' _cfg_refresh || true
+            } < <("$MMRY_JQ" -j '
+                    [ .apiUrl, .authMethod, .apiKey,
+                      .foundationReinject, .foundationReinjectTokenCap, .foundationRefreshSeconds ]
+                    | map(if . == null then "" else tostring end)
+                    | map(. + "\u0000")
+                    | .[]
+                ' "$config_file" 2>/dev/null)
+
+            [[ -z "$MMRY_API_URL" && -n "$_cfg_url" ]] && MMRY_API_URL="$_cfg_url" || true
+            [[ -z "$MMRY_AUTH_METHOD" && -n "$_cfg_auth" ]] && MMRY_AUTH_METHOD="$_cfg_auth" || true
+            [[ -z "$MMRY_API_KEY" && -n "$_cfg_key" ]] && MMRY_API_KEY="$_cfg_key" || true
+            [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$_cfg_reinject" ]] && MMRY_FOUNDATION_REINJECT="$_cfg_reinject" || true
+            [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$_cfg_cap" ]] && MMRY_FOUNDATION_TOKEN_CAP="$_cfg_cap" || true
+            [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$_cfg_refresh" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$_cfg_refresh" || true
         fi
     fi
 
@@ -104,6 +177,8 @@ mmry_load_config() {
     if [[ -z "$MMRY_AUTH_METHOD" && -n "$MMRY_API_KEY" ]]; then
         MMRY_AUTH_METHOD="apikey"
     fi
+
+    _MMRY_CONFIG_LOADED=1
 }
 
 # ============================================================================

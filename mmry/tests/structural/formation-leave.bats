@@ -28,8 +28,21 @@ setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"
     export TMPDIR="${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
     export CLAUDE_CODE_SESSION_ID="bats-leave-session"
-    # Nothing here may read the developer's real configuration: mmry_load_config falls back to
-    # ~/.claude/mmry-config.json, and a test that picks up a live API key would talk to production.
+    # This line used to carry a comment claiming it stopped the handler reading the developer's
+    # real ~/.claude/mmry-config.json. It did the opposite, and the comment is corrected rather
+    # than deleted because the false comment is why nobody looked again for three rounds
+    # (#31434 QA round 2).
+    #
+    # mmry_load_config's discovery order only honours MMRY_CONFIG_FILE while the file it names
+    # EXISTS. Pointing it at a file that does not exist is therefore not an override at all -
+    # it is the first step of the fallthrough it claimed to prevent, and the last step of that
+    # fallthrough is $HOME/.claude/mmry-config.json. Measured: this suite parsed a marker config
+    # planted in a sentinel HOME 12 times in one run.
+    #
+    # What actually isolates this suite now is helpers/isolate-home.bash, applied from
+    # run-tests.sh and from structural/setup_suite.bash, so HOME is not the developer's at all.
+    # This line stays for what it really does: name a config that is absent, so the client
+    # falls back to its defaults, which is the state these tests assume.
     export MMRY_CONFIG_FILE="${BATS_TEST_TMPDIR}/no-such-config.json"
 }
 
