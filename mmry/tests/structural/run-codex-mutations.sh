@@ -96,9 +96,9 @@ if [[ -z "$PYBIN" ]]; then
 fi
 echo "interpreter: $PYBIN  $("$PYBIN" -c 'import sys; print(sys.version.split()[0])')"
 
-if [[ -n "$(git status --porcelain -- mmry)" ]]; then
-    echo "REFUSING: the working tree under mmry/ is dirty. Commit or stash first, because each" >&2
-    echo "mutation is undone with 'git checkout -- <file>' and would discard your edits." >&2
+if [[ -n "$(git status --porcelain -- mmry docs)" ]]; then
+    echo "REFUSING: the working tree under mmry/ or docs/ is dirty. Commit or stash first, because" >&2
+    echo "each mutation is undone with 'git checkout -- <file>' and would discard your edits." >&2
     exit 1
 fi
 
@@ -106,15 +106,24 @@ REFUSED=0
 SURVIVED=0
 ERRORS=0
 RUN=0
-TOTAL=50
+TOTAL=69
 SURVIVOR_LIST=""
 ERROR_LIST=""
 CURRENT_FILE=""
 
 # A run that is killed part-way must not leave a mutation behind.
+# A file OUTSIDE mmry/ is named with a leading ../ - docs/codex.md is the customer-facing page and
+# lives at the repository root. Normalising here keeps every call site spelled the same way.
+_repo_path() {
+    case "$1" in
+        ../*) printf '%s' "${1#../}" ;;
+        *)    printf 'mmry/%s' "$1" ;;
+    esac
+}
+
 _restore() {
     if [[ -n "$CURRENT_FILE" ]]; then
-        git checkout -- "mmry/$CURRENT_FILE" 2>/dev/null
+        git checkout -- "$(_repo_path "$CURRENT_FILE")" 2>/dev/null
         CURRENT_FILE=""
     fi
 }
@@ -364,7 +373,29 @@ mutate "session-start stops reporting an absent session_id field" hooks-handlers
 # ---- the one command a new Codex customer runs -----------------------------------------------
 mutate "setup forces the host to claude before resolving" setup/mmry-setup.sh   's = s.replace("[[ -n " + chr(34) + "${MMRY_HOST:-}" + chr(34) + " ]] && export MMRY_HOST", "export MMRY_HOST=" + chr(34) + "${MMRY_HOST:-claude}" + chr(34), 1)'   e2e/codex-setup.bats "writes ~/.codex/mmry-config.json"
 
-mutate "setup loses its opt-out and can no longer run before a credential exists" setup/mmry-setup.sh   's = s.replace("export MMRY_ALLOW_NO_CREDENTIAL=1", "true", 1)'   e2e/codex-setup.bats "writes ~/.codex/mmry-config.json"
+mutate "setup loses its opt-out and can no longer run before a credential exists" setup/mmry-setup.sh   's = s.replace("MMRY_ALLOW_NO_CREDENTIAL=1", "true", 1)'   e2e/codex-setup.bats "writes ~/.codex/mmry-config.json"
+
+# ---- QA ROUND 3: the uninstaller, the relocated home, the update path, the Windows guard,
+# ---- the customer-facing page, and the three assertions that could not fail -------------------
+mutate "the shell uninstaller stops refusing on Codex" setup/uninstall.sh   's = s.replace("if [[ "+chr(34)+"$MMRY_UNINSTALL_HOST"+chr(34)+" != "+chr(34)+"claude"+chr(34)+" ]]; then", "if false; then", 1)'   e2e/install-uninstall.bats "REFUSES"
+mutate "the shell uninstaller destroys the other product's state dir again" setup/uninstall.sh   's = s.replace("if [[ "+chr(34)+"$MMRY_UNINSTALL_HOST"+chr(34)+" != "+chr(34)+"claude"+chr(34)+" ]]; then"+chr(10)+"    _mmry_codex_home", "if false; then"+chr(10)+"    _mmry_codex_home", 1)'   e2e/install-uninstall.bats "STATE DIRECTORY survives"
+mutate "lib-host stops reading the install marker" hooks-handlers/lib-host.sh   's = s.replace("_mmry_marker="+chr(34)+"${_mmry_self_dir}/../.mmry-host"+chr(34), "_mmry_marker="+chr(34)+"/nonexistent/.mmry-host"+chr(34), 1)'   unit/lib-host.bats "install marker"
+mutate "the marker names the host but not the place" hooks-handlers/lib-host.sh   's = s.replace("[[ -n "+chr(34)+"$_MMRY_HOST_DIR_FROM_MARKER"+chr(34)+" ]] && export _MMRY_HOST_DIR_FROM_MARKER", "_MMRY_HOST_DIR_FROM_MARKER="+chr(34)+chr(34), 1)'   unit/lib-host.bats "where the marker IS"
+mutate "any marker content is read as codex" hooks-handlers/lib-host.sh   's = s.replace("if [[ "+chr(34)+"$_mmry_marker_host"+chr(34)+" == "+chr(34)+"codex"+chr(34)+" ]]; then", "if [[ -n "+chr(34)+"$_mmry_marker_host"+chr(34)+" ]]; then", 1)'   unit/lib-host.bats "marker reading claude"
+mutate "the drive-letter spelling is no longer normalised" hooks-handlers/lib-host.sh   's = s.replace("if [[ "+chr(34)+"$p"+chr(34)+" =~ ^([A-Za-z]):(/.*)?$ ]]; then", "if false; then", 1)'   unit/lib-host.bats "Windows spelling"
+mutate "session-init writes no host marker" hooks-handlers/session-init.sh   's = s.replace("printf "+chr(39)+"%s"+chr(10)+chr(39)+" "+chr(34)+"$(mmry_host)"+chr(34)+" > "+chr(34)+"${MMRY_STATE_DIR}/.mmry-host"+chr(34)+" 2>/dev/null || true", "true # no marker", 1)'   handlers/codex-session.bats "host marker"
+mutate "self-update updates the Claude directory from a Codex session" hooks-handlers/self-update.sh   's = s.replace("INSTALLED_DIR="+chr(34)+"$(mmry_host_state_dir)"+chr(34), "INSTALLED_DIR="+chr(34)+"${HOME}/.claude/mmry"+chr(34), 1)'   handlers/self-update.bats "CODEX state directory"
+mutate "self-update loses its credential opt-out and dies silently" hooks-handlers/self-update.sh   's = s.replace("MMRY_ALLOW_NO_CREDENTIAL=1", "true", 1)'   handlers/self-update.bats "update check"
+mutate "the Windows guard forgets the install marker" setup/uninstall.bat   's = s.replace("if exist "+chr(34)+"%~dp0.."+chr(92)+".mmry-host"+chr(34)+" (", "if exist "+chr(34)+"%~dp0.."+chr(92)+".no-such-file"+chr(34)+" (", 1)'   structural/codex-docs-and-eol.bats "marker alone"
+mutate "the Windows guard forgets CODEX_HOME" setup/uninstall.bat   's = s.replace("if defined CODEX_HOME (", "if defined NO_SUCH_VARIABLE (", 1)'   structural/codex-docs-and-eol.bats "CODEX_HOME alone"
+mutate "the Windows guard refuses on any marker at all" setup/uninstall.bat   's = s.replace("findstr /i /l /c:"+chr(34)+"codex"+chr(34)+" "+chr(34)+"%~dp0.."+chr(92)+".mmry-host"+chr(34), "findstr /i /l /c:"+chr(34)+"c"+chr(34)+" "+chr(34)+"%~dp0.."+chr(92)+".mmry-host"+chr(34), 1)'   structural/codex-docs-and-eol.bats "does NOT make it refuse"
+mutate "the customer-facing page goes back to a hard-coded path" ../docs/codex.md   's = s.replace("bash "+chr(34)+"${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"+chr(34), "bash ~/.codex/mmry/setup/mmry-setup.sh", 1)'   structural/codex-docs-and-eol.bats "hard-codes"
+mutate "the 401 reply names a slash command on Codex too" hooks-handlers/session-start.sh   's = s.replace("_mmry_reauth_hint="+chr(34)+"ask the assistant to run $(mmry_host_setup_hint)"+chr(34), "_mmry_reauth_hint="+chr(34)+"run /mmry:setup"+chr(34), 1)'   handlers/codex-session.bats "actually run"
+mutate "formation-join registers every session as claude-code" hooks-handlers/formation-join.sh   's = s.replace("_mmry_client_name="+chr(34)+"$(mmry_host_client_name)"+chr(34), "_mmry_client_name="+chr(34)+"claude-code"+chr(34), 1)'   handlers/codex-session.bats "registers the session as codex"
+mutate "formation-start registers every session as claude-code" hooks-handlers/formation-start.sh   's = s.replace("_mmry_client_name="+chr(34)+"$(mmry_host_client_name)"+chr(34), "_mmry_client_name="+chr(34)+"claude-code"+chr(34), 1)'   handlers/codex-session.bats "starting a formation"
+mutate "setup exports its opt-out into everything it spawns" setup/mmry-setup.sh   's = s.replace("MMRY_ALLOW_NO_CREDENTIAL=1"+chr(10)+"source", "export MMRY_ALLOW_NO_CREDENTIAL=1"+chr(10)+"source", 1)'   e2e/codex-setup.bats "does not leak"
+mutate "the tool-call delivery handler does nothing at all" hooks-handlers/formation-check.sh   's = s.replace("#!/usr/bin/env bash", "#!/usr/bin/env bash"+chr(10)+"exit 1", 1)'   structural/codex-formation-delivery.bats "never cancels a tool call"
+mutate "the Codex skill stops being a document about Codex" skills-codex/memory-system/SKILL.md   's = s.replace("Codex", "Cldx")'   structural/codex-manifest.bats "DIFFERENT document"
 
 echo
 echo "=== refused: $REFUSED   survived: $SURVIVED   experiments not performed: $ERRORS   (ran $RUN of $TOTAL) ==="
