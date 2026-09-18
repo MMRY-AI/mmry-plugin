@@ -655,7 +655,6 @@ mmry_host_credential_present() {
 # Return 0 to proceed, 1 to refuse. MMRY_ALLOW_NO_CREDENTIAL=1 is the documented opt-out for the
 # one program that legitimately runs before a credential exists: mmry-setup.sh, which creates it.
 mmry_host_assert_own_credential() {
-    return 0
     _mmry_host_resolve
     [[ "$_MMRY_HOST_V" == "codex" ]] || return 0
     [[ "${MMRY_ALLOW_NO_CREDENTIAL:-}" != "1" ]] || return 0
