@@ -23,8 +23,29 @@ if exist "%~dp0..\.mmry-host" (
 
 rem 2. A CODEX_HOME this copy sits inside. Skipped when the variable is empty - findstr with an
 rem    empty pattern matches everything, which would refuse on every machine.
-if defined CODEX_HOME (
-  echo "%MMRY_SELF_DIR%" | findstr /i /l /c:"%CODEX_HOME%" >nul
+rem
+rem    THE TRAILING BACKSLASH IS STRIPPED FIRST (#31245 QA round 4). This is the same defect the
+rem    comment under test 3 below documents for the literal pattern, and it was never applied
+rem    here: with CODEX_HOME=C:\Users\x\.codex\ the expansion ends ...\.codex\", the \" escapes
+rem    the closing quote, and findstr receives a pattern that can never match. The guard silently
+rem    did nothing and the full CLAUDE uninstall proceeded on a Codex machine. A trailing
+rem    backslash is what tab-completion in cmd hands you, so this is a common spelling rather
+rem    than an exotic one. The loop strips repeats and will not strip the value away to nothing.
+set "MMRY_CODEX_HOME=%CODEX_HOME%"
+:strip_codex_home_sep
+if not defined MMRY_CODEX_HOME goto :done_strip_codex_home
+if "%MMRY_CODEX_HOME%"=="\" goto :done_strip_codex_home
+if "%MMRY_CODEX_HOME:~-1%"=="\" (
+  set "MMRY_CODEX_HOME=%MMRY_CODEX_HOME:~0,-1%"
+  goto :strip_codex_home_sep
+)
+if "%MMRY_CODEX_HOME:~-1%"=="/" (
+  set "MMRY_CODEX_HOME=%MMRY_CODEX_HOME:~0,-1%"
+  goto :strip_codex_home_sep
+)
+:done_strip_codex_home
+if defined MMRY_CODEX_HOME (
+  echo "%MMRY_SELF_DIR%" | findstr /i /l /c:"%MMRY_CODEX_HOME%" >nul
   if not errorlevel 1 goto :codex_install
 )
 

@@ -188,8 +188,14 @@ _runnable_lines() {
     #    exported - the hole QA found in round 2's guard.
     grep -qF '.mmry-host' "$f"
     # 2. CODEX_HOME, guarded by `if defined` because findstr with an empty pattern matches
-    #    everything and would refuse on every machine on earth.
-    grep -qF 'if defined CODEX_HOME' "$f"
+    #    everything and would refuse on every machine on earth. The value is COPIED and its
+    #    trailing separator stripped before it reaches findstr (#31245 QA round 4) - passing
+    #    %CODEX_HOME% straight through is the defect, not the fix, so the raw variable must NOT
+    #    appear inside a findstr pattern anywhere in this file.
+    grep -qF 'set "MMRY_CODEX_HOME=%CODEX_HOME%"' "$f"
+    grep -qF 'if defined MMRY_CODEX_HOME' "$f"
+    run grep -cF 'findstr /i /l /c:"%CODEX_HOME%"' "$f"
+    assert_output "0"
     # 3. The literal segment. The pattern must not end in a backslash: in a cmd string \" escapes
     #    the quote and findstr then gets a pattern that never matches, which is how the first
     #    version of this guard silently did nothing.
@@ -272,4 +278,36 @@ _codex_tree() {
     grep -q "Remove-Item \$configPath -Force" "$f"
     grep -q 'Restart Claude Code to take effect' "$f"
     grep -q "Join-Path \$env:USERPROFILE '.claude" "$f"
+}
+
+# ---------------------------------------------------------------------------------------------
+# THE TRAILING BACKSLASH, EXECUTED (#31245 QA round 4).
+#
+# CODEX_HOME=C:\Users\x\.codex\ expands inside the findstr pattern as ...\.codex\", where the \"
+# escapes the closing quote and findstr receives a pattern that can never match. The guard
+# silently did nothing and the full CLAUDE uninstall proceeded on a Codex machine.
+#
+# This is the exact failure mode the comment above clause 3 of that file already documented for
+# the literal pattern, which was never applied to the variable one. A trailing backslash is what
+# tab-completion in cmd hands you, so it is the common spelling rather than an exotic one.
+#
+# Executed rather than read, through the same MSYS_NO_PATHCONV harness as the four cases above,
+# and only on the REFUSAL path with USERPROFILE pointed at a temporary directory.
+
+@test "codex: executed - a CODEX_HOME with a trailing backslash still makes it refuse" {
+    _require_windows_shell
+    local d; d="$(_codex_tree "$TEST_TMPDIR/relocated-trailing" "")"
+    # cygpath -w gives no trailing separator, so one is appended deliberately - this is the
+    # spelling under test, not an accident of the harness.
+    run _run_bat "$d" env CODEX_HOME="$(cygpath -w "$TEST_TMPDIR/relocated-trailing")\\"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"changed nothing"* ]]
+}
+
+@test "codex: executed - and a trailing forward slash too" {
+    _require_windows_shell
+    local d; d="$(_codex_tree "$TEST_TMPDIR/relocated-trailing-fwd" "")"
+    run _run_bat "$d" env CODEX_HOME="$(cygpath -w "$TEST_TMPDIR/relocated-trailing-fwd")/"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"changed nothing"* ]]
 }

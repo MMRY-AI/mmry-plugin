@@ -293,3 +293,73 @@ _fake_plugin_root() {
     run grep -c 'claude-code' "$TEST_TMPDIR/curl-log.txt"
     assert_output "0"
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE MARKER INVARIANT, ENFORCED RATHER THAN ASSERTED IN PROSE (#31245 QA round 4).
+#
+# session-init.sh wrote the marker with `|| true` and then copied the handlers unconditionally,
+# under a comment claiming that handlers-without-a-marker could only result from a run that
+# failed before copying anything. A reviewer forced the write to fail and got exactly that
+# combination: exit 0, no marker, handlers copied. It is the precondition for the credential
+# defect the marker exists to prevent.
+#
+# The write is made to fail by pre-creating .mmry-host AS A DIRECTORY, which is a real thing a
+# stale install or a botched cleanup leaves behind, and needs no root and no exotic filesystem.
+
+@test "codex: when the host marker cannot be written, handlers are NOT installed" {
+    local root; root="$(_fake_plugin_root)"
+    local codexhome="$TEST_TMPDIR/codexhome"
+    mkdir -p "$codexhome/mmry/.mmry-host"   # a DIRECTORY where the marker file must go
+
+    run env -u MMRY_CONFIG_FILE HOME="$HOME" MMRY_HOST=codex CODEX_HOME="$codexhome" \
+        CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks-handlers/session-init.sh"
+
+    # THE ASSERTION THE DEFECT FAILED: at 1cb52d6 this directory held the handlers.
+    [ ! -f "$codexhome/mmry/hooks-handlers/lib-host.sh" ]
+    [ -z "$(ls -A "$codexhome/mmry/hooks-handlers" 2>/dev/null)" ]
+}
+
+@test "codex: and it says why, rather than failing the session or failing silently" {
+    local root; root="$(_fake_plugin_root)"
+    local codexhome="$TEST_TMPDIR/codexhome2"
+    mkdir -p "$codexhome/mmry/.mmry-host"
+
+    run env -u MMRY_CONFIG_FILE HOME="$HOME" MMRY_HOST=codex CODEX_HOME="$codexhome" \
+        CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks-handlers/session-init.sh"
+
+    # exit 0: a SessionStart hook must not break the customer's session.
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"could not write the host marker"* ]]
+    [[ "$output" == *"Handlers were NOT installed"* ]]
+    # And it must not have run the delegate as though everything were fine.
+    [[ "$output" != *"DELEGATE RAN"* ]]
+}
+
+@test "codex: the happy path still writes the marker AND the handlers" {
+    local root; root="$(_fake_plugin_root)"
+    local codexhome="$TEST_TMPDIR/codexhome3"
+    mkdir -p "$codexhome"
+
+    run env -u MMRY_CONFIG_FILE HOME="$HOME" MMRY_HOST=codex CODEX_HOME="$codexhome" \
+        CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks-handlers/session-init.sh"
+
+    [ "$status" -eq 0 ]
+    [ -f "$codexhome/mmry/.mmry-host" ]
+    grep -q '^codex$' "$codexhome/mmry/.mmry-host"
+    [ -f "$codexhome/mmry/hooks-handlers/lib-host.sh" ]
+    [[ "$output" == *"DELEGATE RAN"* ]]
+}
+
+@test "req4 control: a CLAUDE install with an unwritable marker still installs its handlers" {
+    # The marker changes nothing on Claude Code - lib-host.sh acts only on one reading "codex",
+    # so its absence gives the answer every existing install already has. Refusing to install
+    # here would break working setups to guard against a risk this host does not have.
+    local root; root="$(_fake_plugin_root)"
+    mkdir -p "$HOME/.claude/mmry/.mmry-host"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CODEX_HOME HOME="$HOME" \
+        CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks-handlers/session-init.sh"
+
+    [ -f "$HOME/.claude/mmry/hooks-handlers/lib-host.sh" ]
+    [[ "$output" == *"DELEGATE RAN"* ]]
+}

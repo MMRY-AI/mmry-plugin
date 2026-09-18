@@ -66,7 +66,43 @@ mkdir -p "${MMRY_STATE_DIR}/hooks-handlers" "${MMRY_STATE_DIR}/setup"
 # a model-invoked handler which product it belongs to when the home was relocated, so a state
 # directory must never hold handlers without one. Ordering it first means the only way to get that
 # combination is a run that failed before it copied anything.
-printf '%s\n' "$(mmry_host)" > "${MMRY_STATE_DIR}/.mmry-host" 2>/dev/null || true
+# AND THE WRITE IS CHECKED, BECAUSE THE COMMENT ABOVE WAS NOT TRUE (#31245 QA round 4).
+#
+# It said the only way to get handlers without a marker is a run that failed before copying
+# anything. It was written with `|| true` and followed by an unconditional `cp`, so a write that
+# failed - a read-only state dir, a full disk, a permissions problem, an antivirus lock - exited
+# 0, wrote no marker, and copied the handlers anyway. Forced by a reviewer, and confirmed: exit
+# 0, no marker, handlers present. That combination is the precondition for the credential defect
+# the marker exists to prevent, so the invariant is now enforced rather than asserted in prose.
+#
+# THE CHECK IS A READ-BACK, not the write's exit status. It is the FILE that later readers
+# depend on, not the syscall, and the two can disagree.
+_mmry_marker_ok=0
+if printf '%s
+' "$(mmry_host)" > "${MMRY_STATE_DIR}/.mmry-host" 2>/dev/null; then
+    _mmry_marker_readback=""
+    read -r _mmry_marker_readback < "${MMRY_STATE_DIR}/.mmry-host" 2>/dev/null || _mmry_marker_readback=""
+    _mmry_marker_readback="${_mmry_marker_readback//[[:space:]]/}"
+    [[ "$_mmry_marker_readback" == "$(mmry_host)" ]] && _mmry_marker_ok=1
+fi
+
+# WHAT FAILURE MEANS DIFFERS BY HOST, so the response does too.
+#
+# On CODEX the marker is the only signal that survives a relocated home in the shell the model
+# actually runs handlers in. Handlers installed without it can resolve the host as Claude and
+# reach for the other product's credential, so installing them is worse than not installing
+# them. This stops - loudly enough to act on, and with exit 0 so the session still starts.
+#
+# On CLAUDE CODE the marker changes nothing: lib-host.sh acts only on a marker reading "codex",
+# so its absence gives exactly the answer every existing install already has. Refusing to
+# install there would break working setups to guard against a risk that does not exist on it.
+if (( _mmry_marker_ok == 0 )) && [[ "$(mmry_host)" == "codex" ]]; then
+    echo "MMRY AI: could not write the host marker at ${MMRY_STATE_DIR}/.mmry-host." >&2
+    echo "  Handlers were NOT installed. Without that file a handler cannot tell which" >&2
+    echo "  assistant it belongs to, and may read the wrong account's credential." >&2
+    echo "  Check that ${MMRY_STATE_DIR} is writable, then start a new session." >&2
+    exit 0
+fi
 
 # Copy current handler and setup scripts (all platforms)
 cp "$P"/hooks-handlers/*.sh "${MMRY_STATE_DIR}/hooks-handlers/"
