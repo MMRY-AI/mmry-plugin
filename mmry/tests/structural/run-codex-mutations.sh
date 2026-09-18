@@ -107,7 +107,7 @@ SURVIVED=0
 ERRORS=0
 RUN=0
 SKIPPED=0
-TOTAL=85
+TOTAL=96
 SURVIVOR_LIST=""
 ERROR_LIST=""
 CURRENT_FILE=""
@@ -247,22 +247,30 @@ mutate "claude config dir drifts" hooks-handlers/lib-host.sh \
   "s = s.replace('\"\${HOME}/.claude\"', '\"\${HOME}/.claude-v2\"')" \
   unit/lib-host.bats "Claude config dir"
 
+# REPAIRED (#31245 QA round 6). The literal moved: the accessors were rewritten in round 4 to
+# print a cached variable rather than a constant, so `printf 'claude-code'` is not in the file any
+# more and this experiment silently stopped being performed. It now targets the assignment in
+# _mmry_host_resolve, which is where the literal actually is.
 mutate "claude client name becomes codex" hooks-handlers/lib-host.sh \
-  "s = s.replace(\"printf 'claude-code'\", \"printf 'codex'\")" \
+  's = s.replace("_MMRY_HOST_CLIENT_V=" + chr(34) + "claude-code" + chr(34), "_MMRY_HOST_CLIENT_V=" + chr(34) + "codex" + chr(34), 1)' \
   unit/lib-host.bats "Claude client name"
 
 mutate "claude script ref becomes absolute" hooks-handlers/lib-host.sh   's = s.replace("${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s", "/abs/%s")'   unit/lib-host.bats "unexpanded"
 
+# REPAIRED (#31245 QA round 6). Same cause: the case arm assigns rather than prints now.
 mutate "default host becomes codex" hooks-handlers/lib-host.sh \
-  "s = s.replace('        *)     printf \\'claude\\' ;;', '        *)     printf \\'codex\\' ;;')" \
+  's = s.replace("        *)     _MMRY_HOST_V=" + chr(34) + "claude" + chr(34) + " ;;", "        *)     _MMRY_HOST_V=" + chr(34) + "codex" + chr(34) + " ;;", 1)' \
   unit/lib-host.bats "MMRY_HOST unset"
 
 mutate "CODEX_HOME ignored" hooks-handlers/lib-host.sh \
   "s = s.replace('\"\${CODEX_HOME:-\${HOME}/.codex}\"', '\"\${HOME}/.codex\"')" \
   unit/lib-host.bats "CODEX_HOME wins"
 
+# REPAIRED (#31245 QA round 6). mmry_host_script_ref stopped calling $(mmry_host_state_dir) in
+# round 4 - the whole point of that change was to remove a nested command substitution from a hot
+# path - so the pattern named a line that no longer existed.
 mutate "codex script ref keeps the variable" hooks-handlers/lib-host.sh \
-  "s = s.replace(\"printf '%s/hooks-handlers/%s' \\\"\$(mmry_host_state_dir)\\\" \\\"\$script\\\"\", \"printf '\\\\\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' \\\"\$script\\\"\")" \
+  's = s.replace("printf " + chr(39) + "%s/mmry/hooks-handlers/%s" + chr(39) + " " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " " + chr(34) + "$script" + chr(34), "printf " + chr(39) + "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s" + chr(39) + " " + chr(34) + "$script" + chr(34), 1)' \
   unit/lib-host.bats "ABSOLUTE path"
 
 mutate "the double-source guard becomes a no-op" hooks-handlers/lib-host.sh   's = s.replace(chr(34) + "${_MMRY_LIB_HOST_SOURCED:-}" + chr(34) + " ]] && return 0", chr(34) + "${_MMRY_LIB_HOST_SOURCED:-}" + chr(34) + " ]] && true", 1)'   unit/lib-host.bats "clobber"
@@ -388,7 +396,13 @@ mutate "the assertion always passes" hooks-handlers/lib-host.sh   's = s.replace
 
 mutate "the refusal goes quiet" hooks-handlers/lib-host.sh   's = s.replace("MMRY AI: no %s credential was found", "", 1)'   handlers/codex-hook.bats "SAYS SO"
 
-mutate "the refusal fires on Claude Code too" hooks-handlers/lib-host.sh   's = s.replace(chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " ]] || return 0", chr(34) + "$(mmry_host)" + chr(34) + " != " + chr(34) + "no-such-host" + chr(34) + " ]] || return 0", 1)'   handlers/codex-hook.bats "Claude install with no credential at all is unaffected"
+# REPAIRED (#31245 QA round 6). This is the requirement-4 guard - the one that stops the Codex
+# credential refusal firing on a Claude Code install - and it is the most important of the five to
+# have gone untested. mmry_host_assert_own_credential stopped calling $(mmry_host) in round 4 and
+# reads the resolved variable instead, so the pattern matched nothing.
+mutate "the refusal fires on Claude Code too" hooks-handlers/lib-host.sh \
+  's = s.replace(chr(34) + "$_MMRY_HOST_V" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " ]] || return 0", chr(34) + "$_MMRY_HOST_V" + chr(34) + " != " + chr(34) + "no-such-host" + chr(34) + " ]] || return 0", 1)' \
+  handlers/codex-hook.bats "Claude install with no credential at all is unaffected"
 
 # ---- session-init.sh and session-start.sh, which had no mutation coverage at all -------------
 mutate "session-init installs into the Claude directory on every host" hooks-handlers/session-init.sh   's = s.replace("MMRY_STATE_DIR=" + chr(34) + "$(mmry_host_state_dir)" + chr(34), "MMRY_STATE_DIR=" + chr(34) + "${HOME}/.claude/mmry" + chr(34), 1)'   handlers/codex-session.bats "installs the handlers under"
@@ -420,7 +434,12 @@ mutate "session-init writes no host marker" hooks-handlers/session-init.sh   's 
 mutate "self-update updates the Claude directory from a Codex session" hooks-handlers/self-update.sh   's = s.replace("INSTALLED_DIR="+chr(34)+"$(mmry_host_state_dir)"+chr(34), "INSTALLED_DIR="+chr(34)+"${HOME}/.claude/mmry"+chr(34), 1)'   handlers/self-update.bats "CODEX state directory"
 mutate "self-update loses its credential opt-out and dies silently" hooks-handlers/self-update.sh   's = s.replace("MMRY_ALLOW_NO_CREDENTIAL=1", "true", 1)'   handlers/self-update.bats "update check"
 mutate "the Windows guard forgets the install marker" setup/uninstall.bat   's = s.replace("if exist "+chr(34)+"%~dp0.."+chr(92)+".mmry-host"+chr(34)+" (", "if exist "+chr(34)+"%~dp0.."+chr(92)+".no-such-file"+chr(34)+" (", 1)'   structural/codex-docs-and-eol.bats "marker alone"
-mutate "the Windows guard forgets CODEX_HOME" setup/uninstall.bat   's = s.replace("if defined CODEX_HOME (", "if defined NO_SUCH_VARIABLE (", 1)'   structural/codex-docs-and-eol.bats "CODEX_HOME alone"
+# REPAIRED (#31245 QA round 6). Round 4 added trailing-separator stripping to the Windows
+# uninstaller, which copies CODEX_HOME into MMRY_CODEX_HOME first; the guard now tests the copy,
+# so `if defined CODEX_HOME (` is not in the file.
+mutate "the Windows guard forgets CODEX_HOME" setup/uninstall.bat \
+  's = s.replace("if defined MMRY_CODEX_HOME (", "if defined NO_SUCH_VARIABLE (", 1)' \
+  structural/codex-docs-and-eol.bats "CODEX_HOME alone"
 mutate "the Windows guard refuses on any marker at all" setup/uninstall.bat   's = s.replace("findstr /i /l /c:"+chr(34)+"codex"+chr(34)+" "+chr(34)+"%~dp0.."+chr(92)+".mmry-host"+chr(34), "findstr /i /l /c:"+chr(34)+"c"+chr(34)+" "+chr(34)+"%~dp0.."+chr(92)+".mmry-host"+chr(34), 1)'   structural/codex-docs-and-eol.bats "does NOT make it refuse"
 mutate "the customer-facing page goes back to a hard-coded path" ../docs/codex.md   's = s.replace("bash "+chr(34)+"${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"+chr(34), "bash ~/.codex/mmry/setup/mmry-setup.sh", 1)'   structural/codex-docs-and-eol.bats "hard-codes"
 mutate "the 401 reply names a slash command on Codex too" hooks-handlers/session-start.sh   's = s.replace("_mmry_reauth_hint="+chr(34)+"ask the assistant to run $(mmry_host_setup_hint)"+chr(34), "_mmry_reauth_hint="+chr(34)+"run /mmry:setup"+chr(34), 1)'   handlers/codex-session.bats "actually run"
@@ -451,7 +470,11 @@ mutate "the host comparison stops folding case on Windows [R4]" hooks-handlers/l
 # The remedy that contradicted itself.
 # Aimed at the RELOCATED branch only, so the Claude literal is untouched and the experiment
 # isolates the defect it is about rather than breaking everything at once.
-mutate "the setup hint goes back to a hardcoded home [R4]" hooks-handlers/lib-host.sh   's = s.replace("        shown=" + chr(34) + "$dir" + chr(34), "        shown=" + chr(34) + "~/.codex" + chr(34), 1)'   unit/lib-host.bats "two lines of the refusal message agree"
+# RETARGETED (#31245 QA round 6). Round 6 factored the tilde logic out of mmry_host_setup_hint
+# into _mmry_host_display_dir, so that the credential file and the state directory spell the same
+# directory the same way. That deleted the line this experiment named, and the dry run caught it -
+# which is what the dry run is for.
+mutate "the setup hint goes back to a hardcoded home [R4]" hooks-handlers/lib-host.sh   's = s.replace("        printf " + chr(39) + "%s" + chr(39) + " " + chr(34) + "$dir" + chr(34), "        printf " + chr(39) + "~/.codex" + chr(39), 1)'   unit/lib-host.bats "two lines of the refusal message agree"
 
 # A trailing separator on CODEX_HOME.
 mutate "a trailing separator is left on the resolved config dir [R4]" hooks-handlers/lib-host.sh   's = s.replace("while [[ " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " == */ || " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " == *" + chr(92) + chr(92) + " ]]; do", "while false; do", 1)'   unit/lib-host.bats "trailing separator on CODEX_HOME"
@@ -498,6 +521,51 @@ mutate "the formation remedy names no command on either host" hooks-handlers/lib
 #    literal. This is the experiment that proves the assertions read the HANDLER'S OUTPUT rather
 #    than the helper: a test written against mmry_host_formation_ref directly would survive this,
 #    and surviving it is precisely how twenty such strings shipped in the first place.
+# ---- round 6 ----------------------------------------------------------------------------------
+mutate "the roster footer is re-wrapped, same bytes, different breaks [R6]" hooks-handlers/formation-roster.sh \
+  's = s.replace("printf " + chr(39) + "%s, and read the whole account" + chr(92) + "n" + chr(39) + " " + chr(34) + "$(mmry_host_formation_ref progress " + chr(39) + "<Accepted|Done|Blocked|Abandoned>" + chr(39) + ")" + chr(34) + chr(10) + "printf " + chr(39) + "with %s." + chr(92) + "n" + chr(39), "printf " + chr(39) + "%s," + chr(39) + " " + chr(34) + "$(mmry_host_formation_ref progress " + chr(39) + "<Accepted|Done|Blocked|Abandoned>" + chr(39) + ")" + chr(34) + chr(10) + "printf " + chr(39) + chr(92) + "nand read the whole account with %s." + chr(92) + "n" + chr(39), 1)' \
+  structural/codex-formation-instructions.bats "BYTE FOR BYTE"
+
+mutate "the sweep is satisfied by a handler that says nothing [R6]" hooks-handlers/formation-join.sh \
+  's = s.replace("    echo " + chr(34) + "Which formation? Usage: $(mmry_host_formation_ref join " + chr(34) + "<formationId>" + chr(34) + ")" + chr(34), "    true", 1)' \
+  structural/codex-formation-instructions.bats "replaces its slash command"
+
+mutate "the Foundation notice names the other product's config file again [R6]" hooks-handlers/userpromptsubmit-foundation.sh \
+  's = s.replace("_FOUND_CONFIG_REF=" + chr(34) + "$(mmry_host_config_file_ref)" + chr(34), "_FOUND_CONFIG_REF=" + chr(39) + "~/.claude/mmry-config.json" + chr(39), 1)' \
+  handlers/userpromptsubmit-foundation.bats "CONFIGURED Codex install past the deadline"
+
+mutate "the Foundation notice names the slash command again [R6]" hooks-handlers/userpromptsubmit-foundation.sh \
+  's = s.replace("_FOUND_RELOAD_REF=" + chr(34) + "$(mmry_host_command_ref load-memories)" + chr(34), "_FOUND_RELOAD_REF=" + chr(39) + "/mmry:load-memories" + chr(39), 1)' \
+  handlers/userpromptsubmit-foundation.bats "CONFIGURED Codex install past the deadline"
+
+mutate "the client's credential message names /mmry:setup on every host [R6]" hooks-handlers/mmry-client.sh \
+  's = s.replace("        mmry_host_command_ref setup && return 0", "        return 1", 1)' \
+  structural/codex-customer-strings.bats "credential messages name"
+
+mutate "a command with no Codex surface gets an invented one [R6]" hooks-handlers/lib-host.sh \
+  's = s.replace("        [[ -n " + chr(34) + "$script" + chr(34) + " ]] || return 1", "        [[ -n " + chr(34) + "$script" + chr(34) + " ]] || script=" + chr(39) + "hooks-handlers/help.sh" + chr(39), 1)' \
+  structural/codex-customer-strings.bats "no Codex equivalent"
+
+mutate "MMRY_HOST_ARG is honoured from the environment again [R6]" setup/mmry-setup.sh \
+  's = s.replace(chr(10) + "MMRY_HOST_ARG=" + chr(34) + chr(34) + chr(10), chr(10), 1)' \
+  structural/codex-customer-strings.bats "exported MMRY_HOST_ARG"
+
+mutate "lib-jq resolves its own directory with a fork again [R6]" hooks-handlers/lib-jq.sh \
+  's = s.replace("_mmry_libjq_dir=" + chr(34) + "${BASH_SOURCE[0]%/*}" + chr(34) + chr(10) + "[[ " + chr(34) + "$_mmry_libjq_dir" + chr(34) + " == " + chr(34) + "${BASH_SOURCE[0]}" + chr(34) + " ]] && _mmry_libjq_dir=" + chr(34) + "." + chr(34), "_mmry_libjq_dir=" + chr(34) + "$(cd " + chr(34) + "$(dirname " + chr(34) + "${BASH_SOURCE[0]}" + chr(34) + ")" + chr(34) + " && pwd)" + chr(34), 1)' \
+  structural/hook-budgets.bats "resolves its own directory with a fork"
+
+mutate "the host resolver forks on its own directory again [R6]" hooks-handlers/lib-host.sh \
+  's = s.replace("_mmry_norm_path_str_g " + chr(34) + "$_mmry_self_dir" + chr(34) + "; _mmry_self_dir=" + chr(34) + "$_MMRY_NP" + chr(34), "_mmry_norm_path " + chr(34) + "$_mmry_self_dir" + chr(34) + "; _mmry_self_dir=" + chr(34) + "$_MMRY_NP" + chr(34), 1)' \
+  structural/hook-budgets.bats "costs about what sourcing an empty file"
+
+mutate "the Windows source spelling resolves to the working directory again [R6]" hooks-handlers/lib-host.sh \
+  's = s.replace("_mmry_self_src=" + chr(34) + "${BASH_SOURCE[0]//" + chr(92) + chr(92) + "//}" + chr(34) + chr(10) + "    _mmry_self_dir=" + chr(34) + "${_mmry_self_src%/*}" + chr(34) + chr(10) + "    [[ " + chr(34) + "$_mmry_self_dir" + chr(34) + " == " + chr(34) + "$_mmry_self_src" + chr(34) + " ]] && _mmry_self_dir=" + chr(34) + "." + chr(34), "_mmry_self_dir=" + chr(34) + "${BASH_SOURCE[0]%/*}" + chr(34) + chr(10) + "    [[ " + chr(34) + "$_mmry_self_dir" + chr(34) + " == " + chr(34) + "${BASH_SOURCE[0]}" + chr(34) + " ]] && _mmry_self_dir=" + chr(34) + "." + chr(34), 1)' \
+  unit/lib-host.bats "by its POSIX path and by its WINDOWS path"
+
+mutate "the string sweep waves through a new bad literal [R6]" hooks-handlers/visibility.sh \
+  's = s.replace("$(mmry_host_command_ref visibility group " + chr(39) + chr(34) + "NAME" + chr(34) + chr(39) + ")", "/mmry:visibility group " + chr(92) + chr(34) + "NAME" + chr(92) + chr(34), 1)' \
+  structural/codex-customer-strings.bats "names a command or the other product"
+
 mutate "a handler hardcodes the slash command again instead of deriving it" hooks-handlers/formation-join.sh   's = s.replace("echo " + chr(34) + "Which formation? Usage: $(mmry_host_formation_ref join " + chr(34) + "<formationId>" + chr(34) + ")" + chr(34), "echo " + chr(34) + "Which formation? Usage: /mmry:formation join <formationId>" + chr(34), 1)'   structural/codex-formation-instructions.bats "a command that exists on their machine"
 
 echo
