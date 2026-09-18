@@ -792,17 +792,56 @@ _code_only() {
     [ "$output" -ge 1 ]
 }
 
-@test "req5: the stated floor is the version this fix actually ships in" {
-    # A documented floor that does not match the manifest is worse than none: it sends support to
-    # check for a version that was never released. Read from the manifest rather than repeated here.
+@test "req5: the stated floor is a plugin version that actually exists" {
+    # A documented floor that was never released is worse than none: it sends support to check for
+    # a version that does not exist. Read the real one from the manifest rather than repeating it.
+    #
+    # #31434 corrected what this asserts. It used to demand that formation.md name the CURRENT
+    # manifest version, which held for exactly as long as the version did not move. "Fixed in
+    # plugin 2.9.1" is a statement of fact about where the macOS payload fix landed; rewriting it
+    # to 2.9.2 at the next bump would make the document false in order to keep a test green. The
+    # invariant that was actually wanted is: the doc names a plugin version, and no plugin version
+    # it names is NEWER than what ships - which still refuses the original defect.
     local plugin_json="${BATS_TEST_DIRNAME}/../../.claude-plugin/plugin.json"
+    local doc="${BATS_TEST_DIRNAME}/../../commands/formation.md"
     local ver
     ver="$(grep -o '"version"[^"]*"[^"]*"' "$plugin_json" | head -1 | grep -o '[0-9][^"]*')"
     [ -n "$ver" ]
 
-    run grep -c "$ver" "${BATS_TEST_DIRNAME}/../../commands/formation.md"
+    # Only versions the document attaches to the PLUGIN. formation.md also names a Claude Code
+    # client version, which has its own numbering and must not be compared against this manifest.
+    local named
+    named="$(grep -oE '(plugin|MMRY) [0-9]+\.[0-9]+\.[0-9]+' "$doc" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -u)"
+    [ -n "$named" ] || {
+        echo "formation.md names no plugin version at all, so a Mac user is told nothing to check"
+        return 1
+    }
+
+    # SAMPLE SIZE, printed beside the verdict rather than assumed.
+    echo "plugin versions named in formation.md: $(printf '%s ' $named)(shipping ${ver})" >&3
+
+    # Component-wise numeric comparison in pure bash. NOT `sort -V`: that is a GNU extension and
+    # the BSD sort macOS ships does not have it, which would make this whole file a no-op on the
+    # one platform the surrounding tests exist for.
+    local v shipped_parts named_parts i newer
+    for v in $named; do
+        newer=0
+        IFS=. read -r -a shipped_parts <<< "$ver"
+        IFS=. read -r -a named_parts <<< "$v"
+        for i in 0 1 2; do
+            if (( ${named_parts[$i]:-0} > ${shipped_parts[$i]:-0} )); then newer=1; break; fi
+            if (( ${named_parts[$i]:-0} < ${shipped_parts[$i]:-0} )); then break; fi
+        done
+        (( newer == 0 )) || {
+            echo "formation.md names plugin ${v}, which is newer than the shipped ${ver} - nobody can install it"
+            return 1
+        }
+    done
+
+    # And the floor must still be STATED. Deleting the sentence would satisfy every check above.
+    run grep -c 'Fixed in plugin' "$doc"
     [ "$output" -ge 1 ] || {
-        echo "formation.md names a floor that is not the shipped version ${ver}"
+        echo "formation.md no longer states which plugin version fixed this"
         return 1
     }
 }
