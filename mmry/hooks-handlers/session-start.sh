@@ -213,6 +213,20 @@ mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>
 # Escape path for JSON
 escaped_path="$(echo "$MEM_FILE" | sed 's/\\/\\\\/g')"
 
+# AND THE FAULT NOTE IS ESCAPED TOO, WHICH IT WAS NOT (#31245 QA round 4).
+#
+# MMRY_HOOK_FAULT_NOTE was interpolated into the JSON below raw. It is not a fixed string: it
+# carries ${HOOK_READ_STATUS} and the list of field names found in the hook payload, both of
+# which come from OUTSIDE this script. A payload whose keys contain a double quote or a
+# backslash therefore produced invalid JSON, and a host discards an additionalContext it cannot
+# parse - so the one message whose entire purpose is to report that something went wrong was
+# silently dropped by the thing going wrong. The path beside it has been escaped since before
+# this ticket; the note never was.
+#
+# Escaped with the same three-step idiom used for $setup_msg above, in ONE place, so both emit
+# sites below are covered by construction rather than by remembering to do it twice.
+MMRY_HOOK_FAULT_NOTE="$(printf '%s' "$MMRY_HOOK_FAULT_NOTE" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+
 # First-session onboarding: detect zero memories
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it
 # would be read after the model has already decided what to do with the turn (#31385).

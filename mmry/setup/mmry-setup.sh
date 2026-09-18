@@ -400,6 +400,23 @@ CONFIG_FILE="$(mmry_host_config_file)"
 
 mkdir -p "$CONFIG_DIR"
 
+# THE FILE IS CREATED PRIVATE BEFORE THE KEY GOES INTO IT (#31245 QA round 4).
+#
+# This file holds a long-lived API key that can read and write every memory on the account.
+# It was created with whatever the invoking umask happened to be - commonly 022, which is
+# world-readable - and nothing ever narrowed it. On a shared or multi-user machine that is the
+# credential readable by every account on the box.
+#
+# ORDER MATTERS. The permissions are set on an EMPTY file first, so there is no instant at which
+# the key exists on disk while the file is still world-readable. Doing it afterwards leaves a
+# window, and a window is all a credential leak needs.
+#
+# BEST EFFORT, NEVER FATAL. Windows filesystems under Git Bash do not implement POSIX modes and
+# chmod is a no-op there; failing setup over that would break the platform this plugin is most
+# used on, to no benefit. The write below is what must succeed.
+: > "$CONFIG_FILE" 2>/dev/null || true
+chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+
 "$MMRY_JQ" -n --arg url "$API_URL" --arg key "$API_KEY" '{
     apiUrl: $url,
     authMethod: "apikey",

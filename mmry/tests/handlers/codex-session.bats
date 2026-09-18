@@ -363,3 +363,30 @@ _fake_plugin_root() {
     [ -f "$HOME/.claude/mmry/hooks-handlers/lib-host.sh" ]
     [[ "$output" == *"DELEGATE RAN"* ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE FAULT NOTE HAS TO SURVIVE BEING ABOUT A HOSTILE {\"a\\\"b\":1,\"event\":\"SessionStart\"} (#31245 QA round 4).
+#
+# MMRY_HOOK_FAULT_NOTE is interpolated straight into the JSON this handler emits, and it is not a
+# fixed string: it carries the hook read status and the list of field names the payload DID
+# carry, both of which come from outside this script. A key containing a double quote therefore
+# produced invalid JSON - and a host discards an additionalContext it cannot parse, so the one
+# message whose entire purpose is to report that something went wrong was dropped by the thing
+# going wrong. The memory-file path beside it had been escaped since before this ticket.
+
+@test "a fault note about a payload with a quote in a field name still emits VALID JSON" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey"
+    run env -u CLAUDE_SESSION_ID MMRY_HOST=codex HOME="$HOME"         bash -c "printf '%s' '{\"a\\\"b\":1,\"event\":\"SessionStart\"}' | bash \"$PLUGIN_ROOT/hooks-handlers/session-start.sh\""
+    assert_success
+
+    # THE ASSERTION THAT MATTERS: it parses. Asserting on the text alone would pass while the
+    # customer's host silently threw the whole object away.
+    if command -v jq >/dev/null; then
+        echo "$output" | jq . >/dev/null
+    else
+        echo "$output" | python3 -c 'import sys,json; json.load(sys.stdin)'
+    fi
+
+    # And it is still the fault note, not an empty object that happens to parse.
+    assert_output --partial "carried no 'session_id' field"
+}

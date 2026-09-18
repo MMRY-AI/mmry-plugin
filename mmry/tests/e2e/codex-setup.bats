@@ -255,3 +255,61 @@ EOF
     [ ! -f "$HOME/.claude/mmry-config.json" ]
     [ ! -f "$HOME/.codex/mmry-config.json" ]
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE CREDENTIAL FILE IS NOT WORLD-READABLE (#31245 QA round 4).
+#
+# mmry-config.json holds a long-lived API key that can read and write every memory on the
+# account. It was created with whatever umask the caller happened to have - commonly 022, which
+# is world-readable - and nothing ever narrowed it.
+#
+# TWO TESTS, BECAUSE ONE OF THEM CANNOT RUN EVERYWHERE AND SAYING SO IS THE POINT. Git Bash on
+# Windows does not implement POSIX modes: chmod 600 there is a no-op and stat reports 644
+# regardless, which was confirmed on this machine before these were written. So the mode is
+# asserted where it is observable and SKIPPED where it is not, and the ORDER - private before
+# the secret is written - is asserted from the source, where it is checkable everywhere.
+
+@test "codex: the credential file is created private BEFORE the key is written into it" {
+    # A SOURCE-ORDER CHECK, deliberately. Setting the mode after writing leaves a window in
+    # which the key is on disk world-readable, and a window is all a credential leak needs.
+    # This is checkable on every platform; the mode itself is not.
+    local f="$PLUGIN_ROOT/setup/mmry-setup.sh"
+    local create_line chmod_line write_line
+    # The three steps, in the order they must happen: create empty, narrow the mode, THEN write
+    # the key. Anchored on the jq invocation rather than on a redirect, because the empty-file
+    # creation is a redirect to the same path and would otherwise match first.
+    create_line="$(grep -n ': > "$CONFIG_FILE"' "$f" | head -1 | cut -d: -f1)"
+    chmod_line="$(grep -n 'chmod 600 "$CONFIG_FILE"' "$f" | head -1 | cut -d: -f1)"
+    write_line="$(grep -n 'MMRY_JQ" -n --arg url' "$f" | head -1 | cut -d: -f1)"
+
+    # SAMPLE SIZE: an extraction that found nothing must fail, not compare empty strings.
+    [[ "$create_line" =~ ^[0-9]+$ ]]
+    [[ "$chmod_line" =~ ^[0-9]+$ ]]
+    [[ "$write_line" =~ ^[0-9]+$ ]]
+    (( create_line < chmod_line ))
+    (( chmod_line < write_line ))
+}
+
+@test "codex: and the written credential really is mode 600 where the platform has modes" {
+    # Establish that this filesystem honours modes AT ALL before asserting anything about them.
+    # Without this the test passes vacuously on Windows, reporting success for a guarantee the
+    # platform never provided.
+    local probe="$TEST_TMPDIR/modeprobe"
+    : > "$probe"
+    chmod 600 "$probe"
+    local probemode
+    probemode="$(stat -c %a "$probe" 2>/dev/null || stat -f %Lp "$probe" 2>/dev/null)"
+    [[ "$probemode" == "600" ]] || skip "this filesystem does not implement POSIX modes (probe reported ${probemode:-unknown})"
+
+    local script
+    script="$(_stage "$HOME/.codex/mmry")"
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        MMRY_NO_BROWSER=1 MMRY_JQ_VENDOR_DIR="$MMRY_JQ_VENDOR_DIR" PATH="$PATH" \
+        bash "$script"
+
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.codex/mmry-config.json" ]
+    local mode
+    mode="$(stat -c %a "$HOME/.codex/mmry-config.json" 2>/dev/null || stat -f %Lp "$HOME/.codex/mmry-config.json" 2>/dev/null)"
+    [[ "$mode" == "600" ]]
+}
