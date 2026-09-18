@@ -11,7 +11,11 @@
 #   - NEVER blocks a prompt. Any problem (no cache, toggle off, parse error) -> emit
 #     nothing and exit 0.
 #   - No network call on the critical path. Reads only the local cache.
-#   - Bounded cost. A configurable token cap (default 1500) truncates oversized sets.
+#   - COMPLETE. The set is delivered in full, every time. There is no size at which this
+#     withholds part of what the customer wrote (#31411).
+#   - VERIFIED. The cache is checked against a manifest the writer recorded, so a damaged
+#     or substituted file is refused and reported rather than passed off as the
+#     account's guidance (#31583).
 #   - Opt-out. foundationReinject=false (config or env) makes this a no-op.
 #   - BOUNDED WALL CLOCK, and it says so when it fails (#31434). See below.
 #
@@ -331,6 +335,24 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
     rm -f "$_INFLIGHT" 2>/dev/null || true
 
+    # THE CACHE WAS THERE AND COULD NOT BE TRUSTED (#31583).
+    #
+    # Distinct from both a crash and a deadline, and it needs its own words: nothing was
+    # slow and nothing was broken about the install. Something replaced or damaged the file
+    # this account's directives are read from, and the whole point of the ticket is that the
+    # customer hears about it instead of being handed a stub described as authoritative.
+    # The worker puts the specific reason on stdout; it is repeated verbatim to both
+    # audiences so the assistant and the customer are told the same thing.
+    if (( WORKER_RC == 3 )); then
+        REASON="${BODY:-the cached directives could not be verified}"
+        NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
+        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. Nothing was truncated and nothing was guessed at; the local copy did not match what MMRY stored, so it was refused rather than used. Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+        printf '%s foundation reinjection REFUSED: %s
+'             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
+        _mmry_emit "$NOTICE" "$USERMSG"
+        exit 0
+    fi
+
     if (( WORKER_RC != 0 )); then
         # The turn proceeds either way; what matters is that the customer is told, in terms
         # they can act on, that this turn is running WITHOUT their standing directives — and
@@ -385,9 +407,12 @@ set +e +u
 mmry_load_config 2>/dev/null || true
 
 REINJECT="${MMRY_FOUNDATION_REINJECT:-true}"
-CAP_TOKENS="${MMRY_FOUNDATION_TOKEN_CAP:-1500}"
 REFRESH_SECS="${MMRY_FOUNDATION_REFRESH_SECONDS:-86400}"
 CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
+# Kept for the supervisor's failure log only. Nothing on the happy path writes here any
+# more: the line that did recorded a truncation that no longer happens, and recorded it
+# wrongly - it printed the length AFTER the cut, so every one of the 1,457 entries on the
+# affected machine read "had 6000 chars" (#31411).
 LOG="${MMRY_TMPDIR}/mmry-foundation.log"
 
 # Toggle off -> no-op. NOTE the supervisor checks this too, before it ever spawns this
@@ -411,29 +436,126 @@ if [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_
     fi
 fi
 
-# No cache, or cache is empty/whitespace -> no-op.
-[[ -s "$CACHE" ]] || exit 0
-# `$(<file)` rather than `$(cat file)`: same value, one fewer process on a path that runs
-# on every prompt. Measured ~300 ms per spawn on Windows Git Bash (#31434 QA).
-content="$(<"$CACHE")"
-[[ -n "${content//[[:space:]]/}" ]] || exit 0
+# ============================================================================
+# VERIFY THE CACHE BEFORE BELIEVING IT (#31583).
+#
+# The old precondition was `[[ -s "$CACHE" ]]` - "the file is not empty" - and that is the
+# whole defect. On 2026-09-18 this file held four bytes, the literal "- x", while the account
+# held twelve directives totalling ~5.9 KB, and the product forwarded those four bytes to the
+# assistant framed as the account's authoritative guidance. A single stray character passes
+# a non-empty check exactly as well as the complete set does.
+#
+# The cache is a fixed name in a shared temp directory, so ANYTHING on the machine can write
+# it. This does not try to prevent that - it makes it detectable. The writer records what it
+# wrote (see mmry_write_foundation_cache); this refuses to inject anything that is not
+# byte-for-byte that, and REPORTS rather than going quiet.
+#
+# Exit codes are the channel to the supervisor, which owns everything the customer sees:
+#   0 - either injected in full, or a verified-empty set with nothing to inject
+#   3 - the cache could not be verified; stdout carries the one-line reason
+# ============================================================================
 
-# Guard against a non-numeric cap.
-[[ "$CAP_TOKENS" =~ ^[0-9]+$ ]] || CAP_TOKENS=1500
+MANIFEST="${CACHE}.manifest"
+# Written on every verified injection so /mmry:foundation-status can answer "are my
+# directives reaching my assistants right now" without anyone reading a cache file
+# (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
+STATUS="${MMRY_TMPDIR}/mmry-foundation.status"
 
-# Token cap (~4 chars/token). Truncate + log if over — never silently balloon context.
-cap_chars=$(( CAP_TOKENS * 4 ))
-truncated_note=""
-if (( ${#content} > cap_chars )); then
-    content="${content:0:cap_chars}"
-    truncated_note=" (Foundation set truncated to the ${CAP_TOKENS}-token cap - trim Foundation memories in the portal to restore the full set.)"
-    printf '%s truncated Foundation reinjection to %s tokens (had %s chars)\n' \
-        "$(date +%FT%T 2>/dev/null || echo now)" "$CAP_TOKENS" "${#content}" >> "$LOG" 2>/dev/null || true
+# No manifest at all. Either nothing has ever populated the cache on this machine, or
+# something overwrote the cache without going through the writer. Those are only
+# distinguishable by whether a cache file is sitting there unaccounted for.
+if [[ ! -r "$MANIFEST" ]]; then
+    if [[ -e "$CACHE" ]]; then
+        printf 'the cache file exists but has no manifest, so it cannot be shown to be the account'"'"'s own directives'
+        exit 3
+    fi
+    # Nothing here at all: a session that has not loaded memories yet. Not damage, and
+    # warning on it would mean warning on every fresh session. Say nothing.
+    exit 0
 fi
 
-# Authoritative framing. These lead every turn, so they are stated as directives that
-# take precedence, distinct from transient memories.
-printf '%s' "The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.${truncated_note}
+_man="$(<"$MANIFEST")" 2>/dev/null || _man=""
+_exp_entries=""; _exp_bytes=""; _exp_cksum=""
+if [[ "$_man" =~ ^mmry-foundation[[:space:]]+v1[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)[[:space:]]+cksum=([0-9]+) ]]; then
+    _exp_entries="${BASH_REMATCH[1]}"
+    _exp_bytes="${BASH_REMATCH[2]}"
+    _exp_cksum="${BASH_REMATCH[3]}"
+else
+    printf 'the manifest describing the cached directives is missing or unreadable, so the cache cannot be verified'
+    exit 3
+fi
+
+# A genuinely empty Foundation set is VALID, not damage. An account with no Foundation
+# memories must not be nagged on every prompt, and requirement 4 of #31583 is explicit that
+# the check must not be satisfiable by warning all the time.
+if (( _exp_entries == 0 )); then
+    printf 'ok entries=0 bytes=0
+' > "$STATUS" 2>/dev/null || true
+    exit 0
+fi
+
+if [[ ! -r "$CACHE" ]]; then
+    printf 'the manifest records %s Foundation directives but the cache holding them is missing' "$_exp_entries"
+    exit 3
+fi
+
+# ONE process answers both questions: cksum prints its checksum and its byte count together.
+# Byte count alone would not be enough - a same-length substitution is exactly the case
+# #31583 test case 2 exists to catch - but it is free here, and it names the failure more
+# precisely when the size is what changed.
+_act_cksum=""; _act_bytes=""
+read -r _act_cksum _act_bytes < <(cksum < "$CACHE" 2>/dev/null)
+if [[ ! "$_act_cksum" =~ ^[0-9]+$ || ! "$_act_bytes" =~ ^[0-9]+$ ]]; then
+    printf 'the cached directives could not be read for verification'
+    exit 3
+fi
+
+if [[ "$_act_bytes" != "$_exp_bytes" ]]; then
+    printf 'the cached directives are %s bytes but the manifest records %s, so the file is not the set that was stored'         "$_act_bytes" "$_exp_bytes"
+    exit 3
+fi
+
+if [[ "$_act_cksum" != "$_exp_cksum" ]]; then
+    printf 'the cached directives are the right length but their contents do not match the stored set'
+    exit 3
+fi
+
+content="$(<"$CACHE")"
+# Verified, and the manifest says there is at least one entry, so an empty read here means
+# the bytes on disk are whitespace that somehow checksummed to the recorded value. Refuse
+# rather than inject a blank set under an authoritative framing.
+if [[ -z "${content//[[:space:]]/}" ]]; then
+    printf 'the cached directives verified but contain no readable text'
+    exit 3
+fi
+
+# ============================================================================
+# DELIVER THE SET IN FULL (#31411).
+#
+# There is no size at which this withholds part of what the customer wrote. The cut that
+# used to live here kept the first CAP_TOKENS*4 characters and discarded the rest, as a raw
+# substring, so it landed wherever character 6000 happened to fall. On the account that
+# surfaced it that was mid-sentence inside a list of corporate values, and four of the eight
+# values had never reached any assistant. The log line recording the loss was itself broken:
+# it printed the length AFTER the cut, so all 1,457 entries on that machine read
+# "had 6000 chars" and the log could never show how much had been lost.
+#
+# Raising the ceiling was considered and rejected in #31411. Any ceiling, however high,
+# keeps a size at which the product silently overrules the customer, and the product's
+# standing claim is that these directives are in force on every response. The tokens are
+# spent in the customer's own session, so the cost of a large set is theirs to judge; the
+# account page tells them how large their set is and what it costs (#31411, website half).
+#
+# MMRY_FOUNDATION_TOKEN_CAP / foundationReinjectTokenCap is still PARSED by the client - the
+# config-loading tests use it as a canary for key/value shear - but it is deliberately no
+# longer honoured here. See the assertion "an explicitly configured token cap does NOT cut
+# the set" in tests/handlers/userpromptsubmit-foundation.bats.
+# ============================================================================
+
+printf 'ok entries=%s bytes=%s
+' "$_exp_entries" "$_act_bytes" > "$STATUS" 2>/dev/null || true
+
+printf '%s' "The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
 
 ${content}"
 exit 0
