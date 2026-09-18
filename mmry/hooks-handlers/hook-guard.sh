@@ -31,10 +31,21 @@ fi
 # So a missing resolver falls back to exactly the path this file carried before #31245. That is
 # strictly no worse than the previous behaviour, which is the right bar for a guard whose whole job
 # is to never break a session.
-_mmry_guard_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# DERIVED WITHOUT A PROCESS (#31245 QA round 4). This was
+# `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` - two nested command substitutions, and a fork
+# measured ~300 ms on Windows Git Bash, on a guard that fires after every tool call. The path only
+# has to be good enough to source a sibling file. lib-host.sh resolves its OWN absolute location
+# for the detection it does, so nothing downstream depends on this one being absolute.
+_mmry_guard_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_mmry_guard_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_guard_dir="."
 # shellcheck source=/dev/null
 if source "${_mmry_guard_dir}/lib-host.sh" 2>/dev/null; then
-    TARGET="$(mmry_host_state_dir)/hooks-handlers/${SCRIPT_NAME}.sh"
+    # The resolved value is read from the variable rather than through $(mmry_host_state_dir),
+    # because command substitution is a fork and this is the hottest path the plugin has
+    # (#31245 QA round 4). _mmry_host_resolve is idempotent and costs no process; the accessor
+    # function remains the public interface for everyone who is not on a per-tool-call path.
+    _mmry_host_resolve
+    TARGET="${_MMRY_HOST_DIR_V}/mmry/hooks-handlers/${SCRIPT_NAME}.sh"
 else
     TARGET="${HOME}/.claude/mmry/hooks-handlers/${SCRIPT_NAME}.sh"
 fi
