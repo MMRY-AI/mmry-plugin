@@ -333,3 +333,77 @@ After the survivor was closed, the affected experiment was re-run individually:
     (restored)
     ok 1 codex: an unconfigured Codex install makes this hook silent, not noisy
 
+
+---
+
+## QA round 5 — the formation remedy a Codex customer is handed
+
+Three experiments were added (TOTAL 82 -> 85) for the fix in
+`tests/structural/codex-formation-instructions.bats`. All three were run and all three REFUSED.
+The per-test outcomes are recorded here rather than summarised, because "refused" alone does not
+show WHICH assertions did the refusing, and the point of the Claude-side controls is that a
+different set of them goes red for each mutation.
+
+Run individually with `MMRY_MUTATION_FILTER`; each was seen as `refused: 1 survived: 0
+experiments not performed: 0`.
+
+### 1. `the formation remedy stops being derived per host`
+
+`mmry_host_formation_ref` is reverted so the Codex branch returns the Claude string. This is the
+defect as it stood before the fix: every remedy names a slash command a Codex customer cannot type.
+
+Ten tests went red, covering all four handlers; the eight Claude controls stayed green, which is
+correct — this mutation restores the Claude string everywhere, and the Claude string is what the
+controls pin.
+
+| | test |
+|---|---|
+| not ok 1 | join: a Codex customer with no argument is given a command that exists on their machine |
+| not ok 3 | start: a Codex customer with no objective is given a runnable command |
+| not ok 5 | start: a session already in a formation is told how to leave, in its own host's terms |
+| not ok 7 | say: a Codex customer with no message is given a runnable command |
+| not ok 9 | say: a bad recipient points a Codex customer at the roster they can actually run |
+| not ok 11 | say: a session in no formation is told how to find and join one, runnably |
+| not ok 13 | roster: a session in no formation is given commands it can run |
+| not ok 15 | roster: a malformed id points a Codex customer at a runnable list |
+| not ok 16 | roster: the success footer hands a Codex customer three commands that all exist |
+| not ok 18 | surface: none of the four exposed handlers names a slash command on Codex |
+
+### 2. `the formation remedy names no command on either host`
+
+The helper stops naming a command at all and prints "the formation X operation" instead. This is
+the mutation the Claude-side controls exist for: without them, "no slash command appears on Codex"
+is trivially satisfied by a handler that names nothing, leaving the customer with a complaint and
+no way forward — indistinguishable, to the suite, from a fix.
+
+All eight Claude controls went red. The ten Codex assertions stayed green, which is the finding:
+the Codex half of this file CANNOT detect this regression on its own.
+
+| | test |
+|---|---|
+| not ok 2 | join: the same message on Claude Code still names the slash command, unchanged |
+| not ok 4 | start: on Claude Code the usage line is the slash command it always was |
+| not ok 6 | start: and on Claude Code that same remedy is still /mmry:formation leave |
+| not ok 8 | say: on Claude Code the usage line is unchanged |
+| not ok 10 | say: and on Claude Code the bad recipient still names /mmry:formation roster |
+| not ok 12 | say: and on Claude Code that pair is still the two slash commands |
+| not ok 14 | roster: on Claude Code that message is unchanged |
+| not ok 17 | roster: the same footer on Claude Code still names all three slash commands |
+
+### 3. `a handler hardcodes the slash command again instead of deriving it`
+
+The helper is left correct and `formation-join.sh` goes back to a hardcoded literal. This is the
+experiment that proves the assertions read the HANDLER'S OUTPUT rather than the helper's return
+value: a test written against `mmry_host_formation_ref` directly would survive this, and surviving
+it is precisely how twenty such strings shipped in the first place.
+
+| | test |
+|---|---|
+| not ok 1 | join: a Codex customer with no argument is given a command that exists on their machine |
+| not ok 18 | surface: none of the four exposed handlers names a slash command on Codex |
+
+### Still open
+
+The per-experiment table for the full 69-of-69 round-4 run is NOT recorded here. A full run is
+upwards of two hours and would describe a tree still under review; it goes in once this branch
+settles. The three experiments above are complete and were run to completion.
