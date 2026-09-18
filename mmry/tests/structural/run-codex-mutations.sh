@@ -435,7 +435,9 @@ mutate "the Codex skill becomes a byte-for-byte copy of the Claude Code one" ski
 # reverts one round-4 fix and names the test that must refuse.
 
 # R1 - the Codex Foundation hook budget, and the drift between the two registrations.
-mutate "the codex Foundation budget drifts back below its own deadline [R4]" hooks/codex-hooks.json   's = s.replace(chr(34)+"userpromptsubmit-foundation"+chr(34)+","+chr(10)+"            "+chr(34)+"timeout"+chr(34)+": 20", chr(34)+"userpromptsubmit-foundation"+chr(34)+","+chr(10)+"            "+chr(34)+"timeout"+chr(34)+": 5")'   structural/hook-budgets.bats "SAME Foundation budget"
+# 20 is unique in this file - the registered budgets are 8, 10, 10, 15, 20 and 30 - so this
+# anchor cannot drift onto another hook the way a multi-line one did.
+mutate "the codex Foundation budget drifts back below its own deadline [R4]" hooks/codex-hooks.json   's = s.replace(chr(34)+"timeout"+chr(34)+": 20", chr(34)+"timeout"+chr(34)+": 5", 1)'   structural/hook-budgets.bats "SAME Foundation budget"
 
 # R2 - the unconfigured Codex install shouting on every prompt.
 mutate "the Foundation hook stops asking whether this host has its own credential [R4]" hooks-handlers/userpromptsubmit-foundation.sh   's = s.replace("if ! mmry_host_assert_own_credential >/dev/null 2>&1; then", "if false; then", 1)'   handlers/userpromptsubmit-foundation.bats "emits NOTHING on a prompt"
@@ -447,7 +449,9 @@ mutate "setup stops validating --host and lets an unknown value default [R4]" se
 mutate "the host comparison stops folding case on Windows [R4]" hooks-handlers/lib-host.sh   's = s.replace("msys*|cygwin*|win32*) return 0 ;;", "msys*|cygwin*|win32*) return 1 ;;", 1)'   unit/lib-host.bats "LOWERCASE Windows spelling"
 
 # The remedy that contradicted itself.
-mutate "the setup hint goes back to a hardcoded home [R4]" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "bash %s/mmry/setup/mmry-setup.sh" + chr(39) + ", " + chr(34) + "$shown" + chr(34), "printf " + chr(39) + "bash ~/.codex/mmry/setup/mmry-setup.sh" + chr(39), 1)'   unit/lib-host.bats "two lines of the refusal message agree"
+# Aimed at the RELOCATED branch only, so the Claude literal is untouched and the experiment
+# isolates the defect it is about rather than breaking everything at once.
+mutate "the setup hint goes back to a hardcoded home [R4]" hooks-handlers/lib-host.sh   's = s.replace("        shown=" + chr(34) + "$dir" + chr(34), "        shown=" + chr(34) + "~/.codex" + chr(34), 1)'   unit/lib-host.bats "two lines of the refusal message agree"
 
 # A trailing separator on CODEX_HOME.
 mutate "a trailing separator is left on the resolved config dir [R4]" hooks-handlers/lib-host.sh   's = s.replace("while [[ " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " == */ || " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " == *" + chr(92) + chr(92) + " ]]; do", "while false; do", 1)'   unit/lib-host.bats "trailing separator on CODEX_HOME"
