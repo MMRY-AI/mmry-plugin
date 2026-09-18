@@ -429,3 +429,122 @@ SHIMEOF
 ' "$body" | sed -n "${off_line}p" | grep -q 'if _mmry_reinject_is_off_here'
     (( off_line < worker_line ))
 }
+
+# =============================================================================================
+# THE SECOND HOST'S REGISTRATION, WHICH DRIFTED FROM THE FIRST (#31245 QA round 4).
+#
+# codex-hooks.json registered the Foundation hook at timeout 5 - the exact number #31434 raised
+# to 20 on hooks.json, and for the exact reason it was raised: the handler now enforces its own
+# 10 s deadline and was measured at 5.0 to 9.5 s, mean 6.45 over five runs. At 5 s Codex kills
+# it and DISCARDS its output on most turns, so the new platform would have shipped carrying the
+# defect Claude Code had just finished fixing.
+#
+# Nothing could have caught that, because every assertion in this file above reads $HOOKS_FILE
+# and there was no second file under test. These close that: the Codex registration is held to
+# the same floor, and the two Foundation budgets are asserted EQUAL so they cannot drift apart
+# again without a test going red.
+
+CODEX_HOOKS_FILE=""
+
+_codex_setup() {
+    CODEX_HOOKS_FILE="$PLUGIN_ROOT/hooks/codex-hooks.json"
+}
+
+_codex_foundation_timeout() {
+    jq -r '.hooks.UserPromptSubmit[].hooks[]
+           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
+        "$CODEX_HOOKS_FILE" | tr -d '\r'
+}
+
+_claude_foundation_timeout() {
+    jq -r '.hooks.UserPromptSubmit[].hooks[]
+           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
+        "$HOOKS_FILE" | tr -d '\r'
+}
+
+@test "hook-budgets codex: the file under test is the repo's shipped codex-hooks.json" {
+    _codex_setup
+    [[ -f "$CODEX_HOOKS_FILE" ]]
+    [[ "$CODEX_HOOKS_FILE" != */plugins/cache/* ]]
+    [[ "$CODEX_HOOKS_FILE" != */plugins/marketplaces/* ]]
+    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]]
+    [[ -d "$PLUGIN_ROOT/tests" ]]
+}
+
+@test "hook-budgets codex: every registered Codex hook declares a positive integer timeout" {
+    _codex_setup
+    local timeouts count t
+    timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$CODEX_HOOKS_FILE" | tr -d '\r')"
+    count="$(printf '%s\n' "$timeouts" | grep -c '[0-9]')"
+    # SAMPLE SIZE. The Codex manifest registers six hooks today; if a refactor drops them all,
+    # every assertion below would pass vacuously.
+    echo "codex hooks found: ${count}" >&3
+    (( count >= 6 ))
+    for t in $timeouts; do
+        [[ "$t" =~ ^[0-9]+$ ]]
+        (( t > 0 ))
+    done
+}
+
+@test "hook-budgets codex: the two hosts register the SAME Foundation budget (#31245 QA round 4)" {
+    # THE ANTI-DRIFT ASSERTION, and the reason this block exists. One handler, one enforced
+    # deadline, therefore one budget. If a future change raises hooks.json and forgets
+    # codex-hooks.json - which is precisely what happened - this goes red naming both numbers.
+    _codex_setup
+    local codex claude
+    codex="$(_codex_foundation_timeout)"
+    claude="$(_claude_foundation_timeout)"
+
+    echo "Foundation budget - claude: ${claude}s, codex: ${codex}s" >&3
+
+    # SAMPLE SIZE: an extraction that found nothing must fail, not compare two empty strings.
+    [[ "$codex" =~ ^[0-9]+$ ]]
+    [[ "$claude" =~ ^[0-9]+$ ]]
+    [[ "$codex" == "$claude" ]]
+}
+
+@test "hook-budgets codex: the SHIPPED deadline sits below the Codex budget too (#31245 QA round 4)" {
+    # The same invariant the Claude registration is held to. Read from the SHIPPED handler,
+    # because a value a test supplies proves nothing about what customers run.
+    _codex_setup
+    local handler default budget
+    handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [[ -f "$handler" ]]
+    default="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*' "$handler" | head -1 | sed 's/.*:-//')"
+    budget="$(_codex_foundation_timeout)"
+
+    echo "shipped deadline ${default}s against codex budget ${budget}s" >&3
+
+    [[ "$default" =~ ^[0-9]+$ ]]
+    [[ "$budget" =~ ^[0-9]+$ ]]
+    (( default > 0 ))
+    # The plugin must stop ITSELF before Codex stops it, with room to write the JSON that tells
+    # the customer what happened. Without that margin the supervisor is decoration.
+    (( default < budget ))
+    (( default + 3 <= budget ))
+}
+
+@test "hook-budgets codex: no Codex hook is budgeted below the startup cost every handler pays" {
+    _codex_setup
+    _write_config
+
+    local floor t timeouts count sourced
+    floor="$(_avg_ms 5 bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'")"
+    echo "shared startup floor: ${floor} ms over 5 runs" >&3
+
+    # THE PREMISE, by observation rather than by the clock - _avg_ms rounds up by a whole
+    # second, so a floor above zero proves nothing on its own.
+    sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh' \
+        && declare -F mmry_load_config >/dev/null \
+        && printf SOURCED" 2>/dev/null)"
+    [[ "$sourced" == "SOURCED" ]]
+
+    timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$CODEX_HOOKS_FILE" | tr -d '\r')"
+    count=0
+    for t in $timeouts; do
+        (( t * 1000 >= floor * 5 ))
+        count=$(( count + 1 ))
+    done
+    echo "codex hooks checked against the floor: ${count}" >&3
+    (( count >= 6 ))
+}
