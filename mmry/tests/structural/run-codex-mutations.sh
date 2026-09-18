@@ -195,6 +195,23 @@ PY
         return
     fi
 
+    # DRY RUN: prove the PATTERN still applies, without paying for the test run.
+    #
+    # A full run is over two hours, and round 3 lost most of a cycle to experiments whose
+    # patterns had gone stale against an edited file - each of which reports NOT APPLIED only
+    # after the harness has already spent minutes reaching it. MMRY_MUTATION_DRYRUN answers the
+    # only question that goes stale, in seconds, for every experiment at once.
+    #
+    # IT IS NOT A RESULT ABOUT THE TESTS and says so in the summary: applying cleanly proves the
+    # experiment can still be performed, not that any assertion refuses.
+    if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then
+        printf '[%2d/%2d] APPLIES      %s
+' "$RUN" "$TOTAL" "$label"
+        DRYRUN_OK=$((DRYRUN_OK + 1))
+        _restore
+        return
+    fi
+
     local out
     out="$("$BATS" "$TESTS/$testfile" 2>&1)"
     _restore
@@ -218,7 +235,12 @@ PY
     fi
 }
 
+DRYRUN_OK=0
 echo "=== #31245 mutation run: $TOTAL experiments ==="
+if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then
+    echo "DRY RUN: patterns are applied and restored, no tests are run. This checks that the"
+    echo "experiments can still be PERFORMED; it says nothing about whether assertions refuse."
+fi
 
 # ---- lib-host.sh: the requirement-4 literals -------------------------------------------------
 mutate "claude config dir drifts" hooks-handlers/lib-host.sh \
@@ -452,7 +474,11 @@ mutate "the customer page goes back to promising the whole feature set [R4]" ../
 mutate "the Codex skill stops explaining how to uninstall [R4]" skills-codex/memory-system/SKILL.md   's = s.replace("## Removing MMRY from Codex", "## Removing MMRY from somewhere else", 1)'   structural/codex-docs-and-eol.bats "uninstall is documented on the Codex surfaces"
 
 echo
+if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then
+    echo "=== DRY RUN: patterns that still apply: $DRYRUN_OK   stale or broken: $ERRORS   (checked $RUN of $TOTAL) ==="
+else
 echo "=== refused: $REFUSED   survived: $SURVIVED   experiments not performed: $ERRORS   (ran $RUN of $TOTAL) ==="
+fi
 if [[ -n "${MMRY_MUTATION_FILTER:-}" ]]; then
     echo "FILTERED RUN: only labels containing '${MMRY_MUTATION_FILTER}' were run; $SKIPPED were" >&2
     echo "skipped. This is not a result about the suite, only about the experiments named." >&2
