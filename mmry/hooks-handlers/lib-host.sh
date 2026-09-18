@@ -373,6 +373,53 @@ mmry_host_script_ref() {
     fi
 }
 
+# THE COORDINATION-GROUP INSTRUCTION A CUSTOMER CAN ACTUALLY FOLLOW (#31245 QA round 5).
+#
+# WHY THIS EXISTS. Four handlers that are ALREADY on the Codex surface - say, roster, start and
+# join - print remedies naming "/mmry:formation ...". Codex gives plugins no typed slash commands
+# at all (see commands-codex/README.md: the manifest names an empty commands directory on purpose,
+# and Codex customers reach this feature through skills instead). So twenty of those strings named
+# a command the reader cannot type, and every one of them is printed at the exact moment the
+# customer is already stuck - a bad recipient id, a session not in a formation, an objective left
+# off. An instruction that cannot be followed is worse there than no instruction, because it sends
+# the reader to look for a command that does not exist rather than at the thing that is wrong.
+#
+# This is the same defect that failed #31434: a customer-facing string naming a command that does
+# not exist for them, discovered at the moment they are confused.
+#
+# IT IS DERIVED, NOT SPELLED OUT. The twenty strings could each have been rewritten with a
+# host test beside them, and that is exactly how they would drift: the fifth handler to join the
+# Codex surface would be written by copying a neighbour, and whichever branch its author forgot is
+# the one nobody reads until a customer is stuck. One function means a handler cannot half-do it.
+# Same reason, and the same shape, as mmry_host_setup_hint deriving its path from the resolved
+# config directory rather than restating it.
+#
+# THE CODEX FORM IS TRUE FOR EVERY SUBCOMMAND, INCLUDING THE UNDOCUMENTED ONES. session-init.sh
+# copies hooks-handlers/*.sh wholesale (line 108), so formation-progress.sh and formation-report.sh
+# - named by the roster footer, and not advertised in skills-codex - are on disk at this path on a
+# Codex install and do run. The footer therefore stays honest rather than having to be cut.
+#
+# THE CLAUDE STRING IS UNCHANGED, BYTE FOR BYTE. "/mmry:formation say" is what every one of these
+# messages carried before, which is requirement 4, and the handler tests assert the Claude output
+# alongside the Codex output so that a handler which "fixes" this by naming no command at all
+# fails rather than passes.
+#
+# Usage: mmry_host_formation_ref <subcommand> [argument ...]
+#   mmry_host_formation_ref join 12     -> claude: /mmry:formation join 12
+#                                       -> codex:  bash <dir>/mmry/hooks-handlers/formation-join.sh 12
+mmry_host_formation_ref() {
+    local sub="$1"
+    shift
+    _mmry_host_resolve
+    local rest=""
+    (( $# > 0 )) && rest=" $*"
+    if [[ "$_MMRY_HOST_V" == "codex" ]]; then
+        printf 'bash %s/mmry/hooks-handlers/formation-%s.sh%s' "$_MMRY_HOST_DIR_V" "$sub" "$rest"
+    else
+        printf '/mmry:formation %s%s' "$sub" "$rest"
+    fi
+}
+
 # ---------------------------------------------------------------------------------------------
 # POINT THE CLIENT AT THE RIGHT CREDENTIAL, ONCE, AT SOURCE TIME.
 #

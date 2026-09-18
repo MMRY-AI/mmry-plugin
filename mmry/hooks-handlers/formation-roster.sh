@@ -36,14 +36,14 @@ if [[ -z "$formation_id" ]]; then
     fi
     state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
     if [[ -z "$state" ]]; then
-        echo "This session is not in a formation. Run /mmry:formation list to see what is active, then /mmry:formation join <id>."
+        echo "This session is not in a formation. Run $(mmry_host_formation_ref list) to see what is active, then $(mmry_host_formation_ref join "<id>")."
         exit 1
     fi
     formation_id="${state%% *}"
 fi
 
 if ! [[ "$formation_id" =~ ^[1-9][0-9]*$ ]]; then
-    echo "A formation id is a positive whole number. Run /mmry:formation list to see what is active."
+    echo "A formation id is a positive whole number. Run $(mmry_host_formation_ref list) to see what is active."
     exit 1
 fi
 
@@ -91,12 +91,12 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
       + (if .leftDate != null then "   (has left; cannot be addressed)" else "" end)
 ' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
 
-printf '\nDirect a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off\n'
+printf '\nDirect a message at one of them with %s. Leave the id off\n' "$(mmry_host_formation_ref say '"..." --to <id>')"
 printf 'and the message goes to the whole formation.\n'
 # #31046. The state in brackets is the last thing that member reported, and "not started" means
 # nothing has been reported against work that WAS handed out, which is the thing worth noticing on
-# this list. The full account, one section per member, is /mmry:formation report.
+# this list. The full account, one section per member, is the formation report operation.
 printf 'The state in brackets is the last thing that member reported. Report your own with\n'
-printf '/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account\n'
-printf 'with /mmry:formation report.\n'
+printf '%s,' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
+printf '\nand read the whole account with %s.\n' "$(mmry_host_formation_ref report)"
 exit 0

@@ -31,7 +31,7 @@
 # any of them might act on it; with five members, four of them evaluate every instruction that does
 # not concern them.
 #
-# The address is the ROSTER ENTRY id from /mmry:formation roster, never a session string. A sender
+# The address is the ROSTER ENTRY id from the formation roster listing, never a session string. A sender
 # has no legitimate way to learn another session's id, and it is not the kind of thing that should
 # travel through a command line.
 #
@@ -45,7 +45,7 @@ source "${HANDLER_DIR}/mmry-client.sh"
 
 message="${1:-}"
 if [[ -z "$message" ]]; then
-    echo "Say what? Usage: /mmry:formation say \"what you want the others to know\" [recipientMemberId]"
+    echo "Say what? Usage: $(mmry_host_formation_ref say '"what you want the others to know" [recipientMemberId]')"
     exit 1
 fi
 
@@ -56,7 +56,7 @@ fi
 # an unaddressed instruction is not a smaller version of an addressed one, it is a broadcast.
 recipient_member_id="${2:-}"
 if [[ -n "$recipient_member_id" ]] && ! [[ "$recipient_member_id" =~ ^[1-9][0-9]*$ ]]; then
-    echo "A recipient is a roster entry id, a positive whole number from /mmry:formation roster. Nothing was sent, because sending this without the recipient would have told the whole formation."
+    echo "A recipient is a roster entry id, a positive whole number from $(mmry_host_formation_ref roster). Nothing was sent, because sending this without the recipient would have told the whole formation."
     exit 1
 fi
 
@@ -74,13 +74,13 @@ fi
 
 state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -z "$state" ]]; then
-    echo "This session is not in a formation, so there is nobody to tell. Run /mmry:formation list to see what is active, then /mmry:formation join <id>."
+    echo "This session is not in a formation, so there is nobody to tell. Run $(mmry_host_formation_ref list) to see what is active, then $(mmry_host_formation_ref join "<id>")."
     exit 1
 fi
 
 formation_id="${state%% *}"
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The local formation state is not a number, so it cannot be trusted. Run /mmry:formation leave and join again."
+    echo "The local formation state is not a number, so it cannot be trusted. Run $(mmry_host_formation_ref leave) and join again."
     exit 1
 fi
 
@@ -106,8 +106,8 @@ if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "
         # not-a-member, closed-out and another account's formation, because the server deliberately
         # does not distinguish them: telling them apart would disclose whether somebody else's
         # formation exists.
-        403) echo "Refused, and nothing was sent. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run /mmry:formation join ${formation_id} from this window, or /mmry:formation list to see what is active." ;;
-        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        403) echo "Refused, and nothing was sent. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run $(mmry_host_formation_ref join "${formation_id}") from this window, or $(mmry_host_formation_ref list) to see what is active." ;;
+        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run $(mmry_host_formation_ref leave)." ;;
         # Two things land on 400 and both need the SERVER's own words rather than a summary. An
         # out-of-date plugin still posting to the old memory-processing path gets a body naming the
         # endpoint to use. A directed message naming a recipient who is not in this formation, is on

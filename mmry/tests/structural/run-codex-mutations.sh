@@ -107,7 +107,7 @@ SURVIVED=0
 ERRORS=0
 RUN=0
 SKIPPED=0
-TOTAL=82
+TOTAL=85
 SURVIVOR_LIST=""
 ERROR_LIST=""
 CURRENT_FILE=""
@@ -476,6 +476,29 @@ mutate "the customer page goes back to promising the whole feature set [R4]" ../
 
 # Reachability: uninstall disappearing from the Codex surfaces again.
 mutate "the Codex skill stops explaining how to uninstall [R4]" skills-codex/memory-system/SKILL.md   's = s.replace("## Removing MMRY from Codex", "## Removing MMRY from somewhere else", 1)'   structural/codex-docs-and-eol.bats "uninstall is documented on the Codex surfaces"
+
+# ---- the formation remedy a Codex customer is handed (#31245 QA round 5) ---------------------
+#
+# Three experiments, because there are three distinct ways this fix can be undone and only the
+# first is the obvious one.
+
+# 1. THE DERIVATION IS REVERTED. The helper stops answering differently for Codex, so every
+#    remedy goes back to naming a slash command the Codex customer cannot type. The Codex
+#    assertions must go red; the Claude controls must stay green, since the Claude string is
+#    exactly what this mutation restores everywhere.
+mutate "the formation remedy stops being derived per host" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "bash %s/mmry/hooks-handlers/formation-%s.sh%s" + chr(39) + " " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), "printf " + chr(39) + "/mmry:formation %s%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), 1)'   structural/codex-formation-instructions.bats "a command that exists on their machine"
+
+# 2. THE REMEDY STOPS NAMING ANY COMMAND AT ALL. This is the mutation the Claude-side controls
+#    exist for. "No slash command appears on Codex" is trivially satisfied by a handler that
+#    names nothing, leaving the customer with a complaint and no way forward - and without a
+#    control that is indistinguishable from a fix. The Claude assertions must go red here.
+mutate "the formation remedy names no command on either host" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "/mmry:formation %s%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), "printf " + chr(39) + "the formation %s operation%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), 1)'   structural/codex-formation-instructions.bats "still names the slash command, unchanged"
+
+# 3. A HANDLER STOPS ASKING. The helper is left correct and one handler goes back to a hardcoded
+#    literal. This is the experiment that proves the assertions read the HANDLER'S OUTPUT rather
+#    than the helper: a test written against mmry_host_formation_ref directly would survive this,
+#    and surviving it is precisely how twenty such strings shipped in the first place.
+mutate "a handler hardcodes the slash command again instead of deriving it" hooks-handlers/formation-join.sh   's = s.replace("echo " + chr(34) + "Which formation? Usage: $(mmry_host_formation_ref join " + chr(34) + "<formationId>" + chr(34) + ")" + chr(34), "echo " + chr(34) + "Which formation? Usage: /mmry:formation join <formationId>" + chr(34), 1)'   structural/codex-formation-instructions.bats "a command that exists on their machine"
 
 echo
 if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then

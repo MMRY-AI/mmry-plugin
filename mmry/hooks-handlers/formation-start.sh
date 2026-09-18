@@ -22,7 +22,7 @@ objective="${1:-}"
 task_id="${2:-}"
 
 if [[ -z "$objective" ]]; then
-    echo "What is the job? Usage: /mmry:formation start \"what the formation is for\""
+    echo "What is the job? Usage: $(mmry_host_formation_ref start '"what the formation is for"')"
     exit 1
 fi
 if [[ "${#objective}" -lt 10 ]]; then
@@ -38,7 +38,7 @@ fi
 
 existing="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -n "$existing" ]]; then
-    echo "This session is already in formation ${existing%% *}. Run /mmry:formation leave first, or use that one."
+    echo "This session is already in formation ${existing%% *}. Run $(mmry_host_formation_ref leave) first, or use that one."
     exit 1
 fi
 
@@ -66,7 +66,7 @@ if ! mmry_create_formation "$objective" "$session_id" "$task_id"; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
         400) echo "The server refused the objective. ${MMRY_RESPONSE:-}" ;;
-        409) echo "This session already belongs to an active formation. Run /mmry:formation leave first." ;;
+        409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
         *)   echo "Could not start a formation (HTTP ${code}). Nothing has been changed locally." ;;
     esac
     exit 1
@@ -80,12 +80,12 @@ fi
 # Without an id there is nothing to record, and a formation the session cannot address is worse than
 # a clean failure: the hook would never poll it and the lead would believe they were coordinating.
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The formation was created but the server did not return an id this client could read, so this session has not been put in it. Run /mmry:formation list and join it by id."
+    echo "The formation was created but the server did not return an id this client could read, so this session has not been put in it. Run $(mmry_host_formation_ref list) and join it by id."
     exit 1
 fi
 
 bash "${HANDLER_DIR}/formation-state.sh" set "$formation_id" "$session_id"
 
 echo "Started formation ${formation_id}: ${objective}"
-echo "You are the lead. Tell the others to run /mmry:formation join ${formation_id}, then use /mmry:formation say to keep them posted."
+echo "You are the lead. Tell the others to run $(mmry_host_formation_ref join "${formation_id}"), then use $(mmry_host_formation_ref say) to keep them posted."
 exit 0

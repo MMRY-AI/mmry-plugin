@@ -18,7 +18,7 @@ source "${HANDLER_DIR}/mmry-client.sh"
 
 formation_id="${1:-}"
 if [[ -z "$formation_id" ]]; then
-    echo "Which formation? Usage: /mmry:formation join <formationId>"
+    echo "Which formation? Usage: $(mmry_host_formation_ref join "<formationId>")"
     exit 1
 fi
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
@@ -52,7 +52,7 @@ if ! mmry_join_formation "$formation_id" "$session_id"; then
     case "$code" in
         403) echo "Refused. Either you share no access group with whoever created formation ${formation_id}, or your account is not active. An administrator can add you to the group." ;;
         404) echo "Formation ${formation_id} does not exist, or it belongs to another account." ;;
-        409) echo "This session already belongs to an active formation. Run /mmry:formation leave first." ;;
+        409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
         *)   echo "Could not join formation ${formation_id} (HTTP ${code}). Nothing has been changed locally." ;;
     esac
     exit 1
