@@ -227,6 +227,55 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         exit 0
     fi
 
+    # A HOST WITH NO CREDENTIAL OF ITS OWN IS SILENT, NOT ALARMING (#31245 QA round 4).
+    #
+    # THE DEFECT. On an unconfigured Codex install this handler fired on every prompt and exited
+    # 1 with zero bytes. The chain: the worker sources mmry-client.sh, which sources lib-jq.sh,
+    # which asks lib-host.sh whether this host has its own credential; on Codex with none, that
+    # refuses with `exit 1` rather than returning non-zero, so the worker's own
+    # `|| exit 0` never sees it and the worker dies with rc=1.
+    #
+    # AND AFTER #31434 IT GOT WORSE, NOT BETTER. The new supervisor cannot tell that apart from a
+    # broken install, so rc=1 took the crash branch and printed, on EVERY prompt: "the loader
+    # exited with code 1 ... the usual cause is an incomplete plugin install. Run
+    # /mmry:load-memories ... or set foundationReinject to false in ~/.claude/mmry-config.json."
+    # A slash command Codex customers cannot type, the OTHER product's config file, and a cause
+    # that is not true. A silent exit became a wrong, alarming, every-prompt message. Reproduced
+    # on this branch after the merge, 838 bytes of it.
+    #
+    # THE FIX IS THE ONE formation-check.sh ALREADY MAKES, at its line 111, for the same reason
+    # and in the same words: the refusal is correct for a handler the MODEL runs, where a human
+    # reads the message and acts on it, and wrong for a hook that fires unattended on every
+    # prompt, whose governing rule is to fail open and silent. So the question is asked HERE,
+    # before anything can answer it wrongly, and answered with exit 0.
+    #
+    # ON CLAUDE CODE THIS IS A NO-OP by construction: mmry_host_assert_own_credential returns 0
+    # immediately unless the host is codex, so no existing install changes behaviour.
+    #
+    # ONLY AN EXPLICIT REFUSAL STOPS US. A MISSING lib-host.sh MUST NOT. hook-guard.sh documents
+    # why: this script runs from a directory somebody else assembled, and a curated copy without
+    # the resolver exists in the test suite today. Treating "could not ask" as "refuse" would
+    # silently switch Foundation re-injection off for anyone with such a copy - trading a Codex
+    # bug for a Claude one. The two outcomes are therefore kept distinct rather than collapsed
+    # into one exit status.
+    #
+    # SOURCED IN THIS SHELL, NOT A SUBSHELL, because `$(...)` is a fork and this runs on every
+    # prompt - #31434 spent real effort getting forks off this path and this must not put one
+    # back. The only thing that has to be undone afterwards is lib-host.sh's `set -e`: this
+    # handler deliberately runs without it, because a failure here must never fail the
+    # customer's prompt. -u and pipefail are already on from line 46, so `set +e` restores
+    # exactly the options this file chose.
+    if [[ -f "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" >/dev/null 2>&1
+        set +e
+        if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
+            if ! mmry_host_assert_own_credential >/dev/null 2>&1; then
+                exit 0
+            fi
+        fi
+    fi
+
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
     # story: the supervisor still has to start, reap the worker, decide WHY it failed and
     # write the JSON afterwards, and on Windows Git Bash every one of those steps is a

@@ -556,3 +556,100 @@ EOF
     [ -z "$output" ]
     (( elapsed < 3 ))
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE UNCONFIGURED CODEX INSTALL (#31245 QA round 4).
+#
+# On a Codex install with no credential of its own, this handler fired on every prompt and exited
+# 1 with zero bytes. The chain: the worker sources mmry-client.sh -> lib-jq.sh -> lib-host.sh,
+# which refuses with `exit 1` rather than a return code, so the worker's own `|| exit 0` never
+# saw it and the worker died with rc=1.
+#
+# After #31434 that stopped being silent and started being WRONG. The supervisor cannot tell a
+# refusal from a broken install, so rc=1 took the crash branch and printed, on every prompt, a
+# banner naming /mmry:load-memories - a slash command Codex customers cannot type - and
+# ~/.claude/mmry-config.json, the OTHER product's config file, with "the usual cause is an
+# incomplete plugin install", which is not the cause.
+#
+# These stage a real Codex install the way session-init.sh does, rather than asserting against a
+# replica of it.
+
+_stage_codex_install() {
+    local root="$1"
+    mkdir -p "$root/mmry/hooks-handlers" "$root/fakehome"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$root/mmry/hooks-handlers/"
+    printf 'codex\n' > "$root/mmry/.mmry-host"
+    printf '%s/mmry/hooks-handlers/userpromptsubmit-foundation.sh' "$root"
+}
+
+@test "codex: an unconfigured Codex install emits NOTHING on a prompt, rather than a banner" {
+    local root="$TEST_TMPDIR/codex-unconfigured" handler
+    handler="$(_stage_codex_install "$root")"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST HOME="$root/fakehome" CODEX_HOME="$root" \
+        bash "$handler"
+
+    [ "$status" -eq 0 ]
+    # ZERO BYTES. Not "no crash banner" - nothing at all, which is what every other
+    # nothing-to-say path in this handler does.
+    [ -z "$output" ]
+}
+
+@test "codex: and it does not name a slash command Codex cannot type, or the other product's config" {
+    local root="$TEST_TMPDIR/codex-unconfigured-msg" handler
+    handler="$(_stage_codex_install "$root")"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST HOME="$root/fakehome" CODEX_HOME="$root" \
+        bash "$handler"
+
+    # These three are the literal contents of the banner the merge produced. Asserted
+    # separately from the emptiness check above so that a future change which emits SOMETHING
+    # here still cannot emit THIS.
+    [[ "$output" != *"/mmry:load-memories"* ]]
+    [[ "$output" != *".claude/mmry-config.json"* ]]
+    [[ "$output" != *"incomplete plugin install"* ]]
+}
+
+@test "codex: a CONFIGURED Codex install still re-injects - the guard is not a blanket off switch" {
+    local root="$TEST_TMPDIR/codex-configured" handler
+    handler="$(_stage_codex_install "$root")"
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"k","foundationReinject":"true"}' \
+        > "$root/mmry-config.json"
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST HOME="$root/fakehome" CODEX_HOME="$root" \
+        bash "$handler"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'FOUNDATION'* ]]
+    [[ "$output" == *'never overstate evidence'* ]]
+}
+
+@test "req4 control: a Claude install with NO credential is unaffected by the Codex guard" {
+    # The guard must key on the HOST, not on whether a credential happens to exist. A Claude
+    # install has always re-injected from cache regardless, and still must.
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    local fakehome="$TEST_TMPDIR/claude-nocred"
+    mkdir -p "$fakehome/.claude"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CODEX_HOME HOME="$fakehome" bash "$HANDLER"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Eric builds MMRY'* ]]
+}
+
+@test "req4 control: a curated copy with NO lib-host.sh still re-injects, rather than going silent" {
+    # "Could not ask the question" must not be treated as "the answer was refuse". hook-guard.sh
+    # documents why such copies exist; collapsing the two would trade a Codex bug for a Claude one.
+    local root="$TEST_TMPDIR/claude-curated"
+    mkdir -p "$root/mmry/hooks-handlers" "$root/fakehome/.claude"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$root/mmry/hooks-handlers/"
+    rm -f "$root/mmry/hooks-handlers/lib-host.sh"
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CODEX_HOME HOME="$root/fakehome" \
+        bash "$root/mmry/hooks-handlers/userpromptsubmit-foundation.sh"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Eric builds MMRY'* ]]
+}
