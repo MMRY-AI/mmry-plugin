@@ -462,6 +462,171 @@ _claude_foundation_timeout() {
         "$HOOKS_FILE" | tr -d '\r'
 }
 
+# ---------------------------------------------------------------------------------------------
+# THE PER-TOOL-CALL PATH, AND WHY IT NEEDS ITS OWN GUARD (#31245 QA round 6).
+#
+# userpromptsubmit-foundation.sh has the two tests above because it runs on every prompt. The
+# LIBRARIES have had nothing, and #31245 put a new one - lib-host.sh - underneath every handler in
+# the plugin by way of lib-jq.sh, which mmry-client.sh sources as its first executable line.
+#
+# That produced two latency regressions on the Claude Code path in two consecutive rounds:
+#
+#   round 4  hook-guard.sh resolved its own directory with `$(cd "$(dirname ...)" && pwd)`.
+#            Fixed in 7ae2464.
+#   round 5  lib-jq.sh reintroduced the identical idiom, IN THE SAME COMMIT THAT REMOVED IT
+#            from hook-guard.sh, and lib-host.sh's host detection called cygpath - a fork - for
+#            any path with a backslash or a drive letter, which on Windows is every path a hook
+#            is invoked with. Measured: 0.65 ms per source on develop against 141.72 ms.
+#
+# Two rounds, same shape, found both times by a reviewer with a stopwatch. The two tests below are
+# what makes a third one fail here instead.
+#
+# ONE IS STRUCTURAL AND ONE IS MEASURED, deliberately, for the reason the per-prompt pair above
+# gives: a wall-clock bar only bites on a slow machine, and a pattern check only catches the
+# idioms somebody thought of. The measured one is written as a RATIO against a control rather than
+# an absolute, so it means the same thing on a fast box and a loaded one.
+
+@test "hook-budgets: no library on the per-tool-call path resolves its own directory with a fork" {
+    # The libraries every handler pulls in, and hook-guard.sh, which is registered on three events
+    # including PostToolUse. formation-check.sh is on PostToolUse WITH NO MATCHER - after every
+    # single tool call - and reaches all four of these.
+    # THE ONE OCCURRENCE THAT IS ALLOWED, AND WHY. _mmry_jq_vendor_dir's third fallback builds a
+    # path to the BUNDLED jq. It is on develop unchanged, it is inside a function rather than at
+    # module level so it costs nothing at source time, and it is reached only when neither
+    # MMRY_JQ_VENDOR_DIR nor CLAUDE_PLUGIN_ROOT/vendor/jq is available - i.e. when a bundled
+    # binary has to be located, not on every source. Matched by its whole text, so a NEW fork on
+    # the same line number or in the same function does not inherit the exception.
+    local allowed='printf '"'"'%s'"'"' "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vendor/jq"'
+
+    local f body offenders="" hits line trimmed
+    for f in lib-host.sh lib-jq.sh hook-guard.sh lib-hookread.sh; do
+        local path="$PLUGIN_ROOT/hooks-handlers/$f"
+        [[ -f "$path" ]] || { offenders="${offenders} ${f}(missing)"; continue; }
+        # Comments in these files discuss the idiom by name - one of them at length - so strip
+        # them before matching, or the test fails on its own explanation.
+        body="$(grep -v '^[[:space:]]*#' "$path")"
+        # SAMPLE SIZE: the strip must leave a file behind, not an empty string. Without this a
+        # mangled path reads as a clean bill of health. hook-guard.sh is the shortest of the four
+        # at 17 non-comment lines, so the floor is set below that rather than above it.
+        (( $(printf '%s\n' "$body" | grep -c .) >= 10 )) || { offenders="${offenders} ${f}(empty-after-strip)"; continue; }
+        # Counted rather than `! grep -q`: a `!`-negated command cannot fail a bats test, which
+        # is the note the per-prompt test above carries for the same reason.
+        hits="$(printf '%s\n' "$body" | grep 'cd "\$(dirname' || true)"
+        [[ -n "$hits" ]] || continue
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            trimmed="${line#"${line%%[![:space:]]*}"}"
+            [[ "$trimmed" == "$allowed" ]] || offenders="${offenders} ${f}:[${trimmed}]"
+        done <<< "$hits"
+    done
+    [ -z "$offenders" ] || {
+        echo "these lines on the per-tool-call path fork to resolve a directory:${offenders}" >&2
+        echo "Use \${BASH_SOURCE[0]%/*}; see the block in hook-guard.sh for why." >&2
+        return 1
+    }
+}
+
+@test "hook-budgets: and that exception is still a real line, not a permission granted to nothing" {
+    # An exception whose line no longer exists waves through the next occurrence of the same text.
+    # Same failure as a stale mutation pattern, and this round had five of those.
+    grep -Fq 'printf '"'"'%s'"'"' "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vendor/jq"' \
+        "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh"
+}
+
+@test "hook-budgets: sourcing lib-host.sh costs about what sourcing an empty file costs" {
+    # THE MEASURED HALF. The structural test above only catches idioms somebody listed; the
+    # regression that actually shipped was a cygpath call, which is not one of them. This asks the
+    # only question that matters - what does it COST.
+    #
+    # IT MEASURES THE WINDOWS SPELLING, WHICH IS THE WHOLE POINT. The first cut of this test
+    # sourced lib-host.sh by its POSIX path and passed with the regression restored underneath it,
+    # because the cygpath branch is reached only for a path carrying a backslash or a drive
+    # letter - and a POSIX path has neither. That is exactly the shape of defect this round is
+    # about: a check that looks right, runs, and cannot fail. Production uses the Windows
+    # spelling: hooks.json invokes handlers as %CLAUDE_PLUGIN_ROOT%\hooks-handlers\..., so
+    # ${BASH_SOURCE[0]} arrives with backslashes and a drive letter, and the fork is paid.
+    #
+    # METHOD. Process-spawn timing cannot resolve this: `bash -c true` on the development box has
+    # a 74 ms floor and a mean past 300 ms under load. So the file is sourced N times inside ONE
+    # shell, with the double-source guard and the resolve cache cleared between iterations so the
+    # detection block really does run again, and compared against an empty file sourced the same
+    # number of times in the same shell.
+    command -v cygpath >/dev/null 2>&1 || \
+        skip "not a Windows shell: the drive-letter path this guards against cannot arise here"
+
+    local lib winlib
+    lib="$PLUGIN_ROOT/hooks-handlers/lib-host.sh"
+    [[ -f "$lib" ]]
+    winlib="$(cygpath -w "$lib")"
+    # The spelling really is the Windows one, or this measures the same thing the POSIX path did.
+    [[ "$winlib" == *'\'* ]]
+    [[ "$winlib" =~ ^[A-Za-z]: ]]
+
+    local empty="$BATS_TEST_TMPDIR/empty-lib.sh"
+    printf '#!/usr/bin/env bash\n' > "$empty"
+
+    # THREE ROUNDS, AND THE MINIMUM OF THEM, for the reason every other timing in this repo takes
+    # a minimum: the box is shared. The figures here come out bimodal - 73 ms or 373 ms for the
+    # same forty sources, alternating - and 300 ms is exactly one process spawn on this machine,
+    # so something outside this code (a scanner, most likely) lands on roughly every other run.
+    # A warm-up did not cure it because it is not a cold cache. The minimum of three rounds is
+    # the round nothing else interfered with, and it is stable at 73-79 ms across many runs.
+    local out
+    out="$(env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE bash -c '
+        N=40
+        best_lib=0; best_empty=0
+        r=0
+        while (( r < 3 )); do
+            t0=$(date +%s%N)
+            i=0; while (( i < N )); do
+                unset _MMRY_LIB_HOST_SOURCED _MMRY_HOST_DIR_FROM_MARKER MMRY_CONFIG_FILE
+                _MMRY_HOST_KEY=$'"'"'\x01unset'"'"'
+                source "'"$winlib"'" >/dev/null 2>&1
+                i=$(( i + 1 ))
+            done
+            t1=$(date +%s%N)
+            i=0; while (( i < N )); do source "'"$empty"'"; i=$(( i + 1 )); done
+            t2=$(date +%s%N)
+            lib=$(( (t1 - t0) / 1000000 ))
+            emp=$(( (t2 - t1) / 1000000 ))
+            if (( best_lib == 0 || lib < best_lib )); then best_lib=$lib; best_empty=$emp; fi
+            r=$(( r + 1 ))
+        done
+        echo "$best_lib $best_empty"
+    ')"
+
+    local lib_ms empty_ms
+    lib_ms="${out%% *}"
+    empty_ms="${out##* }"
+    [[ "$lib_ms" =~ ^[0-9]+$ && "$empty_ms" =~ ^[0-9]+$ ]] || \
+        skip "this shell's date has no nanoseconds, so the cost cannot be measured here"
+
+    # THE BAR IS A RATIO, NOT A MILLISECOND FIGURE. An absolute ceiling was tried first and it
+    # would flap: on a loaded box the fixed library measured 871 ms for 40 sources while the
+    # regression measured 1148, and any threshold between those two is a coin toss. Against the
+    # empty-file control taken in the SAME shell moments later, the same two runs are 2.6x and
+    # 34.8x - and on a quiet box, 2.6x against 210x. The separation is two orders of magnitude
+    # wide, which is what a guard needs to be worth having.
+    #
+    # The control is floored at 20 ms so that a very fast control cannot turn a healthy library
+    # into a large ratio.
+    local floor=20
+    (( empty_ms > floor )) && floor="$empty_ms"
+    local ratio=$(( lib_ms * 10 / floor ))   # tenths, so 26 means 2.6x
+
+    echo "lib-host.sh via its WINDOWS path: ${lib_ms} ms for 40 sources; empty control ${empty_ms} ms; ratio $(( ratio / 10 )).$(( ratio % 10 ))x" >&3
+
+    (( ratio < 80 )) || {
+        echo "sourcing lib-host.sh costs ${lib_ms} ms for 40 sources ($(( lib_ms / 40 )) ms each)," >&2
+        echo "which is $(( ratio / 10 )).$(( ratio % 10 ))x the cost of sourcing an empty file in the same shell." >&2
+        echo "It is on the path of EVERY tool call through lib-jq.sh -> mmry-client.sh ->" >&2
+        echo "formation-check.sh (PostToolUse, no matcher). Something in the host detection" >&2
+        echo "block has started spawning a process on the Windows path spelling; cygpath and" >&2
+        echo "\$(cd ... && pwd) are the two that have done it before." >&2
+        return 1
+    }
+}
+
 @test "hook-budgets codex: the file under test is the repo's shipped codex-hooks.json" {
     _codex_setup
     [[ -f "$CODEX_HOOKS_FILE" ]]

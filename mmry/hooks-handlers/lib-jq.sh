@@ -41,14 +41,29 @@ set -euo pipefail
 # identical idiom removed from hook-guard.sh in commit 7ae2464 of this branch and reintroduced
 # here in the same commit that removed it there. It is not a quiet corner: formation-check.sh
 # sources this file, and formation-check.sh is registered on PostToolUse WITH NO MATCHER, so it
-# runs after EVERY tool call. Measured on Windows Git Bash, 20 runs: 113-151 ms on develop against
-# 250-299 ms with this idiom in place - roughly double, paid by every existing Claude Code
-# customer for a second host they do not have. That is a requirement-4 cost.
+# runs after EVERY tool call.
+#
+# AND IT WAS NOT THE MAIN COST, WHICH IS WORTH WRITING DOWN RATHER THAN QUIETLY FIXING. QA named
+# this line for a regression it had measured, and removing it moved the figure by about 5 ms of a
+# 140 ms problem. Bisecting the rest found the real one a level down, in lib-host.sh's host
+# detection: a cygpath call - a fork - taken for any path carrying a backslash or a drive letter,
+# which on Windows is every path a hook is invoked with. Measured in one shell, 60 sources each,
+# no process-spawn noise:
+#
+#   develop (no lib-host at all)            0.65 ms per source
+#   round 5, both defects present         141.72 ms per source
+#   only the cygpath fork present         149.72 ms per source   <- the whole of it
+#   this branch, both fixed                 2.20 ms per source
+#
+# Both are fixed; see the "NORMALISED WITHOUT A PROCESS HERE" block in lib-host.sh for the other.
+# The lesson kept here is the method rather than the line: a named suspect that accounts for 5 ms
+# of 140 is not the cause, and stopping at it would have shipped the regression with a commit
+# message claiming it was fixed.
 #
 # The path only has to be good enough to source a sibling file. lib-host.sh resolves its OWN
 # absolute location for the host detection it does, so nothing downstream depends on this one
-# being absolute. tests/structural/hook-budgets.bats asserts the idiom is absent from every script
-# on a per-tool-call or per-prompt path, so a third one cannot appear unnoticed.
+# being absolute. tests/structural/hook-budgets.bats asserts both the absent idiom and a ceiling
+# on what sourcing lib-host.sh may cost, so a third one cannot appear unnoticed.
 _mmry_libjq_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_mmry_libjq_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_libjq_dir="."
 if [[ -f "${_mmry_libjq_dir}/lib-host.sh" ]]; then

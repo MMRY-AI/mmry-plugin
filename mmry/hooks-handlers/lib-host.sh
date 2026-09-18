@@ -90,7 +90,25 @@ _mmry_host_tolower() {
 # A TRAILING SEPARATOR IS NOT PART OF THE PATH, IN EITHER SPELLING (#31245 QA round 4).
 # The loop below stripped a trailing "/" but the flip above now feeds it a trailing backslash
 # too, so CODEX_HOME=C:\Users\x\codexhome\ normalises the same as without it.
-_mmry_norm_path_str() {
+# RETURNED THROUGH A GLOBAL, NOT PRINTED (#31245 QA round 6).
+#
+# WHY. This is called during host detection, which runs every time ANY handler sources
+# lib-jq.sh - which is every handler, through mmry-client.sh - including formation-check.sh,
+# registered on PostToolUse with no matcher, i.e. after every tool call. Called as
+# `$(_mmry_norm_path ...)` it was a COMMAND SUBSTITUTION, and a fork on Windows Git Bash is the
+# expensive thing this file already avoids everywhere else. Bisected on 2026-09-18, 40 runs,
+# minimum of each set: sourcing lib-host.sh cost 129 ms, and removing this one command
+# substitution took it to 76 ms - the same as `bash -c true`. The entire regression was here.
+#
+# It is the same technique, for the same reason, as _mmry_host_tolower above, whose own comment
+# says "`$(f)` is a fork and forks are the entire thing being avoided". bash 3.2, which macOS
+# still ships, has no namerefs, so a well-known output variable is the portable way.
+#
+# THE PRINTING FORM IS KEPT as a thin wrapper, because tests/unit/lib-host.bats asserts the
+# string normalisation by reading stdout, and a test that has to be rewritten to accommodate an
+# optimisation is a test that stops being about the behaviour.
+_MMRY_NP=""
+_mmry_norm_path_str_g() {
     local p="${1//\\//}"
     if [[ "$p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
         local _d="${BASH_REMATCH[1]}" _r="${BASH_REMATCH[2]:-/}"
@@ -98,7 +116,12 @@ _mmry_norm_path_str() {
         p="/${_MMRY_LC}${_r}"
     fi
     while [[ "$p" == */ && "$p" != "/" ]]; do p="${p%/}"; done
-    printf '%s' "$p"
+    _MMRY_NP="$p"
+}
+
+_mmry_norm_path_str() {
+    _mmry_norm_path_str_g "$1"
+    printf '%s' "$_MMRY_NP"
 }
 
 # WINDOWS PATHS ARE CASE-INSENSITIVE, AND THE COMPARISON HAS TO BE TOO (#31245 QA round 4).
@@ -130,6 +153,9 @@ _mmry_path_is_within() {
     [[ "$a" == "$b" || "$a" == "${b}"/* ]]
 }
 
+# Answers in _MMRY_NP, for the reason given above. The cygpath call inside it is still a fork,
+# but it is reached ONLY for a path carrying a backslash or a drive letter - which the paths on
+# the hot path (an already-POSIX ${BASH_SOURCE[0]}) never do - rather than on every source.
 _mmry_norm_path() {
     local p="$1"
     # AND WHERE THE MOUNT TABLE MATTERS, ASK THE TOOL THAT HAS IT. Under Git Bash
@@ -139,7 +165,7 @@ _mmry_norm_path() {
     if [[ "$p" == *\\* || "$p" =~ ^[A-Za-z]: ]] && command -v cygpath >/dev/null 2>&1; then
         p="$(cygpath -u "$p" 2>/dev/null || printf '%s' "$p")"
     fi
-    _mmry_norm_path_str "$p"
+    _mmry_norm_path_str_g "$p"
 }
 
 if [[ -z "${MMRY_HOST:-}" ]]; then
@@ -149,8 +175,31 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
     # "${HANDLER_DIR}/lib-host.sh" with HANDLER_DIR already resolved, so the common case needs
     # no process at all. `cd`/`pwd` is kept for the relative and dot-laden spellings, where it
     # is doing real work rather than restating what we were handed.
-    _mmry_self_dir="${BASH_SOURCE[0]%/*}"
-    [[ "$_mmry_self_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_self_dir="."
+    # THE SEPARATOR IS FLIPPED BEFORE THE STRIP, NOT AFTER (#31245 QA round 6).
+    #
+    # THIS WAS A CORRECTNESS BUG, FOUND WHILE MEASURING LATENCY. ${BASH_SOURCE[0]%/*} strips to
+    # the last FORWARD slash. On Windows there often is not one: hooks.json invokes handlers as
+    # %CLAUDE_PLUGIN_ROOT%\hooks-handlers\..., so ${BASH_SOURCE[0]} arrives as
+    # C:\Users\x\.codex\mmry\hooks-handlers\lib-host.sh - all backslashes. The strip then
+    # matched nothing, the guard below read that as "no directory component", and this resolved
+    # to "." - THE CURRENT WORKING DIRECTORY, which has nothing to do with where this file is.
+    #
+    # Reproduced on 2026-09-18 against a staged Codex install with a valid .mmry-host marker
+    # beside it, sourced from a foreign cwd:
+    #
+    #   by its POSIX path:    MMRY_HOST=codex   config_dir=/tmp/cxprobe
+    #   by its WINDOWS path:  MMRY_HOST=unset   config_dir=/c/Users/x/.claude
+    #
+    # That is the whole defect this file exists to prevent - a Codex install reaching for the
+    # other product's credential - occurring on the platform whose invocation spelling causes it.
+    # It also cost a fork every time, because "." then failed the absolute test below and was
+    # sent through `cd`/`pwd`: ~20 ms per source, on the path of every tool call.
+    #
+    # Flipping separators first fixes both. A drive-lettered path with forward slashes satisfies
+    # the absolute test below, so no process is spawned, and the directory is the file's own.
+    _mmry_self_src="${BASH_SOURCE[0]//\\//}"
+    _mmry_self_dir="${_mmry_self_src%/*}"
+    [[ "$_mmry_self_dir" == "$_mmry_self_src" ]] && _mmry_self_dir="."
     # The dot tests match "." and ".." as whole SEGMENTS. They must not match a hidden
     # directory: nearly every path this file sees contains "/.claude" or "/.codex", and a
     # pattern like */.* matches those, which would fork on exactly the paths this is for.
@@ -163,7 +212,37 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
         _mmry_self_dir="$(cd "$_mmry_self_dir" && pwd 2>/dev/null)" || _mmry_self_dir=""
     fi
     if [[ -n "$_mmry_self_dir" ]]; then
-        _mmry_self_dir="$(_mmry_norm_path "$_mmry_self_dir")"
+        # NORMALISED WITHOUT A PROCESS HERE, AND WITH ONE ONLY WHERE ONE IS NEEDED
+        # (#31245 QA round 6).
+        #
+        # WHAT THIS COST. _mmry_norm_path calls cygpath - a FORK - for any path carrying a
+        # backslash or a drive letter. On Windows that is the ordinary case rather than the
+        # exception: hooks.json invokes handlers as %CLAUDE_PLUGIN_ROOT%\hooks-handlers\..., so
+        # ${BASH_SOURCE[0]} arrives here as a Windows path and the fork was paid on EVERY source
+        # of this file. This file is sourced by lib-jq.sh, lib-jq.sh by mmry-client.sh, and
+        # mmry-client.sh by nearly every handler - including formation-check.sh, registered on
+        # PostToolUse with NO matcher, i.e. after every single tool call.
+        #
+        # Measured in one shell with no process-spawn noise, 60 sources: 55.12 ms each with this
+        # call, 1.57 ms each without it. Bisected against the marker test, the trailing unset,
+        # the source-time resolve and the dot-segment case, none of which moved the figure.
+        #
+        # WHY IT CAN BE DEFERRED RATHER THAN OPTIMISED. cygpath is only needed to compare two
+        # paths that may be spelled differently - the mount-table problem the function's own
+        # comment describes, where C:\Users\x\AppData\Local\Temp\t and /tmp/t are one
+        # directory. Nothing before the CODEX_HOME test does any such comparison:
+        #
+        #   the marker test is a FILE TEST, and `[[ -f C:/x/y/../.mmry-host ]]` is true for
+        #   exactly the same file as the POSIX spelling, so it needs no normalisation at all
+        #
+        #   the ".codex" segment test is a STRING test against a path this file derived itself,
+        #   so the separator-and-drive-letter form below is the whole answer, with no fork
+        #
+        # So the only consumer that genuinely needs the mount table is the CODEX_HOME comparison,
+        # and CODEX_HOME is unset on every Claude Code machine. A Claude Code customer now pays
+        # no fork here at all, which is what requirement 4 asks for; a Codex customer pays the
+        # one that the comparison actually requires.
+        _mmry_norm_path_str_g "$_mmry_self_dir"; _mmry_self_dir="$_MMRY_NP"
 
         # 1. THE MARKER THE INSTALL WROTE ABOUT ITSELF, WHICH IS THE ONLY ANSWER THAT SURVIVES A
         #    RELOCATED HOME NOBODY EXPORTED.
@@ -210,7 +289,12 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
 
         # 2. AN EXPORTED CODEX_HOME THIS FILE SITS INSIDE.
         if [[ -z "${MMRY_HOST:-}" && -n "${CODEX_HOME:-}" ]]; then
-            _mmry_codex_home="$(_mmry_norm_path "$CODEX_HOME")"
+            # HERE, AND ONLY HERE, THE MOUNT TABLE MATTERS. Two paths from two sources are about
+            # to be compared, one of them typed by a customer, so both go through the full
+            # normaliser - cygpath included. This is the one branch that is worth a fork, and it
+            # is not reached on a machine with no CODEX_HOME, which is every Claude Code install.
+            _mmry_norm_path "$CODEX_HOME"; _mmry_codex_home="$_MMRY_NP"
+            _mmry_norm_path "$_mmry_self_dir"; _mmry_self_dir="$_MMRY_NP"
             if [[ -n "$_mmry_codex_home" && "$_mmry_codex_home" != "/" ]]; then
                 # Case-folded on Windows, byte-exact elsewhere. A lowercase spelling of
                 # CODEX_HOME used to miss here and silently resolve the host as Claude
@@ -224,7 +308,7 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
         # 3. The default Codex home, and any path segment that is literally ".codex".
         [[ -z "${MMRY_HOST:-}" && "$_mmry_self_dir" == */.codex/* ]] && MMRY_HOST="codex"
     fi
-    unset _mmry_self_dir _mmry_codex_home _mmry_marker _mmry_marker_host 2>/dev/null || true
+    unset _mmry_self_dir _mmry_self_src _mmry_codex_home _mmry_marker _mmry_marker_host 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------------------------

@@ -344,3 +344,78 @@ _eval_installed() {
         bash -c "source '$LIB'; mmry_host_setup_hint"
     assert_output "bash ~/.claude/mmry/setup/mmry-setup.sh"
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE SPELLING THE FILE IS SOURCED BY (#31245 QA round 6).
+#
+# ${BASH_SOURCE[0]%/*} strips to the last FORWARD slash. On Windows there often is not one:
+# hooks.json invokes handlers as %CLAUDE_PLUGIN_ROOT%\hooks-handlers\..., so ${BASH_SOURCE[0]}
+# arrives all backslashes, the strip matched nothing, and the resolver fell back to "." - THE
+# CURRENT WORKING DIRECTORY, which has nothing to do with where the file is.
+#
+# The consequence is the exact defect this file exists to prevent, on the platform whose
+# invocation spelling causes it: a Codex install with a valid marker beside it resolved as CLAUDE
+# and pointed at the other product's credential. Found while measuring latency, which is why the
+# measurement is worth keeping as well as the fix.
+#
+# THE TEST STAGES A REAL INSTALL and sources it from a FOREIGN WORKING DIRECTORY, because a test
+# run from inside the staged directory passes against the defect: "." is the right answer there
+# by accident. That accident is why this shipped.
+
+_stage_install() {
+    # Usage: _stage_install <marker-contents>   Echoes the staged <root>/mmry directory.
+    local root="$TEST_TMPDIR/staged-$1-$$"
+    rm -rf "$root"
+    mkdir -p "$root/mmry/hooks-handlers"
+    cp "$LIB" "$root/mmry/hooks-handlers/lib-host.sh"
+    printf '%s\n' "$1" > "$root/mmry/.mmry-host"
+    printf '%s' "$root"
+}
+
+@test "codex: a staged install resolves the same by its POSIX path and by its WINDOWS path" {
+    command -v cygpath >/dev/null 2>&1 || skip "not a Windows shell: there is no second spelling"
+    local root posix win out_posix out_win
+    root="$(_stage_install codex)"
+    posix="$root/mmry/hooks-handlers/lib-host.sh"
+    win="$(cygpath -w "$posix")"
+    # The two spellings really are different, or this test compares a thing with itself.
+    [ "$win" != "$posix" ]
+    [[ "$win" == *'\'* ]]
+
+    # Sourced from a foreign working directory, which is the condition the defect needed.
+    out_posix="$(cd / && env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE \
+        bash -c "source '$posix'; printf '%s|%s' \"\${MMRY_HOST:-unset}\" \"\$(mmry_host_config_dir)\"")"
+    out_win="$(cd / && env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE \
+        bash -c "source '$win'; printf '%s|%s' \"\${MMRY_HOST:-unset}\" \"\$(mmry_host_config_dir)\"")"
+
+    # Both must say codex. Before the fix the Windows one said "unset" and named ~/.claude.
+    [[ "$out_posix" == codex\|* ]]
+    [[ "$out_win"   == codex\|* ]]
+    # And both must name the staged directory rather than a home this install has nothing to do
+    # with. The two spellings of it need not be byte-identical - cygpath's 8.3 forms are real -
+    # so the assertion is that neither points at the OTHER product.
+    [[ "$out_posix" != *"/.claude"* ]]
+    [[ "$out_win"   != *"/.claude"* ]]
+}
+
+@test "req4: a Claude install by its WINDOWS path is still claude, and still ~/.claude" {
+    command -v cygpath >/dev/null 2>&1 || skip "not a Windows shell: there is no second spelling"
+    local root win out
+    root="$(_stage_install claude)"
+    win="$(cygpath -w "$root/mmry/hooks-handlers/lib-host.sh")"
+    out="$(cd / && env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="/home/testuser" \
+        bash -c "source '$win'; printf '%s|%s|%s' \"\${MMRY_HOST:-unset}\" \"\$(mmry_host_config_dir)\" \"\$(mmry_host_setup_hint)\"")"
+    [ "$out" = "unset|/home/testuser/.claude|bash ~/.claude/mmry/setup/mmry-setup.sh" ]
+}
+
+@test "codex: the Windows spelling costs no process to resolve" {
+    # The other half of the same defect. "." failed the absolute test, so the resolver sent it
+    # through `cd`/`pwd` - a fork - on EVERY source, which on this path is every tool call.
+    # Asserted structurally: the separators are flipped BEFORE the strip, so a drive-lettered
+    # path satisfies the absolute test and never reaches the resolve.
+    grep -Fq '_mmry_self_src="${BASH_SOURCE[0]//' "$LIB"
+    grep -Fq '_mmry_self_dir="${_mmry_self_src%/*}"' "$LIB"
+    # And the resolve is still there for the spellings that genuinely need it - a relative path
+    # or one with dot segments - rather than having been deleted along with the defect.
+    grep -Fq '_mmry_self_dir="$(cd "$_mmry_self_dir" && pwd 2>/dev/null)"' "$LIB"
+}
