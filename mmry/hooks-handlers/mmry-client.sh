@@ -194,25 +194,100 @@ _mmry_mtime() {
     fi
 }
 
+# The manifest that makes the Foundation cache verifiable (#31583).
+#
+# WHY A MANIFEST AND NOT "IS THE FILE NON-EMPTY".
+#
+# On 2026-09-18 this cache held four bytes - the literal "- x" - while the account held
+# twelve Foundation directives. Every turn for roughly six hours was produced by an
+# assistant that had been handed that stub and told it was the account's authoritative
+# guidance. Nothing warned, because the ONLY precondition the reader checked was that the
+# file was not empty, and four bytes is not empty.
+#
+# The cache lives in a shared temp directory under a fixed name. Anything on the machine can
+# write it, and the plugin had no way to tell its own output from somebody else's. That is
+# what the manifest fixes: the writer records what it wrote, and the reader refuses anything
+# that is not byte-for-byte that.
+#
+# WHAT IS RECORDED, and why each field earns its place:
+#   entries - the number of Foundation memories, counted by jq from the RESPONSE, not by
+#             grepping the file. Content can itself contain lines beginning "- ", so a line
+#             count is not a memory count: measured on the account above, the file holds 15
+#             such lines for 12 memories.
+#   bytes   - the exact byte length of the file as written.
+#   cksum   - POSIX cksum of the file's bytes. Length alone is not validity: a same-length
+#             substitution passes a byte count and fails a customer.
+#
+# COST, measured rather than assumed. The reader spends ONE process to verify, because
+# cksum prints its checksum AND its byte count from a single invocation, so both fields are
+# checked for the price of one. On this Windows Git Bash host, n=10 over the real 6,279-byte
+# cache: cksum 281 ms, sha256sum 116 ms, shasum 295 ms, md5sum 430 ms, and $(<file) 3 ms.
+# cksum is the slower of the portable options and is chosen anyway because it is POSIX and
+# present everywhere this plugin runs - sha256sum is absent on macOS. 281 ms sits against
+# the handler's self-imposed 10 s deadline and its 20 s registered budget (#31434).
+mmry_foundation_manifest_path() {
+    # Usage: mmry_foundation_manifest_path <cache-file>
+    printf '%s' "${1}.manifest"
+}
+
 mmry_write_foundation_cache() {
     # Usage: mmry_write_foundation_cache <response-json> <cache-file>
-    # Writes Foundation-tier memories (topic + content) to the cache. Best-effort; the
-    # UserPromptSubmit hook applies framing at inject time, so this holds just the data.
+    # Writes Foundation-tier memories (topic + content) to the cache, plus the manifest the
+    # UserPromptSubmit reader verifies it against. The hook applies framing at inject time,
+    # so this holds just the data.
+    #
+    # Returns 0 only when both the cache and its manifest were written. On any failure the
+    # EXISTING cache and manifest are left exactly as they were.
     local resp="$1" cache="$2"
-    if [[ -n "${MMRY_JQ:-}" ]]; then
-        printf '%s' "$resp" \
-            | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
-            > "$cache" 2>/dev/null || true
+    local manifest tmp entries sum count
+    manifest="$(mmry_foundation_manifest_path "$cache")"
+
+    [[ -n "${MMRY_JQ:-}" ]] || return 1
+
+    # WRITE TO A TEMPORARY FILE, NEVER STRAIGHT TO THE CACHE.
+    #
+    # The previous form was: printf ... | jq ... > "$cache" 2>/dev/null || true
+    # A shell sets up the redirect BEFORE it runs the command, so that line truncated the
+    # customer's good cache to zero the instant it started, and only then asked jq whether it
+    # had anything to put there. A jq that errored, or was killed, or produced nothing left
+    # the account with no directives, and the trailing || true ensured nobody heard about it.
+    tmp="${cache}.new.$$"
+    if ! printf '%s' "$resp"         | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"'         > "$tmp" 2>/dev/null
+    then
+        rm -f "$tmp" 2>/dev/null
+        return 1
     fi
+
+    # Count from the response, not from the file. See the note above.
+    entries="$(printf '%s' "$resp"         | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | length' 2>/dev/null)"
+    [[ "$entries" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
+
+    read -r sum count < <(cksum < "$tmp" 2>/dev/null)
+    [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
+
+    # ORDER MATTERS AND IT FAILS CLOSED. The manifest is written FIRST and the cache is moved
+    # into place second. If the process dies between the two, the manifest describes bytes
+    # that are not there yet, the reader's check fails, and the customer is TOLD. The other
+    # order would leave a new cache described by a stale manifest - also refused, but that
+    # way a CORRECT cache gets rejected, which is the worse of the two failures to choose.
+    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s
+'         "$entries" "$count" "$sum" > "$manifest" 2>/dev/null || {
+            rm -f "$tmp" 2>/dev/null; return 1; }
+
+    mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+    return 0
 }
 
 mmry_refresh_foundation_cache() {
     # Usage: mmry_refresh_foundation_cache <working-dir> <cache-file>
     # Re-fetches startup memories and rewrites the Foundation cache ONLY on a successful
     # fetch, so an offline/failed refresh never clobbers a good cache. Returns 0 on refresh.
+    # Returns 0 only if the cache AND its manifest were actually rewritten (#31583). It
+    # previously returned 0 whenever the FETCH succeeded, regardless of what the write did,
+    # so a failed write was indistinguishable from a refreshed cache to every caller.
     local workdir="$1" cache="$2"
     if mmry_get_startup_memories "$workdir" >/dev/null 2>&1; then
-        mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache"
+        mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache" || return 1
         return 0
     fi
     return 1
