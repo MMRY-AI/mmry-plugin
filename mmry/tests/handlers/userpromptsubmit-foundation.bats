@@ -10,8 +10,30 @@ setup() {
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
 }
 
+# Write the manifest that describes whatever is currently in the cache (#31583).
+#
+# The handler no longer believes a cache just because it is not empty - it verifies the
+# bytes against what the writer recorded. Tests that put a cache in place by hand therefore
+# have to record it too, exactly as mmry_write_foundation_cache would, or they are testing
+# the refusal path by accident.
+#
+# Entry count defaults to the number of lines beginning "- ". That is good enough for
+# fixtures; the production writer counts from the API response instead, because memory
+# CONTENT can also contain such lines.
+manifest_now() {
+    local c="${1:-$CACHE}" n="${2:-}" s b
+    read -r s b < <(cksum < "$c")
+    if [[ -z "$n" ]]; then
+        n="$(grep -c '^- ' "$c" 2>/dev/null || true)"
+        [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    fi
+    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s
+' "$n" "$b" "$s" > "${c}.manifest"
+}
+
 @test "userpromptsubmit-foundation: reinjects cached Foundation memories inline with authoritative framing" {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
+    manifest_now
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]]
@@ -23,6 +45,7 @@ setup() {
 
 @test "userpromptsubmit-foundation: emits valid JSON" {
     printf -- '- Foundation fact.\n' > "$CACHE"
+    manifest_now
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     # Validate with jq if present, else python3 — the emitted context must parse.
@@ -35,6 +58,7 @@ setup() {
 
 @test "userpromptsubmit-foundation: refresh disabled (0) creates no refresh lock" {
     printf -- '- Foundation fact.\n' > "$CACHE"
+    manifest_now
     export MMRY_FOUNDATION_REFRESH_SECONDS=0
     export MMRY_API_KEY="test-key"
     run bash "$HANDLER"
@@ -44,6 +68,7 @@ setup() {
 
 @test "userpromptsubmit-foundation: a stale cache triggers a gated background refresh (lock created)" {
     printf -- '- Foundation fact.\n' > "$CACHE"
+    manifest_now
     touch -t 202001010000 "$CACHE"   # force the cache to look stale
     export MMRY_FOUNDATION_REFRESH_SECONDS=1
     export MMRY_API_KEY="test-key"
@@ -57,6 +82,7 @@ setup() {
 
 @test "userpromptsubmit-foundation: toggle off emits nothing and exits 0" {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
     export MMRY_FOUNDATION_REINJECT=false
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -72,18 +98,230 @@ setup() {
 
 @test "userpromptsubmit-foundation: empty cache emits nothing and exits 0" {
     : > "$CACHE"
+    manifest_now
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-@test "userpromptsubmit-foundation: token cap truncates an oversized set and logs the drop" {
-    head -c 4000 /dev/zero | tr '\0' 'x' > "$CACHE"
-    export MMRY_FOUNDATION_TOKEN_CAP=100
+# ============================================================================
+# #31411 - THE SET IS DELIVERED IN FULL. THERE IS NO CEILING.
+#
+# What used to be here asserted the opposite: that a set over the cap was cut and that the
+# cut was logged. That assertion defended the defect. The cut was a raw substring at
+# cap*4 characters, so it landed wherever that character fell - on the account that
+# surfaced it, mid-sentence inside a list of corporate values, with four of the eight
+# values never reaching any assistant on any turn for fifty days.
+#
+# Each assertion below was shown to REFUSE by reinstating the cut, not observed to pass.
+# See the mutation harness, m10 through m13.
+# ============================================================================
+
+# A large set is built from distinguishable parts so a partial delivery shows up as a
+# MISSING NAMED PIECE rather than as a length that looks about right. A test that only
+# compared lengths could not say WHICH end was lost.
+_big_foundation_set() {
+    local i
+    for i in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19; do
+        printf -- '- Directive %s: %s\n' "$i" "$(printf 'w%.0s' $(seq 1 380))"
+    done
+    printf -- '- FinalDirective: this last line must arrive intact and uncut.\n'
+}
+
+@test "userpromptsubmit-foundation: #31411 a set far beyond the old cap is delivered COMPLETE, first line to last" {
+    _big_foundation_set > "$CACHE"
+    manifest_now
+    # Well past the 6000-character cut this replaces.
+    [ "$(wc -c < "$CACHE")" -gt 7000 ]
+
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'truncated'* ]]
-    [ -f "$TEST_TMPDIR/mmry-foundation.log" ]
+
+    # PRESENCE, not merely the absence of a warning. A handler that emitted nothing at all
+    # would satisfy "no truncation note" perfectly well.
+    [[ "$output" == *'Directive 00'* ]]
+    [[ "$output" == *'Directive 19'* ]]
+    [[ "$output" == *'FinalDirective: this last line must arrive intact and uncut.'* ]]
+    # And every one in between, so a cut anywhere is caught, not only at the two ends.
+    local i
+    for i in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18; do
+        [[ "$output" == *"Directive $i"* ]] || { echo "lost Directive $i"; return 1; }
+    done
+}
+
+@test "userpromptsubmit-foundation: #31411 the delivered text is byte-for-byte the stored set, not merely long enough" {
+    _big_foundation_set > "$CACHE"
+    manifest_now
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+
+    # COMPARED ON THE WIRE, NOT AFTER DECODING, and that is not a shortcut - it is the only
+    # form of this check that is trustworthy on every platform the plugin supports.
+    #
+    # The first two cuts of this test decoded the emitted JSON, once with python3 and once
+    # with jq. Both FAILED on Windows and both failed for the same reason, which has nothing
+    # to do with the handler: each is a Windows-native binary that opens stdout in text mode
+    # and rewrites every \n as \r\n. The decoder corrupted the very bytes being compared and
+    # reported the handler as having lost content it had delivered perfectly. Verified by od:
+    # the raw JSON carried the correct \n escapes and the decoded output carried \r\n.
+    #
+    # So the expected string is built here with the same escaping the handler performs, and
+    # the assertion is that those exact bytes appear in the emitted JSON. No subprocess, no
+    # text-mode translation, and it pins the wire format rather than a reconstruction of it.
+    local stored escaped
+    stored="$(cat "$CACHE")"
+    [ -n "$stored" ]
+    escaped="${stored//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//$'\015'/\\r}"
+    escaped="${escaped//$'\011'/\\t}"
+    escaped="${escaped//$'\012'/\\n}"
+
+    [[ "$output" == *"$escaped"* ]]
+}
+
+@test "userpromptsubmit-foundation: #31411 an explicitly configured token cap does NOT cut the set" {
+    _big_foundation_set > "$CACHE"
+    manifest_now
+    # The tightest cap anyone could set. Under the old code this kept 400 characters.
+    export MMRY_FOUNDATION_TOKEN_CAP=100
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'FinalDirective: this last line must arrive intact and uncut.'* ]]
+    [[ "$output" != *'truncated'* ]]
+    [ ${#output} -gt 7000 ]
+}
+
+@test "userpromptsubmit-foundation: #31411 no truncation is ever announced or logged" {
+    _big_foundation_set > "$CACHE"
+    manifest_now
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'truncated'* ]]
+    [[ "$output" != *'token cap'* ]]
+    # The old log line recorded the length AFTER the cut, so all 1,457 entries on the
+    # affected machine read "had 6000 chars". Nothing may write that line any more.
+    if [ -f "$TEST_TMPDIR/mmry-foundation.log" ]; then
+        run grep -c 'truncated Foundation reinjection' "$TEST_TMPDIR/mmry-foundation.log"
+        [ "$output" = "0" ]
+    fi
+}
+
+@test "userpromptsubmit-foundation: #31411 control - a small set is delivered unchanged" {
+    printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
+    manifest_now
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Eric builds MMRY.'* ]]
+    [[ "$output" == *'clarity over cleverness.'* ]]
+    [[ "$output" != *'truncated'* ]]
+}
+
+# ============================================================================
+# #31583 - A CACHE IS VERIFIED OR REFUSED. "NOT EMPTY" IS NOT A CHECK.
+#
+# The four tests the ticket names, in its order, plus the states either side of them.
+# ============================================================================
+
+@test "userpromptsubmit-foundation: #31583 TC1 a four-byte stub is refused, reported, and never presented as guidance" {
+    printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
+    manifest_now
+    # The exact observed failure, byte for byte.
+    printf -- '- x\n' > "$CACHE"
+    [ "$(wc -c < "$CACHE")" -eq 4 ]
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]                      # never blocks the prompt
+    [[ "$output" == *'could not verify'* ]]  # reported to the assistant
+    [[ "$output" == *'systemMessage'* ]]     # and to the customer, who can act on it
+    # The stub itself must not be forwarded under the authoritative framing.
+    [[ "$output" != *'authoritative directives that take precedence'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 TC2 the right size with the wrong content is refused" {
+    printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
+    manifest_now
+    local n
+    n="$(wc -c < "$CACHE")"
+    # Same byte count, different bytes. A check that only measured length would pass this.
+    head -c "$n" /dev/zero | tr '\0' 'z' > "$CACHE"
+    [ "$(wc -c < "$CACHE")" -eq "$n" ]
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'do not match'* ]]
+    [[ "$output" != *'zzzz'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 TC3 a removed cache behaves exactly as a damaged one" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    rm -f "$CACHE"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'systemMessage'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 TC4 a valid cache is delivered in full and says NOTHING" {
+    _big_foundation_set > "$CACHE"
+    manifest_now
+    local total
+    total="$(wc -c < "$CACHE")"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    # The new check must not be satisfiable by warning all the time.
+    [[ "$output" != *'could not verify'* ]]
+    [[ "$output" != *'systemMessage'* ]]
+    [[ "$output" == *'FinalDirective'* ]]
+
+    # Delivered count against the account's true total, as the ticket asks for.
+    [ -f "$TEST_TMPDIR/mmry-foundation.status" ]
+    run cat "$TEST_TMPDIR/mmry-foundation.status"
+    [[ "$output" == *"bytes=$total"* ]]
+    [[ "$output" == *'entries=21'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 a cache with no manifest cannot be shown to be the account's own, so it is refused" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    rm -f "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" != *'Eric builds MMRY'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 a manifest that is present but malformed is refused, not ignored" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    printf 'garbage not a manifest\n' > "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" != *'Eric builds MMRY'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 an account with genuinely NO Foundation memories is silent, not warned" {
+    : > "$CACHE"
+    printf 'mmry-foundation v1 entries=0 bytes=0 cksum=4294967295\n' > "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "userpromptsubmit-foundation: #31583 a session that has loaded nothing yet is silent, not warned" {
+    rm -f "$CACHE" "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
 }
 
 # ============================================================================
@@ -135,6 +373,7 @@ _registered_timeout() {
 
 @test "userpromptsubmit-foundation: slowed past the OLD 5s budget, still delivers the directives inside the shipped one" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     _make_config
     # 6 s of extra latency, not the 7 s this used to inject (#31434 QA).
     #
@@ -172,6 +411,7 @@ _registered_timeout() {
 
 @test "userpromptsubmit-foundation: slowed past the DEADLINE, the turn proceeds and the customer is told" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     _make_config
     local shim start elapsed budget
     shim="$(_make_slow_jq 20)"
@@ -224,6 +464,7 @@ _registered_timeout() {
     # observed. The supervisor itself is invoked by absolute path so that only the WORKER
     # spawn is affected.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     local start elapsed shimdir real_bash
     real_bash="$(command -v bash)"
@@ -267,6 +508,7 @@ _registered_timeout() {
     # hard-wired to /dev/null, or the fourth report is just as unreproducible. MMRY_DEBUG
     # redirects rather than discards; the terminal contract is unchanged either way.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     local dbg="$TEST_TMPDIR/mmry-foundation-debug.log"
 
     # Default: nothing is captured anywhere.
@@ -286,6 +528,7 @@ _registered_timeout() {
 
 @test "userpromptsubmit-foundation: a firing cut short by the harness is reported on the NEXT firing" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     # The marker the supervisor leaves behind when it never reaches its own exit.
     : > "$TEST_TMPDIR/.mmry-foundation-inflight"
 
@@ -301,6 +544,7 @@ _registered_timeout() {
 
 @test "userpromptsubmit-foundation: a clean firing reports nothing and leaves no marker" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
 
     run bash "$HANDLER"
@@ -324,6 +568,7 @@ _registered_timeout() {
 
 @test "userpromptsubmit-foundation: an absurd deadline value falls back to the default rather than disabling the guard" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     MMRY_FOUNDATION_DEADLINE_SECS="not-a-number" run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'never overstate evidence'* ]]
@@ -338,6 +583,7 @@ _registered_timeout() {
     # Asserted by ROUND-TRIPPING the content back out of the JSON, not by eyeballing the string:
     # a test that only checked "contains a backslash" would pass on double-escaped output too.
     printf -- '- Quote: he said "no".\n- Backslash: C:\Users\x\n- Tab:\tafter\n- Ampersand & percent %%\n' > "$CACHE"
+    manifest_now
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -373,6 +619,7 @@ _registered_timeout() {
     # output is read from, then measure time to EOF. Measured this way: 15155/15170/15155 ms
     # with the orphan against a 15 s deadline, 494/515/604/567/572 ms without it.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
 
     local start elapsed captured
@@ -393,6 +640,7 @@ _registered_timeout() {
     # whole suite stayed green - a handler that never records a firing can never report a lost
     # one, which is the entire feature. This drives the real sequence instead.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     cat > "$MMRY_CONFIG_FILE" <<'EOF'
 {
@@ -476,6 +724,7 @@ EOF
 @test "userpromptsubmit-foundation: foundationReinject=false in CONFIG silences the crash notice it recommends (#31434 QA)" {
     printf -- '- Truthfulness: never overstate evidence.
 ' > "$CACHE"
+manifest_now
     local real_bash shimdir
     real_bash="$(command -v bash)"
     shimdir="$(_make_broken_bash)"
@@ -501,6 +750,7 @@ EOF
     # reads the file without jq, so the bare boolean is the spelling most likely to be missed.
     printf -- '- Truthfulness: never overstate evidence.
 ' > "$CACHE"
+manifest_now
     local real_bash shimdir
     real_bash="$(command -v bash)"
     shimdir="$(_make_broken_bash)"
@@ -520,6 +770,7 @@ EOF
 @test "userpromptsubmit-foundation: the ENVIRONMENT off switch silences the crash notice, and outranks the config (#31434 QA)" {
     printf -- '- Truthfulness: never overstate evidence.
 ' > "$CACHE"
+manifest_now
     local real_bash shimdir
     real_bash="$(command -v bash)"
     shimdir="$(_make_broken_bash)"
@@ -543,6 +794,7 @@ EOF
     # not even wait out a deadline to be told about a feature they switched off.
     printf -- '- Truthfulness: never overstate evidence.
 ' > "$CACHE"
+manifest_now
     local shim start elapsed
     shim="$(_make_slow_jq 30)"
 
