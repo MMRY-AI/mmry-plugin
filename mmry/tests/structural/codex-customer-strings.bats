@@ -433,11 +433,30 @@ _compare_hosts() {
 @test "setup: an exported MMRY_HOST_ARG is not treated as a typed --host flag" {
     # A value arriving from somewhere nobody expected, deciding which product's account file gets
     # the credential. Same shape as the case-folding defect this script already carries a fix for.
-    # With the flag genuinely absent, an exported bad value must NOT produce the --host refusal.
-    run env MMRY_HOST_ARG=codx bash "${PLUGIN_ROOT}/setup/mmry-setup.sh" --help
+    #
+    # THE FIRST VERSION OF THIS TEST COULD NOT FAIL, AND THE MUTATION RUN SAID SO (#31245 QA
+    # round 6). It invoked the script with `--help`, which exits at line 14 INSIDE the argument
+    # parsing loop - while the MMRY_HOST_ARG validation this is about lives at line 85, seventy
+    # lines later. The assertion "no --host refusal was printed" was therefore true of every
+    # possible tree, fixed or broken, and experiment 91 SURVIVED against it. It is the exact
+    # defect this whole round is about - a check that cannot fail - written by me, into the
+    # round that was meant to end them, which is why the note stays here rather than being
+    # quietly corrected.
+    #
+    # IT NOW REACHES THE CODE UNDER TEST. The CI-style arguments carry it past the parse loop,
+    # past the validation, and into the login attempt, which is pointed at a closed local port so
+    # nothing leaves the machine and the outcome is the same on every box.
+    #
+    # AND IT ASSERTS PRESENCE, NOT ONLY ABSENCE. "Unrecognised did not appear" is satisfied by a
+    # script that dies before it gets there; "Logging in... appeared" is the proof it got past
+    # the validation rather than never arriving.
+    run env MMRY_HOST_ARG=codx bash "${PLUGIN_ROOT}/setup/mmry-setup.sh" \
+        --email a@b.c --password 'Xx1!' --api-url http://127.0.0.1:9
     [[ "$output" != *"Unrecognised --host value"* ]]
+    [[ "$output" == *"Logging in"* ]]
 
-    # And the flag itself still refuses, so the fix did not disarm the validation.
+    # And the flag itself still refuses, so the fix did not disarm the validation. This half was
+    # always sound: --host IS consumed by the parse loop, so it does reach line 85.
     run bash "${PLUGIN_ROOT}/setup/mmry-setup.sh" --host codx
     [ "$status" -eq 1 ]
     [[ "$output" == *"Unrecognised --host value"* ]]
