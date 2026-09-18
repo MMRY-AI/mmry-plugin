@@ -343,15 +343,40 @@ mmry_host_label() {
 # the tilde spelling is the friendlier one and is the literal every existing message carried; the
 # Claude string is unchanged byte for byte, which tests/unit/lib-host.bats asserts. Anywhere else
 # the absolute path is printed, because that is the one that works when pasted.
-mmry_host_setup_hint() {
+# The host's config directory as a customer READS it, which is not always how a shell resolves it.
+# Factored out of mmry_host_setup_hint so that every other display string - the credential file,
+# the state directory - spells the same directory the same way. Two messages about one directory
+# that disagree about its name is the defect mmry_host_setup_hint was written to stop; three
+# copies of the tilde logic is how it comes back.
+_mmry_host_display_dir() {
     _mmry_host_resolve
-    local dir="$_MMRY_HOST_DIR_V" shown
+    local dir="$_MMRY_HOST_DIR_V"
     if [[ -n "${HOME:-}" && "$dir" == "${HOME}/"* ]]; then
-        shown="~/${dir#"${HOME}/"}"
+        printf '~/%s' "${dir#"${HOME}/"}"
     else
-        shown="$dir"
+        printf '%s' "$dir"
     fi
-    printf 'bash %s/mmry/setup/mmry-setup.sh' "$shown"
+}
+
+mmry_host_setup_hint() {
+    printf 'bash %s/mmry/setup/mmry-setup.sh' "$(_mmry_host_display_dir)"
+}
+
+# The credential file as a customer READS it, for messages that tell them to edit it.
+#
+# WHY THIS EXISTS (#31245 QA round 6). userpromptsubmit-foundation.sh told every customer whose
+# Foundation load failed to "set foundationReinject to false in ~/.claude/mmry-config.json". On
+# Codex that file is the OTHER PRODUCT'S, and on a Codex-only machine it does not exist at all, so
+# the one remedy offered for a message arriving on every prompt could not be carried out. The
+# Claude spelling is "~/.claude/mmry-config.json" byte for byte, which is what that message has
+# always carried.
+mmry_host_config_file_ref() {
+    printf '%s/mmry-config.json' "$(_mmry_host_display_dir)"
+}
+
+# MMRY's own state directory as a customer READS it, for messages that name what was removed.
+mmry_host_state_dir_ref() {
+    printf '%s/mmry' "$(_mmry_host_display_dir)"
 }
 
 # How the model should refer to MMRY's own scripts in text it is asked to act on.
@@ -417,6 +442,78 @@ mmry_host_formation_ref() {
         printf 'bash %s/mmry/hooks-handlers/formation-%s.sh%s' "$_MMRY_HOST_DIR_V" "$sub" "$rest"
     else
         printf '/mmry:formation %s%s' "$sub" "$rest"
+    fi
+}
+
+# EVERY OTHER COMMAND MMRY NAMES TO A CUSTOMER, DERIVED FROM ONE TABLE (#31245 QA round 6).
+#
+# WHY THIS EXISTS, AND WHY IT IS NOT FOUR MORE HOST TESTS. mmry_host_formation_ref above fixed
+# twenty strings in four handlers, and QA round 5 then found four MORE customer-reachable strings
+# naming "/mmry:..." that it did not cover: the Foundation re-injection failure notice on a
+# CONFIGURED Codex install (both of its branches), the client's two credential messages, and the
+# group chooser in visibility.sh. Round 4 had already fixed one branch of the first of those and
+# left its sibling three lines below it.
+#
+# That is the whole pattern of this task: a literal gets fixed where somebody looked, and the one
+# beside it ships. So this function does not take a host test, it takes a COMMAND NAME, and the
+# single table below is the only place in the plugin that knows what a command is called on each
+# host. tests/structural/codex-customer-strings.bats sweeps the entire installed file set and
+# fails on any emitting line that spells a command out by hand instead of asking here.
+#
+# THE TABLE IS THE COMMANDS DIRECTORY. Every file in mmry/commands/ is a slash command a customer
+# can type on Claude Code, and every one of them is listed here with the script that does the same
+# job on Codex - which is how the Codex skill already tells customers to drive MMRY. A command
+# with no Codex equivalent is NOT given a plausible-looking one; see the refusal below.
+#
+# WHY "load-memories" MAPS TO session-start.sh. commands/load-memories.md's own instruction is
+# "run the plugin's session-start bash script directly", so the Codex form is not an invention,
+# it is the same script the slash command runs (#31245 QA round 6, item 2).
+#
+# THE CLAUDE STRING IS THE LITERAL IT ALWAYS WAS, byte for byte, which is requirement 4.
+#
+# Usage: mmry_host_command_ref <command> [argument ...]
+#   mmry_host_command_ref setup            -> claude: /mmry:setup
+#                                          -> codex:  bash <dir>/mmry/setup/mmry-setup.sh
+#   mmry_host_command_ref visibility group -> claude: /mmry:visibility group
+#                                          -> codex:  bash <dir>/mmry/hooks-handlers/visibility.sh group
+_mmry_host_command_script() {
+    # The Codex script for a command, relative to <config-dir>/mmry/. Empty means there is none.
+    case "$1" in
+        setup)          printf 'setup/mmry-setup.sh' ;;
+        uninstall)      printf 'setup/uninstall.sh' ;;
+        save)           printf 'hooks-handlers/save-memory.sh' ;;
+        search)         printf 'hooks-handlers/search-memories.sh' ;;
+        visibility)     printf 'hooks-handlers/visibility.sh' ;;
+        feedback)       printf 'hooks-handlers/submit-feedback.sh' ;;
+        load-memories)  printf 'hooks-handlers/session-start.sh' ;;
+        *)              printf '' ;;
+    esac
+}
+
+# A COMMAND WITH NO CODEX EQUIVALENT IS REFUSED, NOT GUESSED (#31245 QA round 6).
+#
+# "help" is the one that matters: /mmry:help renders a page of typed commands, and there is no
+# script that does that on Codex because there is nothing to type. Returning a plausible-looking
+# path for it would put a command in front of a customer that does not exist - which is the exact
+# defect this whole function exists to stop, reintroduced by the machinery meant to prevent it.
+#
+# So this returns 1 and prints NOTHING, and the caller must say something true in prose instead.
+# session-start.sh already does exactly that for help and feedback. The sweep test asserts the
+# refusal, so a future caller that pipes this into a message gets an empty string and a red test
+# rather than a quiet half-sentence.
+mmry_host_command_ref() {
+    local cmd="$1"
+    shift
+    _mmry_host_resolve
+    local rest=""
+    (( $# > 0 )) && rest=" $*"
+    if [[ "$_MMRY_HOST_V" == "codex" ]]; then
+        local script
+        script="$(_mmry_host_command_script "$cmd")"
+        [[ -n "$script" ]] || return 1
+        printf 'bash %s/mmry/%s%s' "$_MMRY_HOST_DIR_V" "$script" "$rest"
+    else
+        printf '/mmry:%s%s' "$cmd" "$rest"
     fi
 }
 

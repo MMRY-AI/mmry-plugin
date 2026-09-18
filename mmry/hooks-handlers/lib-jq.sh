@@ -35,7 +35,22 @@ set -euo pipefail
 # existence test rather than a swallowed source. STDERR IS DELIBERATELY NOT REDIRECTED HERE: the
 # refusal below is the only warning a customer gets that MMRY is not set up for this host, and a
 # 2>/dev/null on this line would discard it.
-_mmry_libjq_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# DERIVED WITHOUT A PROCESS, FOR THE SAME REASON AS hook-guard.sh (#31245 QA round 6).
+#
+# This was `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` - two nested command substitutions, the
+# identical idiom removed from hook-guard.sh in commit 7ae2464 of this branch and reintroduced
+# here in the same commit that removed it there. It is not a quiet corner: formation-check.sh
+# sources this file, and formation-check.sh is registered on PostToolUse WITH NO MATCHER, so it
+# runs after EVERY tool call. Measured on Windows Git Bash, 20 runs: 113-151 ms on develop against
+# 250-299 ms with this idiom in place - roughly double, paid by every existing Claude Code
+# customer for a second host they do not have. That is a requirement-4 cost.
+#
+# The path only has to be good enough to source a sibling file. lib-host.sh resolves its OWN
+# absolute location for the host detection it does, so nothing downstream depends on this one
+# being absolute. tests/structural/hook-budgets.bats asserts the idiom is absent from every script
+# on a per-tool-call or per-prompt path, so a third one cannot appear unnoticed.
+_mmry_libjq_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_mmry_libjq_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_libjq_dir="."
 if [[ -f "${_mmry_libjq_dir}/lib-host.sh" ]]; then
     # shellcheck source=/dev/null
     source "${_mmry_libjq_dir}/lib-host.sh" || true
@@ -136,7 +151,7 @@ mmry_jq_unavailable_message() {
         # here, not at the top of the file: this library is pulled in by mmry-client.sh, which is
         # itself sourced by twenty-odd handlers, and this message is the only line in it that needs
         # to know the host. The guard keeps the previous literal if the resolver is unavailable.
-        if source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-host.sh" 2>/dev/null; then
+        if source "${BASH_SOURCE[0]%/*}/lib-host.sh" 2>/dev/null; then
             echo "  $(mmry_host_setup_hint)"
         else
             echo "  bash ~/.claude/mmry/setup/mmry-setup.sh"

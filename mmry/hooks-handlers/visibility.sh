@@ -60,7 +60,7 @@ list_groups_for_choice() {
     echo "Your groups:"
     printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] | "  - \(.groupName)"'
     echo ""
-    echo "Choose one with: /mmry:visibility group \"NAME\""
+    echo "Choose one with: $(mmry_host_command_ref visibility group '"NAME"')"
 }
 
 resolve_group_id_by_name() {

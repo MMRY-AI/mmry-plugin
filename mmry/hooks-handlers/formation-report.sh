@@ -39,14 +39,14 @@ if [[ -z "$formation_id" ]]; then
     fi
     state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
     if [[ -z "$state" ]]; then
-        echo "This session is not in a formation. Give the id instead: /mmry:formation report <formationId>. The record is readable by anybody on the account, including somebody who was never a member."
+        echo "This session is not in a formation. Give the id instead: $(mmry_host_formation_ref report '<formationId>'). The record is readable by anybody on the account, including somebody who was never a member."
         exit 1
     fi
     formation_id="${state%% *}"
 fi
 
 if ! [[ "$formation_id" =~ ^[1-9][0-9]*$ ]]; then
-    echo "A formation id is a positive whole number. Run /mmry:formation list to see what is active."
+    echo "A formation id is a positive whole number. Run $(mmry_host_formation_ref list) to see what is active."
     exit 1
 fi
 

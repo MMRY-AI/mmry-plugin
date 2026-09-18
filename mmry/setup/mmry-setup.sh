@@ -24,6 +24,16 @@ PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 API_URL="https://mmryai.com"
 EMAIL=""
 PASSWORD=""
+# INITIALISED, SO THAT ONLY THE FLAG CAN SET IT (#31245 QA round 6).
+#
+# MMRY_HOST_ARG was only ever assigned by `--host`, and then read as "${MMRY_HOST_ARG:-}". An
+# exported MMRY_HOST_ARG in the customer's environment was therefore honoured exactly as though
+# the flag had been typed, from a variable nothing documents and nobody would think to look at.
+# The allowlist below still constrains the VALUE, so the blast radius is small - but it is the
+# same shape as the case-folding defect this script already carries a fix for: a value arriving
+# from somewhere nobody expected, deciding which product's account file gets the credential.
+# Clearing it here means the flag is the only way in.
+MMRY_HOST_ARG=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do

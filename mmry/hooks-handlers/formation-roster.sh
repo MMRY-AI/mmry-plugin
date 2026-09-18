@@ -95,8 +95,21 @@ printf '\nDirect a message at one of them with %s. Leave the id off\n' "$(mmry_h
 printf 'and the message goes to the whole formation.\n'
 # #31046. The state in brackets is the last thing that member reported, and "not started" means
 # nothing has been reported against work that WAS handed out, which is the thing worth noticing on
-# this list. The full account, one section per member, is the formation report operation.
+# this list. The full account, one section per member, is /mmry:formation report.
+#
+# THE LINE BREAKS ARE PART OF THE CLAUDE OUTPUT, NOT A DETAIL OF IT (#31245 QA round 6).
+#
+# The first cut of this derivation printed the same 199 bytes with the WRAP MOVED: it ended
+# "...Abandoned>,\nand read the whole account with /mmry:formation report." where this footer has
+# always read "...Abandoned>, and read the whole account\nwith /mmry:formation report." That is a
+# change in what an existing Claude Code customer sees, which requirement 4 forbids - and the
+# substring assertions meant to protect it could not see it, because every substring was still
+# present in a different arrangement.
+#
+# The format strings below put the breaks back exactly where they were, and the Claude control in
+# codex-formation-instructions.bats now compares the WHOLE footer byte for byte rather than
+# hunting for three fragments inside it.
 printf 'The state in brackets is the last thing that member reported. Report your own with\n'
-printf '%s,' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
-printf '\nand read the whole account with %s.\n' "$(mmry_host_formation_ref report)"
+printf '%s, and read the whole account\n' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
+printf 'with %s.\n' "$(mmry_host_formation_ref report)"
 exit 0

@@ -31,7 +31,7 @@
 # any of them might act on it; with five members, four of them evaluate every instruction that does
 # not concern them.
 #
-# The address is the ROSTER ENTRY id from the formation roster listing, never a session string. A sender
+# The address is the ROSTER ENTRY id from /mmry:formation roster, never a session string. A sender
 # has no legitimate way to learn another session's id, and it is not the kind of thing that should
 # travel through a command line.
 #
