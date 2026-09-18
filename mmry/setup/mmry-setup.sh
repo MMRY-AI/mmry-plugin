@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
         --email)       EMAIL="$2"; shift 2 ;;
         --password)    PASSWORD="$2"; shift 2 ;;
         --api-url)     API_URL="$2"; shift 2 ;;
-        --host)        MMRY_HOST="$2"; shift 2 ;;
+        --host)        MMRY_HOST_ARG="$2"; shift 2 ;;
         --help|-h)
             echo "Usage:"
             echo "  Setup (browser):     bash mmry-setup.sh"
@@ -53,8 +53,37 @@ done
 #
 # Leaving it unset lets lib-host.sh answer from this script's own install location, which is right
 # for both hosts: a copy under ~/.claude resolves to claude, a copy under a Codex home resolves to
-# codex, and an explicit --host still outranks both. An unrecognised --host value resolves to
-# claude, which is the same answer an absent one gives.
+# codex, and an explicit --host still outranks both.
+#
+# BUT AN EXPLICIT VALUE IS VALIDATED, AND AN UNRECOGNISED ONE IS REFUSED (#31245 QA round 4).
+#
+# The previous version handed --host straight to the resolver, where mmry_host() maps anything
+# that is not exactly "codex" to "claude". So `--host Codex` - the capitalisation a customer
+# reading prose would naturally type - wrote the Codex credential into
+# ${HOME}/.claude/mmry-config.json, the OTHER product's account file, and said nothing. So did
+# `--host codx`, and `--host CODEX`.
+#
+# An ABSENT --host and an UNRECOGNISED one are not the same question and must not get the same
+# answer. Absent means "work it out from where I am installed", which the resolver does well.
+# Unrecognised means the customer stated an intent this script could not honour, and the only
+# safe response to that is to stop, because every alternative writes a credential somewhere the
+# customer did not ask for.
+#
+# Case is folded rather than rejected: "Codex" and "CODEX" are not ambiguous, they are the same
+# instruction in different shift states, and refusing them would be pedantry. A value that is
+# neither host after folding is refused by name.
+if [[ -n "${MMRY_HOST_ARG:-}" ]]; then
+    case "$(printf '%s' "$MMRY_HOST_ARG" | tr '[:upper:]' '[:lower:]')" in
+        claude) MMRY_HOST="claude" ;;
+        codex)  MMRY_HOST="codex" ;;
+        *)
+            echo "Unrecognised --host value: ${MMRY_HOST_ARG}" >&2
+            echo "  --host takes 'claude' or 'codex'." >&2
+            echo "  Refusing to continue: guessing here writes your credential into the wrong" >&2
+            echo "  product's account file." >&2
+            exit 1 ;;
+    esac
+fi
 [[ -n "${MMRY_HOST:-}" ]] && export MMRY_HOST
 # shellcheck source=/dev/null
 source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh"

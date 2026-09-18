@@ -194,3 +194,64 @@ EOF
         return 1
     }
 }
+
+# ---------------------------------------------------------------------------------------------
+# --host IS VALIDATED, BECAUSE THE FALLBACK FOR AN UNRECOGNISED VALUE WAS ANOTHER PRODUCT'S
+# ACCOUNT FILE (#31245 QA round 4).
+#
+# mmry_host() maps anything that is not exactly "codex" to "claude", and --host was handed
+# straight to it. So the capitalisation a customer reading prose would naturally type wrote the
+# Codex credential into ${HOME}/.claude/mmry-config.json and said nothing at all about it.
+#
+# These four assert the two halves separately: a case variant is HONOURED (it is unambiguous),
+# and a value that is neither host is REFUSED rather than defaulted.
+
+@test "codex: --host Codex - the capitalisation a customer types - targets the CODEX directory" {
+    local script
+    script="$(_stage "$HOME/.claude/mmry")"
+
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        MMRY_NO_BROWSER=1 MMRY_JQ_VENDOR_DIR="$MMRY_JQ_VENDOR_DIR" PATH="$PATH" \
+        bash "$script" --host Codex
+
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.codex/mmry-config.json" ]
+}
+
+@test "codex: and --host Codex writes NO credential into the other product's account file" {
+    local script
+    script="$(_stage "$HOME/.claude/mmry")"
+
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        MMRY_NO_BROWSER=1 MMRY_JQ_VENDOR_DIR="$MMRY_JQ_VENDOR_DIR" PATH="$PATH" \
+        bash "$script" --host Codex
+
+    [ "$status" -eq 0 ]
+    # THIS IS THE ASSERTION THE DEFECT FAILED. Before the fix this file existed and held the
+    # credential the customer meant for Codex.
+    [ ! -f "$HOME/.claude/mmry-config.json" ]
+}
+
+@test "codex: an unrecognised --host is REFUSED, not quietly resolved to claude" {
+    local script
+    script="$(_stage "$HOME/.claude/mmry")"
+
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        MMRY_NO_BROWSER=1 MMRY_JQ_VENDOR_DIR="$MMRY_JQ_VENDOR_DIR" PATH="$PATH" \
+        bash "$script" --host codx
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Unrecognised --host value: codx"* ]]
+}
+
+@test "codex: and a refused --host writes no credential anywhere at all" {
+    local script
+    script="$(_stage "$HOME/.claude/mmry")"
+
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$HOME" \
+        MMRY_NO_BROWSER=1 MMRY_JQ_VENDOR_DIR="$MMRY_JQ_VENDOR_DIR" PATH="$PATH" \
+        bash "$script" --host codx
+
+    [ ! -f "$HOME/.claude/mmry-config.json" ]
+    [ ! -f "$HOME/.codex/mmry-config.json" ]
+}
