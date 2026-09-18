@@ -556,7 +556,7 @@ mutate "lib-jq resolves its own directory with a fork again [R6]" hooks-handlers
 
 mutate "the host resolver forks on its own directory again [R6]" hooks-handlers/lib-host.sh \
   's = s.replace("_mmry_norm_path_str_g " + chr(34) + "$_mmry_self_dir" + chr(34) + "; _mmry_self_dir=" + chr(34) + "$_MMRY_NP" + chr(34), "_mmry_norm_path " + chr(34) + "$_mmry_self_dir" + chr(34) + "; _mmry_self_dir=" + chr(34) + "$_MMRY_NP" + chr(34), 1)' \
-  structural/hook-budgets.bats "costs about what sourcing an empty file"
+  structural/hook-budgets.bats "resolving the host spawns NO process"
 
 mutate "the Windows source spelling resolves to the working directory again [R6]" hooks-handlers/lib-host.sh \
   's = s.replace("_mmry_self_src=" + chr(34) + "${BASH_SOURCE[0]//" + chr(92) + chr(92) + "//}" + chr(34) + chr(10) + "    _mmry_self_dir=" + chr(34) + "${_mmry_self_src%/*}" + chr(34) + chr(10) + "    [[ " + chr(34) + "$_mmry_self_dir" + chr(34) + " == " + chr(34) + "$_mmry_self_src" + chr(34) + " ]] && _mmry_self_dir=" + chr(34) + "." + chr(34), "_mmry_self_dir=" + chr(34) + "${BASH_SOURCE[0]%/*}" + chr(34) + chr(10) + "    [[ " + chr(34) + "$_mmry_self_dir" + chr(34) + " == " + chr(34) + "${BASH_SOURCE[0]}" + chr(34) + " ]] && _mmry_self_dir=" + chr(34) + "." + chr(34), 1)' \

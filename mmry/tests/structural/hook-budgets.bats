@@ -533,96 +533,118 @@ _claude_foundation_timeout() {
         "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh"
 }
 
-@test "hook-budgets: sourcing lib-host.sh costs about what sourcing an empty file costs" {
-    # THE MEASURED HALF. The structural test above only catches idioms somebody listed; the
-    # regression that actually shipped was a cygpath call, which is not one of them. This asks the
-    # only question that matters - what does it COST.
-    #
-    # IT MEASURES THE WINDOWS SPELLING, WHICH IS THE WHOLE POINT. The first cut of this test
-    # sourced lib-host.sh by its POSIX path and passed with the regression restored underneath it,
-    # because the cygpath branch is reached only for a path carrying a backslash or a drive
-    # letter - and a POSIX path has neither. That is exactly the shape of defect this round is
-    # about: a check that looks right, runs, and cannot fail. Production uses the Windows
-    # spelling: hooks.json invokes handlers as %CLAUDE_PLUGIN_ROOT%\hooks-handlers\..., so
-    # ${BASH_SOURCE[0]} arrives with backslashes and a drive letter, and the fork is paid.
-    #
-    # METHOD. Process-spawn timing cannot resolve this: `bash -c true` on the development box has
-    # a 74 ms floor and a mean past 300 ms under load. So the file is sourced N times inside ONE
-    # shell, with the double-source guard and the resolve cache cleared between iterations so the
-    # detection block really does run again, and compared against an empty file sourced the same
-    # number of times in the same shell.
+# ---------------------------------------------------------------------------------------------
+# COUNTING THE PROCESS, NOT TIMING IT (#31245 QA round 6).
+#
+# The first version of these was a wall-clock bar: sourcing lib-host.sh had to cost no more than
+# 8x an empty file. It caught the regression in isolation and then FAILED ON A HEALTHY TREE during
+# a full-suite run - 11.7x, because the suite loads the box - while the same regression measured
+# 9.5x on another loaded run. The healthy and broken ranges OVERLAP under load, so a timed bar
+# here cannot separate them, and a guard that cries wolf is one people learn to re-run until it
+# passes. (The figures are still worth having and are recorded in the commit message; what they
+# are not is a gate.)
+#
+# So these count the thing itself. The regression was a call to cygpath, taken for any path with a
+# backslash or a drive letter; a shim earlier on PATH records every invocation. Zero or some: no
+# threshold, no timing, no flap, and it means the same on a loaded box as on an idle one.
+#
+# THE SHIM IS PROVEN BEFORE IT IS TRUSTED, THROUGH THE IDENTICAL INVOCATION FORM. A shim that is
+# not reachable records nothing, which is indistinguishable from a clean result - a check that
+# cannot fail, which is the defect this whole round is about. An earlier cut of this proved the
+# shim with a bare `cygpath` call in the test's own shell and then measured through
+# `env ... bash -c`, which is not the same thing at all.
+
+# Build a cygpath shim that records every call and then does the real job, and return its
+# directory. Echoes the directory; writes the log to $2.
+_mmry_cygpath_shim() {
+    local dir="$1" log="$2" real
+    real="$(command -v cygpath)"
+    mkdir -p "$dir"
+    : > "$log"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'printf "%%s\n" "$*" >> "%s"\n' "$log"
+        printf 'exec "%s" "$@"\n' "$real"
+    } > "$dir/cygpath"
+    chmod +x "$dir/cygpath"
+}
+
+# Source a library through `env ... bash -c` with the shim on PATH, and echo how many times
+# cygpath was called. The probe runs in the SAME form, so a shim that cannot be reached fails
+# loudly instead of reporting zero.
+#   Usage: _mmry_count_cygpath <log> <shimdir> <lib-to-source> [VAR=value ...]
+_mmry_count_cygpath() {
+    local log="$1" shimdir="$2" lib="$3"; shift 3
+
+    : > "$log"
+    PATH="${shimdir}:$PATH" env -u MMRY_HOST -u MMRY_CONFIG_FILE \
+        bash -c 'cygpath -u "C:\probe" >/dev/null 2>&1' || true
+    if (( $(grep -c . "$log" || true) < 1 )); then
+        echo "the cygpath shim is not reachable in the form this test measures with, so the" >&2
+        echo "measurement below would report zero for any tree. Refusing to report it." >&2
+        return 1
+    fi
+
+    : > "$log"
+    PATH="${shimdir}:$PATH" env -u MMRY_HOST -u MMRY_CONFIG_FILE "$@" \
+        bash -c "source '$lib' >/dev/null 2>&1" || true
+    grep -c . "$log" || true
+}
+
+@test "hook-budgets: resolving the host spawns NO process, counted rather than timed" {
+    # THE SPELLING MATTERS AS MUCH AS THE COUNT. It sources through the WINDOWS path, because the
+    # cygpath branch is only reachable for a drive-lettered one - an earlier cut of this test used
+    # the POSIX path and passed with the regression restored underneath it.
     command -v cygpath >/dev/null 2>&1 || \
         skip "not a Windows shell: the drive-letter path this guards against cannot arise here"
 
-    local lib winlib
+    local lib winlib shimdir log calls
     lib="$PLUGIN_ROOT/hooks-handlers/lib-host.sh"
     [[ -f "$lib" ]]
     winlib="$(cygpath -w "$lib")"
-    # The spelling really is the Windows one, or this measures the same thing the POSIX path did.
     [[ "$winlib" == *'\'* ]]
     [[ "$winlib" =~ ^[A-Za-z]: ]]
 
-    local empty="$BATS_TEST_TMPDIR/empty-lib.sh"
-    printf '#!/usr/bin/env bash\n' > "$empty"
+    shimdir="$BATS_TEST_TMPDIR/shim"
+    log="$BATS_TEST_TMPDIR/cygpath-calls.log"
+    _mmry_cygpath_shim "$shimdir" "$log"
 
-    # THREE ROUNDS, AND THE MINIMUM OF THEM, for the reason every other timing in this repo takes
-    # a minimum: the box is shared. The figures here come out bimodal - 73 ms or 373 ms for the
-    # same forty sources, alternating - and 300 ms is exactly one process spawn on this machine,
-    # so something outside this code (a scanner, most likely) lands on roughly every other run.
-    # A warm-up did not cure it because it is not a cold cache. The minimum of three rounds is
-    # the round nothing else interfered with, and it is stable at 73-79 ms across many runs.
-    local out
-    out="$(env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE bash -c '
-        N=40
-        best_lib=0; best_empty=0
-        r=0
-        while (( r < 3 )); do
-            t0=$(date +%s%N)
-            i=0; while (( i < N )); do
-                unset _MMRY_LIB_HOST_SOURCED _MMRY_HOST_DIR_FROM_MARKER MMRY_CONFIG_FILE
-                _MMRY_HOST_KEY=$'"'"'\x01unset'"'"'
-                source "'"$winlib"'" >/dev/null 2>&1
-                i=$(( i + 1 ))
-            done
-            t1=$(date +%s%N)
-            i=0; while (( i < N )); do source "'"$empty"'"; i=$(( i + 1 )); done
-            t2=$(date +%s%N)
-            lib=$(( (t1 - t0) / 1000000 ))
-            emp=$(( (t2 - t1) / 1000000 ))
-            if (( best_lib == 0 || lib < best_lib )); then best_lib=$lib; best_empty=$emp; fi
-            r=$(( r + 1 ))
-        done
-        echo "$best_lib $best_empty"
-    ')"
-
-    local lib_ms empty_ms
-    lib_ms="${out%% *}"
-    empty_ms="${out##* }"
-    [[ "$lib_ms" =~ ^[0-9]+$ && "$empty_ms" =~ ^[0-9]+$ ]] || \
-        skip "this shell's date has no nanoseconds, so the cost cannot be measured here"
-
-    # THE BAR IS A RATIO, NOT A MILLISECOND FIGURE. An absolute ceiling was tried first and it
-    # would flap: on a loaded box the fixed library measured 871 ms for 40 sources while the
-    # regression measured 1148, and any threshold between those two is a coin toss. Against the
-    # empty-file control taken in the SAME shell moments later, the same two runs are 2.6x and
-    # 34.8x - and on a quiet box, 2.6x against 210x. The separation is two orders of magnitude
-    # wide, which is what a guard needs to be worth having.
-    #
-    # The control is floored at 20 ms so that a very fast control cannot turn a healthy library
-    # into a large ratio.
-    local floor=20
-    (( empty_ms > floor )) && floor="$empty_ms"
-    local ratio=$(( lib_ms * 10 / floor ))   # tenths, so 26 means 2.6x
-
-    echo "lib-host.sh via its WINDOWS path: ${lib_ms} ms for 40 sources; empty control ${empty_ms} ms; ratio $(( ratio / 10 )).$(( ratio % 10 ))x" >&3
-
-    (( ratio < 80 )) || {
-        echo "sourcing lib-host.sh costs ${lib_ms} ms for 40 sources ($(( lib_ms / 40 )) ms each)," >&2
-        echo "which is $(( ratio / 10 )).$(( ratio % 10 ))x the cost of sourcing an empty file in the same shell." >&2
+    # CODEX_HOME is explicitly absent: this is an ordinary Claude Code machine, which is the one
+    # that was paying for a second host it does not have.
+    calls="$(_mmry_count_cygpath "$log" "$shimdir" "$winlib" --unset=CODEX_HOME)"
+    echo "cygpath invocations while resolving the host from the Windows spelling: ${calls}" >&3
+    (( calls == 0 )) || {
+        echo "resolving the host spawned cygpath ${calls} time(s):" >&2
+        sed 's/^/    /' "$log" >&2
         echo "It is on the path of EVERY tool call through lib-jq.sh -> mmry-client.sh ->" >&2
-        echo "formation-check.sh (PostToolUse, no matcher). Something in the host detection" >&2
-        echo "block has started spawning a process on the Windows path spelling; cygpath and" >&2
-        echo "\$(cd ... && pwd) are the two that have done it before." >&2
+        echo "formation-check.sh (PostToolUse, no matcher), and on Windows every hook is" >&2
+        echo "invoked with a drive-lettered path, so this is paid every time." >&2
+        echo "cygpath is only needed to COMPARE two paths; defer it to the CODEX_HOME branch." >&2
+        return 1
+    }
+}
+
+@test "hook-budgets: and a Codex home that must be compared still gets its cygpath" {
+    # The other direction, without which the test above is satisfied by deleting the call
+    # outright - which would break the relocated-home customer the whole feature exists for.
+    command -v cygpath >/dev/null 2>&1 || skip "not a Windows shell"
+
+    local lib winlib shimdir log calls
+    lib="$PLUGIN_ROOT/hooks-handlers/lib-host.sh"
+    winlib="$(cygpath -w "$lib")"
+    shimdir="$BATS_TEST_TMPDIR/shim2"
+    log="$BATS_TEST_TMPDIR/cygpath-calls2.log"
+    _mmry_cygpath_shim "$shimdir" "$log"
+
+    # A CODEX_HOME in the Windows spelling is exactly the case that needs the mount table.
+    calls="$(_mmry_count_cygpath "$log" "$shimdir" "$winlib" \
+        'CODEX_HOME=C:\Users\somebody\relocated-codex')"
+    echo "cygpath invocations when CODEX_HOME must be compared: ${calls}" >&3
+    (( calls >= 1 )) || {
+        echo "the CODEX_HOME comparison no longer normalises through cygpath." >&2
+        echo "Under Git Bash C:\Users\x\AppData\Local\Temp\t and /tmp/t are the same" >&2
+        echo "directory and no string surgery makes them match, so a customer who relocated" >&2
+        echo "their Codex home stops being recognised." >&2
         return 1
     }
 }
