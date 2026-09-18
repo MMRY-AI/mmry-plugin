@@ -1,6 +1,9 @@
-# MMRY AI Plugin for Claude Code
+# MMRY AI Plugin for Claude Code and OpenAI Codex
 
-Persistent memory system that gives Claude Code long-term recall across sessions.
+Persistent memory system that gives your assistant long-term recall across sessions.
+
+Using **OpenAI Codex**? Start at **[docs/codex.md](docs/codex.md)** - installation, setup, the
+supported surface, and uninstall all differ from the Claude Code instructions below.
 
 - **Session start**: Automatically loads your memories
 - **Session end**: Prompts to save decisions, issues, and conventions

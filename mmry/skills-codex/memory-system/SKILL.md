@@ -179,6 +179,25 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 It opens a browser for the customer to sign in at mmryai.com and writes the credential. After it
 finishes, the customer restarts Codex.
 
+## Removing MMRY from Codex
+
+If the customer asks how to uninstall, do NOT point them at uninstall.sh or uninstall.bat. Both of
+those remove the CLAUDE CODE installation and both refuse to run from a Codex directory. The Codex
+removal is three steps, and the first one is theirs to do in the Codex interface:
+
+1. They remove the plugin through Codex, the same way they added it.
+2. Delete the MMRY directory:
+   ```bash
+   rm -rf "${CODEX_HOME:-$HOME/.codex}/mmry"
+   ```
+3. Delete the credential, which is what disconnects the machine from the account:
+   ```bash
+   rm -f "${CODEX_HOME:-$HOME/.codex}/mmry-config.json"
+   ```
+
+Tell them their memories are stored on the account and none of this deletes any of them, and that
+a Claude Code installation on the same machine is untouched.
+
 ## What is not available here, stated plainly
 
 If a customer asks what MMRY can do on Codex, or seems to expect something that is not here, point
@@ -188,6 +207,12 @@ https://github.com/MMRY-AI/mmry-plugin/blob/master/docs/codex.md
 The four things that are genuinely unavailable on this platform are: typed slash commands, the
 prompt before context is trimmed, waking an idle session with a formation message, and the
 plan-accepted prompt. Never imply any of them works here.
+
+Six formation operations also have no Codex surface yet: assign, claim, debrief, progress, report
+and state. Only the operations listed under "Coordination groups" above are available here. If a
+customer asks for one of the six, say plainly that it is not available from Codex yet rather than
+improvising a command - a handler script exists for each of them, but its instructions name typed
+slash commands the customer cannot use on this platform.
 
 ## Reporting a problem
 

@@ -311,3 +311,75 @@ _codex_tree() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"changed nothing"* ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# REACHABILITY (#31245 QA round 4).
+#
+# A platform nobody can find is not shipped. At round 3 the marketplace manifest still described
+# the product as being for Claude Code, so the first sentence a Codex customer read named the
+# other product; neither README contained the word Codex; docs/codex.md claimed "everything the
+# memory system can do" while six of thirteen formation operations have no Codex surface; and
+# uninstall appeared zero times across all three Codex customer surfaces while both uninstallers
+# tell the customer to remove the plugin through Codex.
+
+@test "reach: the marketplace description names Codex, not only the other product" {
+    local f="$PLUGIN_ROOT/../.claude-plugin/marketplace.json"
+    [[ -f "$f" ]]
+    local desc
+    desc="$(jq -r '.plugins[0].description' "$f")"
+    [[ -n "$desc" && "$desc" != "null" ]]
+    [[ "$desc" == *"Codex"* ]]
+}
+
+@test "reach: both READMEs point a Codex customer somewhere before the Claude instructions" {
+    grep -qi 'codex' "$PLUGIN_ROOT/README.md"
+    grep -qi 'codex' "$PLUGIN_ROOT/../README.md"
+    # And not merely a passing mention - they must route to the page that has the real
+    # instructions, because the Claude setup command writes the wrong account's credential.
+    grep -q 'docs/codex.md' "$PLUGIN_ROOT/README.md"
+    grep -q 'docs/codex.md' "$PLUGIN_ROOT/../README.md"
+}
+
+@test "reach: the customer page does not claim the whole feature set" {
+    # The exact overclaim, asserted as absent by its own words.
+    run grep -c 'Everything the memory system can do' "$PLUGIN_ROOT/../docs/codex.md"
+    assert_output "0"
+}
+
+@test "reach: and it names the six formation operations that have no Codex surface" {
+    local f="$PLUGIN_ROOT/../docs/codex.md" op
+    # Named individually. A vague "some operations are unavailable" is how a customer ends up
+    # searching for one of them.
+    for op in assign claim debrief progress report state; do
+        grep -q "$op" "$f"
+    done
+}
+
+@test "reach: the six named as missing really have NO Codex surface, and the six claimed really do" {
+    # THE ASSERTION THAT KEEPS THE DOC HONEST IN BOTH DIRECTIONS. Without the second loop this
+    # passes for a doc that under-promises as badly as it used to over-promise.
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" op
+    for op in assign claim debrief progress report state; do
+        run grep -c "formation-${op}.sh" "$skill"
+        assert_output "0"
+    done
+    for op in list start join say roster leave; do
+        run bash -c "grep -c 'formation-${op}.sh' '$skill' | head -1"
+        [[ "$output" != "0" ]]
+    done
+}
+
+@test "reach: uninstall is documented on the Codex surfaces that customers actually reach" {
+    # Both uninstaller scripts refuse on Codex and tell the customer to remove the plugin
+    # through Codex - advice that appeared in no Codex-facing document at all.
+    grep -qi 'removing mmry from codex' "$PLUGIN_ROOT/../docs/codex.md"
+    grep -qi 'removing mmry from codex' "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    # And the step that actually disconnects the machine is named in both.
+    grep -q 'mmry-config.json' "$PLUGIN_ROOT/../docs/codex.md"
+    grep -q 'mmry-config.json' "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+}
+
+@test "reach: the skill steers off the uninstallers that would remove the OTHER product" {
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    grep -qi 'do NOT point them at uninstall' "$skill"
+}

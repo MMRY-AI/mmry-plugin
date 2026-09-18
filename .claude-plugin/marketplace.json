@@ -7,7 +7,7 @@
     {
       "name": "mmry",
       "source": "./mmry",
-      "description": "Persistent memory system for Claude Code. Auto-loads, auto-saves, auto-reinforces.",
+      "description": "Persistent memory for Claude Code and OpenAI Codex. Auto-loads, auto-saves, auto-reinforces.",
       "version": "2.10.0",
       "category": "productivity"
     }

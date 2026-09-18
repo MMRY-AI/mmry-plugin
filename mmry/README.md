@@ -1,12 +1,24 @@
 # MMRY AI
 
-Persistent memory system for Claude Code. Automatically loads memories at session start, prompts to save at session end, before context compression, and when plans are accepted.
+Persistent memory for Claude Code and OpenAI Codex. Automatically loads memories at session start, prompts to save at session end, before context compression, and when plans are accepted.
 
 Cross-platform: works on Windows (Git Bash), macOS, and Linux.
 
+## Which assistant are you using?
+
+This plugin serves two hosts from one codebase, and they are not set up the same way.
+
+- **Claude Code** - everything below applies as written. Typed slash commands (`/mmry:save`,
+  `/mmry:search`, `/mmry:formation`) are available.
+- **OpenAI Codex** - see **[docs/codex.md](../docs/codex.md)** for installation, setup, what is
+  and is not supported, and how to uninstall. Codex has no typed slash commands; you ask for what
+  you want in plain words. Do not follow the Claude Code instructions below on Codex: the setup
+  command differs, and running the wrong one writes your credential into the other product's
+  account file.
+
 ## Requirements
 
-- **Claude Code** (latest version)
+- **Claude Code** (latest version) **or OpenAI Codex**
 - **bash** (Git Bash on Windows, native on macOS/Linux)
 - **curl** (included with Git Bash, native on macOS/Linux)
 - **jq** (ships bundled with the plugin, so nothing to install; a system jq is used automatically when present)

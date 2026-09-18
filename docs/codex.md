@@ -67,7 +67,7 @@ bash, which cannot see your Windows home directory. If you keep bash somewhere u
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save before you finish** | At the end of a turn, Codex is reminded to record what is new. |
-| **Everything the memory system can do** | Save, search, reinforce, link, retire, change who can see a memory, start and join formations. |
+| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and the formation operations listed below. |
 
 ---
 
@@ -125,10 +125,40 @@ memory.
   there in Claude Code and in any connected assistant, and vice versa.
 - **Privacy controls are the same.** Global, Private and Group visibility all work, and re-scoping
   is still restricted to whoever saved the memory.
-- **Formations work.** You can start one, join one, speak to it, address a message to one member,
-  see the roster and leave.
+- **Formations work, for six operations.** You can list them, start one, join one, speak to it
+  (including to one member), see the roster, and leave. Messages reach you as you work.
+
+  **Six further formation operations have no Codex surface yet** - assign, claim, debrief,
+  progress, report and state. They exist on Claude Code and are named here so you do not go
+  looking for something that is not there. A formation you run from Codex can still be assigned
+  to and debriefed by a Claude Code member of the same formation; it is the Codex side of those
+  six that is missing, not the capability.
 - **Tiers and reinforcement are the same.** Nothing about how memories age or survive differs by
   platform.
+
+---
+
+## Removing MMRY from Codex
+
+Both uninstaller scripts in this plugin remove the **Claude Code** installation, and both refuse
+to run when they are started from a Codex directory - so there is no single command here. Removing
+it from Codex is three steps:
+
+1. **Remove the plugin through Codex**, the same way you added it.
+2. **Delete the MMRY directory** inside your Codex home:
+   ```bash
+   rm -rf "${CODEX_HOME:-$HOME/.codex}/mmry"
+   ```
+3. **Delete the credential file**, which is what disconnects this machine from your account:
+   ```bash
+   rm -f "${CODEX_HOME:-$HOME/.codex}/mmry-config.json"
+   ```
+
+Your memories are stored on your account, not on this machine, so none of this deletes anything you
+have saved. Setting Codex up again restores access to all of it.
+
+If you also use Claude Code, this leaves that installation completely untouched - the two keep
+separate credentials and separate directories on purpose.
 
 ---
 
