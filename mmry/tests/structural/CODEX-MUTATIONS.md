@@ -84,9 +84,68 @@ Stated here so the next reviewer does not have to derive it from absence.
 
 | Date | Machine | Result |
 |---|---|---|
+| 2026-09-18 (QA round 4) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | **13 refused, 0 survived, 0 not performed, 13 of 82 run** (filtered to the round-4 experiments). Per-experiment table below. |
 | 2026-09-16 | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 49 refused, 1 survived, 0 not performed, 50 of 50 run. The survivor is analysed below and is now closed. |
 | 2026-09-17 (QA round 3, clean re-run) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | **69 refused, 0 survived, 0 not performed, 69 of 69 run.** The run below, repeated end to end after the four experiment corrections. |
 | 2026-09-16 (QA round 3, first run) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 66 refused, 2 survived, 1 not performed, 69 of 69 run. **All three were faults in the EXPERIMENTS, not findings about the tests.** Each was corrected and re-run individually; all three now REFUSE. Detail below. |
+
+### 2026-09-18 (QA round 4) - thirteen new experiments, all refused
+
+Round 4 took the suite from 69 experiments to 82. Each of the thirteen reverts one round-4 fix and
+names the test that must refuse.
+
+    MMRY_MUTATION_FILTER="[R4]" bash tests/structural/run-codex-mutations.sh
+
+    === refused: 13   survived: 0   experiments not performed: 0   (ran 13 of 82) ===
+
+The working tree was clean afterwards, as the EXIT trap requires.
+
+**The thirteen, as the run reported them.** This is the per-experiment table, not only a summary:
+the round-3 entry below records a corrected 69-of-69 count with no table behind it, and a count
+without its rows is a claim rather than evidence.
+
+| # | Verdict | Mutation |
+|---|---|---|
+| 1/82 | REFUSED | the codex Foundation budget drifts back below its own deadline |
+| 2/82 | REFUSED | the Foundation hook stops asking whether this host has its own credential |
+| 3/82 | REFUSED | setup stops validating --host and lets an unknown value default |
+| 4/82 | REFUSED | the host comparison stops folding case on Windows |
+| 5/82 | REFUSED | the setup hint goes back to a hardcoded home |
+| 6/82 | REFUSED | a trailing separator is left on the resolved config dir |
+| 7/82 | REFUSED | session-init copies handlers even when the marker could not be written |
+| 8/82 | REFUSED | the uninstaller uses CODEX_HOME raw, so a trailing backslash breaks the pattern |
+| 9/82 | REFUSED | the session-start fault note goes back in unescaped |
+| 10/82 | REFUSED | the credential file is written before its mode is narrowed |
+| 11/82 | REFUSED | the marketplace description stops naming Codex |
+| 12/82 | REFUSED | the customer page goes back to promising the whole feature set |
+| 13/82 | REFUSED | the Codex skill stops explaining how to uninstall |
+
+#### Two patterns were stale, and cost seconds rather than a cycle
+
+`MMRY_MUTATION_DRYRUN=1`, added this round, applies every pattern, reports whether it still
+matches, restores, and skips the test run. Run against the thirteen BEFORE the real run, it found
+two experiments that could not be performed:
+
+| Reported | Experiment | What was actually wrong |
+|---|---|---|
+| NOT APPLIED | the codex Foundation budget drifts back below its own deadline | The pattern spanned a newline and reproduced the file's indentation by hand. Re-anchored on the bare `"timeout": 20`, which is unique among that file's six budgets (8, 10, 10, 15, 20, 30). |
+| NOT APPLIED | the setup hint goes back to a hardcoded home | The pattern reconstructed `printf '...', "$shown"` where the source has a space, not a comma. Re-aimed at the relocated branch only, so the Claude literal is untouched and the experiment isolates the defect it is about. |
+
+Both were faults in the EXPERIMENTS, not findings about the tests. Round 3 found three of the same
+kind and paid for each with a long run before it reported them; this round found two in seconds.
+That is the whole reason the dry-run mode exists.
+
+#### Outstanding: the corrected 69 still has no per-experiment table
+
+A reviewer noted, correctly, that the 2026-09-17 clean re-run records `69 refused, 0 survived` as a
+summary line only, while the per-experiment table printed under it is the run from BEFORE the four
+corrections. That is still true. The thirteen rows above are a table for the round-4 experiments,
+not for the other sixty-nine.
+
+Closing it honestly needs a full 82-experiment run, upwards of two hours on this machine, and it
+should be done after this round's product changes settle rather than during review - a table
+generated now would describe a tree that is still changing. Recorded here as outstanding rather
+than left as a silent gap.
 
 ### 2026-09-16 (QA round 3) - nineteen new experiments, and what the run found
 
