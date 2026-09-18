@@ -263,3 +263,84 @@ _eval_installed() {
     run bash -c "source '$LIB'; _mmry_norm_path_str '/c/already/posix/'"
     assert_output "/c/already/posix"
 }
+
+# ---------------------------------------------------------------------------------------------
+# #31245 QA ROUND 4.
+
+@test "codex: a LOWERCASE Windows spelling of CODEX_HOME is the same directory, and resolves as one" {
+    # THE DEFECT. The normaliser folded separators and the drive letter but not segment case, so
+    # CODEX_HOME=c:\users\x\codexhome became /c/users/x/codexhome while pwd answered
+    # /c/Users/x/codexhome. On a case-insensitive filesystem those are not two spellings of
+    # equivalent paths, they are the same name. The prefix test compared them byte for byte,
+    # failed, and the handler resolved the host as Claude and reached for the Claude credential.
+    local lib; lib="$(_install_at "$TEST_TMPDIR/lower" "mycodex" "")"
+    local posix="$TEST_TMPDIR/lower/mycodex" windows lowered
+    if command -v cygpath >/dev/null 2>&1; then
+        windows="$(cygpath -w "$posix")"
+    else
+        skip "cygpath is not available; the drive-letter spelling only exists on Windows"
+    fi
+    lowered="$(printf '%s' "$windows" | tr '[:upper:]' '[:lower:]')"
+    # THE PREMISE, asserted rather than assumed: if the path had no uppercase to lose, this test
+    # would pass for the wrong reason on a machine whose temp path is already lowercase.
+    [[ "$lowered" != "$windows" ]] || skip "this temp path has no uppercase segments to fold"
+
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/lower" CODEX_HOME="$lowered" \
+        bash -c "source '$lib'; mmry_host"
+    assert_output "codex"
+}
+
+@test "req4: case folding does NOT happen where the platform is case-sensitive" {
+    # The other half. On Linux /home/A and /home/a are different directories, and a resolver that
+    # folded them would claim a Codex install that is not there. OSTYPE is forced rather than
+    # waited for, so this assertion runs on the Windows machine this was developed on.
+    local lib; lib="$(_install_at "$TEST_TMPDIR/cs" "mycodex" "")"
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/cs" \
+        CODEX_HOME="$TEST_TMPDIR/cs/MYCODEX" \
+        bash -c "OSTYPE=linux-gnu; source '$lib'; mmry_host"
+    assert_output "claude"
+}
+
+@test "codex: a trailing separator on CODEX_HOME is not part of the directory" {
+    # CODEX_HOME=C:\Users\x\codexhome\ is what tab-completion in cmd hands you, and it produced a
+    # credential path of "...\codexhome\/mmry-config.json".
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/ts" MMRY_HOST=codex \
+        CODEX_HOME="/opt/codexhome/" bash -c "source '$LIB'; mmry_host_config_file"
+    assert_output "/opt/codexhome/mmry-config.json"
+}
+
+@test "codex: and a trailing BACKSLASH is stripped too, which is the Windows spelling" {
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/tsb" MMRY_HOST=codex \
+        CODEX_HOME='D:\work\codexhome\' bash -c "source '$LIB'; mmry_host_config_dir"
+    assert_output 'D:\work\codexhome'
+}
+
+@test "codex: the setup hint names the directory the credential was ACTUALLY looked for in" {
+    # THE SELF-CONTRADICTING REMEDY. The refusal prints the resolved path under "looked for" and
+    # the hint under "create it". The hint was hardcoded to ~/.codex, so for the relocated-home
+    # customer this whole feature exists for, the two lines disagreed and the one the customer was
+    # told to run did not exist.
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/hint" MMRY_HOST=codex \
+        CODEX_HOME="/opt/relocated" bash -c "source '$LIB'; mmry_host_setup_hint"
+    assert_output "bash /opt/relocated/mmry/setup/mmry-setup.sh"
+}
+
+@test "codex: and the two lines of the refusal message agree with each other" {
+    # Asserted on the MESSAGE, not on the two functions separately, because the defect was that
+    # the two disagreed - which is invisible if each is only ever checked on its own.
+    run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/agree" MMRY_HOST=codex \
+        CODEX_HOME="/opt/relocated" bash -c "source '$LIB'; mmry_host_assert_own_credential 2>&1"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"looked for: /opt/relocated/mmry-config.json"* ]]
+    [[ "$output" == *"create it:  bash /opt/relocated/mmry/setup/mmry-setup.sh"* ]]
+    # And the hint must not name a directory the "looked for" line did not.
+    [[ "$output" != *"~/.codex"* ]]
+}
+
+@test "req4: the Claude setup hint is still the tilde literal, byte for byte" {
+    # The governing rule. The derived form must not change the string every existing message has
+    # carried since before this ticket.
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="/home/someone" \
+        bash -c "source '$LIB'; mmry_host_setup_hint"
+    assert_output "bash ~/.claude/mmry/setup/mmry-setup.sh"
+}

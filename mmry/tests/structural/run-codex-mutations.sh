@@ -107,7 +107,7 @@ SURVIVED=0
 ERRORS=0
 RUN=0
 SKIPPED=0
-TOTAL=69
+TOTAL=82
 SURVIVOR_LIST=""
 ERROR_LIST=""
 CURRENT_FILE=""
@@ -407,6 +407,49 @@ mutate "formation-start registers every session as claude-code" hooks-handlers/f
 mutate "setup exports its opt-out into everything it spawns" setup/mmry-setup.sh   's = s.replace("MMRY_ALLOW_NO_CREDENTIAL=1", "export MMRY_ALLOW_NO_CREDENTIAL=1", 1).replace(chr(10) + "unset MMRY_ALLOW_NO_CREDENTIAL", "", 1)'   e2e/codex-setup.bats "does not leak"
 mutate "the tool-call delivery handler does nothing at all" hooks-handlers/formation-check.sh   's = s.replace("#!/usr/bin/env bash", "#!/usr/bin/env bash"+chr(10)+"exit 1", 1)'   structural/codex-formation-delivery.bats "never cancels a tool call"
 mutate "the Codex skill becomes a byte-for-byte copy of the Claude Code one" skills-codex/memory-system/SKILL.md   's = io.open(p.replace("skills-codex", "skills"), encoding="utf-8").read().replace(chr(13) + chr(10), chr(10))'   structural/codex-manifest.bats "DIFFERENT document"
+
+# ---- #31245 QA ROUND 4 -----------------------------------------------------------------------
+# The four failures, the three verified findings and the reachability items. Each experiment
+# reverts one round-4 fix and names the test that must refuse.
+
+# R1 - the Codex Foundation hook budget, and the drift between the two registrations.
+mutate "the codex Foundation budget drifts back below its own deadline [R4]" hooks/codex-hooks.json   's = s.replace(chr(34)+"userpromptsubmit-foundation"+chr(34)+","+chr(10)+"            "+chr(34)+"timeout"+chr(34)+": 20", chr(34)+"userpromptsubmit-foundation"+chr(34)+","+chr(10)+"            "+chr(34)+"timeout"+chr(34)+": 5")'   structural/hook-budgets.bats "SAME Foundation budget"
+
+# R2 - the unconfigured Codex install shouting on every prompt.
+mutate "the Foundation hook stops asking whether this host has its own credential [R4]" hooks-handlers/userpromptsubmit-foundation.sh   's = s.replace("if ! mmry_host_assert_own_credential >/dev/null 2>&1; then", "if false; then", 1)'   handlers/userpromptsubmit-foundation.bats "emits NOTHING on a prompt"
+
+# R3 - an unrecognised --host falling through to the other product's account.
+mutate "setup stops validating --host and lets an unknown value default [R4]" setup/mmry-setup.sh   's = s.replace("--host)        MMRY_HOST_ARG=", "--host)        MMRY_HOST=", 1)'   e2e/codex-setup.bats "REFUSED, not quietly resolved"
+
+# R4 - a lowercase Windows CODEX_HOME resolving as the wrong host.
+mutate "the host comparison stops folding case on Windows [R4]" hooks-handlers/lib-host.sh   's = s.replace("msys*|cygwin*|win32*) return 0 ;;", "msys*|cygwin*|win32*) return 1 ;;", 1)'   unit/lib-host.bats "LOWERCASE Windows spelling"
+
+# The remedy that contradicted itself.
+mutate "the setup hint goes back to a hardcoded home [R4]" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "bash %s/mmry/setup/mmry-setup.sh" + chr(39) + ", " + chr(34) + "$shown" + chr(34), "printf " + chr(39) + "bash ~/.codex/mmry/setup/mmry-setup.sh" + chr(39), 1)'   unit/lib-host.bats "two lines of the refusal message agree"
+
+# A trailing separator on CODEX_HOME.
+mutate "a trailing separator is left on the resolved config dir [R4]" hooks-handlers/lib-host.sh   's = s.replace("while [[ " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " == */ || " + chr(34) + "$_MMRY_HOST_DIR_V" + chr(34) + " == *" + chr(92) + chr(92) + " ]]; do", "while false; do", 1)'   unit/lib-host.bats "trailing separator on CODEX_HOME"
+
+# The marker invariant.
+mutate "session-init copies handlers even when the marker could not be written [R4]" hooks-handlers/session-init.sh   's = s.replace("if (( _mmry_marker_ok == 0 )) && [[ " + chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " ]]; then", "if false; then", 1)'   handlers/codex-session.bats "handlers are NOT installed"
+
+# The Windows uninstaller's trailing backslash.
+mutate "the uninstaller uses CODEX_HOME raw, so a trailing backslash breaks the pattern [R4]" setup/uninstall.bat   's = s.replace("findstr /i /l /c:" + chr(34) + "%MMRY_CODEX_HOME%" + chr(34), "findstr /i /l /c:" + chr(34) + "%CODEX_HOME%" + chr(34), 1)'   structural/codex-docs-and-eol.bats "trailing backslash still makes it refuse"
+
+# The session-start fault note.
+mutate "the session-start fault note goes back in unescaped [R4]" hooks-handlers/session-start.sh   's = s.replace("MMRY_HOOK_FAULT_NOTE=" + chr(34) + "$(printf ", "MMRY_HOOK_FAULT_NOTE_UNUSED=" + chr(34) + "$(printf ", 1)'   handlers/codex-session.bats "still emits VALID JSON"
+
+# The credential file's permissions.
+mutate "the credential file is written before its mode is narrowed [R4]" setup/mmry-setup.sh   's = s.replace("chmod 600 " + chr(34) + "$CONFIG_FILE" + chr(34), "true " + chr(34) + "$CONFIG_FILE" + chr(34), 1)'   e2e/codex-setup.bats "created private BEFORE"
+
+# Reachability: the marketplace manifest naming only the other product.
+mutate "the marketplace description stops naming Codex [R4]" ../.claude-plugin/marketplace.json   's = s.replace("Persistent memory for Claude Code and OpenAI Codex.", "Persistent memory system for Claude Code.", 1)'   structural/codex-docs-and-eol.bats "marketplace description names Codex"
+
+# Reachability: the page over-promising the formation surface again.
+mutate "the customer page goes back to promising the whole feature set [R4]" ../docs/codex.md   's = s.replace("| **The memory operations** |", "| **Everything the memory system can do** |", 1)'   structural/codex-docs-and-eol.bats "does not claim the whole feature set"
+
+# Reachability: uninstall disappearing from the Codex surfaces again.
+mutate "the Codex skill stops explaining how to uninstall [R4]" skills-codex/memory-system/SKILL.md   's = s.replace("## Removing MMRY from Codex", "## Removing MMRY from somewhere else", 1)'   structural/codex-docs-and-eol.bats "uninstall is documented on the Codex surfaces"
 
 echo
 echo "=== refused: $REFUSED   survived: $SURVIVED   experiments not performed: $ERRORS   (ran $RUN of $TOTAL) ==="
