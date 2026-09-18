@@ -67,7 +67,8 @@ bash, which cannot see your Windows home directory. If you keep bash somewhere u
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save before you finish** | At the end of a turn, Codex is reminded to record what is new. |
-| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and the formation operations listed below. |
+| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and every formation operation. |
+| **Reloading your memories mid-session** | Ask your assistant to reload and it re-runs the session-start load, which also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
 
@@ -125,14 +126,14 @@ memory.
   there in Claude Code and in any connected assistant, and vice versa.
 - **Privacy controls are the same.** Global, Private and Group visibility all work, and re-scoping
   is still restricted to whoever saved the memory.
-- **Formations work, for six operations.** You can list them, start one, join one, speak to it
-  (including to one member), see the roster, and leave. Messages reach you as you work.
+- **Formations work, all of them.** List, start, join, speak to the formation or to one member,
+  see the roster, assign work, report progress, claim an area, read the report, debrief and leave.
+  Messages reach you as you work.
 
-  **Six further formation operations have no Codex surface yet** - assign, claim, debrief,
-  progress, report and state. They exist on Claude Code and are named here so you do not go
-  looking for something that is not there. A formation you run from Codex can still be assigned
-  to and debriefed by a Claude Code member of the same formation; it is the Codex side of those
-  six that is missing, not the capability.
+  Earlier builds of this page said six of those operations had no Codex surface. They do now. The
+  reason they were held back was that the instructions they printed when something went wrong
+  named typed slash commands, which is worse than nothing on a platform that has none; those
+  messages are derived from the platform you are on, so every operation is usable here.
 - **Tiers and reinforcement are the same.** Nothing about how memories age or survive differs by
   platform.
 
@@ -171,6 +172,8 @@ separate credentials and separate directories on purpose.
 | Nothing at all happens, on Windows | Is Git for Windows installed? Try setting `MMRY_BASH` to your `bash.exe`. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |
+| A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It re-runs the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |
+| "Your Foundation directives were NOT applied to this turn" | Re-send the prompt. If it keeps happening, ask your assistant to reload your memories; the notice itself names the exact command for your install. |
 
 To report a problem, ask the assistant to submit feedback — it has a script for it — or write to us
 through [mmryai.com](https://mmryai.com).

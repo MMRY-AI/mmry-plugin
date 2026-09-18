@@ -281,32 +281,111 @@ _ROSTER_JSON='{"formation":{"id":42,"objective":"migrate the billing schema"},"m
     _assert_targets_exist
 }
 
-@test "roster: the same footer on Claude Code still names all three slash commands" {
+@test "roster: the same footer on Claude Code is unchanged, BYTE FOR BYTE" {
+    # THREE SUBSTRINGS ARE NOT A FOOTER (#31245 QA round 6).
+    #
+    # The round-5 version of this test asserted these same three fragments and passed against a
+    # footer whose LINE BREAKS HAD MOVED: the same 199 bytes, re-wrapped, so that an existing
+    # Claude Code customer saw different output. Requirement 4 is about what the customer sees,
+    # and every substring was still present in the new arrangement, so the assertion could not
+    # see the change it existed to prevent.
+    #
+    # The whole block is now compared against a literal. A re-wrap, a dropped word, an extra
+    # space and a changed break all fail, and the failure prints both so the difference is
+    # readable rather than a bare "not equal".
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
-    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$_ROSTER_JSON" \
+    local out
+    out="$(PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$_ROSTER_JSON" \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-        run bash "${HANDLERS}/formation-roster.sh"
+        bash "${HANDLERS}/formation-roster.sh")"
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *'/mmry:formation say "..." --to <id>'* ]]
-    [[ "$output" == *"/mmry:formation progress <Accepted|Done|Blocked|Abandoned>"* ]]
-    [[ "$output" == *"/mmry:formation report"* ]]
+    # The footer begins at the first line of it and runs to the end of the output.
+    local actual expected
+    actual="$(printf '%s\n' "$out" | sed -n '/^Direct a message at one of them with/,$p')"
+    expected="$(cat <<'FOOTER'
+Direct a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off
+and the message goes to the whole formation.
+The state in brackets is the last thing that member reported. Report your own with
+/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account
+with /mmry:formation report.
+FOOTER
+)"
+    [ -n "$actual" ]
+    if [ "$actual" != "$expected" ]; then
+        echo "the Claude Code roster footer has changed." >&2
+        echo "--- expected ---" >&2; printf '%s\n' "$expected" >&2
+        echo "--- actual ---"   >&2; printf '%s\n' "$actual"   >&2
+        return 1
+    fi
 }
 
 # ------------------------------------------------------------------ the boundary
 
-@test "surface: none of the four exposed handlers names a slash command on Codex" {
-    # A sweep rather than four separate assertions, so that a fifth message added to any of these
-    # four handlers is caught without anyone remembering to add a test for it. Each invocation is
-    # an argument-validation path, so none of them reaches the network.
-    local failures=""
-    _run_codex "${HANDLERS}/formation-join.sh";   [[ "$output" == *"/mmry:"* ]] && failures="${failures} join"
-    _run_codex "${HANDLERS}/formation-start.sh";  [[ "$output" == *"/mmry:"* ]] && failures="${failures} start"
-    _run_codex "${HANDLERS}/formation-say.sh";    [[ "$output" == *"/mmry:"* ]] && failures="${failures} say"
-    _run_codex "${HANDLERS}/formation-roster.sh"; [[ "$output" == *"/mmry:"* ]] && failures="${failures} roster"
+@test "surface: each exposed handler replaces its slash command with one that runs here" {
+    # THIS SWEEP USED TO PROVE NOTHING (#31245 QA round 6).
+    #
+    # It checked only that "/mmry:" was ABSENT from the Codex output. QA replaced all four
+    # handlers with an immediate `exit` and the test went green: four silent handlers satisfy
+    # "no slash command appears" perfectly, while the customer is left with a complaint and no
+    # way forward. Absence is half an assertion.
+    #
+    # So the expectation is now DERIVED FROM THE CLAUDE RUN of the same handler with the same
+    # arguments: whatever number of commands the Claude message names, the Codex message must
+    # name that many runnable scripts and zero slash commands. A handler that goes quiet fails,
+    # because the Claude side still names its commands and the Codex side now names none.
+    local failures="" h
+    for h in join start say roster; do
+        local script="${HANDLERS}/formation-${h}.sh"
+        local claude_out codex_out n_claude n_slash n_runnable
+
+        claude_out="$(MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            bash "$script" 2>&1 || true)"
+        codex_out="$(MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            bash "$script" 2>&1 || true)"
+
+        n_claude="$(printf '%s' "$claude_out"  | grep -o -F '/mmry:' | grep -c . || true)"
+        n_slash="$(printf '%s'  "$codex_out"   | grep -o -F '/mmry:' | grep -c . || true)"
+        n_runnable="$(printf '%s' "$codex_out" | grep -o -F "bash ${CODEX_DIR}/mmry/hooks-handlers/formation-" | grep -c . || true)"
+
+        # The control on the control: if the Claude run named nothing, this handler's comparison
+        # is vacuous and the sweep is decoration. All four of these DO name commands.
+        [ "$n_claude" -gt 0 ] || { failures="${failures} ${h}(claude-named-nothing)"; continue; }
+        [ "$n_slash" -eq 0 ] || failures="${failures} ${h}(slash-survives)"
+        [ "$n_runnable" -eq "$n_claude" ] || \
+            failures="${failures} ${h}(claude:${n_claude}/codex:${n_runnable})"
+    done
     [ -z "$failures" ] || {
-        echo "these handlers still name a slash command on Codex:${failures}" >&2
+        echo "handlers whose Codex message does not match their Claude message:${failures}" >&2
         return 1
     }
+}
+
+@test "surface: and the sweep above really fails when a handler goes silent" {
+    # The round-6 finding, turned into a standing check. A handler replaced by an immediate exit
+    # must fail the comparison, not pass it. Run against a COPY so nothing is mutated in place.
+    local tmp="${BATS_TEST_TMPDIR}/silent"
+    mkdir -p "$tmp"
+    printf '#!/usr/bin/env bash\nexit 1\n' > "${tmp}/formation-join.sh"
+
+    # The Claude control is the REAL handler, run from its own directory so that it can source
+    # the client. Only the Codex side is the stand-in, because "this handler went silent" is the
+    # condition being reproduced, not "this handler was moved".
+    local claude_out codex_out n_claude n_runnable
+    claude_out="$(MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash "${HANDLERS}/formation-join.sh" 2>&1 || true)"
+    codex_out="$(MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" \
+        bash "${tmp}/formation-join.sh" 2>&1 || true)"
+
+    n_claude="$(printf '%s' "$claude_out"  | grep -o -F '/mmry:' | grep -c . || true)"
+    n_runnable="$(printf '%s' "$codex_out" | grep -o -F "bash ${CODEX_DIR}/mmry/hooks-handlers/formation-" | grep -c . || true)"
+
+    # The silent handler names nothing; the Claude control names something. That inequality is
+    # exactly what the sweep above reports as a failure, and it is what the old sweep could not
+    # see because it only looked for "/mmry:" being absent - which it is, in an empty string.
+    [ "$n_claude" -gt 0 ]
+    [ "$n_runnable" -eq 0 ]
+    [ "$n_runnable" -ne "$n_claude" ]
+    [[ "$codex_out" != *"/mmry:"* ]]
 }

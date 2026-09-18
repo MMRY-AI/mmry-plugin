@@ -322,6 +322,112 @@ _registered_timeout() {
     [ -z "$output" ]
 }
 
+# ---------------------------------------------------------------------------------------------
+# THE SAME TWO NOTICES, ON A CONFIGURED CODEX INSTALL (#31245 QA round 6).
+#
+# The round-4 fix in this handler makes an UNCONFIGURED Codex install exit silently rather than
+# printing the crash notice. It did nothing for a CONFIGURED one, which is the ordinary case and
+# still reaches both notices on any worker failure. QA reproduced 725 bytes of it on a configured
+# install hitting the deadline, naming /mmry:load-memories - a command Codex customers cannot type
+# - and ~/.claude/mmry-config.json, the OTHER product's file.
+#
+# Both branches are covered, because fixing the branch somebody looked at and leaving its sibling
+# three lines below is the defect this task keeps repeating. Each is paired with its Claude control
+# asserting the literal is unchanged, so a handler that "fixes" this by naming no remedy at all
+# fails rather than passes.
+
+_codex_home_with_credential() {
+    # A Codex home that is NOT the default, because the customer this feature exists for is the one
+    # who moved it, and a message built from a hardcoded ~/.codex would pass against the default.
+    local d="$TEST_TMPDIR/codexhome"
+    mkdir -p "$d/mmry"
+    cat > "$d/mmry-config.json" <<'EOF'
+{
+  "apiUrl": "http://127.0.0.1:9",
+  "authMethod": "apikey",
+  "apiKey": "test-key",
+  "foundationReinject": "true",
+  "foundationReinjectTokenCap": 1500,
+  "foundationRefreshSeconds": 0
+}
+EOF
+    printf '%s' "$d"
+}
+
+@test "userpromptsubmit-foundation: a CONFIGURED Codex install past the deadline is told something it can do" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    _make_config
+    local shim codex
+    shim="$(_make_slow_jq 20)"
+    codex="$(_codex_home_with_credential)"
+
+    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 \
+        MMRY_HOST=codex CODEX_HOME="$codex" \
+        run bash "$HANDLER"
+
+    [ "$status" -eq 0 ]
+    # It still fires: a configured install is NOT silenced by the round-4 unconfigured-install
+    # guard, and a test that merely asserted silence here would pass against the defect.
+    [[ "$output" == *'systemMessage'* ]]
+    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'exceeded'* ]]
+
+    # THE DEFECT, ASSERTED AS ABSENT.
+    [[ "$output" != *'/mmry:load-memories'* ]]
+    [[ "$output" != *'~/.claude/mmry-config.json'* ]]
+
+    # AND THE REMEDY, ASSERTED AS PRESENT. Absence alone is satisfied by a notice that stopped
+    # offering any remedy at all, which is worse for the customer, not better.
+    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]]
+    [[ "$output" == *"${codex}/mmry-config.json"* ]]
+    # The script it names is really there. A path that reads plausibly and is not on disk is the
+    # same failure in a nicer font.
+    [ -f "$PLUGIN_ROOT/hooks-handlers/session-start.sh" ]
+}
+
+@test "userpromptsubmit-foundation: req4 - and on Claude Code that deadline notice is unchanged" {
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    _make_config
+    local shim
+    shim="$(_make_slow_jq 20)"
+
+    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'systemMessage'* ]]
+    [[ "$output" == *'/mmry:load-memories'* ]]
+    [[ "$output" == *'~/.claude/mmry-config.json'* ]]
+    [ -f "$PLUGIN_ROOT/commands/load-memories.md" ]
+}
+
+@test "userpromptsubmit-foundation: a CONFIGURED Codex install whose worker CRASHES gets the same treatment" {
+    # The sibling branch. Round 4 fixed the notice's unconfigured case; this is the one three
+    # lines below it in the same if/else, which round 5 shipped untouched.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    _make_config
+    local shim codex
+    shim="$TEST_TMPDIR/broken-jq.sh"
+    cat > "$shim" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done
+exit 9
+EOF
+    chmod +x "$shim"
+    codex="$(_codex_home_with_credential)"
+
+    MMRY_JQ="$shim" MMRY_HOST=codex CODEX_HOME="$codex" run bash "$HANDLER"
+
+    [ "$status" -eq 0 ]
+    if [[ "$output" != *'systemMessage'* ]]; then
+        # The crash branch is reached through the worker's exit status, which some environments
+        # swallow. Say so rather than passing silently on a test that checked nothing.
+        skip "the worker did not exit non-zero in this environment; the deadline branch above covers the same two strings"
+    fi
+    [[ "$output" != *'/mmry:load-memories'* ]]
+    [[ "$output" != *'~/.claude/mmry-config.json'* ]]
+    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]]
+}
+
 @test "userpromptsubmit-foundation: an absurd deadline value falls back to the default rather than disabling the guard" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     MMRY_FOUNDATION_DEADLINE_SECS="not-a-number" run bash "$HANDLER"

@@ -321,6 +321,12 @@ _codex_tree() {
 # memory system can do" while six of thirteen formation operations have no Codex surface; and
 # uninstall appeared zero times across all three Codex customer surfaces while both uninstallers
 # tell the customer to remove the plugin through Codex.
+#
+# THE SIX-MISSING-OPERATIONS ASSERTIONS ARE NOW PARITY ASSERTIONS (#31245 QA round 6). Those six
+# were held back for one reason: the messages they printed named typed slash commands. That is
+# fixed, so the operations are documented and the pages that said otherwise were made accurate.
+# The invariant worth keeping is not "six are missing" - it is that THE PAGES AND THE CODE AGREE
+# about what a Codex customer can run, in both directions, which is what the pair below asserts.
 
 @test "reach: the marketplace description names Codex, not only the other product" {
     local f="$PLUGIN_ROOT/../.claude-plugin/marketplace.json"
@@ -346,26 +352,51 @@ _codex_tree() {
     assert_output "0"
 }
 
-@test "reach: and it names the six formation operations that have no Codex surface" {
-    local f="$PLUGIN_ROOT/../docs/codex.md" op
-    # Named individually. A vague "some operations are unavailable" is how a customer ends up
-    # searching for one of them.
-    for op in assign claim debrief progress report state; do
-        grep -q "$op" "$f"
-    done
+@test "reach: the customer page no longer claims formation operations are missing that are not" {
+    local f="$PLUGIN_ROOT/../docs/codex.md"
+    # The exact overclaim in the other direction, asserted as absent by its own words. A page that
+    # under-promises sends a customer looking for a Claude Code machine they do not need.
+    run grep -c 'have no Codex surface yet' "$f"
+    assert_output "0"
+    run grep -c 'Formations work, for six operations' "$f"
+    assert_output "0"
+    # And the four things that ARE genuinely unavailable are still named, so the section did not
+    # get emptied out along with the stale claim.
+    grep -qi 'no slash commands' "$f"
+    grep -qi 'before your conversation is trimmed' "$f"
+    grep -qi 'not wake an idle session' "$f"
+    grep -qi 'no plan-accepted prompt' "$f"
 }
 
-@test "reach: the six named as missing really have NO Codex surface, and the six claimed really do" {
-    # THE ASSERTION THAT KEEPS THE DOC HONEST IN BOTH DIRECTIONS. Without the second loop this
-    # passes for a doc that under-promises as badly as it used to over-promise.
+@test "reach: every customer formation operation is documented on the Codex surface" {
+    # PARITY, DERIVED FROM THE FILESYSTEM RATHER THAN FROM A LIST SOMEBODY MAINTAINS. Every
+    # formation-*.sh in hooks-handlers/ is copied to a Codex install by session-init.sh and is
+    # runnable there, so every one of them that is a CUSTOMER operation has to appear in the
+    # skill. A hardcoded list here is how the doc and the code drift apart again.
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    local f base op missing=""
+    for f in "$PLUGIN_ROOT"/hooks-handlers/formation-*.sh; do
+        base="$(basename "$f")"
+        op="${base#formation-}"; op="${op%.sh}"
+        # state and check are internal: state is the local session-to-formation record that the
+        # other handlers read and write, and check is the delivery hook. Neither is an operation
+        # a customer performs, on either host - commands/formation.md names neither.
+        case "$op" in state|check) continue ;; esac
+        grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}"
+    done
+    [ -z "$missing" ] || {
+        echo "these formation operations run on Codex but are not documented in the skill:${missing}" >&2
+        return 1
+    }
+}
+
+@test "reach: and the internal formation scripts are NOT presented to customers as operations" {
+    # The other half of the parity. Without it the test above is satisfied by a skill that lists
+    # every file in the directory, including the two that are not operations.
     local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" op
-    for op in assign claim debrief progress report state; do
+    for op in state check; do
         run grep -c "formation-${op}.sh" "$skill"
         assert_output "0"
-    done
-    for op in list start join say roster leave; do
-        run bash -c "grep -c 'formation-${op}.sh' '$skill' | head -1"
-        [[ "$output" != "0" ]]
     done
 }
 

@@ -96,6 +96,21 @@ next time:
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/reinforce-memory.sh" 42
 ```
 
+## Reloading memories mid-session
+
+Memories are loaded at session start, and the account's Foundation memories are re-stated from a
+local cache that refreshes on a daily cycle. Re-run the session-start script to do both again now:
+
+```bash
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/session-start.sh"
+```
+
+Reach for it when an administrator has just added or changed a Foundation memory and the customer
+wants it in effect immediately rather than on the next daily refresh, when the customer has moved
+to a different project directory mid-session and wants the memories that match it, or when MMRY
+has reported that Foundation directives could not be applied to a turn. It is the same script the
+session-start hook runs; running it by hand is not a workaround.
+
 ## Tiers
 
 | Tier | For | Expires | Reinforceable |
@@ -164,6 +179,22 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-roster.sh"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-leave.sh"
 ```
 
+The rest of the formation operations run the same way. They were left undocumented here until
+#31245 QA round 6 because the instructions they printed named typed slash commands, so a customer
+who got one wrong was sent looking for something that does not exist on this platform. Those
+messages are derived from the host now, so the operations are usable:
+
+```bash
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-assign.sh" <memberId> "what they should work on"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-progress.sh" <Accepted|Done|Blocked|Abandoned> "optional note"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" "src/Billing"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" --list
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-report.sh"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-debrief.sh" "what was accomplished, what was decided, what went wrong"
+```
+
+Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
+
 Messages from the formation arrive on their own, marked `FORMATION TRANSMISSION`. A line marked
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.
@@ -208,11 +239,9 @@ The four things that are genuinely unavailable on this platform are: typed slash
 prompt before context is trimmed, waking an idle session with a formation message, and the
 plan-accepted prompt. Never imply any of them works here.
 
-Six formation operations also have no Codex surface yet: assign, claim, debrief, progress, report
-and state. Only the operations listed under "Coordination groups" above are available here. If a
-customer asks for one of the six, say plainly that it is not available from Codex yet rather than
-improvising a command - a handler script exists for each of them, but its instructions name typed
-slash commands the customer cannot use on this platform.
+Every formation operation is available here (#31245 QA round 6). The six previously listed as
+missing - assign, claim, debrief, progress, report and state - are documented under "Coordination
+groups" above and run the same way as the others. Do not tell a customer they are unavailable.
 
 ## Reporting a problem
 
