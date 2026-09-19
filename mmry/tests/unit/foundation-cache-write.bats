@@ -43,7 +43,34 @@ JSON
     grep -q 'Eric builds MMRY.' "$CACHE"
     grep -q 'Clarity over cleverness.' "$CACHE"
     # Tier filtering still holds.
-    ! grep -q 'Not a Foundation memory.' "$CACHE"
+    #
+    # NOT written as `! grep -q ...`. That form bites only while it is the LAST statement in
+    # the test, because bash exempts a negated command from errexit everywhere else, so
+    # appending any assertion after it silently turns it off. Measured, rather than taken on
+    # faith, with a three-test probe against this repo's own bats: `! true` as the last
+    # statement -> not ok; `! true` followed by any other statement -> ok. This repo has
+    # found 16 or more assertions disabled that way, so the shape is avoided even where it
+    # currently works.
+    run grep -c 'Not a Foundation memory.' "$CACHE"
+    [ "$output" = "0" ]
+}
+
+@test "write_foundation_cache: every line it writes carries a topic and a colon (#31583 requirement 1)" {
+    # This is the property that let requirement 1 rule the writer out as the source of the
+    # four-byte stub. The renderer is "- \(.topic): \(.content)", so a line without a colon
+    # cannot be this plugin's output for ANY account content. The observed fragment was
+    # `- x`, which has none. If the render format ever changes, that finding stops holding,
+    # and this test is what says so.
+    mmry_write_foundation_cache "$(_resp)" "$CACHE"
+
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        [[ "$line" == '- '*': '* ]] || { echo "line without topic and colon: [$line]"; return 1; }
+    done < "$CACHE"
+
+    # And the premise: something was actually read, so an empty cache cannot pass by vacuum.
+    [ "$(grep -c '^- ' "$CACHE")" -eq 2 ]
 }
 
 @test "write_foundation_cache: the manifest's byte count and checksum match the file it wrote" {
