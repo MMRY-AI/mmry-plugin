@@ -38,7 +38,7 @@ if [[ -z "$P" ]] || [[ ! -d "$P/hooks-handlers" ]]; then
 fi
 
 if [[ -z "$P" ]]; then
-    echo "MMRY AI: Could not locate plugin root. Run $(mmry_host_setup_hint)"
+    echo "MMRY AI: Could not locate plugin root. Run $(mmry_host_plugin_recovery_ref)"
     exit 0
 fi
 

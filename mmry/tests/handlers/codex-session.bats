@@ -87,14 +87,34 @@ _fake_plugin_root() {
     assert_output --partial "DELEGATE RAN"
 }
 
-@test "codex: when the plugin root cannot be found the advice names the Codex setup command" {
+@test "codex: when the plugin root cannot be found the advice is something a Codex customer can do" {
     # The fallback search is host-scoped too: looking in ~/.claude/plugins from a Codex session
     # finds another product's install, or nothing at all.
+    #
+    # AND THE REMEDY IS NOT A PATH UNDER THE DIRECTORY THIS RUN HAS NOT POPULATED YET. This branch
+    # is taken BEFORE session-init copies setup/*.sh into the host directory, so on a first install
+    # "<dir>/mmry/setup/mmry-setup.sh" is exactly the file that is not there. It is what this
+    # message used to print.
     local root; root="$(_fake_plugin_root)"
-    run env -u CLAUDE_PLUGIN_ROOT MMRY_HOST=codex HOME="$HOME" \
-        bash "$root/hooks-handlers/session-init.sh"
+    run env -u CLAUDE_PLUGIN_ROOT MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/session-init.sh"
     assert_success
-    assert_output --partial "bash ~/.codex/mmry/setup/mmry-setup.sh"
+    assert_output --partial "codex plugin add mmry@mmry-plugin"
+    [[ "$output" != *"mmry-setup.sh"* ]] || {
+        echo "the remedy names a setup script this run has not copied yet: $output"
+        return 1
+    }
+}
+
+@test "req4: and on Claude Code that same message is still Run /mmry:setup, byte for byte" {
+    # THE CONTROL THAT WAS MISSING, AND WHY THIS DEFECT LIVED THROUGH FIVE ROUNDS. Eight other
+    # requirement-4 controls sit in this file. This message had its Codex half asserted above and
+    # no Claude half anywhere in the suite, so replacing develop's "/mmry:setup" with a path was
+    # invisible to 831 passing tests. It is also the only error branch in session-init.sh, which is
+    # why the byte-identity evidence gathered for requirement 4 never reached it.
+    local root; root="$(_fake_plugin_root)"
+    run env -u CLAUDE_PLUGIN_ROOT -u MMRY_HOST -u CODEX_HOME HOME="$HOME" bash "$root/hooks-handlers/session-init.sh"
+    assert_success
+    assert_output --partial "MMRY AI: Could not locate plugin root. Run /mmry:setup"
 }
 
 # ---------------------------------------------------------------------------------------------

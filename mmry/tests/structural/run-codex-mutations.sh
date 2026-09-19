@@ -107,7 +107,7 @@ SURVIVED=0
 ERRORS=0
 RUN=0
 SKIPPED=0
-TOTAL=96
+TOTAL=99
 SURVIVOR_LIST=""
 ERROR_LIST=""
 CURRENT_FILE=""
@@ -567,6 +567,25 @@ mutate "the string sweep waves through a new bad literal [R6]" hooks-handlers/vi
   structural/codex-customer-strings.bats "names a command or the other product"
 
 mutate "a handler hardcodes the slash command again instead of deriving it" hooks-handlers/formation-join.sh   's = s.replace("echo " + chr(34) + "Which formation? Usage: $(mmry_host_formation_ref join " + chr(34) + "<formationId>" + chr(34) + ")" + chr(34), "echo " + chr(34) + "Which formation? Usage: /mmry:formation join <formationId>" + chr(34), 1)'   structural/codex-formation-instructions.bats "a command that exists on their machine"
+
+# ---- The plugin-root recovery remedy (#31245, after round 6) ---------------------------------
+#
+# session-init.sh's only error branch. It printed the setup hint, which was develop's literal for
+# every OTHER caller and not for this one, and which on Codex names a file this branch has not
+# copied yet. It survived five rounds because the Codex half was asserted and the Claude half was
+# not, so the requirement-4 regression was invisible to a green suite.
+
+mutate "the plugin-root remedy goes back to the setup hint [R6+]" hooks-handlers/session-init.sh \
+  's = s.replace("$(mmry_host_plugin_recovery_ref)", "$(mmry_host_setup_hint)", 1)' \
+  handlers/codex-session.bats "Run /mmry:setup, byte for byte"
+
+mutate "the recovery remedy names the Claude command on Codex too [R6+]" hooks-handlers/lib-host.sh \
+  's = s.replace("printf " + chr(39) + "codex plugin add mmry@mmry-plugin" + chr(39), "printf " + chr(39) + "/mmry:setup" + chr(39), 1)' \
+  unit/lib-host.bats "not a path under a directory not yet filled"
+
+mutate "the documented install command drifts from the printed one [R6+]" ../docs/codex.md \
+  's = s.replace("codex plugin add mmry@mmry-plugin", "codex plugin add mmry@mmry-ai")' \
+  structural/codex-docs-and-eol.bats "is the one this page documents"
 
 echo
 if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then

@@ -110,6 +110,8 @@ _allowed_reason() {
         # (D) lib-host.sh is the single derivation. These two lines are the Claude answers.
         "lib-host.sh|printf '/mmry:formation %s%s' \"\$sub\" \"\$rest\"")         printf 'D'; return 0 ;;
         "lib-host.sh|printf '/mmry:%s%s' \"\$cmd\" \"\$rest\"")                   printf 'D'; return 0 ;;
+        # (D) and the plugin-root recovery remedy, whose Claude answer is develop's own literal.
+        "lib-host.sh|printf '/mmry:setup'")                                       printf 'D'; return 0 ;;
 
         # (F) fallbacks behind `declare -F` guards, for the curated-copy case hook-guard.sh documents.
         "mmry-client.sh|printf '/mmry:setup'")                                    printf 'F'; return 0 ;;
@@ -211,6 +213,7 @@ ${base}|${trimmed}"
     done <<'KEYS'
 lib-host.sh|printf '/mmry:formation %s%s' "$sub" "$rest"
 lib-host.sh|printf '/mmry:%s%s' "$cmd" "$rest"
+lib-host.sh|printf '/mmry:setup'
 mmry-client.sh|printf '/mmry:setup'
 userpromptsubmit-foundation.sh|_FOUND_RELOAD_REF='/mmry:load-memories'
 userpromptsubmit-foundation.sh|_FOUND_CONFIG_REF='~/.claude/mmry-config.json'

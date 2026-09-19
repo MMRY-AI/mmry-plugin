@@ -45,7 +45,7 @@ experiments against 37 defined) were truncated runs being read as results.
 
 ## Coverage
 
-Sixty-nine experiments across:
+Ninety-nine experiments across:
 
 - `hooks-handlers/lib-host.sh` — the requirement-4 literals, host detection, the credential refusal
 - `hooks-handlers/codex-hook.sh` — the Codex entry point
@@ -401,6 +401,54 @@ it is precisely how twenty such strings shipped in the first place.
 |---|---|
 | not ok 1 | join: a Codex customer with no argument is given a command that exists on their machine |
 | not ok 18 | surface: none of the four exposed handlers names a slash command on Codex |
+
+## Round 6 follow-up: the plugin-root recovery remedy
+
+The stopped review of 2026-09-18 found one defect worth acting on, and it is the round 3 to 6
+pattern with the two halves swapped: `session-init.sh` line 41 printed `mmry_host_setup_hint`,
+so on **Claude Code** it replaced develop's `Run /mmry:setup` with a file path (a requirement 4
+regression), and on **Codex** it named `<dir>/mmry/setup/mmry-setup.sh` - the file that branch has
+not copied yet, because the branch is taken when the plugin root was not found.
+
+It survived five rounds for a reason the harness can state precisely: `codex-session.bats` asserted
+the **Codex** half of that message and no file in the suite asserted the **Claude** half, while
+eight other requirement-4 controls sat in that same file. A green 831 could not see it.
+
+Three experiments, all run to completion, all REFUSED.
+
+### 4. `the plugin-root remedy goes back to the setup hint [R6+]`
+
+The fix is reverted in `session-init.sh` and the helper is left correct, so this is the defect
+exactly as it shipped. Both halves of the message go red, which is the point: the Claude control is
+what was missing.
+
+| | test |
+|---|---|
+| not ok 6 | codex: when the plugin root cannot be found the advice is something a Codex customer can do |
+| not ok 7 | req4: and on Claude Code that same message is still Run /mmry:setup, byte for byte |
+
+### 5. `the recovery remedy names the Claude command on Codex too [R6+]`
+
+`mmry_host_plugin_recovery_ref`'s Codex branch is made to return `/mmry:setup`. The Claude control
+stays green, correctly - the mutation does not change the Claude answer - and three Codex
+assertions in three different files go red, including the one that reads the handler's output
+rather than the helper's return value.
+
+| | test |
+|---|---|
+| not ok 38 | codex: the plugin-root remedy is the reinstall, not a path under a directory not yet filled |
+| not ok 50 | docs: the reinstall a stuck customer is told to run is the one this page documents |
+| not ok 74 | codex: when the plugin root cannot be found the advice is something a Codex customer can do |
+
+### 6. `the documented install command drifts from the printed one [R6+]`
+
+The product is left correct and `docs/codex.md` is changed to name a different marketplace. This is
+the experiment that proves the documentation pin is a pin and not a restatement: an install command
+written down in two places is one that will eventually disagree with itself.
+
+| | test |
+|---|---|
+| not ok 11 | docs: the reinstall a stuck customer is told to run is the one this page documents |
 
 ### Still open
 

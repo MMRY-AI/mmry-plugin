@@ -601,6 +601,39 @@ mmry_host_command_ref() {
     fi
 }
 
+# THE REMEDY FOR "THE PLUGIN FILES THEMSELVES ARE NOT WHERE I LOOKED" (#31245, after round 6).
+#
+# One caller: session-init.sh, on the branch it takes when it cannot find the plugin root. That
+# line printed mmry_host_setup_hint, and the hint was wrong on BOTH hosts, in opposite directions.
+#
+# ON CLAUDE CODE IT BROKE REQUIREMENT 4. develop printed "Run /mmry:setup" here. The hint prints
+# "bash ~/.claude/mmry/setup/mmry-setup.sh". Every OTHER caller of the hint was already printing
+# that literal on develop, so the hint is the right derivation for them and the wrong one for this
+# line. It is the only error branch in that file, and it is the one branch the byte-identity
+# evidence gathered for requirement 4 never exercised, which is how it survived five rounds.
+#
+# ON CODEX IT NAMED A FILE THAT NEED NOT EXIST. This message is printed at the moment session-init
+# has failed to find the plugin root, which is the moment BEFORE it copies setup/*.sh into the host
+# directory. On a first install "<dir>/mmry/setup/mmry-setup.sh" is precisely the path that is
+# missing on the run where this message is seen. That is the same defect rounds 3 to 6 kept
+# finding, a remedy the reader cannot carry out handed to them while they are already stuck, with
+# a path substituted for the slash command.
+#
+# WHAT IS ACTUALLY TRUE ON EACH HOST. On Claude Code /mmry:setup is registered by the plugin
+# itself and does not depend on that copy having happened, so the develop literal is also the
+# correct advice. On Codex there are no typed commands at all and the copy has not happened, so
+# the only thing that repairs this state is reinstalling the plugin through Codex. That is the
+# same command docs/codex.md gives for a first install, and codex-docs-and-eol.bats pins the two
+# together so they cannot drift.
+mmry_host_plugin_recovery_ref() {
+    _mmry_host_resolve
+    if [[ "$_MMRY_HOST_V" == "codex" ]]; then
+        printf 'codex plugin add mmry@mmry-plugin'
+    else
+        printf '/mmry:setup'
+    fi
+}
+
 # ---------------------------------------------------------------------------------------------
 # POINT THE CLIENT AT THE RIGHT CREDENTIAL, ONCE, AT SOURCE TIME.
 #

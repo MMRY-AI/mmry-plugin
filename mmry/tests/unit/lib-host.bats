@@ -419,3 +419,37 @@ _stage_install() {
     # or one with dot segments - rather than having been deleted along with the defect.
     grep -Fq '_mmry_self_dir="$(cd "$_mmry_self_dir" && pwd 2>/dev/null)"' "$LIB"
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE PLUGIN-ROOT RECOVERY REMEDY (#31245, after round 6).
+#
+# session-init.sh's one error branch. It printed mmry_host_setup_hint, which was the wrong
+# derivation twice over: on Claude it replaced develop's "/mmry:setup" with a path (requirement 4),
+# and on Codex it named a file that branch has not copied yet.
+# ---------------------------------------------------------------------------------------------
+
+@test "req4: the Claude plugin-root remedy is /mmry:setup, the develop literal, byte for byte" {
+    run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="/home/someone" \
+        bash -c "source '$LIB'; mmry_host_plugin_recovery_ref"
+    assert_output "/mmry:setup"
+}
+
+@test "codex: the plugin-root remedy is the reinstall, not a path under a directory not yet filled" {
+    run env -u MMRY_CONFIG_FILE MMRY_HOST=codex CODEX_HOME="/opt/relocated" HOME="/home/someone" \
+        bash -c "source '$LIB'; mmry_host_plugin_recovery_ref"
+    assert_output "codex plugin add mmry@mmry-plugin"
+}
+
+@test "codex: and that remedy names no setup script at all, on any spelling of the home" {
+    # The regression direction. Any answer containing mmry-setup.sh is the defect coming back,
+    # whether it spells the home as ~/.codex, as an absolute path, or as a relocated one.
+    local home
+    for home in "" "/opt/relocated"; do
+        run env -u MMRY_CONFIG_FILE MMRY_HOST=codex CODEX_HOME="$home" HOME="/home/someone" \
+            bash -c "source '$LIB'; mmry_host_plugin_recovery_ref"
+        [[ "$output" != *"mmry-setup.sh"* ]] || {
+            echo "CODEX_HOME='$home' produced a setup-script path: $output"
+            return 1
+        }
+    done
+}

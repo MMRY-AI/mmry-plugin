@@ -163,6 +163,32 @@ _runnable_lines() {
     }
 }
 
+@test "docs: the reinstall a stuck customer is told to run is the one this page documents" {
+    # session-init.sh prints mmry_host_plugin_recovery_ref when it cannot find the plugin files.
+    # On Codex that is an install command, and an install command stated in two places is an
+    # install command that will disagree with itself. The handler's answer must appear verbatim
+    # on the page a customer is sent to.
+    local ref
+    ref="$(env -u MMRY_CONFIG_FILE MMRY_HOST=codex CODEX_HOME="$BATS_TEST_TMPDIR/ch" HOME="$BATS_TEST_TMPDIR/h" \
+        bash -c "source '$PLUGIN_ROOT/hooks-handlers/lib-host.sh'; mmry_host_plugin_recovery_ref")"
+    [[ -n "$ref" ]] || { echo "the handler printed no remedy at all"; return 1; }
+    grep -Fq "$ref" "$(_codex_doc)" || {
+        echo "the handler tells a stuck customer to run:"
+        echo "  $ref"
+        echo "and docs/codex.md does not contain that command anywhere."
+        return 1
+    }
+}
+
+@test "req4: and on Claude that remedy is a command, not an instruction to reinstall anything" {
+    # The Claude half is pinned here as well, because the test above is satisfied on Claude by any
+    # string that happens to appear in a Codex document.
+    local ref
+    ref="$(env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="$BATS_TEST_TMPDIR/h2" \
+        bash -c "source '$PLUGIN_ROOT/hooks-handlers/lib-host.sh'; mmry_host_plugin_recovery_ref")"
+    [ "$ref" = "/mmry:setup" ]
+}
+
 @test "docs: and the page still explains WHY the commands are written that way" {
     # The form is unusual enough that a customer will wonder. Losing the explanation would leave
     # the commands looking like a typo.
