@@ -47,6 +47,20 @@ _avg_ms() {
     echo $(( ( (finish - start + 1) * 1000 ) / runs ))
 }
 
+# Record the manifest for a hand-written Foundation cache (#31583).
+#
+# The re-injection handler no longer trusts a cache merely for existing - it verifies the
+# bytes against what the writer recorded. A fixture written without one is refused, so a
+# budget test using it would be timing the REFUSAL path rather than the injection path and
+# would report a cost that has nothing to do with what a customer pays.
+_manifest_for() {
+    local c="$1" s b n
+    read -r s b < <(cksum < "$c")
+    n="$(grep -c '^- ' "$c" 2>/dev/null || true)"
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "$n" "$b" "$s" > "${c}.manifest"
+}
+
 _write_config() {
     cat > "$MMRY_CONFIG_FILE" <<'EOF'
 {
@@ -103,6 +117,7 @@ EOF
 @test "hook-budgets: the Foundation hook's budget is a large multiple of its MEASURED cost" {
     _write_config
     printf -- '- Truthfulness: never overstate evidence.\n' > "$TEST_TMPDIR/mmry-foundation.md"
+    _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
 
     local handler cost budget
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
@@ -272,6 +287,7 @@ EOF
     _write_config
     printf -- '- Truthfulness: never overstate evidence.
 ' > "$TEST_TMPDIR/mmry-foundation.md"
+    _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
 
     # A jq that never returns in time. --version stays fast because the resolver probes it.
     local shim="$TEST_TMPDIR/hang-jq.sh"

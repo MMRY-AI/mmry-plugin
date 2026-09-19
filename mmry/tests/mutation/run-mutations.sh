@@ -46,6 +46,9 @@ HANDLER_REL="hooks-handlers/userpromptsubmit-foundation.sh"
 HANDLER_TESTS="handlers/userpromptsubmit-foundation.bats"
 BUDGET_TESTS="structural/hook-budgets.bats"
 CONFIG_TESTS="unit/config-loading.bats"
+WRITER_TESTS="unit/foundation-cache-write.bats"
+STATUS_TESTS="handlers/foundation-status.bats"
+STATUS_REL="hooks-handlers/foundation-status.sh"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
 
 WORK_BASE="${TMPDIR:-/tmp}/mmry-mutation-$$"
@@ -183,7 +186,146 @@ mutate_m10() {
 targets_m10="$BUDGET_TESTS"
 desc_m10="re-injection off-switch moved to after the worker spawn (opt-out pays for the spawn)"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10"
+
+# ===========================================================================
+# #31411 and #31583 mutations. Each one reinstates a specific defect that
+# actually shipped, so a REFUSED verdict is evidence that the assertion added
+# for it bites, rather than a count of tests that happened to pass.
+# ===========================================================================
+
+# Put the cut back. This is #31411 exactly as it shipped: a raw substring at the token cap
+# times four, applied to the account's standing directives, with a note appended to the
+# framing. On the account that surfaced it the cut landed mid-sentence inside a list of
+# corporate values and four of the eight had never reached any assistant.
+#
+# awk, not sed: this inserts a multi-line block, and multi-line insertion is not something
+# BRE sed does identically on GNU and BSD.
+mutate_m11() {
+    local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m11"
+    awk '
+        { print }
+        /^content="\$\(<"\$CACHE"\)"$/ {
+            print "cap_chars=$(( ${MMRY_FOUNDATION_TOKEN_CAP:-1500} * 4 ))"
+            print "if (( ${#content} > cap_chars )); then"
+            print "    content=\"${content:0:cap_chars}\""
+            print "fi"
+        }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+targets_m11="$HANDLER_TESTS"
+desc_m11="#31411 the token-cap cut reinstated (the set is silently truncated again)"
+
+# Replace the whole verification with the precondition it replaced: "the file is not empty".
+# This IS #31583. Four bytes is not empty, so a stub passes and is forwarded to the assistant
+# framed as the account's authoritative guidance.
+#
+# The mutation deletes the verification block by replacing the manifest read with an
+# unconditional pass, which is the smallest edit that restores the old behaviour.
+mutate_m12() {
+    local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m12"
+    awk '
+        /^MANIFEST=/ { print "MANIFEST=\"${CACHE}.manifest\""
+                       print "[[ -s \"$CACHE\" ]] || exit 0"
+                       print "content=\"$(<\"$CACHE\")\""
+                       print "printf '\''%s'\'' \"The following are the account'\''s FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
+                       print ""
+                       print "${content}\""
+                       print "exit 0"
+                       next }
+        { print }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+targets_m12="$HANDLER_TESTS"
+desc_m12="#31583 verification replaced by the old 'file is not empty' precondition"
+
+# Keep the manifest, keep the byte-count check, DROP the checksum comparison. This is the
+# specific trap #31583 test case 2 names: "Length alone is not validity, and a check that
+# only measures length would pass this while failing the customer." A harness that scored
+# m12 alone would not distinguish a real content check from a length check.
+mutate_m13() {
+    local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m13"
+    awk '
+        /^if \[\[ "\$_act_cksum" != "\$_exp_cksum" \]\]; then$/ { print "if false; then"; next }
+        { print }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+targets_m13="$HANDLER_TESTS"
+desc_m13="#31583 checksum comparison dropped, leaving a length-only check"
+
+# Refuse the cache but tell only the assistant, not the customer. The directives are still
+# withheld correctly; the person who could rebuild the cache simply never hears. #31583
+# requirement 3 is explicit that the report has to reach "the person who can act on it".
+mutate_m14() {
+    _sedi 's|^        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - \${REASON}.*|        USERMSG=""|' "$1/$HANDLER_REL"
+}
+targets_m14="$HANDLER_TESTS"
+desc_m14="#31583 the refusal is reported to the assistant but never to the customer"
+
+# Warn on EVERY firing, including a healthy one. This passes any test that only checks
+# "a damaged cache is refused" and fails the customer continuously. #31583 test case 4 exists
+# precisely so the new check cannot be satisfied by warning all the time.
+mutate_m15() {
+    _sedi 's|^if \[\[ ! -r "\$CACHE" \]\]; then$|if true; then|' "$1/$HANDLER_REL"
+}
+targets_m15="$HANDLER_TESTS"
+desc_m15="#31583 every firing reports a failure, healthy ones included"
+
+# Put the writer back to the non-atomic clobber: redirect straight at the cache, hide the
+# error, claim success. The shell sets up the redirect before jq runs, so any jq failure
+# destroys the customer's good cache and the caller is told it worked.
+mutate_m16() {
+    local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m16"
+    awk '
+        /^    tmp="\$\{cache\}\.new\.\$\$"$/ { print "    tmp=\"$cache\""; next }
+        { print }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+file_m16="$CLIENT_REL"
+targets_m16="$WRITER_TESTS"
+desc_m16="#31583 writer redirects straight at the cache again (a jq failure destroys it)"
+
+# Count entries by grepping the file instead of asking jq about the response. A single
+# memory whose content is a bulleted list then counts as several, and the manifest records a
+# number that is not the number of the customer's directives.
+mutate_m17() {
+    # Anchored on the START of the assignment only. The first cut of this pattern required a
+    # trailing backslash, matching a line-continuation form this file does not use, so the
+    # mutation changed nothing and the harness aborted the run on its own no-op guard. That
+    # is the guard doing its job, and it is why m17 had never produced a verdict.
+    local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m17"
+    awk '
+        /^    entries="\$\(printf/ { print "    entries=\"$(grep -c '\''^- '\'' \"$tmp\" 2>/dev/null || true)\""; next }
+        { print }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+file_m17="$CLIENT_REL"
+targets_m17="$WRITER_TESTS"
+desc_m17="#31583 manifest entry count taken from a line count rather than the response"
+
+# Drop the check that an "empty set" manifest agrees with the cache beside it. entries is
+# the one manifest field the bytes+cksum gate does not compare, and zero short-circuits the
+# gate altogether, so without this guard a manifest reading entries=0 next to a cache full
+# of directives makes the handler withhold the whole set and say NOTHING. Measured at 914
+# bytes before the guard existed. A mutation that survives here means the product can go
+# silent on a live account and no test notices.
+mutate_m18() {
+    _sedi 's|^    if \[\[ -s "\$CACHE" \]\]; then$|    if false; then|' "$1/$HANDLER_REL"
+}
+targets_m18="$HANDLER_TESTS"
+desc_m18="#31583 the entries=0 claim is believed without checking the cache (silent withholding)"
+
+# The same guard in the status command. This one is nastier than m18 because nothing breaks:
+# the handler still refuses the cache, and /mmry:foundation-status cheerfully reports "VALID
+# and EMPTY - nothing is being withheld" for the state it is refusing. A customer checking
+# the one command built for asking would be sent away from a live fault.
+mutate_m19() {
+    _sedi 's|^    if \[\[ -s "\$CACHE" \]\]; then$|    if false; then|' "$1/$STATUS_REL"
+}
+file_m19="$STATUS_REL"
+targets_m19="$STATUS_TESTS"
+desc_m19="#31583 the status command reports health for a cache the handler is refusing"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
@@ -251,7 +393,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
