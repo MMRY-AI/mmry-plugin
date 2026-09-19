@@ -13,7 +13,13 @@
 #
 # Read-only. It never writes the cache, never repairs anything, and never fails the caller.
 
-set -uo pipefail 2>/dev/null || true
+# -e is turned straight back off on the next line. This script is a customer asking a
+# question; it must answer even when part of the answer cannot be gathered, so it must
+# never abort mid-report. The full form is written first because the repo's structural
+# check requires every handler to declare it, and a handler that quietly omitted it is
+# how this file shipped with no strict mode at all (caught by file-integrity.bats).
+set -euo pipefail 2>/dev/null || true
+set +e
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
