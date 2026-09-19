@@ -489,6 +489,16 @@ fi
 # memories must not be nagged on every prompt, and requirement 4 of #31583 is explicit that
 # the check must not be satisfiable by warning all the time.
 if (( _exp_entries == 0 )); then
+    # "No directives" is a CLAIM ABOUT THE CACHE, so it is checked against the cache like
+    # every other claim. Zero is the one entry count that short-circuits the bytes+cksum
+    # gate, and a manifest reading entries=0 beside a cache full of real directives makes
+    # this handler withhold the whole set and say nothing - this ticket's exact failure,
+    # reached through the one field the gate does not compare. Measured: 914 bytes of
+    # directives, manifest entries=0, handler emitted nothing at all.
+    if [[ -s "$CACHE" ]]; then
+        printf 'the manifest records no directives at all, but the cached file holds directives, so the two do not describe the same set'
+        exit 3
+    fi
     printf 'ok entries=0 bytes=0
 ' > "$STATUS" 2>/dev/null || true
     exit 0

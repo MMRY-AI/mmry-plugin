@@ -74,6 +74,17 @@ else
 fi
 
 if (( _exp_entries == 0 )); then
+    # A manifest claiming the set is empty beside a cache holding directives is a
+    # contradiction, and the re-injection handler refuses it. This command must say the
+    # same thing: reporting "nothing is being withheld" while the handler withholds the
+    # whole set is the one answer that would send a customer away from a live fault.
+    if [[ -s "$CACHE" ]]; then
+        echo "Stored copy:  INCONSISTENT - the manifest records no directives at all, but the"
+        echo "              stored file holds some. They do not describe the same set, so it"
+        echo "              is being REFUSED, not used."
+        echo "Action:       run /mmry:load-memories to rebuild it."
+        exit 0
+    fi
     echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
     echo "              Nothing is being withheld; there is nothing to send."
     exit 0

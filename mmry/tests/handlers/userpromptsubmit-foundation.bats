@@ -808,3 +808,47 @@ manifest_now
     [ -z "$output" ]
     (( elapsed < 3 ))
 }
+
+# ============================================================================
+# #31583 - "entries=0" IS A CLAIM ABOUT THE CACHE, AND IT HAS TO BE CHECKED TOO.
+#
+# The verification gate is bytes + cksum, and entries is not part of it. That is correct
+# for a mismatch in either direction but ONE value of entries short-circuits the gate
+# entirely: zero. Zero means "this account has no Foundation memories", and the handler
+# answers it by going silent, which is right for an account that genuinely has none.
+#
+# Measured, not reasoned: with a manifest reading entries=0 beside a cache holding 914
+# bytes of real directives, the handler exits 0 and emits NOTHING AT ALL. The directives
+# are withheld and nobody is told - the precise shape of this ticket, reached through the
+# one field the gate does not check. A manifest left behind by an older writer, a partial
+# write, or anything on the machine that drops a plausible manifest next to a good cache
+# gets there.
+#
+# So the empty claim is checked against the file the same way every other claim is.
+# ============================================================================
+
+@test "userpromptsubmit-foundation: #31583 a manifest claiming no directives beside a cache full of them is refused, not obeyed" {
+    printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
+    manifest_now
+    # Same bytes, same checksum, only the count claims the set is empty.
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    printf 'mmry-foundation v1 entries=0 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]                      # never blocks the prompt
+    [[ "$output" == *'could not verify'* ]]  # the assistant is told
+    [[ "$output" == *'systemMessage'* ]]     # and so is the customer
+    # And it must not be quietly forwarded under the authoritative framing either.
+    [[ "$output" != *'authoritative directives that take precedence'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 the empty-set path still stays silent when the cache really is empty" {
+    # The control for the test above: this must not become "warn whenever entries=0".
+    : > "$CACHE"
+    printf 'mmry-foundation v1 entries=0 bytes=0 cksum=4294967295\n' > "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
