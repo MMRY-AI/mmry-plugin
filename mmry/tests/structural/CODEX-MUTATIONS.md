@@ -1,0 +1,457 @@
+# The #31245 mutation evidence
+
+Four test files in this suite carry a header saying every assertion in them was seen to REFUSE.
+That claim pointed at `codex-mutation-log.md` and `codex-mutation-manifest.md`, **neither of which
+was ever committed**. A claim about your own verification that points at a missing document is
+worth less than no claim, so this is the document, and it is committed beside the harness that
+produces it.
+
+- The harness: [`run-codex-mutations.sh`](run-codex-mutations.sh)
+- Run it: `bash mmry/tests/structural/run-codex-mutations.sh` from a clean working tree
+- A dry run that only checks the mutations still apply:
+  `MMRY_BATS_BIN=/path/to/a/stub bash mmry/tests/structural/run-codex-mutations.sh`
+
+## What a mutation run is, and what it is not
+
+Each experiment applies one deliberate break to the product, runs the test file that is supposed to
+notice, and records whether it did. Three outcomes, and they must never be collapsed:
+
+| Outcome | Meaning |
+|---|---|
+| `REFUSED` | The named test failed. The assertion can fail, so its passing means something. |
+| `SURVIVED` | The break was applied and every test still passed. **The assertion cannot fail.** |
+| `NOT APPLIED` / `HARNESS ERROR` | The experiment could not be performed. This says nothing at all about the assertion, and must not be read as a result. |
+
+The first version of the harness counted the third case into the number it printed as "survived".
+That is why three people got three different answers from the same commit.
+
+## Why the first harness was not reproducible
+
+Recorded here because the next person to disbelieve a mutation result will want to know what was
+already ruled out.
+
+| # | Cause | Evidence |
+|---|---|---|
+| 1 | An experiment that could not be **performed** was counted as a surviving mutant | `NOT APPLIED` incremented `FAIL`, and the summary printed `FAIL` as "survived". A reviewer re-ran the five "survivors" individually and every one reproduced as REFUSED. |
+| 2 | The interpreter was unpinned | `python` on this machine is 2.7.2; `python3` is 3.12. Two reviewers ran two different languages against the same fragments. |
+| 3 | Pinning by NAME was still not enough | `python3` here is the Windows Store app execution alias. It answers `-c`, reports 3.12, and then ignores the `-` that means "read the program from stdin", running `argv[1]` instead — a `.sh` file, whose shebang it tried to launch. Exit 127 on all 50 experiments, reported as 50 harness errors. The harness now resolves `sys.executable` and *proves* the stdin form works before trusting it. |
+| 4 | Any interpreter failure looked like a missing pattern | Exit 3 (pattern absent) was conflated with every other non-zero exit, and the interpreter's own error message was discarded. |
+| 5 | Line endings | `.gitattributes` pinned `*.sh` only, so with `core.autocrlf=true` every `.json`, `.md` and `.bats` file in the tree is CRLF and every mutation pattern spanning a newline silently missed. Demonstrated on one commit: the `stop-check` mutations apply against an LF tree and report `MUTATION DID NOT APPLY` against a CRLF one. Matching is now done on a normalised copy. |
+| 6 | A killed run left a mutation in the tree | There was no `EXIT` trap. A run stopped by an impatient timeout left the product broken on disk, so the next run started from a state nobody chose — and the dirty-tree guard then refused it, which looks like a different failure entirely. |
+
+A truncated run is now visibly truncated: every line is numbered `[i/N]` and the summary says
+`ran R of N` and prints `INCOMPLETE` when they differ. Two of the three original reports (25 and 20
+experiments against 37 defined) were truncated runs being read as results.
+
+## Coverage
+
+Ninety-nine experiments across:
+
+- `hooks-handlers/lib-host.sh` — the requirement-4 literals, host detection, the credential refusal
+- `hooks-handlers/codex-hook.sh` — the Codex entry point
+- `hooks-handlers/lib-jq.sh` — where the host resolver is pulled in and the credential is asserted
+- `hooks-handlers/hook-guard.sh`, `stop-check.sh`, `formation-check.sh` — the shared handlers
+- `hooks-handlers/session-init.sh`, `session-start.sh` — **added in QA round 2**; both reviewers
+  found these had no mutation coverage at all
+- `hooks/codex-hooks.json`, `.codex-plugin/plugin.json` — the registration and the manifest
+- `setup/mmry-setup.sh` — the one command a new Codex customer runs
+- `commands/setup.md`, `tests/e2e/setup-join.bats` — the requirement-4 guards on the Claude surface
+
+- `setup/uninstall.sh`, `setup/uninstall.bat` - **added in QA round 3**; the Codex copy of the
+  shell uninstaller destroyed the Claude Code installation, and the Windows guard did not fire on
+  a relocated Codex home at all
+- `hooks-handlers/self-update.sh` - **added in QA round 3**; it overwrote the other product's
+  plugin root from a Codex session
+- `hooks-handlers/formation-join.sh`, `formation-start.sh` - **added in QA round 3**; both
+  registered every session as `claude-code`
+- `docs/codex.md` - **added in QA round 3**; the customer-facing page is the only file mutated
+  from outside `mmry/`, which is why the harness now understands a `../` path
+
+## What is NOT covered by any mutation, and why
+
+Stated here so the next reviewer does not have to derive it from absence.
+
+- **The Codex hook payload field names.** `session_id` and `hook_event_name` are Claude Code's
+  names. No captured Codex payload exists, so no mutation can prove what happens when Codex sends
+  something else. What the handlers now do instead is say so out loud: see the absent-field
+  warnings in `session-start.sh` and the breadcrumb in `formation-check.sh`, asserted in
+  `tests/handlers/codex-session.bats`. This is a stated assumption, not a verified fact, and one
+  real captured payload retires it.
+- **Codex itself.** Every route asserted here comes from Codex's own generated schemas and event
+  handlers, cited in the test headers. Nothing in this suite runs Codex.
+
+## Runs
+
+| Date | Machine | Result |
+|---|---|---|
+| 2026-09-18 (QA round 4) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | **13 refused, 0 survived, 0 not performed, 13 of 82 run** (filtered to the round-4 experiments). Per-experiment table below. |
+| 2026-09-16 | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 49 refused, 1 survived, 0 not performed, 50 of 50 run. The survivor is analysed below and is now closed. |
+| 2026-09-17 (QA round 3, clean re-run) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | **69 refused, 0 survived, 0 not performed, 69 of 69 run.** The run below, repeated end to end after the four experiment corrections. |
+| 2026-09-16 (QA round 3, first run) | Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0 | 66 refused, 2 survived, 1 not performed, 69 of 69 run. **All three were faults in the EXPERIMENTS, not findings about the tests.** Each was corrected and re-run individually; all three now REFUSE. Detail below. |
+
+### 2026-09-18 (QA round 4) - thirteen new experiments, all refused
+
+Round 4 took the suite from 69 experiments to 82. Each of the thirteen reverts one round-4 fix and
+names the test that must refuse.
+
+    MMRY_MUTATION_FILTER="[R4]" bash tests/structural/run-codex-mutations.sh
+
+    === refused: 13   survived: 0   experiments not performed: 0   (ran 13 of 82) ===
+
+The working tree was clean afterwards, as the EXIT trap requires.
+
+**The thirteen, as the run reported them.** This is the per-experiment table, not only a summary:
+the round-3 entry below records a corrected 69-of-69 count with no table behind it, and a count
+without its rows is a claim rather than evidence.
+
+| # | Verdict | Mutation |
+|---|---|---|
+| 1/82 | REFUSED | the codex Foundation budget drifts back below its own deadline |
+| 2/82 | REFUSED | the Foundation hook stops asking whether this host has its own credential |
+| 3/82 | REFUSED | setup stops validating --host and lets an unknown value default |
+| 4/82 | REFUSED | the host comparison stops folding case on Windows |
+| 5/82 | REFUSED | the setup hint goes back to a hardcoded home |
+| 6/82 | REFUSED | a trailing separator is left on the resolved config dir |
+| 7/82 | REFUSED | session-init copies handlers even when the marker could not be written |
+| 8/82 | REFUSED | the uninstaller uses CODEX_HOME raw, so a trailing backslash breaks the pattern |
+| 9/82 | REFUSED | the session-start fault note goes back in unescaped |
+| 10/82 | REFUSED | the credential file is written before its mode is narrowed |
+| 11/82 | REFUSED | the marketplace description stops naming Codex |
+| 12/82 | REFUSED | the customer page goes back to promising the whole feature set |
+| 13/82 | REFUSED | the Codex skill stops explaining how to uninstall |
+
+#### Two patterns were stale, and cost seconds rather than a cycle
+
+`MMRY_MUTATION_DRYRUN=1`, added this round, applies every pattern, reports whether it still
+matches, restores, and skips the test run. Run against the thirteen BEFORE the real run, it found
+two experiments that could not be performed:
+
+| Reported | Experiment | What was actually wrong |
+|---|---|---|
+| NOT APPLIED | the codex Foundation budget drifts back below its own deadline | The pattern spanned a newline and reproduced the file's indentation by hand. Re-anchored on the bare `"timeout": 20`, which is unique among that file's six budgets (8, 10, 10, 15, 20, 30). |
+| NOT APPLIED | the setup hint goes back to a hardcoded home | The pattern reconstructed `printf '...', "$shown"` where the source has a space, not a comma. Re-aimed at the relocated branch only, so the Claude literal is untouched and the experiment isolates the defect it is about. |
+
+Both were faults in the EXPERIMENTS, not findings about the tests. Round 3 found three of the same
+kind and paid for each with a long run before it reported them; this round found two in seconds.
+That is the whole reason the dry-run mode exists.
+
+#### Outstanding: the corrected 69 still has no per-experiment table
+
+A reviewer noted, correctly, that the 2026-09-17 clean re-run records `69 refused, 0 survived` as a
+summary line only, while the per-experiment table printed under it is the run from BEFORE the four
+corrections. That is still true. The thirteen rows above are a table for the round-4 experiments,
+not for the other sixty-nine.
+
+Closing it honestly needs a full 82-experiment run, upwards of two hours on this machine, and it
+should be done after this round's product changes settle rather than during review - a table
+generated now would describe a tree that is still changing. Recorded here as outstanding rather
+than left as a silent gap.
+
+### 2026-09-16 (QA round 3) - nineteen new experiments, and what the run found
+
+    === refused: 66   survived: 2   experiments not performed: 1   (ran 69 of 69) ===
+
+Nineteen experiments were added, one for each behaviour changed in QA round 3. The run reported
+three problems, and all three were mine rather than the tests':
+
+| Reported | Experiment | What was actually wrong |
+|---|---|---|
+| NOT APPLIED | session-init writes no host marker | The fragment carried a real newline where the file has the two characters `backslash n` inside a `printf` format string, so the pattern was never in the file. It now redirects the marker write to `/dev/null`. |
+| SURVIVED | setup exports its opt-out into everything it spawns | The mutation added `export` but left the `unset` two lines below, so there was nothing left to leak and the test was right to pass. The defect it guards against is the pair; the mutation now removes both. |
+| SURVIVED | the Codex skill stops being a document about Codex | Renaming every `Codex` to `Cldx` does not make the file a copy of the Claude Code skill, and the assertion it was aimed at is satisfied by the lower-case `.codex` paths that remain. It now copies the Claude Code skill over it, which is the property the test is about. |
+
+One more label had drifted: `formation-check stops guarding the credential` reported `REFUSED(*)` -
+refused, but not by the test the harness named - because the expectation still said "no formation
+pays nothing" while the test that fails is "an unconfigured Codex install makes this hook silent,
+not noisy". The expectation was corrected.
+
+The whole suite was then re-run end to end on the corrected harness, from a clean tree:
+
+    === refused: 69   survived: 0   experiments not performed: 0   (ran 69 of 69) ===
+
+and the working tree was clean afterwards, as the EXIT trap requires.
+
+After the four corrections each was re-run on its own, with the new filter:
+
+    MMRY_MUTATION_FILTER="host marker"                    -> refused: 1  survived: 0
+    MMRY_MUTATION_FILTER="opt-out into everything"        -> refused: 1  survived: 0
+    MMRY_MUTATION_FILTER="byte-for-byte copy"             -> refused: 1  survived: 0
+    MMRY_MUTATION_FILTER="formation-check stops guarding" -> refused: 1  survived: 0
+
+`MMRY_MUTATION_FILTER` is new in this round: a full run is over two hours on Windows, and a
+reviewer checking one finding should not have to sit through the other sixty-eight. A filtered run
+prints `FILTERED RUN` and does not present itself as a complete one.
+
+**The 69 experiments as the run reported them**, before those four corrections:
+
+| # | Verdict | Mutation |
+|---|---|---|
+| 1/69 | REFUSED | claude config dir drifts |
+| 2/69 | REFUSED | claude client name becomes codex |
+| 3/69 | REFUSED | claude script ref becomes absolute |
+| 4/69 | REFUSED | default host becomes codex |
+| 5/69 | REFUSED | CODEX_HOME ignored |
+| 6/69 | REFUSED | codex script ref keeps the variable |
+| 7/69 | REFUSED | the double-source guard becomes a no-op |
+| 8/69 | REFUSED | shim stops declaring the host |
+| 9/69 | REFUSED | shim drops the path-separator guard |
+| 10/69 | REFUSED | shim swallows the handler exit code |
+| 11/69 | REFUSED | PreCompact gets registered |
+| 12/69 | REFUSED | a handler gains asyncRewake |
+| 13/69 | REFUSED | the PostToolUse group gains a matcher |
+| 14/69 | REFUSED | a handler loses commandWindows |
+| 15/69 | REFUSED | a command bypasses the codex entry point |
+| 16/69 | REFUSED | the formation poller is registered on Stop |
+| 17/69 | REFUSED | additionalContextLimit is emitted |
+| 18/69 | REFUSED | Windows command uses POSIX expansion |
+| 19/69 | REFUSED | an unknown event name is registered |
+| 20/69 | REFUSED | codex manifest points at the Claude skills dir |
+| 21/69 | REFUSED | codex manifest points at the Claude hooks file |
+| 22/69 | REFUSED | codex manifest hardcodes a version |
+| 23/69 | REFUSED | a manifest path loses its ./ prefix |
+| 24/69 | REFUSED | codex manifest inherits the default commands dir |
+| 25/69 | REFUSED | the compaction sentence fires on Claude Code too |
+| 26/69 | REFUSED | the compaction sentence never fires |
+| 27/69 | REFUSED | the save prompt stops exiting 2 |
+| 28/69 | REFUSED | codex tool delivery reverts to stderr+exit 2 |
+| 29/69 | REFUSED | codex idle guard removed, so the poller waits |
+| 30/69 | REFUSED(*) | formation-check stops guarding the credential, so a hot-path hook exits 1 |
+| 31/69 | REFUSED | a Claude command file gains frontmatter |
+| 32/69 | REFUSED | the e2e fixture stops copying lib-host |
+| 33/69 | REFUSED | lib-host stops reading the host off its own location |
+| 34/69 | REFUSED | lib-host stops exporting MMRY_CONFIG_FILE |
+| 35/69 | REFUSED | lib-jq stops sourcing the host resolver |
+| 36/69 | REFUSED | location detection overreaches to any CODEX_HOME in the environment |
+| 37/69 | REFUSED | hook-guard loses its missing-resolver fallback |
+| 38/69 | REFUSED | stop-check loses its missing-resolver fallback |
+| 39/69 | REFUSED | lib-jq stops asserting, so the client walks on to the Claude file |
+| 40/69 | REFUSED | the assertion always passes |
+| 41/69 | REFUSED | the refusal goes quiet |
+| 42/69 | REFUSED | the refusal fires on Claude Code too |
+| 43/69 | REFUSED | session-init installs into the Claude directory on every host |
+| 44/69 | REFUSED | session-init stops copying the Windows entry point |
+| 45/69 | REFUSED | session-init loses the pipefail guard on the plugin-root search |
+| 46/69 | REFUSED | session-start registers every session as claude-code |
+| 47/69 | REFUSED | session-start sources the client before asking about the credential |
+| 48/69 | REFUSED | session-start stops reporting an absent session_id field |
+| 49/69 | REFUSED | setup forces the host to claude before resolving |
+| 50/69 | REFUSED | setup loses its opt-out and can no longer run before a credential exists |
+| 51/69 | REFUSED | the shell uninstaller stops refusing on Codex |
+| 52/69 | REFUSED | the shell uninstaller destroys the other product's state dir again |
+| 53/69 | REFUSED | lib-host stops reading the install marker |
+| 54/69 | REFUSED | the marker names the host but not the place |
+| 55/69 | REFUSED | any marker content is read as codex |
+| 56/69 | REFUSED | the drive-letter spelling is no longer normalised |
+| 57/69 | NOT | APPLIED  session-init writes no host marker |
+| 58/69 | REFUSED | self-update updates the Claude directory from a Codex session |
+| 59/69 | REFUSED | self-update loses its credential opt-out and dies silently |
+| 60/69 | REFUSED | the Windows guard forgets the install marker |
+| 61/69 | REFUSED | the Windows guard forgets CODEX_HOME |
+| 62/69 | REFUSED | the Windows guard refuses on any marker at all |
+| 63/69 | REFUSED | the customer-facing page goes back to a hard-coded path |
+| 64/69 | REFUSED | the 401 reply names a slash command on Codex too |
+| 65/69 | REFUSED | formation-join registers every session as claude-code |
+| 66/69 | REFUSED | formation-start registers every session as claude-code |
+| 67/69 | SURVIVED | setup exports its opt-out into everything it spawns |
+| 68/69 | REFUSED | the tool-call delivery handler does nothing at all |
+| 69/69 | SURVIVED | the Codex skill stops being a document about Codex |
+
+
+### 2026-09-16 — Windows 11, Git Bash, CPython 3.12.7, bats 1.13.0
+
+    === refused: 49   survived: 1   experiments not performed: 0   (ran 50 of 50) ===
+
+**The one survivor was a real finding, and it was mine.** `formation-check stops guarding the
+credential, so a hot-path hook exits 1` was applied and every test in
+`structural/codex-formation-delivery.bats` still passed, because every other test in that file
+supplies a credential through the environment and therefore never reaches the guard. The guard is
+what keeps an unconfigured Codex install from producing a failing hook after every single tool
+call. Two assertions were added - the silent case and its control - and the same mutation was then
+applied by hand and seen to fail the named test. That pair is experiment 30 in the current harness.
+
+The two mutations the QA round flagged as UNPROVEN - `lib-host stops reading the host off its own
+location` (33) and `hook-guard loses its missing-resolver fallback` (37) - both REFUSED in this
+run. They were never survivors; they were experiments the old harness had failed to perform.
+
+| # | Verdict | Mutation |
+|---|---|---|
+| 1/50 | REFUSED | claude config dir drifts |
+| 2/50 | REFUSED | claude client name becomes codex |
+| 3/50 | REFUSED | claude script ref becomes absolute |
+| 4/50 | REFUSED | default host becomes codex |
+| 5/50 | REFUSED | CODEX_HOME ignored |
+| 6/50 | REFUSED | codex script ref keeps the variable |
+| 7/50 | REFUSED | the double-source guard becomes a no-op |
+| 8/50 | REFUSED | shim stops declaring the host |
+| 9/50 | REFUSED | shim drops the path-separator guard |
+| 10/50 | REFUSED | shim swallows the handler exit code |
+| 11/50 | REFUSED | PreCompact gets registered |
+| 12/50 | REFUSED | a handler gains asyncRewake |
+| 13/50 | REFUSED | the PostToolUse group gains a matcher |
+| 14/50 | REFUSED | a handler loses commandWindows |
+| 15/50 | REFUSED | a command bypasses the codex entry point |
+| 16/50 | REFUSED | the formation poller is registered on Stop |
+| 17/50 | REFUSED | additionalContextLimit is emitted |
+| 18/50 | REFUSED | Windows command uses POSIX expansion |
+| 19/50 | REFUSED | an unknown event name is registered |
+| 20/50 | REFUSED | codex manifest points at the Claude skills dir |
+| 21/50 | REFUSED | codex manifest points at the Claude hooks file |
+| 22/50 | REFUSED | codex manifest hardcodes a version |
+| 23/50 | REFUSED | a manifest path loses its ./ prefix |
+| 24/50 | REFUSED | codex manifest inherits the default commands dir |
+| 25/50 | REFUSED | the compaction sentence fires on Claude Code too |
+| 26/50 | REFUSED | the compaction sentence never fires |
+| 27/50 | REFUSED | the save prompt stops exiting 2 |
+| 28/50 | REFUSED | codex tool delivery reverts to stderr+exit 2 |
+| 29/50 | REFUSED | codex idle guard removed, so the poller waits |
+| 30/50 | SURVIVED | formation-check stops guarding the credential, so a hot-path hook exits 1   <-- THIS ASSERTION CANNOT FAIL |
+| 31/50 | REFUSED | a Claude command file gains frontmatter |
+| 32/50 | REFUSED | the e2e fixture stops copying lib-host |
+| 33/50 | REFUSED | lib-host stops reading the host off its own location |
+| 34/50 | REFUSED | lib-host stops exporting MMRY_CONFIG_FILE |
+| 35/50 | REFUSED | lib-jq stops sourcing the host resolver |
+| 36/50 | REFUSED | location detection overreaches to any CODEX_HOME in the environment |
+| 37/50 | REFUSED | hook-guard loses its missing-resolver fallback |
+| 38/50 | REFUSED | stop-check loses its missing-resolver fallback |
+| 39/50 | REFUSED | lib-jq stops asserting, so the client walks on to the Claude file |
+| 40/50 | REFUSED | the assertion always passes |
+| 41/50 | REFUSED | the refusal goes quiet |
+| 42/50 | REFUSED | the refusal fires on Claude Code too |
+| 43/50 | REFUSED | session-init installs into the Claude directory on every host |
+| 44/50 | REFUSED | session-init stops copying the Windows entry point |
+| 45/50 | REFUSED | session-init loses the pipefail guard on the plugin-root search |
+| 46/50 | REFUSED | session-start registers every session as claude-code |
+| 47/50 | REFUSED | session-start sources the client before asking about the credential |
+| 48/50 | REFUSED | session-start stops reporting an absent session_id field |
+| 49/50 | REFUSED | setup forces the host to claude before resolving |
+| 50/50 | REFUSED | setup loses its opt-out and can no longer run before a credential exists |
+
+After the survivor was closed, the affected experiment was re-run individually:
+
+    mutation applied
+    not ok 1 codex: an unconfigured Codex install makes this hook silent, not noisy
+    (restored)
+    ok 1 codex: an unconfigured Codex install makes this hook silent, not noisy
+
+
+---
+
+## QA round 5 — the formation remedy a Codex customer is handed
+
+Three experiments were added (TOTAL 82 -> 85) for the fix in
+`tests/structural/codex-formation-instructions.bats`. All three were run and all three REFUSED.
+The per-test outcomes are recorded here rather than summarised, because "refused" alone does not
+show WHICH assertions did the refusing, and the point of the Claude-side controls is that a
+different set of them goes red for each mutation.
+
+Run individually with `MMRY_MUTATION_FILTER`; each was seen as `refused: 1 survived: 0
+experiments not performed: 0`.
+
+### 1. `the formation remedy stops being derived per host`
+
+`mmry_host_formation_ref` is reverted so the Codex branch returns the Claude string. This is the
+defect as it stood before the fix: every remedy names a slash command a Codex customer cannot type.
+
+Ten tests went red, covering all four handlers; the eight Claude controls stayed green, which is
+correct — this mutation restores the Claude string everywhere, and the Claude string is what the
+controls pin.
+
+| | test |
+|---|---|
+| not ok 1 | join: a Codex customer with no argument is given a command that exists on their machine |
+| not ok 3 | start: a Codex customer with no objective is given a runnable command |
+| not ok 5 | start: a session already in a formation is told how to leave, in its own host's terms |
+| not ok 7 | say: a Codex customer with no message is given a runnable command |
+| not ok 9 | say: a bad recipient points a Codex customer at the roster they can actually run |
+| not ok 11 | say: a session in no formation is told how to find and join one, runnably |
+| not ok 13 | roster: a session in no formation is given commands it can run |
+| not ok 15 | roster: a malformed id points a Codex customer at a runnable list |
+| not ok 16 | roster: the success footer hands a Codex customer three commands that all exist |
+| not ok 18 | surface: none of the four exposed handlers names a slash command on Codex |
+
+### 2. `the formation remedy names no command on either host`
+
+The helper stops naming a command at all and prints "the formation X operation" instead. This is
+the mutation the Claude-side controls exist for: without them, "no slash command appears on Codex"
+is trivially satisfied by a handler that names nothing, leaving the customer with a complaint and
+no way forward — indistinguishable, to the suite, from a fix.
+
+All eight Claude controls went red. The ten Codex assertions stayed green, which is the finding:
+the Codex half of this file CANNOT detect this regression on its own.
+
+| | test |
+|---|---|
+| not ok 2 | join: the same message on Claude Code still names the slash command, unchanged |
+| not ok 4 | start: on Claude Code the usage line is the slash command it always was |
+| not ok 6 | start: and on Claude Code that same remedy is still /mmry:formation leave |
+| not ok 8 | say: on Claude Code the usage line is unchanged |
+| not ok 10 | say: and on Claude Code the bad recipient still names /mmry:formation roster |
+| not ok 12 | say: and on Claude Code that pair is still the two slash commands |
+| not ok 14 | roster: on Claude Code that message is unchanged |
+| not ok 17 | roster: the same footer on Claude Code still names all three slash commands |
+
+### 3. `a handler hardcodes the slash command again instead of deriving it`
+
+The helper is left correct and `formation-join.sh` goes back to a hardcoded literal. This is the
+experiment that proves the assertions read the HANDLER'S OUTPUT rather than the helper's return
+value: a test written against `mmry_host_formation_ref` directly would survive this, and surviving
+it is precisely how twenty such strings shipped in the first place.
+
+| | test |
+|---|---|
+| not ok 1 | join: a Codex customer with no argument is given a command that exists on their machine |
+| not ok 18 | surface: none of the four exposed handlers names a slash command on Codex |
+
+## Round 6 follow-up: the plugin-root recovery remedy
+
+The stopped review of 2026-09-18 found one defect worth acting on, and it is the round 3 to 6
+pattern with the two halves swapped: `session-init.sh` line 41 printed `mmry_host_setup_hint`,
+so on **Claude Code** it replaced develop's `Run /mmry:setup` with a file path (a requirement 4
+regression), and on **Codex** it named `<dir>/mmry/setup/mmry-setup.sh` - the file that branch has
+not copied yet, because the branch is taken when the plugin root was not found.
+
+It survived five rounds for a reason the harness can state precisely: `codex-session.bats` asserted
+the **Codex** half of that message and no file in the suite asserted the **Claude** half, while
+eight other requirement-4 controls sat in that same file. A green 831 could not see it.
+
+Three experiments, all run to completion, all REFUSED.
+
+### 4. `the plugin-root remedy goes back to the setup hint [R6+]`
+
+The fix is reverted in `session-init.sh` and the helper is left correct, so this is the defect
+exactly as it shipped. Both halves of the message go red, which is the point: the Claude control is
+what was missing.
+
+| | test |
+|---|---|
+| not ok 6 | codex: when the plugin root cannot be found the advice is something a Codex customer can do |
+| not ok 7 | req4: and on Claude Code that same message is still Run /mmry:setup, byte for byte |
+
+### 5. `the recovery remedy names the Claude command on Codex too [R6+]`
+
+`mmry_host_plugin_recovery_ref`'s Codex branch is made to return `/mmry:setup`. The Claude control
+stays green, correctly - the mutation does not change the Claude answer - and three Codex
+assertions in three different files go red, including the one that reads the handler's output
+rather than the helper's return value.
+
+| | test |
+|---|---|
+| not ok 38 | codex: the plugin-root remedy is the reinstall, not a path under a directory not yet filled |
+| not ok 50 | docs: the reinstall a stuck customer is told to run is the one this page documents |
+| not ok 74 | codex: when the plugin root cannot be found the advice is something a Codex customer can do |
+
+### 6. `the documented install command drifts from the printed one [R6+]`
+
+The product is left correct and `docs/codex.md` is changed to name a different marketplace. This is
+the experiment that proves the documentation pin is a pin and not a restatement: an install command
+written down in two places is one that will eventually disagree with itself.
+
+| | test |
+|---|---|
+| not ok 11 | docs: the reinstall a stuck customer is told to run is the one this page documents |
+
+### Still open
+
+The per-experiment table for the full 69-of-69 round-4 run is NOT recorded here. A full run is
+upwards of two hours and would describe a tree still under review; it goes in once this branch
+settles. The three experiments above are complete and were run to completion.

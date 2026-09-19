@@ -222,13 +222,34 @@ mmry_refresh_foundation_cache() {
 # 2. AUTHENTICATION
 # ============================================================================
 
+# THE SETUP COMMAND THIS CLIENT NAMES BELONGS TO THE HOST IT IS SERVING (#31245 QA round 6).
+#
+# Two messages in this file told every customer to "Run /mmry:setup": the one printed when there
+# is no credential at all, and the one printed when the stored credential is rejected with a 401.
+# Both are reachable on Codex - lib-host.sh's own header names the first of them as the defect it
+# was written to fix - and Codex has no typed slash commands, so both handed a stuck customer a
+# string that does nothing on their machine. Round 5 fixed the credential RESOLUTION underneath
+# these messages and left the messages themselves.
+#
+# GUARDED, BECAUSE THIS CLIENT IS SOURCED FROM DIRECTORIES SOMEBODY ELSE ASSEMBLED. lib-jq.sh
+# sources lib-host.sh and this file sources lib-jq.sh, so a real install always has the resolver -
+# but hook-guard.sh documents why curated handler copies exist, and one lives in the test suite
+# today. Without the resolver the literal is exactly what this file printed before #31245, which
+# is the right floor for a message whose only job is to be followable.
+_mmry_setup_ref() {
+    if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+        mmry_host_command_ref setup && return 0
+    fi
+    printf '/mmry:setup'
+}
+
 _mmry_get_auth_header() {
     if [[ "$MMRY_AUTH_METHOD" == "apikey" && -n "$MMRY_API_KEY" ]]; then
         echo "X-Api-Key: ${MMRY_API_KEY}"
         return 0
     fi
 
-    MMRY_RESPONSE="No API key configured. Run /mmry:setup to configure your account."
+    MMRY_RESPONSE="No API key configured. Run $(_mmry_setup_ref) to configure your account."
     return 1
 }
 
@@ -302,7 +323,7 @@ _mmry_format_error() {
         # MMRY_RESPONSE is "No API key configured. Run /mmry:setup ...") stays in the generic
         # branch below and keeps its own setup direction.
         echo "MMRY AI: your saved credential is invalid or expired. Memories may not be saved or loaded." >&2
-        echo "Run /mmry:setup to re-authenticate." >&2
+        echo "Run $(_mmry_setup_ref) to re-authenticate." >&2
     else
         echo "Error (HTTP ${MMRY_HTTP_CODE}): ${MMRY_RESPONSE}" >&2
     fi

@@ -227,6 +227,55 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         exit 0
     fi
 
+    # A HOST WITH NO CREDENTIAL OF ITS OWN IS SILENT, NOT ALARMING (#31245 QA round 4).
+    #
+    # THE DEFECT. On an unconfigured Codex install this handler fired on every prompt and exited
+    # 1 with zero bytes. The chain: the worker sources mmry-client.sh, which sources lib-jq.sh,
+    # which asks lib-host.sh whether this host has its own credential; on Codex with none, that
+    # refuses with `exit 1` rather than returning non-zero, so the worker's own
+    # `|| exit 0` never sees it and the worker dies with rc=1.
+    #
+    # AND AFTER #31434 IT GOT WORSE, NOT BETTER. The new supervisor cannot tell that apart from a
+    # broken install, so rc=1 took the crash branch and printed, on EVERY prompt: "the loader
+    # exited with code 1 ... the usual cause is an incomplete plugin install. Run
+    # /mmry:load-memories ... or set foundationReinject to false in ~/.claude/mmry-config.json."
+    # A slash command Codex customers cannot type, the OTHER product's config file, and a cause
+    # that is not true. A silent exit became a wrong, alarming, every-prompt message. Reproduced
+    # on this branch after the merge, 838 bytes of it.
+    #
+    # THE FIX IS THE ONE formation-check.sh ALREADY MAKES, at its line 111, for the same reason
+    # and in the same words: the refusal is correct for a handler the MODEL runs, where a human
+    # reads the message and acts on it, and wrong for a hook that fires unattended on every
+    # prompt, whose governing rule is to fail open and silent. So the question is asked HERE,
+    # before anything can answer it wrongly, and answered with exit 0.
+    #
+    # ON CLAUDE CODE THIS IS A NO-OP by construction: mmry_host_assert_own_credential returns 0
+    # immediately unless the host is codex, so no existing install changes behaviour.
+    #
+    # ONLY AN EXPLICIT REFUSAL STOPS US. A MISSING lib-host.sh MUST NOT. hook-guard.sh documents
+    # why: this script runs from a directory somebody else assembled, and a curated copy without
+    # the resolver exists in the test suite today. Treating "could not ask" as "refuse" would
+    # silently switch Foundation re-injection off for anyone with such a copy - trading a Codex
+    # bug for a Claude one. The two outcomes are therefore kept distinct rather than collapsed
+    # into one exit status.
+    #
+    # SOURCED IN THIS SHELL, NOT A SUBSHELL, because `$(...)` is a fork and this runs on every
+    # prompt - #31434 spent real effort getting forks off this path and this must not put one
+    # back. The only thing that has to be undone afterwards is lib-host.sh's `set -e`: this
+    # handler deliberately runs without it, because a failure here must never fail the
+    # customer's prompt. -u and pipefail are already on from line 46, so `set +e` restores
+    # exactly the options this file chose.
+    if [[ -f "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" >/dev/null 2>&1
+        set +e
+        if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
+            if ! mmry_host_assert_own_credential >/dev/null 2>&1; then
+                exit 0
+            fi
+        fi
+    fi
+
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
     # story: the supervisor still has to start, reap the worker, decide WHY it failed and
     # write the JSON afterwards, and on Windows Git Bash every one of those steps is a
@@ -336,16 +385,47 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # they can act on, that this turn is running WITHOUT their standing directives — and
         # told the RIGHT thing. A crash and a deadline need different remedies, so they are
         # reported as different events rather than both as "it was slow".
+
+        # AND "IN TERMS THEY CAN ACT ON" MEANS THE HOST'S TERMS (#31245 QA round 6).
+        #
+        # THE DEFECT. Both notices below named "/mmry:load-memories" and
+        # "~/.claude/mmry-config.json". On Codex the first is a command that cannot be typed and
+        # the second is the OTHER PRODUCT'S file - on a Codex-only machine, a file that does not
+        # exist. So the two remedies offered for a message the customer sees on a failing prompt
+        # were both uncarryable. Reproduced at 725 bytes on a CONFIGURED Codex install that hit
+        # the deadline.
+        #
+        # THIS IS THE SAME DEFECT AS THE ONE FIXED FORTY LINES ABOVE, IN THIS FILE, IN ROUND 4.
+        # That fix made an UNCONFIGURED Codex install exit silently instead of printing this
+        # text. It did nothing for a CONFIGURED one, which still reaches here on any worker
+        # failure - and a configured install is the ordinary case, not the edge. Fixing the
+        # branch somebody looked at and leaving its sibling is the recurring shape of this task,
+        # which is why the reference is now DERIVED rather than written out again.
+        #
+        # RESOLVED HERE, INSIDE THE FAILURE BRANCH, so the forks are paid only on a prompt that
+        # has already failed - never on the per-prompt success path #31434 spent real effort
+        # clearing. lib-host.sh was sourced into THIS shell near the top of the supervisor, so
+        # the functions are already defined; the guard covers the curated-copy case documented
+        # there, and its fallback is the literal this file has always carried, byte for byte,
+        # which is requirement 4.
+        _FOUND_RELOAD_REF='/mmry:load-memories'
+        _FOUND_CONFIG_REF='~/.claude/mmry-config.json'
+        if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+            _FOUND_RELOAD_REF="$(mmry_host_command_ref load-memories)"
+        fi
+        if declare -F mmry_host_config_file_ref >/dev/null 2>&1; then
+            _FOUND_CONFIG_REF="$(mmry_host_config_file_ref)"
+        fi
         if (( HIT_DEADLINE == 1 )); then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run /mmry:load-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run ${_FOUND_RELOAD_REF} to rebuild the local cache, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
             _FOUND_EVENT="deadline exceeded (${DEADLINE}s), worker killed"
         else
             # NOT a timeout. Saying "it took too long" here would be three lies at once: a
             # false cause, an invented duration, and a remedy (re-send the prompt) that cannot
             # work, because whatever made the worker exit non-zero will do it again.
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: the loader failed with exit code ${WORKER_RC}. This was a failure, not a slow turn. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run /mmry:load-memories to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run ${_FOUND_RELOAD_REF} to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
         fi
         printf '%s foundation reinjection FAILED: %s\n' \

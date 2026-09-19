@@ -20,6 +20,76 @@
 
 set -euo pipefail
 
+# #31245: resolve the host before anything reads a path or a credential.
+#
+# WHY HERE, OF ALL PLACES. mmry-client.sh sources this file as its very first action, before it
+# loads config, and nearly every handler in the plugin reaches the client through that one line. So
+# sourcing lib-host.sh here is what makes a handler invoked directly by the model - which is how
+# save-memory.sh, search-memories.sh and the rest are actually run - resolve the credential of the
+# assistant it is installed under. Without it those scripts fall through to
+# ${HOME}/.claude/mmry-config.json on every host, which is the wrong file on Codex and no file at
+# all on a machine that has only Codex.
+#
+# It is a no-op on Claude Code: lib-host.sh resolves the host to claude and sets nothing.
+# Guarded, because a missing lib-host.sh must not take jq resolution down with it - hence the
+# existence test rather than a swallowed source. STDERR IS DELIBERATELY NOT REDIRECTED HERE: the
+# refusal below is the only warning a customer gets that MMRY is not set up for this host, and a
+# 2>/dev/null on this line would discard it.
+# DERIVED WITHOUT A PROCESS, FOR THE SAME REASON AS hook-guard.sh (#31245 QA round 6).
+#
+# This was `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` - two nested command substitutions, the
+# identical idiom removed from hook-guard.sh in commit 7ae2464 of this branch and reintroduced
+# here in the same commit that removed it there. It is not a quiet corner: formation-check.sh
+# sources this file, and formation-check.sh is registered on PostToolUse WITH NO MATCHER, so it
+# runs after EVERY tool call.
+#
+# AND IT WAS NOT THE MAIN COST, WHICH IS WORTH WRITING DOWN RATHER THAN QUIETLY FIXING. QA named
+# this line for a regression it had measured, and removing it moved the figure by about 5 ms of a
+# 140 ms problem. Bisecting the rest found the real one a level down, in lib-host.sh's host
+# detection: a cygpath call - a fork - taken for any path carrying a backslash or a drive letter,
+# which on Windows is every path a hook is invoked with. Measured in one shell, 60 sources each,
+# no process-spawn noise:
+#
+#   develop (no lib-host at all)            0.65 ms per source
+#   round 5, both defects present         141.72 ms per source
+#   only the cygpath fork present         149.72 ms per source   <- the whole of it
+#   this branch, both fixed                 2.20 ms per source
+#
+# Both are fixed; see the "NORMALISED WITHOUT A PROCESS HERE" block in lib-host.sh for the other.
+# The lesson kept here is the method rather than the line: a named suspect that accounts for 5 ms
+# of 140 is not the cause, and stopping at it would have shipped the regression with a commit
+# message claiming it was fixed.
+#
+# The path only has to be good enough to source a sibling file. lib-host.sh resolves its OWN
+# absolute location for the host detection it does, so nothing downstream depends on this one
+# being absolute. tests/structural/hook-budgets.bats asserts both the absent idiom and a ceiling
+# on what sourcing lib-host.sh may cost, so a third one cannot appear unnoticed.
+_mmry_libjq_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_mmry_libjq_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_libjq_dir="."
+if [[ -f "${_mmry_libjq_dir}/lib-host.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${_mmry_libjq_dir}/lib-host.sh" || true
+fi
+
+# AND THIS IS WHERE A FOREIGN CREDENTIAL IS REFUSED (#31245 QA round 2).
+#
+# Pointing MMRY_CONFIG_FILE at the Codex credential is not enough on its own: mmry-client.sh tests
+# that the file EXISTS and, when it does not, walks on to ${HOME}/.claude/mmry-config.json - the
+# other product's account. Reproduced with a sentinel on 2026-09-16.
+#
+# This is the one line every credential-resolving path in the plugin passes through. mmry-client.sh
+# sources this file as its first executable statement, and mmry_load_config - the only function
+# anywhere that opens a credential file - is defined below that point in the same file. So a
+# refusal here happens before any caller can ask the question, without editing the client.
+#
+# On Claude Code the function returns 0 immediately, so nothing changes. The opt-out exists for
+# mmry-setup.sh and uninstall.sh, the two programs that legitimately run before or after a
+# credential exists.
+if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
+    mmry_host_assert_own_credential || exit 1
+fi
+unset _mmry_libjq_dir
+
 # Directory holding the bundled binaries.
 _mmry_jq_vendor_dir() {
     if [[ -n "${MMRY_JQ_VENDOR_DIR:-}" ]]; then
@@ -92,7 +162,15 @@ mmry_jq_unavailable_message() {
         echo "MMRY AI: no usable jq was found for this platform (${os} ${arch})."
         echo "jq is required for fast memory operations."
         echo "Re-run setup to restore the bundled jq:"
-        echo "  bash ~/.claude/mmry/setup/mmry-setup.sh"
+        # #31245: the setup path belongs to whichever host this is. lib-host.sh is sourced lazily
+        # here, not at the top of the file: this library is pulled in by mmry-client.sh, which is
+        # itself sourced by twenty-odd handlers, and this message is the only line in it that needs
+        # to know the host. The guard keeps the previous literal if the resolver is unavailable.
+        if source "${BASH_SOURCE[0]%/*}/lib-host.sh" 2>/dev/null; then
+            echo "  $(mmry_host_setup_hint)"
+        else
+            echo "  bash ~/.claude/mmry/setup/mmry-setup.sh"
+        fi
         echo "Or install jq (https://jqlang.github.io/jq/) and put it on your PATH."
     } >&2
 }
