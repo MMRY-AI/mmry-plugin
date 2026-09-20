@@ -6,8 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" session-init",
-            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" session-init",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" session-init",
             "statusMessage": "MMRY AI: loading your memories",
             "timeout": 30
           }
@@ -17,8 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
-            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" formation-check",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "statusMessage": "MMRY AI: checking for formation messages",
             "timeout": 15
           }
@@ -30,8 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation",
-            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation",
             "timeout": 20
           }
         ]
@@ -40,8 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
-            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" formation-check",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "timeout": 10
           }
         ]
@@ -52,8 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
-            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" formation-check",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "timeout": 8
           }
         ]
@@ -64,8 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
-            "commandWindows": "\"%CLAUDE_PLUGIN_ROOT%\\hooks-handlers\\codex-hook.cmd\" stop-check",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
             "timeout": 10
           }
         ]

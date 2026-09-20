@@ -244,30 +244,46 @@ setup() {
     [[ "$n_total" == "$n_routed" ]] || { echo "$n_routed of $n_total handlers route through codex-hook.sh"; return 1; }
 }
 
-@test "codex hooks: every handler has a commandWindows, because Windows runs cmd.exe not a shell" {
-    # default_shell_command uses COMSPEC with /C on Windows. A POSIX command string there does not
-    # expand ${CLAUDE_PLUGIN_ROOT} at all, so the handler path would be a literal.
-    local n_total n_win
-    n_total="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$CODEX_HOOKS")"
+@test "codex hooks: NO handler declares commandWindows, because it silently eats the output" {
+    # THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, AND THE OLD ONE WAS WRONG (#31245, 2026-09-20).
+    #
+    # The old test required every handler to carry commandWindows, reasoning that Windows runs
+    # COMSPEC /C and a POSIX command string would leave ${PLUGIN_ROOT} unexpanded. The reasoning was
+    # plausible and the consequence was that the entire Codex feature did nothing on Windows.
+    #
+    # MEASURED on codex-cli 0.154.0, against a real session, with a batch file that echoes a valid
+    # additionalContext payload carrying a unique token:
+    #
+    #   commandWindows declared      -> hook reports Completed, token appears 0 times in the
+    #                                   transcript, and Codex injects THE COMMAND STRING ITSELF as
+    #                                   hooks.additional_context. The handler output never arrives.
+    #   commandWindows absent        -> token appears 4 times. Output is consumed correctly.
+    #
+    # A second, independent fault in the same field: commandWindows fails outright when it carries
+    # an argument. One identical file invoked bare Completes; invoked as "<path>" session-init it
+    # Fails, and so do the unquoted, `call` and `cmd /c` forms. Every MMRY hook passes a handler
+    # name, which is why all six failed rather than misbehaved.
+    local n_win
     n_win="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | select(.commandWindows != null)] | length' "$CODEX_HOOKS")"
-    [[ "$n_total" == "$n_win" ]] || { echo "$n_win of $n_total handlers carry commandWindows"; return 1; }
+    [[ "$n_win" == "0" ]] || {
+        echo "$n_win handler(s) declare commandWindows; on Windows that stops Codex consuming their stdout"
+        return 1
+    }
 }
 
-@test "codex hooks: the POSIX command uses \${VAR} and the Windows one uses %VAR%" {
-    local c w
-    while IFS=$'\t' read -r c w; do
-        [[ "$c" == *'${CLAUDE_PLUGIN_ROOT}'* ]] || { echo "POSIX command lacks \${CLAUDE_PLUGIN_ROOT}: $c"; return 1; }
-        [[ "$w" == *'%CLAUDE_PLUGIN_ROOT%'* ]] || { echo "Windows command lacks %CLAUDE_PLUGIN_ROOT%: $w"; return 1; }
-        [[ "$w" != *'${CLAUDE_PLUGIN_ROOT}'* ]] || { echo "Windows command uses POSIX expansion, which cmd.exe leaves literal: $w"; return 1; }
-    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | [.command, .commandWindows] | @tsv' "$CODEX_HOOKS")
-}
-
-@test "codex hooks: the Windows command runs codex-hook.cmd, not bash, and that file exists" {
-    local w
-    while IFS= read -r w; do
-        [[ "$w" == *'codex-hook.cmd'* ]] || { echo "Windows command does not use the cmd shim: $w"; return 1; }
-    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .commandWindows' "$CODEX_HOOKS")
-    [[ -f "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" ]]
+@test "codex hooks: every command uses Codex own PLUGIN_ROOT token, not the other product alias" {
+    # ${PLUGIN_ROOT} is expanded by Codex itself, on every platform, and was measured working:
+    # the same token emitter referenced this way delivered its payload 4 times.
+    #
+    # It replaces %CLAUDE_PLUGIN_ROOT% and ${D}{CLAUDE_PLUGIN_ROOT}. Those name the OTHER product's
+    # compatibility alias, which occurs exactly ONCE in codex.exe, immediately beside
+    # CLAUDE_PLUGIN_DATA, which is what a legacy compat pair looks like. Building a Codex surface
+    # on it was the original mistake and this test is what stops it coming back.
+    local c
+    while IFS= read -r c; do
+        [[ "$c" == *'${PLUGIN_ROOT}'* ]] || { echo "command does not use Codex's own token: $c"; return 1; }
+        [[ "$c" != *'CLAUDE_PLUGIN_ROOT'* ]] || { echo "command still names the other product's alias: $c"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$CODEX_HOOKS")
 }
 
 @test "codex hooks: every handler named in the registration exists as a script" {
