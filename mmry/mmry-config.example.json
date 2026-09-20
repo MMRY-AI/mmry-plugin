@@ -3,6 +3,5 @@
   "authMethod": "apikey",
   "apiKey": "",
   "foundationReinject": true,
-  "foundationReinjectTokenCap": 1500,
   "foundationRefreshSeconds": 86400
 }

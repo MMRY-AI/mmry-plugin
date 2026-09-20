@@ -97,3 +97,20 @@ setup() {
     [[ "$text" == *'refused'* ]]
     [[ "$text" == *'mmry:load-memories'* ]]
 }
+
+@test "docs: the shipped example config does not seed a setting that does nothing (#31411)" {
+    # mmry-config.example.json is what a new install copies. Seeding it with
+    # foundationReinjectTokenCap hands every new customer a knob that reads as a working
+    # limit and controls nothing. The key is still PARSED, so an existing config keeps
+    # working and config-loading.bats keeps its shear canary; it just is not planted in new
+    # ones.
+    local cfg="$PLUGIN_ROOT/mmry-config.example.json"
+    [ -f "$cfg" ]
+    run grep -c 'foundationReinjectTokenCap' "$cfg"
+    [ "$output" = "0" ]
+    # Premise: the file still carries the keys that DO work, so an empty file cannot pass.
+    run grep -c 'foundationReinject"' "$cfg"
+    [ "$output" -ge 1 ]
+    run grep -c 'foundationRefreshSeconds' "$cfg"
+    [ "$output" -ge 1 ]
+}

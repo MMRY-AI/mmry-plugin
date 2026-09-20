@@ -22,7 +22,10 @@ MMRY_AUTH_METHOD="${MMRY_AUTH_METHOD:-}"
 
 # #30579 Foundation re-injection (UserPromptSubmit hook) settings.
 # foundationReinject: "true"/"false" — restate Foundation memories every prompt (default true).
-# foundationReinjectTokenCap: max approx tokens re-injected per prompt (default 1500).
+# foundationReinjectTokenCap: NO LONGER CAPS ANYTHING (#31411). Still parsed, so an existing
+# config does not break and so config-loading.bats can keep using it as a key/value shear
+# canary, but the re-injection handler deliberately does not honour it: there must be no
+# size at which the product silently overrules what the customer wrote.
 MMRY_FOUNDATION_REINJECT="${MMRY_FOUNDATION_REINJECT:-}"
 MMRY_FOUNDATION_TOKEN_CAP="${MMRY_FOUNDATION_TOKEN_CAP:-}"
 # foundationRefreshSeconds: re-fetch the Foundation cache mid-session at most this often so
