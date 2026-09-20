@@ -49,6 +49,8 @@ CONFIG_TESTS="unit/config-loading.bats"
 WRITER_TESTS="unit/foundation-cache-write.bats"
 STATUS_TESTS="handlers/foundation-status.bats"
 STATUS_REL="hooks-handlers/foundation-status.sh"
+STATUS_CMD_TESTS="structural/foundation-status-command.bats"
+HELP_REL="commands/help.md"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
 
 WORK_BASE="${TMPDIR:-/tmp}/mmry-mutation-$$"
@@ -325,7 +327,18 @@ file_m19="$STATUS_REL"
 targets_m19="$STATUS_TESTS"
 desc_m19="#31583 the status command reports health for a cache the handler is refusing"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19"
+# Take the command back out of the help page. The handler still works perfectly and every
+# test of its OUTPUT still passes; the customer simply has no way to learn the command
+# exists. Requirement 4 of #31583 is that the customer can ASK, so a command nobody can
+# find satisfies the handler tests and fails the requirement.
+mutate_m20() {
+    _sedi 's|/mmry:foundation-status|/mmry:removed-from-help|' "$1/$HELP_REL"
+}
+file_m20="$HELP_REL"
+targets_m20="$STATUS_CMD_TESTS"
+desc_m20="#31583 the status command is no longer advertised anywhere a customer would look"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
@@ -393,7 +406,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
