@@ -70,3 +70,30 @@ setup() {
     [[ "$text" == *'not being applied'* ]]
     [[ "$text" == *'DAMAGED'* ]]
 }
+
+@test "docs: the README does not still promise the truncation #31411 removed" {
+    # The README described the cut as current behaviour: "Beyond this the set is truncated
+    # and the drop is logged", against a default of 1500 tokens. That sentence survived the
+    # fix, so the one customer-facing document describing this feature told a customer their
+    # directives were being trimmed when they no longer are. A stale promise in the docs is
+    # the same defect as the behaviour, one surface along.
+    local readme text
+    readme="$PLUGIN_ROOT/README.md"
+    text="$(tr '
+' ' ' < "$readme")"
+    [[ "$text" != *'the set is truncated and the drop is logged'* ]] || { echo "README still describes the removed cut"; return 1; }
+    [[ "$text" == *'delivered in full'* ]]
+}
+
+@test "docs: the README tells a customer their copy is verified, and how to ask (#31583)" {
+    # Requirements 3 and 4 are customer-facing, and the README is where a customer looks
+    # before they know a slash command exists. It has to carry both the refusal behaviour
+    # and the name of the command that answers the question on demand.
+    local readme text
+    readme="$PLUGIN_ROOT/README.md"
+    text="$(tr '
+' ' ' < "$readme")"
+    [[ "$text" == *'mmry:foundation-status'* ]]
+    [[ "$text" == *'refused'* ]]
+    [[ "$text" == *'mmry:load-memories'* ]]
+}

@@ -85,10 +85,16 @@ Foundation memories are restated to Claude on every prompt so they consistently 
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `foundationReinject` | `true` | Set to `false` to turn off per-prompt Foundation re-injection. |
-| `foundationReinjectTokenCap` | `1500` | Max approximate tokens of Foundation memories re-injected per prompt. Beyond this the set is truncated and the drop is logged. |
+| `foundationReinjectTokenCap` | (no longer applied) | Still accepted, so existing config files do not break, but it no longer limits anything. See below. |
 | `foundationRefreshSeconds` | `86400` | How often (seconds) the Foundation cache re-fetches mid-session so admin changes propagate without a restart. Default is daily; `0` re-fetches only at session start. |
 
-Env overrides: `MMRY_FOUNDATION_REINJECT`, `MMRY_FOUNDATION_TOKEN_CAP`, `MMRY_FOUNDATION_REFRESH_SECONDS`.
+Env overrides: `MMRY_FOUNDATION_REINJECT`, `MMRY_FOUNDATION_REFRESH_SECONDS`. `MMRY_FOUNDATION_TOKEN_CAP` is still read, for the same compatibility reason as the config key, and has no effect.
+
+**Your Foundation set is delivered in full, at any size.** There is no longer a point at which the product trims or drops part of what you wrote. Before MMRY 2.9.2 the set was cut at roughly 6,000 characters, as a raw substring, so the cut landed wherever that character fell: mid-sentence, mid-directive. Anything after it never reached the assistant and you were never told. The tokens are spent in your own session, so the cost of a large set is yours to weigh.
+
+**Your local copy is verified before it is used.** The cache is written together with a manifest recording its exact byte count and checksum. On every prompt the hook checks the file against that manifest, and if it does not match (damaged, truncated, replaced, or written by something other than MMRY) the copy is refused rather than sent to the assistant as your guidance. You are told on that turn, in your own terminal, with the remedy: run `/mmry:load-memories` to rebuild it. A valid copy is silent, and an account with genuinely no Foundation memories is silent too rather than warned on every prompt.
+
+**To ask at any time, run `/mmry:foundation-status`.** It reports whether re-injection is on, whether the stored copy verifies against what MMRY holds for your account, how many directives and characters it is, and how long ago it was last sent. Read-only: it never rebuilds or repairs anything. It exists because a refusal only speaks when something is wrong, and on 2026-09-18 an account ran for hours on a four-character stub with no way to ask.
 
 **If re-injection is ever too slow to finish,** the hook stops itself after 10 seconds instead of letting Claude Code cut it off, and tells you that the turn ran without your Foundation directives so you can re-send the prompt. Previously that turn simply ran with none of your standing directives applied and the only sign was a generic hook-timeout warning.
 
