@@ -333,7 +333,25 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     [[ -s "$OUTFILE" ]] && BODY="$(<"$OUTFILE")"
     rm -f "$OUTFILE" 2>/dev/null || true
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
-    rm -f "$_INFLIGHT" 2>/dev/null || true
+    # THE IN-FLIGHT MARKER IS NOT CLEARED HERE. It is cleared immediately before each exit,
+    # after the emit (#31411 QA).
+    #
+    # It used to be cleared at this point, which left the rest of this path unreported: the
+    # emit and its JSON escape run after it, the watchdog only ever kills the WORKER, and the
+    # escape is pure parameter expansion whose cost grows faster than its input. Measured on
+    # this host with worst-case content, every line short so the newline replacement does the
+    # most work: 8 KB 57 ms, 64 KB 120 ms, 128 KB 428 ms, 256 KB 1,435 ms, 360 KB 2,720 ms.
+    #
+    # That is superlinear and it is nowhere near the 10 s deadline or the 20 s budget at any
+    # size a customer has: the largest Foundation set ever measured on the platform is 34,338
+    # characters. Extrapolating the curve, it would take roughly 700 KB to reach 10 s. So the
+    # speed is not the defect and I have NOT put a jq process on this path to fix it; #31434
+    # deliberately took the processes out of here.
+    #
+    # The defect was that if it ever did run long, the turn would be silent about it, because
+    # the marker saying "a turn was cut short" had already been removed. Clearing it after the
+    # emit instead costs nothing and restores the guarantee: a firing killed anywhere, in the
+    # worker or in the emit, leaves the marker, and the next turn says so.
 
     # THE CACHE WAS THERE AND COULD NOT BE TRUSTED (#31583).
     #
@@ -350,6 +368,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
+        rm -f "$_INFLIGHT" 2>/dev/null || true
         exit 0
     fi
 
@@ -373,13 +392,17 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection FAILED: %s\n' \
             "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
+        rm -f "$_INFLIGHT" 2>/dev/null || true
         exit 0
     fi
 
     # Worker finished inside the deadline with nothing to inject (toggle off, no cache,
     # empty cache). Nothing was lost, so say nothing — including about a previous miss,
     # which would be a false alarm when there are no directives to apply.
-    [[ -n "${BODY//[[:space:]]/}" ]] || exit 0
+    if [[ -z "${BODY//[[:space:]]/}" ]]; then
+        rm -f "$_INFLIGHT" 2>/dev/null || true
+        exit 0
+    fi
 
     USERMSG=""
     if (( MISSED_PREVIOUS == 1 )); then
@@ -390,6 +413,7 @@ ${BODY}"
     fi
 
     _mmry_emit "$BODY" "$USERMSG"
+    rm -f "$_INFLIGHT" 2>/dev/null || true
     exit 0
 fi
 

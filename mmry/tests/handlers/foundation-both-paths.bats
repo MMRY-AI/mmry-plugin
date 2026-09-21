@@ -150,3 +150,58 @@ else:
     [[ "$output" != *'truncated'* ]]
     [ ${#output} -gt 7000 ]
 }
+
+# ============================================================================
+# #31411 QA: A FIRING KILLED DURING THE EMIT MUST STILL BE REPORTED.
+#
+# The in-flight marker was cleared before the emit, so everything after that point was
+# unreported: the emit and its JSON escape run there, the watchdog only ever kills the
+# WORKER, and the escape is parameter expansion whose cost grows faster than its input
+# (measured on this host, worst case: 8 KB 57 ms, 128 KB 428 ms, 360 KB 2,720 ms).
+#
+# The timing is not the problem. Nothing a customer has comes close to the 10 s deadline; the
+# largest Foundation set ever measured on the platform is 34,338 characters and it would take
+# roughly 700 KB to reach it. The problem was that IF it ever ran long, the next turn would
+# say nothing, because the evidence had already been deleted.
+# ============================================================================
+
+@test "#31411 the in-flight marker is cleared AFTER the emit, never before it" {
+    # STRUCTURAL, and deliberately so. My first attempt at this raced a SIGKILL against the
+    # handler and then asserted only `if [ -f "$marker" ]`, which is vacuous in precisely the
+    # case it was written to catch: under the OLD ordering the marker is already gone, the
+    # branch is skipped, and the test reports ok. Restoring the old ordering left it green.
+    # An assertion that cannot fail is worse than no assertion, so this checks the ordering
+    # itself, which is the thing that has to hold.
+    local f="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+
+    # The region after the worker has been waited on. Every clear of the marker in it must
+    # come after an emit, because everything between the two is unreported otherwise: the
+    # watchdog kills only the worker, and the JSON escape runs in the emit.
+    local first_clear first_emit
+    first_clear="$(grep -n 'rm -f "\$_INFLIGHT"' "$f" | head -1 | cut -d: -f1)"
+    first_emit="$(grep -n '_mmry_emit ' "$f" | grep -v '^[0-9]*:_mmry_emit()' | head -1 | cut -d: -f1)"
+
+    [ -n "$first_clear" ]
+    [ -n "$first_emit" ]
+    # The premise: both were actually found, and the marker is written somewhere too.
+    grep -q ': > "\$_INFLIGHT"' "$f"
+
+    [ "$first_clear" -gt "$first_emit" ] || {
+        echo "marker cleared at line $first_clear, before the first emit at line $first_emit"
+        return 1
+    }
+}
+
+@test "#31411 a clean firing clears the marker, so the next turn does NOT cry wolf" {
+    export MOCK_CURL_RESPONSE='[{"memoryTier":"Foundation","topic":"T","content":"C"}]'
+    export MOCK_CURL_HTTP_CODE="200"
+    bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
+
+    bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" >/dev/null
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+
+    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'PREVIOUS turn'* ]]
+    [[ "$output" != *'previous turn'* ]]
+}
