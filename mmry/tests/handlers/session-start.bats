@@ -127,18 +127,18 @@ setup() {
 @test "session-start: #31411 a Foundation cache write failure does not kill the hook" {
     # Deterministic failure with nothing stubbed: a DIRECTORY where the writer must create the
     # manifest file, so the real writer takes its real failure path.
-    mkdir -p "$TEST_TMPDIR/mmry-foundation.md.manifest"
+    _plugin_with_failing_writer
 
-    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    run bash -c "bash '$FAILING_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
     [[ "$output" == *'"hookEventName":"SessionStart"'* ]]
     [[ "$output" == *'memor'* ]]
 }
 
 @test "session-start: #31411 that failure is REPORTED, not swallowed" {
-    mkdir -p "$TEST_TMPDIR/mmry-foundation.md.manifest"
+    _plugin_with_failing_writer
 
-    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    run bash -c "bash '$FAILING_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
     [[ "$output" == *'Foundation directives could not be stored'* ]]
     [[ "$output" == *'NOT be applied'* ]]
@@ -146,9 +146,9 @@ setup() {
 }
 
 @test "session-start: #31411 the JSON on stdout is still valid when the writer fails" {
-    mkdir -p "$TEST_TMPDIR/mmry-foundation.md.manifest"
+    _plugin_with_failing_writer
 
-    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    run bash -c "bash '$FAILING_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
     if command -v jq >/dev/null; then
         printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
@@ -161,4 +161,25 @@ setup() {
     run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
     [[ "$output" != *'could not be stored'* ]]
+}
+
+# A copy of the plugin whose cache writer always fails, so the #31411 tests above exercise
+# session-start's HANDLING of that failure rather than a filesystem trick.
+#
+# The first version put a directory where the manifest file had to go. That worked until the
+# writer began landing both files by atomic rename (#31583 QA): `mv file dir` moves the file
+# INTO the directory and succeeds, so the injected failure silently stopped happening and
+# those tests went red in the full suite. A test whose failure injection depends on the
+# internals of the thing it tests will keep doing that.
+#
+# Defined at the end of the file on purpose: bats sources the whole file before running any
+# test, so position does not matter and appending avoids disturbing the block above.
+_plugin_with_failing_writer() {
+    FAILING_ROOT="$TEST_TMPDIR/plugin"
+    cp -R "$PLUGIN_ROOT" "$FAILING_ROOT"
+    local client="$FAILING_ROOT/hooks-handlers/mmry-client.sh"
+    # Force the documented failure contract: return non-zero, write nothing.
+    awk '{ print } /^mmry_write_foundation_cache\(\) \{$/ { print "    return 1" }' "$client" > "$client.tmp"
+    mv "$client.tmp" "$client"
+    grep -q '^    return 1$' "$client"
 }

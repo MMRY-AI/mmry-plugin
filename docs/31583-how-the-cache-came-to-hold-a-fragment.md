@@ -17,15 +17,32 @@ The cache at the fixed path in the shared temp directory held four bytes, the li
 
 ## What was separated, and how
 
-### 1. The plugin's writer, any version. REFUSED, on format.
+### 1. The plugin's writer, any version. REFUSED, but on a narrower argument than I first gave.
 
-Every line the writer emits comes from one jq expression:
+**Corrected 2026-09-21 after QA disproved the original reasoning.** This section used to say
+that every line the writer emits carries a topic followed by `: `, so no memory an account
+could hold could render to `- x`. That is false, and QA demonstrated it by running the
+shipped writer rather than by reading it. I reproduced their counter-example:
 
-    "- \(.topic): \(.content)"
+    content = "first line
+- x"   ->   cache line 1: "- Notes: first line"
+                                        cache line 2: "- x"
 
-A rendered line therefore always carries a topic followed by `: `. `- x` has no colon, so
-it is not output of this expression for any input. There is no memory an account could hold
-that renders to `- x`.
+A memory whose CONTENT contains a newline followed by that text produces exactly the stub as
+a subsequent line. The unit test pinning the old claim passed only because no fixture content
+contained a newline.
+
+**The argument that does hold** is about the whole file, not about every line. The observed
+artefact was a four-byte FILE, `- x
+`, and nothing else. The writer's first line is always
+`- ` + topic + `: ` + content, so the first line of any file it produces contains `: `. A
+file consisting solely of `- x
+` therefore cannot be writer output for any input.
+
+That is weaker than what I claimed and it is still sufficient to rule the writer out as the
+source of what was actually seen. It is written narrowly on purpose: the earlier version was
+a stronger claim than the evidence supported, and it survived a round of review because the
+test guarding it could not fail.
 
 ### 2. The old writer's truncating redirect, as a partial write. REFUSED, on content.
 
@@ -48,10 +65,12 @@ own and is fixed, but not how this particular content arrived.
 The ticket records that this hypothesis was tested and refused on the grounds that the suite
 writes to an isolated location. Two further pieces of evidence, neither conclusive:
 
-- The literal `- x` appears exactly once in the entire history of this repository, in
-  commit 924071c on this branch, dated 2026-09-18, which is the test written to reproduce
-  the incident **after** it was filed. `git log --all -S"'- x"` returns that commit and no
-  other. Nothing in the suite wrote that string before the incident.
+- The literal `- x` appears in three commits repo-wide as of 2026-09-21: 924071c, the test
+  written to reproduce the incident **after** it was filed, plus 41aa1bc and 2d66b2d, which
+  are this document and its evidence scripts. Scoped to `mmry/` it is one, which is the
+  figure this section originally quoted without saying it was scoped. Corrected after QA
+  re-ran it and got three. Nothing in the suite wrote that string before the incident, which
+  is the point that matters and is unchanged.
 - `TMPDIR` has been overridden in `tests/helpers/test-helper.bash` since the rebrand commit
   702898c, long predating the incident, and HOME isolation that a suite cannot decline was
   added in b829385 on 2026-09-16, two days before.

@@ -55,22 +55,33 @@ JSON
     [ "$output" = "0" ]
 }
 
-@test "write_foundation_cache: every line it writes carries a topic and a colon (#31583 requirement 1)" {
-    # This is the property that let requirement 1 rule the writer out as the source of the
-    # four-byte stub. The renderer is "- \(.topic): \(.content)", so a line without a colon
-    # cannot be this plugin's output for ANY account content. The observed fragment was
-    # `- x`, which has none. If the render format ever changes, that finding stops holding,
-    # and this test is what says so.
-    mmry_write_foundation_cache "$(_resp)" "$CACHE"
+@test "write_foundation_cache: the FIRST line always carries a topic and a colon (#31583 req 1)" {
+    # CORRECTED after QA disproved the claim this test used to pin. It asserted that EVERY
+    # line carries a topic and a colon, which is false: a memory whose content contains a
+    # newline followed by "- x" produces exactly that as a subsequent line. The old test
+    # passed only because no fixture content contained a newline, so the fixture was doing
+    # the work the assertion was supposed to do.
+    #
+    # The property that actually rules the writer out as the source of the four-byte stub is
+    # about the whole FILE. The observed artefact was a file of "- x" and nothing else, and
+    # the writer's first line is always "- " + topic + ": " + content.
+    #
+    # The counter-example is in the fixture now, so this can never again pass for want of a
+    # newline.
+    local resp
+    resp='[{"memoryTier":"Foundation","topic":"Notes","content":"first line\n- x"}]'
+    mmry_write_foundation_cache "$resp" "$CACHE"
 
-    local line
-    while IFS= read -r line; do
-        [[ -n "$line" ]] || continue
-        [[ "$line" == '- '*': '* ]] || { echo "line without topic and colon: [$line]"; return 1; }
-    done < "$CACHE"
+    # The counter-example really is produced: line two is the bare stub.
+    [ "$(sed -n '2p' "$CACHE")" = "- x" ]
 
-    # And the premise: something was actually read, so an empty cache cannot pass by vacuum.
-    [ "$(grep -c '^- ' "$CACHE")" -eq 2 ]
+    # And the property that holds: the first line carries a topic and a colon.
+    local first
+    first="$(head -1 "$CACHE")"
+    [[ "$first" == '- '*': '* ]]
+
+    # So a file consisting solely of the stub cannot be writer output.
+    [ "$(head -1 "$CACHE")" != "- x" ]
 }
 
 @test "write_foundation_cache: the manifest's byte count and checksum match the file it wrote" {
