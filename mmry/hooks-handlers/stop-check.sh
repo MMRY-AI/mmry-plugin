@@ -78,6 +78,26 @@ if [[ -f "$MARKER" ]]; then
     fi
 fi
 
+# NOTHING TO SAVE MEANS SAY NOTHING (Eric, 2026-09-20).
+#
+# The hook is a shell script: it cannot read the conversation, so it cannot judge whether anything
+# is worth keeping. Only the model can, and the directive below already asks it to ("If nothing new
+# is worth keeping, skip and proceed"). What the hook CAN know for certain is that a save has
+# already landed since the last time it spoke, and in that case there is positive evidence nothing
+# is outstanding and the cheapest correct behaviour is silence.
+#
+# Compares the save sentinel against this hook's own marker rather than against the clock, so a
+# customer who saves once per hour is not nudged an hour later about work they already kept.
+if [[ -f "$MARKER" && -f "$LAST_SAVE" ]]; then
+    _sc_marker_at=$(_mmry_mtime "$MARKER")
+    _sc_save_at=$(head -1 "$LAST_SAVE" 2>/dev/null | tr -d '[:space:]')
+    if [[ "$_sc_save_at" =~ ^[0-9]+$ ]] && (( _sc_save_at >= _sc_marker_at )); then
+        touch "$MARKER" 2>/dev/null || true
+        echo "0" > "$STOP_COUNT_FILE" 2>/dev/null || true
+        exit 0
+    fi
+fi
+
 touch "$MARKER"
 
 # Increment the "firings since last save" counter. Resets when mmry-client.sh
@@ -116,7 +136,7 @@ fi
 # file has always produced; precompact-check.sh still owns that job there.
 compaction_clause=""
 if [[ "$(mmry_host)" == "codex" ]]; then
-    compaction_clause=" This is also your last prompt before this conversation may be trimmed: $(mmry_host_label) gives MMRY no moment at compaction, so anything not saved now can be lost without warning."
+    compaction_clause=" $(mmry_host_label) gives MMRY no moment at compaction and no channel at session end, so this periodic prompt is the only warning you get: anything not saved can be lost when the conversation is trimmed."
 fi
 
 # Build the directive — one imperative line, explicit skip clause, anchored by last-save info
@@ -134,5 +154,34 @@ DIRECTIVE="Save what is new since the last memory: identify decisions, findings,
 # ONLY to stderr - no JSON. Emitting the directive as JSON would force backslash escaping that
 # leaks into the model-visible text; stderr-only keeps it clean. exit 2 preserves the block;
 # moving to exit 0 would risk changing it. The user-only systemMessage is dropped.
+# HOW THIS REACHES THE MODEL, PER HOST (#31245, 2026-09-20).
+#
+# Claude Code: unchanged. stderr plus exit 2, the #30642 contract. On exit 2 Claude Code discards
+# stdout and feeds stderr to the model, so we emit ONLY to stderr; emitting JSON there would force
+# escaping that leaks into the model-visible text.
+#
+# Codex: additionalContext on stdout with exit 0, registered on UserPromptSubmit rather than Stop.
+# Measured against real sessions: exit 2 is reported Failed on EVERY Codex event and delivers
+# nothing, and Stop rejects an additionalContext payload outright, so Stop has no channel to the
+# model at all. The research design recommended moving this prompt to Stop and said it would work;
+# that was reasoned from source and never run.
+#
+# UserPromptSubmit is also the better moment on its own merits. Codex trims conversations
+# mid-session (auto_compact), and a prompt delivered at session end cannot save anyone from a
+# trim that happened fifty turns earlier. The debounce above keeps it periodic rather than
+# per-turn.
+if [[ "$(mmry_host)" == "codex" ]]; then
+    if [[ -n "${MMRY_JQ:-}" ]] && "$MMRY_JQ" --version >/dev/null 2>&1; then
+        printf '%s' "$DIRECTIVE" | "$MMRY_JQ" -Rs \
+            '{hookSpecificOutput:{hookEventName:"UserPromptSubmit", additionalContext:.}}'
+    else
+        # No jq: escape by hand rather than stay silent. The directive is one line of prose, so
+        # backslashes and quotes are the only characters that can break the payload.
+        _sc_escaped="$(printf '%s' "$DIRECTIVE" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}' "$_sc_escaped"
+    fi
+    exit 0
+fi
+
 printf '%s\n' "$DIRECTIVE" >&2
 exit 2

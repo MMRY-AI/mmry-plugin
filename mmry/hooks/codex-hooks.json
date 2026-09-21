@@ -41,6 +41,15 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -50,17 +59,6 @@
             "type": "command",
             "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "timeout": 8
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
-            "timeout": 10
           }
         ]
       }

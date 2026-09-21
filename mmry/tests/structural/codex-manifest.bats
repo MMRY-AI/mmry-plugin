@@ -204,11 +204,23 @@ setup() {
     assert_output "0"
 }
 
-@test "codex hooks: the save prompt IS registered on Stop" {
-    # The amended requirement on #31245: the prompt to save before the conversation is trimmed is
-    # not optional and moves to the end of the session on this platform.
-    run jq -r '[.hooks.Stop[]? | .hooks[] | .command | select(contains("stop-check"))] | length' "$CODEX_HOOKS"
-    assert_output "1"
+@test "codex hooks: the save prompt is registered on UserPromptSubmit, because Stop cannot deliver" {
+    # MOVED OFF STOP, AND THE OLD TEST REQUIRED IT TO BE THERE (#31245, 2026-09-20).
+    #
+    # Measured against real sessions: a Stop hook that exits 0 with no output Completes, but one
+    # that exits 0 and prints an additionalContext payload FAILS and delivers nothing, and exit 2
+    # is reported Failed on every event. So Stop has no channel to the model at all, the same as
+    # PreCompact. The research design recommended moving the save prompt to Stop and stated it
+    # would work; that was reasoned from source and never run.
+    #
+    # UserPromptSubmit is also the better moment on its merits. Codex trims conversations
+    # mid-session, and an end-of-session prompt cannot save anyone from a trim fifty turns
+    # earlier. stop-check's own debounce keeps it periodic rather than per-turn.
+    local on_ups on_stop
+    on_ups="$(jq -r '[.hooks.UserPromptSubmit[]?.hooks[]? | select(.command | contains("stop-check"))] | length' "$CODEX_HOOKS")"
+    on_stop="$(jq -r '[.hooks.Stop[]?.hooks[]? | select(.command | contains("stop-check"))] | length' "$CODEX_HOOKS")"
+    [[ "$on_ups" -ge 1 ]] || { echo "the save prompt is not registered on UserPromptSubmit"; return 1; }
+    [[ "$on_stop" == "0" ]] || { echo "the save prompt is still on Stop, which cannot deliver it"; return 1; }
 }
 
 @test "codex hooks: memories are loaded on SessionStart" {

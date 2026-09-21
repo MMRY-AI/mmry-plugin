@@ -168,13 +168,19 @@ setup() {
 # ---------------------------------------------------------------------------------------------
 
 stop_run() {
-    # Usage: stop_run <host>   -- returns stderr on stdout, and sets $status
+    # Usage: stop_run <host>   -- returns whichever channel that host delivers on, and sets $status
+    #
+    # BOTH STREAMS, DELIBERATELY (#31245, 2026-09-20). This used to capture stderr and discard
+    # stdout, which was right while every host delivered by stderr with exit 2. Codex delivers the
+    # save prompt as additionalContext on STDOUT now, because exit 2 is reported Failed there and
+    # delivers nothing. Capturing only stderr made these tests see an empty string and pass or fail
+    # for the wrong reason.
     local host="$1"
     rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-count" "$TMPDIR/.mmry-last-save"
     if [[ "$host" == "codex" ]]; then
-        MMRY_HOST=codex HOME="$TEST_HOME" bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" 2>&1 >/dev/null
+        MMRY_HOST=codex HOME="$TEST_HOME" bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" 2>&1
     else
-        env -u MMRY_HOST HOME="$TEST_HOME" bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" 2>&1 >/dev/null
+        env -u MMRY_HOST HOME="$TEST_HOME" bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" 2>&1
     fi
 }
 
@@ -196,10 +202,13 @@ stop_run() {
 }
 
 @test "amended req: on Codex the save directive carries the compaction warning" {
-    # Codex has no PreCompact channel at all, so this sentence is the only warning a customer's
-    # assistant ever gets that unsaved work can vanish.
+    # Codex has no PreCompact channel and no Stop channel either, so this sentence is the only
+    # warning a customer's assistant ever gets that unsaved work can vanish. The wording moved with
+    # the prompt: it now fires periodically during the session rather than at its end, because a
+    # prompt at session end cannot save anyone from a trim that happened fifty turns earlier.
     run stop_run codex
-    assert_output --partial "before this conversation may be trimmed"
+    assert_output --partial "no moment at compaction and no channel at session end"
+    assert_output --partial "can be lost when the conversation is trimmed"
 }
 
 @test "amended req: on Codex the save prompt is otherwise the same prompt Claude Code produces" {
@@ -208,11 +217,18 @@ stop_run() {
     assert_output --partial "If nothing new is worth keeping, skip and proceed."
 }
 
-@test "amended req: on Codex the Stop hook exits 2, which is what makes stderr the continuation prompt" {
-    # events/stop.rs line 343: Some(2) with non-empty stderr sets continuation_prompt. Exit 0 would
-    # deliver nothing at all.
-    run stop_run codex
-    [[ "$status" -eq 2 ]]
+@test "amended req: on Codex the save prompt is delivered as additionalContext, not exit 2" {
+    # THE INVERSE OF WHAT THIS TEST USED TO REQUIRE. It asserted exit 2 on Codex, "which is what
+    # makes stderr the continuation prompt". Measured: exit 2 is reported Failed on every Codex
+    # event and delivers nothing at all.
+    local dir="$TEST_TMPDIR/sc-codex"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    run env MMRY_HOST=codex TMPDIR="$dir" HOME="$HOME" bash "$dir/stop-check.sh"
+    assert_success
+    [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]] || { echo "not a UserPromptSubmit payload: $output"; return 1; }
+    [[ "$output" == *'Save what is new'* ]] || { echo "directive missing: $output"; return 1; }
 }
 
 @test "codex: the save directive names an absolute path, never \${CLAUDE_PLUGIN_ROOT}" {
@@ -221,12 +237,30 @@ stop_run() {
     assert_output --partial "/.codex/mmry/hooks-handlers/save-memory.sh"
 }
 
-@test "codex: the Stop hook writes the directive to stderr and nothing to stdout" {
-    # stop.command.output.schema.json has no hookSpecificOutput, and on exit 2 stdout is discarded.
-    # Anything printed there is invisible at best.
-    local out
-    out="$(rm -f "$TMPDIR/.mmry-stop-checked"; MMRY_HOST=codex HOME="$TEST_HOME" bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" 2>/dev/null || true)"
-    [[ -z "$out" ]]
+@test "codex: the save prompt goes to stdout as JSON, and stderr stays clean" {
+    local dir="$TEST_TMPDIR/sc-codex2"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    env MMRY_HOST=codex TMPDIR="$dir" HOME="$HOME" bash "$dir/stop-check.sh" >"$dir/out" 2>"$dir/err"
+    [[ -s "$dir/out" ]] || { echo "nothing on stdout"; return 1; }
+    [[ ! -s "$dir/err" ]] || { echo "stderr should be empty on Codex: $(cat "$dir/err")"; return 1; }
+}
+
+@test "codex: nothing to save means nothing is said" {
+    # Eric, 2026-09-20: nudge only when there is something to save, otherwise move on. The hook
+    # cannot read the conversation, but it CAN know a save landed since it last spoke.
+    local dir="$TEST_TMPDIR/sc-quiet"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    env MMRY_HOST=codex TMPDIR="$dir" HOME="$HOME" bash "$dir/stop-check.sh" >/dev/null 2>&1
+    # Age the marker past the debounce, then record a save as having happened just now.
+    touch -d "20 minutes ago" "$dir/.mmry-stop-checked" 2>/dev/null || skip "touch -d unavailable"
+    date +%s > "$dir/.mmry-last-save"
+    run env MMRY_HOST=codex TMPDIR="$dir" HOME="$HOME" bash "$dir/stop-check.sh"
+    assert_success
+    [[ -z "$output" ]] || { echo "spoke even though a save had landed since: $output"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
