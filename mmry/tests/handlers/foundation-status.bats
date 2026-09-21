@@ -133,3 +133,77 @@ manifest_now() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'Re-injection: ON'* ]]
 }
+
+# ============================================================================
+# EVERY state-to-label mapping (#31583 QA round 2).
+#
+# "three of the eight state-to-label mappings in the status command are asserted nowhere, so
+# a typo in one of those tokens degrades silently to the catch-all." Counted at the time: of
+# the five labels, only DAMAGED was asserted anywhere.
+#
+# A typo in a case arm is invisible without these: the state falls through to "*)", the
+# customer still gets a refusal, and the label is just less useful. Nothing goes red.
+# ============================================================================
+
+@test "foundation-status: state no-manifest maps to PRESENT BUT UNVERIFIABLE" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    rm -f "${CACHE}.manifest"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'PRESENT BUT UNVERIFIABLE'* ]]
+    run grep -c 'REFUSED -' <<<"$output"
+    [ "$output" = "0" ]
+}
+
+@test "foundation-status: state bad-manifest maps to PRESENT BUT UNVERIFIABLE" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    printf 'garbage not a manifest\n' > "${CACHE}.manifest"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'PRESENT BUT UNVERIFIABLE'* ]]
+}
+
+@test "foundation-status: state inconsistent maps to INCONSISTENT" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    printf 'mmry-foundation v1 entries=0 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'INCONSISTENT'* ]]
+}
+
+@test "foundation-status: state missing maps to MISSING" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    rm -f "$CACHE"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'MISSING'* ]]
+}
+
+@test "foundation-status: state size maps to DAMAGED, and says both numbers" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    printf -- '- Identity: Eric builds MMRY, and rather more besides.\n' > "$CACHE"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'DAMAGED'* ]]
+    # The two numbers must differ. The old wording printed that 28 bytes did not match 28
+    # bytes, because the size and checksum cases shared one branch.
+    [[ "$output" == *"$(wc -c < "$CACHE" | tr -d ' ')"* ]]
+}
+
+@test "foundation-status: state contents maps to DAMAGED, with the length-matched wording" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    local n; n="$(wc -c < "$CACHE" | tr -d ' ')"
+    head -c "$n" /dev/zero | tr '\0' 'z' > "$CACHE"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'DAMAGED'* ]]
+    [[ "$output" == *'right length'* ]]
+}
+
+@test "foundation-status: state blank maps to EMPTY OF TEXT" {
+    printf '  \n \n  ' > "$CACHE"
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    printf 'mmry-foundation v1 entries=2 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+    run bash "$STATUS_CMD"
+    [[ "$output" == *'EMPTY OF TEXT'* ]]
+}

@@ -181,5 +181,20 @@ _plugin_with_failing_writer() {
     # Force the documented failure contract: return non-zero, write nothing.
     awk '{ print } /^mmry_write_foundation_cache\(\) \{$/ { print "    return 1" }' "$client" > "$client.tmp"
     mv "$client.tmp" "$client"
-    grep -q '^    return 1$' "$client"
+    # ANCHORED TO POSITION, not to the text (#31583 QA round 2). The first guard here was
+    # grep -q '^    return 1$', which mmry-client.sh already satisfies twice at lines 416 and
+    # 430 before any mutation, so it passed on an untouched copy. If the awk pattern ever
+    # stopped matching, nothing would be injected, the writer would succeed, and the three
+    # tests that prove the session-start guard works would go green while exercising the
+    # healthy path. That is the fifth assertion on this branch whose premise was satisfied by
+    # something other than the thing under test.
+    #
+    # This asserts the line IMMEDIATELY AFTER the function header is the injected return, so
+    # it cannot be satisfied by a return 1 anywhere else in the file.
+    local after
+    after="$(awk '/^mmry_write_foundation_cache\(\) \{$/ { getline; print; exit }' "$client")"
+    [ "$after" = "    return 1" ] || {
+        echo "injection did not land: line after the header was [$after]"
+        return 1
+    }
 }
