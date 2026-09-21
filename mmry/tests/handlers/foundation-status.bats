@@ -91,3 +91,45 @@ manifest_now() {
     run grep -c 'Nothing is being withheld' <<<"$output"
     [ "$output" = "0" ]
 }
+
+@test "foundation-status: #31583 QA a cache that verifies but holds only whitespace is REFUSED, not called VERIFIED" {
+    # QA reproduced this directly: the hook refused the turn while this command reported
+    # "VERIFIED - 2 directives, 8 characters" and "Delivered: IN FULL". The customer asking
+    # the question was told the opposite of what was happening. The two readers had separate
+    # copies of the verification and this branch existed in only one of them.
+    printf '  \n \n  ' > "$CACHE"
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    printf 'mmry-foundation v1 entries=2 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+
+    run bash "$STATUS_CMD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'REFUSED'* ]]
+    [[ "$output" == *'no readable text'* ]]
+    run grep -c 'VERIFIED' <<<"$output"
+    [ "$output" = "0" ]
+    run grep -c 'IN FULL' <<<"$output"
+    [ "$output" = "0" ]
+}
+
+@test "foundation-status: #31583 QA the off switch is reported, and it had no test at all" {
+    # QA: "remove it and every suite still passes while the command reports Re-injection: ON
+    # to a customer who has it switched off."
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    export MMRY_FOUNDATION_REINJECT=false
+
+    run bash "$STATUS_CMD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'TURNED OFF'* ]]
+    run grep -c 'Re-injection: ON' <<<"$output"
+    [ "$output" = "0" ]
+}
+
+@test "foundation-status: the off switch control - ON is reported when it is on" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    run bash "$STATUS_CMD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Re-injection: ON'* ]]
+}

@@ -233,6 +233,96 @@ mmry_foundation_manifest_path() {
     printf '%s' "${1}.manifest"
 }
 
+# ONE verification, used by BOTH readers (#31583 QA round one).
+#
+# The manifest regex, the entries=0 check and the checksum comparison were implemented twice
+# verbatim: once in userpromptsubmit-foundation.sh and once in foundation-status.sh. That
+# duplication produced two customer-facing contradictions in two rounds. First a manifest
+# reading entries=0 beside a full cache, which the hook refused and the status command called
+# "VALID and EMPTY, nothing is being withheld". Then a cache that verifies but holds only
+# whitespace, which the hook refuses and the status command called "VERIFIED, 2 directives,
+# Delivered: IN FULL". In both cases the customer asking the question was told the opposite of
+# what was happening.
+#
+# Patching the second branch into the copy would leave the third to be found later. So there
+# is one routine now and both callers format their own words from its verdict.
+#
+# CONTRACT. Echoes a single line and returns:
+#   0  "ok <entries> <bytes>"        verified, deliver it
+#   1  "absent" or "empty"           nothing to deliver and nothing wrong, say nothing
+#   3  "<state>|<customer prose>"    refuse
+#
+# The STATE token on a refusal exists so a caller can label the condition without matching on
+# prose. foundation-status.sh prints a one-word state to the customer, and matching that out
+# of a sentence would break the moment the sentence was reworded.
+#
+# Exit code 2 is not used, so a caller cannot confuse "refused" with a shell error.
+mmry_verify_foundation_cache() {
+    local cache="$1"
+    local manifest="${cache}.manifest"
+
+    if [[ ! -r "$manifest" ]]; then
+        if [[ -e "$cache" ]]; then
+            printf 'no-manifest|the cache file exists but has no manifest, so it cannot be shown to be the account'"'"'s own directives'
+            return 3
+        fi
+        printf 'absent'
+        return 1
+    fi
+
+    local man exp_entries exp_bytes exp_cksum
+    man="$(<"$manifest")" 2>/dev/null || man=""
+    if [[ "$man" =~ ^mmry-foundation[[:space:]]+v1[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)[[:space:]]+cksum=([0-9]+) ]]; then
+        exp_entries="${BASH_REMATCH[1]}"; exp_bytes="${BASH_REMATCH[2]}"; exp_cksum="${BASH_REMATCH[3]}"
+    else
+        printf 'bad-manifest|the manifest describing the cached directives is unreadable, so they cannot be shown to be the account'"'"'s own'
+        return 3
+    fi
+
+    # A genuinely empty set is valid, and an entries=0 claim is still a claim about the file.
+    if (( exp_entries == 0 )); then
+        if [[ -s "$cache" ]]; then
+            printf 'inconsistent|the manifest records no directives at all, but the cached file holds directives, so the two do not describe the same set'
+            return 3
+        fi
+        printf 'empty'
+        return 1
+    fi
+
+    if [[ ! -r "$cache" ]]; then
+        printf 'missing|the manifest records %s Foundation directives but the cache holding them is missing' "$exp_entries"
+        return 3
+    fi
+
+    local act_cksum act_bytes
+    read -r act_cksum act_bytes < <(cksum < "$cache" 2>/dev/null)
+    if [[ ! "$act_cksum" =~ ^[0-9]+$ || ! "$act_bytes" =~ ^[0-9]+$ ]]; then
+        printf 'unreadable|the cached directives could not be read for verification'
+        return 3
+    fi
+    if [[ "$act_bytes" != "$exp_bytes" ]]; then
+        printf 'size|the cached directives are %s bytes but the manifest records %s, so the file is not the set that was stored' "$act_bytes" "$exp_bytes"
+        return 3
+    fi
+    if [[ "$act_cksum" != "$exp_cksum" ]]; then
+        printf 'contents|the cached directives are the right length but their contents do not match the stored set'
+        return 3
+    fi
+
+    # Verified bytes that are nothing but whitespace. The manifest agrees with the file and the
+    # file says nothing, so injecting it would frame a blank as the account's guidance. The
+    # status command missed this branch for a whole round and told customers IN FULL.
+    local content
+    content="$(<"$cache")"
+    if [[ -z "${content//[[:space:]]/}" ]]; then
+        printf 'blank|the cached directives verified but contain no readable text'
+        return 3
+    fi
+
+    printf 'ok %s %s' "$exp_entries" "$act_bytes"
+    return 0
+}
+
 mmry_write_foundation_cache() {
     # Usage: mmry_write_foundation_cache <response-json> <cache-file>
     # Writes Foundation-tier memories (topic + content) to the cache, plus the manifest the

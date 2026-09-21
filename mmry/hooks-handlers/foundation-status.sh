@@ -52,60 +52,52 @@ esac
 echo "Re-injection: ON - directives are re-sent on every prompt."
 
 # 2. What does the stored copy claim to be, and is it actually that?
-if [[ ! -r "$MANIFEST" ]]; then
-    if [[ -e "$CACHE" ]]; then
-        echo "Stored copy:  PRESENT BUT UNVERIFIABLE - there is no manifest for it, so it"
-        echo "              cannot be shown to be your own directives. It is being refused."
-        echo "Action:       run /mmry:load-memories to rebuild it."
-    else
+#
+# THROUGH THE SHARED VERIFIER (#31583 QA). This block used to re-implement the manifest
+# regex, the entries=0 check and the checksum comparison, and it drifted from the hook twice
+# in two rounds: it reported "VALID and EMPTY, nothing is being withheld" for a manifest
+# claiming zero beside a full cache, and "VERIFIED, N directives, Delivered: IN FULL" for a
+# cache holding only whitespace. In both cases the hook was refusing the turn and the customer
+# asking the question was told the opposite. There is one routine now, so the two cannot
+# disagree about what is verified; only the wording is this command's own.
+_reason="$(mmry_verify_foundation_cache "$CACHE")"
+_verdict=$?
+
+if (( _verdict == 1 )); then
+    if [[ "$_reason" == "absent" ]]; then
         echo "Stored copy:  NOT LOADED YET in this session."
         echo "Action:       run /mmry:load-memories, or start a new session."
+    else
+        echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
+        echo "              Nothing is being withheld; there is nothing to send."
     fi
     exit 0
 fi
 
-_man="$(<"$MANIFEST")" 2>/dev/null || _man=""
-if [[ "$_man" =~ ^mmry-foundation[[:space:]]+v1[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)[[:space:]]+cksum=([0-9]+) ]]; then
-    _exp_entries="${BASH_REMATCH[1]}"; _exp_bytes="${BASH_REMATCH[2]}"; _exp_cksum="${BASH_REMATCH[3]}"
-else
-    echo "Stored copy:  UNVERIFIABLE - the manifest is unreadable. It is being refused."
+if (( _verdict != 0 )); then
+    # The state token, not the prose, chooses the label. Matching a one-word state out of a
+    # sentence would break the moment the sentence was reworded, and these labels are what a
+    # customer scans for. The bytes case and the checksum case are separate states now, so
+    # this no longer prints that 28 bytes does not match 28 bytes (#31583 QA).
+    _state="${_reason%%|*}"
+    _prose="${_reason#*|}"
+    case "$_state" in
+        no-manifest|bad-manifest) _label="PRESENT BUT UNVERIFIABLE" ;;
+        inconsistent)             _label="INCONSISTENT" ;;
+        missing)                  _label="MISSING" ;;
+        size|contents|unreadable) _label="DAMAGED" ;;
+        blank)                    _label="EMPTY OF TEXT" ;;
+        *)                        _label="REFUSED" ;;
+    esac
+    echo "Stored copy:  ${_label} - ${_prose}."
+    echo "              It is being REFUSED, not used."
     echo "Action:       run /mmry:load-memories to rebuild it."
     exit 0
 fi
 
-if (( _exp_entries == 0 )); then
-    # A manifest claiming the set is empty beside a cache holding directives is a
-    # contradiction, and the re-injection handler refuses it. This command must say the
-    # same thing: reporting "nothing is being withheld" while the handler withholds the
-    # whole set is the one answer that would send a customer away from a live fault.
-    if [[ -s "$CACHE" ]]; then
-        echo "Stored copy:  INCONSISTENT - the manifest records no directives at all, but the"
-        echo "              stored file holds some. They do not describe the same set, so it"
-        echo "              is being REFUSED, not used."
-        echo "Action:       run /mmry:load-memories to rebuild it."
-        exit 0
-    fi
-    echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
-    echo "              Nothing is being withheld; there is nothing to send."
-    exit 0
-fi
-
-if [[ ! -r "$CACHE" ]]; then
-    echo "Stored copy:  MISSING - the manifest expects ${_exp_entries} directives and the file is gone."
-    echo "              It is being refused, so this turn and the next run without them."
-    echo "Action:       run /mmry:load-memories to rebuild it."
-    exit 0
-fi
-
-read -r _act_cksum _act_bytes < <(cksum < "$CACHE" 2>/dev/null)
-if [[ "$_act_bytes" != "$_exp_bytes" || "$_act_cksum" != "$_exp_cksum" ]]; then
-    echo "Stored copy:  DAMAGED - it holds ${_act_bytes:-0} bytes and does not match the ${_exp_bytes} bytes"
-    echo "              of ${_exp_entries} directives that were stored. It is being REFUSED, not used."
-    echo "Action:       run /mmry:load-memories to rebuild it."
-    exit 0
-fi
-
-echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_exp_bytes} characters, matching what was stored."
+# Verified. The verdict carries the numbers so they cannot be recomputed differently here.
+read -r _ok_word _exp_entries _act_bytes <<<"$_reason"
+echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_act_bytes} bytes, matching what was stored."
 echo "Delivered:    IN FULL. There is no size limit; nothing is trimmed or cut."
 
 # 3. Did the most recent prompt actually inject it? The hook records this on each verified

@@ -485,83 +485,31 @@ MANIFEST="${CACHE}.manifest"
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
 STATUS="${MMRY_TMPDIR}/mmry-foundation.status"
 
-# No manifest at all. Either nothing has ever populated the cache on this machine, or
-# something overwrote the cache without going through the writer. Those are only
-# distinguishable by whether a cache file is sitting there unaccounted for.
-if [[ ! -r "$MANIFEST" ]]; then
-    if [[ -e "$CACHE" ]]; then
-        printf 'the cache file exists but has no manifest, so it cannot be shown to be the account'"'"'s own directives'
-        exit 3
-    fi
-    # Nothing here at all: a session that has not loaded memories yet. Not damage, and
-    # warning on it would mean warning on every fresh session. Say nothing.
-    exit 0
-fi
+# THROUGH THE SHARED VERIFIER (#31583 QA). This block used to carry its own copy of the
+# manifest regex, the entries=0 check, the checksum comparison and the whitespace check, and
+# foundation-status.sh carried another. They drifted twice in two rounds and each time the
+# customer asking "are my directives reaching my assistant" was told the opposite of what was
+# happening. One routine now; this file owns only the wording and the exit codes.
+_reason="$(mmry_verify_foundation_cache "$CACHE")"
+_verdict=$?
 
-_man="$(<"$MANIFEST")" 2>/dev/null || _man=""
-_exp_entries=""; _exp_bytes=""; _exp_cksum=""
-if [[ "$_man" =~ ^mmry-foundation[[:space:]]+v1[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)[[:space:]]+cksum=([0-9]+) ]]; then
-    _exp_entries="${BASH_REMATCH[1]}"
-    _exp_bytes="${BASH_REMATCH[2]}"
-    _exp_cksum="${BASH_REMATCH[3]}"
-else
-    printf 'the manifest describing the cached directives is missing or unreadable, so the cache cannot be verified'
-    exit 3
-fi
-
-# A genuinely empty Foundation set is VALID, not damage. An account with no Foundation
-# memories must not be nagged on every prompt, and requirement 4 of #31583 is explicit that
-# the check must not be satisfiable by warning all the time.
-if (( _exp_entries == 0 )); then
-    # "No directives" is a CLAIM ABOUT THE CACHE, so it is checked against the cache like
-    # every other claim. Zero is the one entry count that short-circuits the bytes+cksum
-    # gate, and a manifest reading entries=0 beside a cache full of real directives makes
-    # this handler withhold the whole set and say nothing - this ticket's exact failure,
-    # reached through the one field the gate does not compare. Measured: 914 bytes of
-    # directives, manifest entries=0, handler emitted nothing at all.
-    if [[ -s "$CACHE" ]]; then
-        printf 'the manifest records no directives at all, but the cached file holds directives, so the two do not describe the same set'
-        exit 3
-    fi
-    printf 'ok entries=0 bytes=0
+if (( _verdict == 1 )); then
+    # Valid and empty, or nothing loaded yet. Neither is damage and neither is worth a word.
+    if [[ "$_reason" != "absent" ]]; then
+        printf 'ok entries=0 bytes=0
 ' > "$STATUS" 2>/dev/null || true
+    fi
     exit 0
 fi
 
-if [[ ! -r "$CACHE" ]]; then
-    printf 'the manifest records %s Foundation directives but the cache holding them is missing' "$_exp_entries"
+if (( _verdict != 0 )); then
+    # The state token is for the status command's label; this channel is prose only.
+    printf '%s' "${_reason#*|}"
     exit 3
 fi
 
-# ONE process answers both questions: cksum prints its checksum and its byte count together.
-# Byte count alone would not be enough - a same-length substitution is exactly the case
-# #31583 test case 2 exists to catch - but it is free here, and it names the failure more
-# precisely when the size is what changed.
-_act_cksum=""; _act_bytes=""
-read -r _act_cksum _act_bytes < <(cksum < "$CACHE" 2>/dev/null)
-if [[ ! "$_act_cksum" =~ ^[0-9]+$ || ! "$_act_bytes" =~ ^[0-9]+$ ]]; then
-    printf 'the cached directives could not be read for verification'
-    exit 3
-fi
-
-if [[ "$_act_bytes" != "$_exp_bytes" ]]; then
-    printf 'the cached directives are %s bytes but the manifest records %s, so the file is not the set that was stored'         "$_act_bytes" "$_exp_bytes"
-    exit 3
-fi
-
-if [[ "$_act_cksum" != "$_exp_cksum" ]]; then
-    printf 'the cached directives are the right length but their contents do not match the stored set'
-    exit 3
-fi
-
+read -r _ok_word _exp_entries _act_bytes <<<"$_reason"
 content="$(<"$CACHE")"
-# Verified, and the manifest says there is at least one entry, so an empty read here means
-# the bytes on disk are whitespace that somehow checksummed to the recorded value. Refuse
-# rather than inject a blank set under an authoritative framing.
-if [[ -z "${content//[[:space:]]/}" ]]; then
-    printf 'the cached directives verified but contain no readable text'
-    exit 3
-fi
 
 # ============================================================================
 # DELIVER THE SET IN FULL (#31411).
