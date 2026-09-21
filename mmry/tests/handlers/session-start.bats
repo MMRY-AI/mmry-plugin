@@ -107,3 +107,58 @@ setup() {
     [[ "$output" == *'/mmry:setup'* ]]
     [[ "$output" != *'session-start failed'* ]]
 }
+
+# ============================================================================
+# #31411 QA: A WRITER FAILURE MUST NOT KILL THE HOOK, AND MUST NOT BE SILENT.
+#
+# session-start.sh runs under `set -euo pipefail` with no trap and no set +e. Its call to
+# mmry_write_foundation_cache was unguarded, and the comment above it still said
+# "Best-effort", which was true on master: that function ended in `|| true` and had no
+# return-1 path. #31583 gave it six. So under errexit any one of them terminated the hook at
+# that line, BEFORE it printed its JSON, and the session ran with no Foundation directives
+# and nobody was told.
+#
+# These assert on STDOUT ONLY. The writer's failure also produces a shell redirection error on
+# stderr, which `2>/dev/null` inside the function cannot suppress because the shell emits it.
+# Claude Code reads stdout, so merging the two here would fail the test for something the
+# product does not do.
+# ============================================================================
+
+@test "session-start: #31411 a Foundation cache write failure does not kill the hook" {
+    # Deterministic failure with nothing stubbed: a DIRECTORY where the writer must create the
+    # manifest file, so the real writer takes its real failure path.
+    mkdir -p "$TEST_TMPDIR/mmry-foundation.md.manifest"
+
+    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"hookEventName":"SessionStart"'* ]]
+    [[ "$output" == *'memor'* ]]
+}
+
+@test "session-start: #31411 that failure is REPORTED, not swallowed" {
+    mkdir -p "$TEST_TMPDIR/mmry-foundation.md.manifest"
+
+    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Foundation directives could not be stored'* ]]
+    [[ "$output" == *'NOT be applied'* ]]
+    [[ "$output" == *'mmry:load-memories'* ]]
+}
+
+@test "session-start: #31411 the JSON on stdout is still valid when the writer fails" {
+    mkdir -p "$TEST_TMPDIR/mmry-foundation.md.manifest"
+
+    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    [ "$status" -eq 0 ]
+    if command -v jq >/dev/null; then
+        printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+    else
+        printf '%s' "$output" | python3 -c 'import sys,json; json.load(sys.stdin)'
+    fi
+}
+
+@test "session-start: #31411 control - a healthy write says nothing about a failure" {
+    run bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *'could not be stored'* ]]
+}

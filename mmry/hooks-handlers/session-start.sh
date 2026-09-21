@@ -135,8 +135,23 @@ fi
 count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
 
 # Write the Foundation-only cache the UserPromptSubmit hook re-injects each turn (#30579).
-# Presentation/framing is applied at inject time; this file holds just the data. Best-effort.
-mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"
+# Presentation/framing is applied at inject time; this file holds just the data.
+#
+# GUARDED, AND REPORTED (#31411 QA). This call used to be bare, and the comment here used to
+# say "Best-effort", which was true while mmry_write_foundation_cache ended in `|| true` and
+# had no failing path. #31583 gave it six. This file runs under `set -euo pipefail` with no
+# trap, so from that point a bare call meant any writer failure terminated the hook HERE,
+# before it printed its JSON: the session then ran with no Foundation directives and nobody
+# was told. That is precisely the failure this release exists to remove, arriving through the
+# code written to remove it. The neighbouring mmry_register_session call was already guarded,
+# so the difference sat in the same screenful.
+#
+# Two things are therefore true of the line below. It cannot kill the hook, and it cannot be
+# silent. `if !` is exempt from errexit, and the fault note is the channel this file already
+# uses to put a warning in front of the model before it decides anything about the turn.
+if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"; then
+    MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: your Foundation directives could not be stored for this session, so they will NOT be applied on each prompt. Nothing partial was kept and nothing was guessed at. Tell the user, and ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check. "
+fi
 
 # Register session — uses session_id read from hook stdin (see top of file).
 # WORK_DIR is persisted server-side here; subsequent save calls reference it
