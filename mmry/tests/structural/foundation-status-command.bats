@@ -14,6 +14,17 @@ setup() {
     HANDLERS="$PLUGIN_ROOT/hooks-handlers"
 }
 
+# Flatten a document for phrase matching: carriage returns REMOVED, then newlines to spaces.
+#
+# The -d step is not decoration. .gitattributes forces eol=lf for *.sh only, so on Windows
+# these markdown pages check out CRLF, and flattening a newline without the carriage return
+# leaves a stray CR inside every phrase searched for afterwards. This file passed on the
+# machine it was written on and failed in a fresh checkout; CI covers ubuntu and macos, so
+# CI never saw it (#31583 QA). The .gitattributes rule is widened in the same change, and
+# this stays anyway, because a test should not depend on how the tree was checked out.
+_flat() { tr -d '' < "$1" | tr '
+' ' '; }
+
 @test "command: /mmry:foundation-status exists and is advertised in help" {
     [ -f "$CMDS/foundation-status.md" ]
     [ -s "$CMDS/foundation-status.md" ]
@@ -64,8 +75,7 @@ setup() {
     # says exactly that, because markdown had wrapped the phrase between "being" and
     # "applied". A per-line grep over prose asserts the reflow, not the sentence.
     local doc="$CMDS/foundation-status.md" text
-    text="$(tr '
-' ' ' < "$doc")"
+    text="$(_flat "$doc")"
     [[ "$text" == *'/mmry:load-memories'* ]]
     [[ "$text" == *'not being applied'* ]]
     [[ "$text" == *'DAMAGED'* ]]
@@ -79,8 +89,7 @@ setup() {
     # the same defect as the behaviour, one surface along.
     local readme text
     readme="$PLUGIN_ROOT/README.md"
-    text="$(tr '
-' ' ' < "$readme")"
+    text="$(_flat "$readme")"
     [[ "$text" != *'the set is truncated and the drop is logged'* ]] || { echo "README still describes the removed cut"; return 1; }
     [[ "$text" == *'delivered in full'* ]]
 }
@@ -91,8 +100,7 @@ setup() {
     # and the name of the command that answers the question on demand.
     local readme text
     readme="$PLUGIN_ROOT/README.md"
-    text="$(tr '
-' ' ' < "$readme")"
+    text="$(_flat "$readme")"
     [[ "$text" == *'mmry:foundation-status'* ]]
     [[ "$text" == *'refused'* ]]
     [[ "$text" == *'mmry:load-memories'* ]]
