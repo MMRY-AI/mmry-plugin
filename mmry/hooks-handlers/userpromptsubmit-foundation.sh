@@ -494,11 +494,32 @@ _reason="$(mmry_verify_foundation_cache "$CACHE")"
 _verdict=$?
 
 if (( _verdict == 1 )); then
-    # Valid and empty, or nothing loaded yet. Neither is damage and neither is worth a word.
-    if [[ "$_reason" != "absent" ]]; then
-        printf 'ok entries=0 bytes=0
-' > "$STATUS" 2>/dev/null || true
+    # ABSENT IS TWO DIFFERENT SITUATIONS AND ONLY ONE OF THEM IS A LOSS (#31583 R3/TC3).
+    #
+    # Nothing on disk at all can mean the set has never been built for this session -
+    # SessionStart may not have run yet, or the account may hold no directives - and
+    # warning on every prompt of a fresh session would make the notice worthless, which
+    # TC4 explicitly forbids. It can also mean a set WAS verified and delivered this
+    # session and the files have since gone. That is a disappearance, and TC3 requires it
+    # to be reported exactly like damage, because the customer cannot tell those apart
+    # and should not have to.
+    #
+    # The status record is what separates them. It is written on every verified delivery
+    # and on a verified-empty set, so its presence means "this session has had a good
+    # answer at least once". QA round 3 measured the gap: a valid cache delivered 294
+    # characters, both files were then deleted, and the next firing emitted nothing at
+    # all - no notice to the customer and no note to the assistant.
+    if [[ "$_reason" == "absent" ]]; then
+        if [[ -e "$STATUS" ]]; then
+            printf '%s' 'the local copy of your Foundation directives has disappeared since it was last delivered in this session'
+            exit 3
+        fi
+        exit 0
     fi
+    # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
+    # so it goes on the record the status command reads.
+    printf 'ok entries=0 bytes=0
+' > "$STATUS" 2>/dev/null || true
     exit 0
 fi
 

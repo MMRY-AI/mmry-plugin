@@ -324,6 +324,37 @@ _big_foundation_set() {
     [ -z "$output" ]
 }
 
+# #31583 TC3, the case the round-3 review measured as unreported.
+#
+# The test above and this one look alike and mean opposite things. There, nothing has ever
+# been delivered, so nothing has been lost and silence is correct. Here a set WAS verified
+# and delivered in this session and has since vanished from disk, which TC3 says must be
+# reported exactly like damage. Before this fix both emitted nothing: QA delivered 294
+# characters, deleted both files, fired again and got 0 characters, no systemMessage and no
+# additionalContext. The deleted-cache-but-manifest-kept case was already reported, which is
+# why the gap survived a round.
+@test "userpromptsubmit-foundation: #31583 TC3 a set that DISAPPEARS after being delivered is reported, not passed over in silence" {
+    printf -- '- Identity: Eric builds MMRY.
+' > "$CACHE"
+    manifest_now
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Eric builds MMRY'* ]]
+
+    # Both files, exactly as the reviewer did. Not just the cache.
+    rm -f "$CACHE" "${CACHE}.manifest"
+    [ ! -e "$CACHE" ]
+    [ ! -e "${CACHE}.manifest" ]
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'disappeared'* ]]
+    [[ "$output" == *'systemMessage'* ]]
+}
+
 # ============================================================================
 # #31434 — the hook budget, the self-imposed deadline, and telling the customer.
 #
