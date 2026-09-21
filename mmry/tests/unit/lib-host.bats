@@ -497,3 +497,27 @@ _stage_install() {
     assert_success
     assert_output "/home/chosen"
 }
+
+# ---------------------------------------------------------------------------------------------
+# THE PATH THE MODEL IS TOLD TO OPEN (#31245, 2026-09-20).
+#
+# Observed in a live Codex session on Windows: "MMRY AI loaded 12 memories. Read them now:
+# /tmp/mmry-memories.md". The model's shell there is PowerShell, which cannot resolve /tmp, so the
+# single instruction attached to every memory load named a file the reader could not open.
+# ---------------------------------------------------------------------------------------------
+
+@test "codex: the memories path is spelled for the model's shell, not the handler's" {
+    command -v cygpath >/dev/null 2>&1 || skip "cygpath is absent; this branch is Windows-only"
+    run env MMRY_HOST=codex HOME="$HOME" bash -c "source '$LIB'; mmry_host_path_for_model /tmp/mmry-memories.md"
+    assert_success
+    [[ "$output" == *":\\"* ]] || { echo "not a Windows path: $output"; return 1; }
+    [[ "$output" != /tmp/* ]] || { echo "still a POSIX path: $output"; return 1; }
+}
+
+@test "req4: on Claude Code that same path is returned untouched" {
+    # Claude Code's model has a Bash tool and opens the POSIX path happily. Rewriting it there
+    # would break the thing that already works.
+    run env -u MMRY_HOST HOME="$HOME" bash -c "source '$LIB'; mmry_host_path_for_model /tmp/mmry-memories.md"
+    assert_success
+    assert_output "/tmp/mmry-memories.md"
+}

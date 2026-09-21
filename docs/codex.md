@@ -8,7 +8,13 @@ means on Codex — including the four things you do not get here, and what you g
 
 ## Installing
 
-You need the Codex CLI, and a bash on your machine (on Windows, Git for Windows provides one).
+You need the Codex CLI, and a bash on your machine.
+
+**On Windows, run the setup command from the Git Bash window, not from PowerShell or the Command
+Prompt.** If you have the Windows Subsystem for Linux installed, typing `bash` in PowerShell starts
+the Linux one, which cannot see your Windows files and fails with "Failed to translate" followed by
+`execvpe(/bin/bash) failed`. Git Bash is installed with
+[Git for Windows](https://gitforwindows.org) and appears in the Start menu.
 
 **1. Add the MMRY marketplace and install the plugin.**
 
@@ -35,6 +41,13 @@ Ask Codex to run MMRY setup, or run it yourself:
 
 ```
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
+```
+
+If you are on Windows and would rather not open Git Bash, this runs the same thing from PowerShell
+by naming the shell explicitly, so it cannot pick the wrong one:
+
+```
+& 'C:\Program Files\Git\bin\bash.exe' "$env:USERPROFILE\.codex\mmry\setup\mmry-setup.sh"
 ```
 
 It opens a browser so you can sign in at [mmryai.com](https://mmryai.com), then writes your
@@ -170,6 +183,7 @@ separate credentials and separate directories on purpose.
 | No memories at session start | Did you answer **Trust all and continue** at the hook review? Restart Codex and look for it. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Nothing at all happens, on Windows | Is Git for Windows installed? Try setting `MMRY_BASH` to your `bash.exe`. |
+| Setup says "Failed to translate" or `execvpe(/bin/bash) failed` | You ran it in PowerShell and it picked the Linux subsystem's bash. Use the Git Bash window, or the explicit PowerShell form above. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |
 | A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It re-runs the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |

@@ -210,8 +210,14 @@ mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"
 # a session the customer cannot find in their own session list.
 mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
 
-# Escape path for JSON
-escaped_path="$(echo "$MEM_FILE" | sed 's/\\/\\\\/g')"
+# Escape path for JSON.
+#
+# The path shown to the model is spelled for the MODEL's shell, not for this handler's. On Codex
+# for Windows that shell is PowerShell and cannot resolve a POSIX path, so the one instruction
+# attached to every memory load used to name a file the reader could not open. The file itself is
+# still written to MEM_FILE; only the spelling in the message changes.
+model_path="$(mmry_host_path_for_model "$MEM_FILE")"
+escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
 
 # AND THE FAULT NOTE IS ESCAPED TOO, WHICH IT WAS NOT (#31245 QA round 4).
 #

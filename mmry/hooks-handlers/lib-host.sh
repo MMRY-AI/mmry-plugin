@@ -732,6 +732,31 @@ fi
 # ON CLAUDE CODE IT IS A NO-OP: the host is "claude" and the function returns 0 before looking at
 # anything, so the existing discovery order runs exactly as it always has.
 
+# A PATH THE MODEL'S OWN SHELL CAN OPEN (#31245, 2026-09-20).
+#
+# The session-start message ends "Read them now: <path>", and the path it named was a POSIX one
+# like /tmp/mmry-memories.md because that is what the handler's shell uses. On Claude Code that is
+# correct: the model has a Bash tool and opens it happily.
+#
+# On Codex for Windows it is useless. The model's shell there is PowerShell, which cannot resolve
+# /tmp at all, so the single instruction attached to every memory load named a file the reader
+# could not open. Observed in a live session: "MMRY AI loaded 12 memories. Read them now:
+# /tmp/mmry-memories.md".
+#
+# cygpath is the authority on the mapping and ships with the same Git for Windows that provides
+# the bash these handlers run in, so it is present wherever this branch is reachable. When it is
+# absent, or the host is not Codex, the path is returned untouched: a POSIX path is right on Linux
+# and macOS, and right on Claude Code everywhere.
+mmry_host_path_for_model() {
+    local p="$1"
+    _mmry_host_resolve
+    if [[ "$_MMRY_HOST_V" == "codex" ]] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$p" 2>/dev/null || printf '%s' "$p"
+        return 0
+    fi
+    printf '%s' "$p"
+}
+
 mmry_host_credential_present() {
     _mmry_host_resolve
     [[ -f "${_MMRY_HOST_DIR_V}/mmry-config.json" ]]

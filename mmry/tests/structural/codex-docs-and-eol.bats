@@ -440,3 +440,34 @@ _codex_tree() {
     local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
     grep -qi 'do NOT point them at uninstall' "$skill"
 }
+
+@test "docs: Windows customers are steered off the shell that silently resolves to WSL" {
+    # Eric hit this live: pasting the documented command into PowerShell on a machine with WSL
+    # started the Linux bash, which cannot see Windows paths, and failed with "Failed to translate"
+    # and execvpe(/bin/bash). Requirement 3 says install without hand-editing; that needed a
+    # hand-edit to get past.
+    local doc; doc="$(_codex_doc)"
+    grep -q "Git Bash window" "$doc" || { echo "the page does not say which shell to use on Windows"; return 1; }
+    grep -qi "Windows Subsystem for Linux" "$doc" || { echo "the page does not name the trap"; return 1; }
+    grep -q "Failed to translate" "$doc" || { echo "the page does not name the error a customer will actually see"; return 1; }
+}
+
+@test "docs: the page offers a Windows invocation that cannot pick the wrong shell" {
+    local doc; doc="$(_codex_doc)"
+    grep -q "Git.bin.bash.exe" "$doc" || { echo "no explicit interpreter form for PowerShell users"; return 1; }
+}
+
+@test "docs: every documentation URL the installer prints names a file that exists in this repo" {
+    # The installer's closing line sends customers to the capability page. If that path is ever
+    # renamed, the link rots silently and the customer meets a 404 at the exact moment they are
+    # being told what is and is not available.
+    local repo; repo="$(cd "$PLUGIN_ROOT/.." && pwd)"
+    local url rel missing=""
+    while IFS= read -r url; do
+        rel="${url#*github.com/MMRY-AI/mmry-plugin/blob/master/}"
+        [[ -n "$rel" && "$rel" != "$url" ]] || continue
+        [[ -f "$repo/$rel" ]] || missing="${missing} $rel"
+    done < <(grep -ohE 'https://github.com/MMRY-AI/mmry-plugin/blob/master/[A-Za-z0-9_./-]+' \
+             "$PLUGIN_ROOT"/setup/*.sh "$PLUGIN_ROOT"/hooks-handlers/*.sh 2>/dev/null | sort -u)
+    [[ -z "$missing" ]] || { echo "the installer links to files this repo does not contain:${missing}"; return 1; }
+}
