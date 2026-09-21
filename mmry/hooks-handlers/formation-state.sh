@@ -26,7 +26,10 @@ set -euo pipefail
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
 
 _state_file() {
-    local sid="${1:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
+    # CODEX_SESSION_ID is in the chain because this file does not source lib-host.sh and so
+    # cannot call mmry_session_id. Callers normally pass the id explicitly; this is the
+    # fallback, and on Codex it was resolving to "unknown" for every model-invoked handler.
+    local sid="${1:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${CODEX_SESSION_ID:-unknown}}}}"
     # Session ids come from the client and can carry characters that are awkward in a filename.
     local safe
     safe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"

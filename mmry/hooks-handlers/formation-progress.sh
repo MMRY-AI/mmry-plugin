@@ -64,7 +64,7 @@ else
     fi
 fi
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is no participation to report on. This needs to run inside a session."
     exit 1

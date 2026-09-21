@@ -521,3 +521,52 @@ _stage_install() {
     assert_success
     assert_output "/tmp/mmry-memories.md"
 }
+
+# ---------------------------------------------------------------------------------------------
+# WHICH SESSION AM I (#31245, 2026-09-21).
+#
+# Twelve formation handlers resolved the session id from the two Claude Code variables only, and
+# neither exists in the model's shell on Codex, so every one of them refused with "No session id is
+# available, so there is nothing to enrol." A customer's assistant could not join a formation
+# through the plugin at all. Codex provides CODEX_SESSION_ID, measured by printing the environment
+# from inside a live session's own shell.
+# ---------------------------------------------------------------------------------------------
+
+@test "req4: CLAUDE_SESSION_ID still wins, so Claude Code resolution is unchanged" {
+    run env CLAUDE_SESSION_ID="claude-one" CLAUDE_CODE_SESSION_ID="claude-two" CODEX_SESSION_ID="codex-three" \
+        bash -c "source '$LIB'; mmry_session_id"
+    assert_success
+    assert_output "claude-one"
+}
+
+@test "req4: and the Bash-tool variable is still second in line" {
+    run env -u CLAUDE_SESSION_ID CLAUDE_CODE_SESSION_ID="claude-two" CODEX_SESSION_ID="codex-three" \
+        bash -c "source '$LIB'; mmry_session_id"
+    assert_success
+    assert_output "claude-two"
+}
+
+@test "codex: the session resolves from CODEX_SESSION_ID when the others are absent" {
+    run env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID="codex-three" \
+        bash -c "source '$LIB'; mmry_session_id"
+    assert_success
+    assert_output "codex-three"
+}
+
+@test "nosession: with nothing at all it returns empty rather than failing the caller" {
+    # A non-zero return here would abort every handler under set -e, which is the failure mode
+    # this whole area keeps producing.
+    run env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID \
+        bash -c "set -euo pipefail; source '$LIB'; mmry_session_id; echo SURVIVED"
+    assert_success
+    assert_output --partial "SURVIVED"
+}
+
+@test "codex: a model-invoked formation handler enrols instead of refusing" {
+    # The observable symptom, not just the helper: before this, every formation handler run by the
+    # model on Codex printed "No session id is available".
+    local hh="$PLUGIN_ROOT/hooks-handlers"
+    run env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID="bats-probe-session" \
+        MMRY_HOST=codex HOME="$HOME" bash "$hh/formation-state.sh" get "bats-probe-session"
+    [[ "$output" != *"No session id is available"* ]] || { echo "still refusing: $output"; return 1; }
+}

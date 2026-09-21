@@ -32,7 +32,7 @@ source "${HANDLER_DIR}/mmry-client.sh"
 formation_id="${1:-}"
 
 if [[ -z "$formation_id" ]]; then
-    session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # #31143
+    session_id="$(mmry_session_id)"  # #31143
     if [[ -z "$session_id" ]]; then
         echo "No session id is available and no formation id was given, so there is no record to show."
         exit 1

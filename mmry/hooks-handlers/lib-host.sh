@@ -757,6 +757,36 @@ mmry_host_path_for_model() {
     printf '%s' "$p"
 }
 
+# WHICH SESSION AM I (#31245, 2026-09-21).
+#
+# The formation handlers are run BY THE MODEL, in the model's own shell, not as hooks. They need
+# the session id to know which member of a formation they are. Twelve of them resolved it as
+# ${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}} and neither of those exists on Codex, so every
+# one of them refused with "No session id is available, so there is nothing to enrol." A customer's
+# assistant could not join a formation through the plugin at all, which is why it reached for the
+# connector instead, and why unsolicited delivery could never work: the connector registers the
+# member under its own identity while the hook polls for the id Codex gave the session.
+#
+# Codex DOES provide one. Measured by printing the environment from inside a live session's own
+# shell: CODEX_SESSION_ID and CODEX_THREAD_ID are both present and equal, alongside CODEX_HOME and
+# CODEX_VERSION. So this is the platform's own answer rather than a workaround, and it needs no
+# file on disk and no guess about which session is current when two are open at once.
+#
+# Order matters. The Claude Code variables come first so that host's behaviour is untouched, and
+# CODEX_SESSION_ID is consulted only when they are absent.
+mmry_session_id() {
+    if [[ -n "${CLAUDE_SESSION_ID:-}" ]]; then
+        printf '%s' "${CLAUDE_SESSION_ID}"
+    elif [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+        printf '%s' "${CLAUDE_CODE_SESSION_ID}"
+    elif [[ -n "${CODEX_SESSION_ID:-}" ]]; then
+        printf '%s' "${CODEX_SESSION_ID}"
+    else
+        printf ''
+    fi
+    return 0
+}
+
 mmry_host_credential_present() {
     _mmry_host_resolve
     [[ -f "${_MMRY_HOST_DIR_V}/mmry-config.json" ]]
