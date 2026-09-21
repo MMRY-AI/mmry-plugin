@@ -176,3 +176,26 @@ JSON
     [[ "$output" == *'Eric builds MMRY.'* ]]
     [[ "$output" != *'could not verify'* ]]
 }
+
+@test "write_foundation_cache: the manifest lands by rename from a PID-scoped temp (#31583 QA)" {
+    # Two sessions sharing a temp directory could interleave into a permanently inconsistent
+    # pair, because the cache temp was PID-scoped and the manifest name was not: one session's
+    # manifest describing another session's cache, with nothing to repair it until the next
+    # successful write. Both temps are PID-scoped now and both files arrive by rename.
+    grep -q 'local mtmp="${manifest}.new.\$\$"' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
+    grep -q 'mv -f "$mtmp" "$manifest"' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
+
+    # Nothing may write the manifest by redirecting at its final name any more.
+    run grep -c '> "\$manifest"' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
+    [ "$output" = "0" ]
+}
+
+@test "write_foundation_cache: no temp files survive, manifest or cache, on success or failure" {
+    mmry_write_foundation_cache "$(_resp)" "$CACHE"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l"
+    [ "$output" = "0" ]
+
+    mmry_write_foundation_cache 'not json' "$CACHE" || true
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l"
+    [ "$output" = "0" ]
+}

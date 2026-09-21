@@ -363,10 +363,40 @@ mmry_write_foundation_cache() {
     # that are not there yet, the reader's check fails, and the customer is TOLD. The other
     # order would leave a new cache described by a stale manifest - also refused, but that
     # way a CORRECT cache gets rejected, which is the worse of the two failures to choose.
+    # BOTH FILES LAND BY ATOMIC RENAME, AND BOTH TEMPS ARE PID-SCOPED (#31583 QA).
+    #
+    # The manifest used to be written by redirecting straight at its final, fixed name. Two
+    # consequences, both reported by QA:
+    #
+    #   A reader arriving mid-write saw a partially written manifest. It is one short line so
+    #   the window is small, but it is not zero, and a torn manifest is refused.
+    #
+    #   Worse, the cache temp was PID-scoped and the manifest name was not, so two sessions
+    #   sharing a temp directory could interleave into a permanently inconsistent pair: one
+    #   session's manifest describing another session's cache. Nothing repairs that until the
+    #   next successful write.
+    #
+    # Renaming both from PID-scoped temps makes each file's arrival atomic and stops two
+    # writers clobbering a shared filename mid-write.
+    #
+    # WHAT THIS DOES NOT FIX, stated rather than implied. There are still TWO files and they
+    # arrive one after the other, so a reader in the gap sees a new manifest against an old
+    # cache and refuses a set that is in fact healthy. QA measured that at 225 of 2,808 reads,
+    # 8 percent, on a live refresh loop. I could not reproduce it myself: both attempts were
+    # timing-fragile and neither contradicts their measurement. Closing it properly needs the
+    # manifest and the cache to become ONE file so a single rename publishes both, which is a
+    # format change and its own piece of work. Ordering the two renames differently does not
+    # help; it only moves which side of the pair is stale.
+    local mtmp="${manifest}.new.$$"
     printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s
-'         "$entries" "$count" "$sum" > "$manifest" 2>/dev/null || {
-            rm -f "$tmp" 2>/dev/null; return 1; }
+'         "$entries" "$count" "$sum" > "$mtmp" 2>/dev/null || {
+            rm -f "$tmp" "$mtmp" 2>/dev/null; return 1; }
 
+    # Manifest first, as before: if the process dies between the two, the manifest describes
+    # bytes that are not there, the reader refuses and the customer is TOLD. The other order
+    # leaves a correct cache under a stale manifest, which is refused just as loudly but is
+    # the worse of the two to choose deliberately.
+    mv -f "$mtmp" "$manifest" 2>/dev/null || { rm -f "$tmp" "$mtmp" 2>/dev/null; return 1; }
     mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
     return 0
 }
