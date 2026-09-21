@@ -364,7 +364,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if (( WORKER_RC == 3 )); then
         REASON="${BODY:-the cached directives could not be verified}"
         NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. Nothing was truncated and nothing was guessed at; the local copy did not match what MMRY stored, so it was refused rather than used. Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. Nothing was truncated and nothing was guessed at; the local copy did not match the record MMRY wrote when it fetched them, so it was refused rather than used. Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"

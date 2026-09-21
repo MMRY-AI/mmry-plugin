@@ -6,8 +6,16 @@ Usage: `/mmry:foundation-status`
 
 Foundation memories are your standing directives, re-sent to the assistant on every prompt.
 This reports, in plain words, whether that is really happening: whether re-injection is
-switched on, whether the locally stored copy matches what MMRY stored for your account,
-how many directives and characters it holds, and how long ago it was last sent.
+switched on, whether the locally stored copy still matches the record MMRY wrote when it
+last fetched your directives, how many directives and characters it holds, and how long ago
+it was last sent.
+
+It is a LOCAL integrity check and makes no network call. That is worth being precise about,
+because the two questions are different. It can tell you your copy is intact and is being
+delivered to the assistant. It cannot tell you your copy agrees with what is in your account
+right now, so if you have edited your directives in the portal since this session last
+fetched them, run `/mmry:load-memories` rather than reading a healthy report here as
+confirmation that the edit is in force.
 
 It answers the question you would otherwise have no way to ask. A damaged local copy is
 refused and reported by the hook itself, but a refusal only speaks when something is wrong.

@@ -122,3 +122,46 @@ _flat() { tr -d '' < "$1" | tr '
     run grep -c 'foundationRefreshSeconds' "$cfg"
     [ "$output" -ge 1 ]
 }
+
+# #31583 R4, QA round 3 item 3. Three customer-facing surfaces told the customer that
+# /mmry:foundation-status compares their local copy with what MMRY holds for their account.
+# The command makes no network call at all, so that claim could never be true: the check is
+# local, between the cache and the manifest the writer recorded beside it. A customer reading
+# any of those three would take a healthy report as confirmation that their portal edits are
+# in force, which it cannot be.
+#
+# The absence assertion here is the shape that has repeatedly shipped unable to fail in this
+# repository, so it carries a CONTROL: the same pattern is first run against a string that
+# must match. If the pattern ever stops matching the phrase it exists to catch, the control
+# fails and the test goes red for that reason rather than passing vacuously.
+@test "foundation-status: no customer-facing surface claims the check reaches the server (#31583 R4)" {
+    local pat='what MMRY (holds|stored|has)'
+
+    # CONTROL. The pattern must match the exact wording that was shipped.
+    printf 'whether the locally stored copy matches what MMRY holds for your account\n' > "$TEST_TMPDIR/control.md"
+    if ! grep -qiE "$pat" "$TEST_TMPDIR/control.md"; then
+        echo "the pattern cannot match the phrase it exists to catch, so the check below proves nothing"
+        return 1
+    fi
+
+    # The premise: the command genuinely makes no network call. If this ever gains one, the
+    # claim could become true and this test should be revisited rather than silently kept.
+    run grep -cE 'curl|wget|https?://' "$HANDLERS/foundation-status.sh"
+    [ "$output" = "0" ]
+
+    # The assertion: no surface makes the claim.
+    local hits
+    hits="$(grep -rliE "$pat" "$PLUGIN_ROOT/README.md" "$CMDS" "$HANDLERS" 2>/dev/null || true)"
+    if [ -n "$hits" ]; then
+        echo "these surfaces still claim a comparison with the server:"
+        echo "$hits"
+        return 1
+    fi
+
+    # And the positive half: each surface says what it really compares, so this cannot be
+    # satisfied by deleting the sentence instead of correcting it.
+    grep -q 'record MMRY wrote' "$PLUGIN_ROOT/README.md"
+    grep -q 'record MMRY wrote' "$CMDS/help.md"
+    grep -q 'record MMRY wrote' "$CMDS/foundation-status.md"
+    grep -q 'record MMRY wrote' "$HANDLERS/userpromptsubmit-foundation.sh"
+}
