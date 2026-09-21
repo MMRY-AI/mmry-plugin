@@ -544,3 +544,37 @@ _install_codex_only_unconfigured() {
     run grep -c 'export MMRY_HOST="${MMRY_HOST:-claude}"' "$PLUGIN_ROOT/setup/mmry-setup.sh"
     assert_output "0"
 }
+
+# ---------------------------------------------------------------------------------------------
+# WHICH SHELL STARTS THE HOOK (#31245, 2026-09-21).
+#
+# The command used to begin with a bare `bash`. On Windows, Codex runs it through cmd, cmd takes
+# the first `bash` on PATH, and Windows ships one in System32: the Linux subsystem's. Measured on
+# a real machine, `where.exe bash` inside a live Codex session returned
+# C:\Windows\System32\bash.exe AHEAD of Git's, and every hook failed with exit 1 and no output,
+# because WSL bash cannot translate a Windows working directory.
+#
+# It launches with `sh` now. Windows ships bash.exe in System32 but no sh.exe, so `sh` can only be
+# Git's, which is bash 5.2 under another name. On Linux `sh` is usually dash, so the entry point
+# re-execs under a real bash before parsing anything bash-only.
+# ---------------------------------------------------------------------------------------------
+
+@test "shell: the entry point survives being started by dash, which is sh on Debian and Ubuntu" {
+    command -v dash >/dev/null 2>&1 || skip "dash is not installed on this machine"
+    local dir="$TEST_TMPDIR/dashrun"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    printf '#!/usr/bin/env bash\nprintf DASH-REEXEC-OK\nexit 0\n' > "$dir/probe.sh"
+    run env MMRY_HOST=codex CLAUDE_PLUGIN_ROOT="$dir" HOME="$HOME" dash "$dir/codex-hook.sh" probe
+    assert_success
+    assert_output --partial "DASH-REEXEC-OK"
+}
+
+@test "shell: and the re-exec guard is POSIX, so dash never parses bash-only syntax" {
+    # The guard has to sit AHEAD of `set -euo pipefail`, because pipefail is not POSIX and dash
+    # would abort on it before reaching the re-exec.
+    command -v dash >/dev/null 2>&1 || skip "dash is not installed on this machine"
+    run dash -n "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh"
+    assert_success
+}

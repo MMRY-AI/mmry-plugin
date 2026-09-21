@@ -26,6 +26,27 @@
 # set -e is the repository convention (structural/file-integrity.bats enforces it) and is safe here
 # only because every step below is explicitly guarded with `|| exit 0`. The fail-open promise is
 # carried by those guards, not by the absence of -e.
+# STARTED BY sh, NOT BY bash, AND THAT IS DELIBERATE (#31245, 2026-09-21).
+#
+# The hook command used to begin with a bare `bash`. On Windows Codex runs it through cmd, cmd
+# takes the first `bash` on PATH, and Windows ships one in System32: the Linux subsystem's. On a
+# machine where that wins, it cannot translate a Windows working directory and exits 1 with no
+# output before any of this file runs. Measured on Eric's machine, where `where.exe bash` inside a
+# live session returns C:\Windows\System32\bash.exe ahead of Git's, and the hook failed on every
+# turn. commandWindows was the mitigation for exactly this and is unusable, because declaring it
+# stops Codex consuming the hook's output at all.
+#
+# `sh` is immune to that trap: Windows ships bash.exe in System32 but NO sh.exe, so `sh` can only
+# resolve to Git's, which is bash 5.2 wearing a different name and sets BASH_VERSION.
+#
+# On Linux `sh` is often dash, which has no [[ ]] and no pipefail, so the two lines below re-exec
+# under a real bash before anything bash-specific is parsed. They are deliberately POSIX: this is
+# the one part of the file that may be read by a shell that is not bash. Everything after the
+# re-exec is guaranteed bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 HANDLER_NAME="${1:-}"

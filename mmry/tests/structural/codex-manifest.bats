@@ -376,3 +376,14 @@ setup() {
         }
     done
 }
+
+@test "codex hooks: every command launches with sh, never a bare bash" {
+    # A bare `bash` on Windows can resolve to the Linux subsystem's, which cannot translate a
+    # Windows working directory and exits 1 before our code runs. Windows ships no sh.exe, so `sh`
+    # can only be Git's. Measured on a real machine where where.exe bash returned System32 first.
+    local c
+    while IFS= read -r c; do
+        [[ "$c" == sh\ * ]] || { echo "command does not launch with sh: $c"; return 1; }
+        [[ "$c" != bash\ * ]] || { echo "command still launches with a bare bash: $c"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$CODEX_HOOKS")
+}
