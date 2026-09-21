@@ -453,3 +453,47 @@ _stage_install() {
         }
     done
 }
+
+# ---------------------------------------------------------------------------------------------
+# HOME IS NOT GUARANTEED (#31245, 2026-09-20).
+#
+# A single unguarded "${HOME}" took the whole Codex feature down on Windows. codex-hook.sh runs
+# under `set -euo pipefail`, so with HOME unset the expansion aborted the hook with
+# "HOME: unbound variable", exit 1, and no output, before any of our code ran. Codex showed the
+# customer "hook exited with code 1" every turn.
+#
+# HOME is a Git Bash convention. Windows sets USERPROFILE, and HOMEDRIVE plus HOMEPATH. Codex's
+# terminal app sets none of them for the hook: running `codex --version` inside it prints
+# "could not find home directory". Every test this suite ever ran was launched from Git Bash,
+# which does set HOME, which is precisely why 836 green tests never saw it.
+# ---------------------------------------------------------------------------------------------
+
+@test "nohome: the config dir resolves from USERPROFILE when HOME is unset" {
+    run env -u HOME -u CODEX_HOME -u MMRY_CONFIG_FILE USERPROFILE="C:\\Users\\someone" MMRY_HOST=codex \
+        bash -c "set -euo pipefail; source '$LIB'; mmry_host_config_dir"
+    assert_success
+    [[ "$output" == *"/Users/someone/.codex" ]] || { echo "resolved to: $output"; return 1; }
+}
+
+@test "nohome: and from HOMEDRIVE plus HOMEPATH when that is all there is" {
+    run env -u HOME -u CODEX_HOME -u MMRY_CONFIG_FILE -u USERPROFILE \
+        HOMEDRIVE="C:" HOMEPATH="\\Users\\someone" MMRY_HOST=codex \
+        bash -c "set -euo pipefail; source '$LIB'; mmry_host_config_dir"
+    assert_success
+    [[ "$output" == *"/Users/someone/.codex" ]] || { echo "resolved to: $output"; return 1; }
+}
+
+@test "nohome: sourcing the resolver with no home at all does not abort under set -u" {
+    # The failure mode was not a wrong path, it was the shell dying on an unbound variable.
+    run env -u HOME -u CODEX_HOME -u MMRY_CONFIG_FILE -u USERPROFILE -u HOMEDRIVE -u HOMEPATH \
+        MMRY_HOST=codex bash -c "set -euo pipefail; source '$LIB'; echo SURVIVED"
+    assert_success
+    assert_output --partial "SURVIVED"
+}
+
+@test "req4: a customer's own HOME is never overridden by the fallback" {
+    run env -u CODEX_HOME -u MMRY_CONFIG_FILE HOME="/home/chosen" USERPROFILE="C:\\Users\\other" \
+        bash -c "set -euo pipefail; source '$LIB'; mmry_home"
+    assert_success
+    assert_output "/home/chosen"
+}

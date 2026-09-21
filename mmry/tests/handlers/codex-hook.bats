@@ -119,16 +119,48 @@ setup() {
     assert_output ""
 }
 
-@test "shim: the handler's exit code is passed through, because exit 2 IS the delivery channel" {
-    # Swallowing a non-zero exit would silently disable both the save prompt and formation
-    # delivery on Stop, while leaving everything looking healthy.
+@test "shim: a handler's non-zero exit is NOT passed through, because it only breaks the session" {
+    # THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, AND THE OLD ONE WAS WRONG (2026-09-20).
+    #
+    # The old test required the shim to propagate exit 2, reasoning that exit 2 IS the delivery
+    # channel and that swallowing it would silently disable the save prompt and formation
+    # delivery. That was read from the platform's source and never run.
+    #
+    # MEASURED against real sessions: an emitter exiting 2 is reported Failed on EVERY event,
+    # including SessionStart and Stop, and delivers nothing at all. The same emitter exiting 0 is
+    # reported Completed. So propagating 2 bought a visible "hook exited with code 1" in front of
+    # the customer, every turn, and no delivery whatsoever. Codex handlers deliver with
+    # additionalContext on stdout and exit 0, which formation-check.sh already does.
     local dir="$TEST_TMPDIR/hh"
     mkdir -p "$dir"
     cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" "$dir/"
     cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
     printf '#!/usr/bin/env bash\necho "to the model" >&2\nexit 2\n' > "$dir/probe.sh"
     run bash "$dir/codex-hook.sh" probe
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 0 ]] || { echo "shim exited $status; Codex renders any non-zero as a failed hook"; return 1; }
+}
+
+@test "failopen: an ordinary handler failure also leaves the hook reporting success" {
+    local dir="$TEST_TMPDIR/hh2"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    printf '#!/usr/bin/env bash\necho "boom" >&2\nexit 7\n' > "$dir/probe.sh"
+    run bash "$dir/codex-hook.sh" probe
+    [[ "$status" -eq 0 ]] || { echo "shim exited $status"; return 1; }
+}
+
+@test "failopen: the entry point survives having no resolvable home at all" {
+    # The defect that took the feature down on Windows: with HOME unset, "${HOME}/.codex" aborted
+    # the hook under set -u with exit 1 and no output, before any of our code ran.
+    local dir="$TEST_TMPDIR/hh3"
+    mkdir -p "$dir"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" "$dir/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/probe.sh"
+    run env -u HOME -u USERPROFILE -u HOMEDRIVE -u HOMEPATH -u CODEX_HOME \
+        MMRY_HOST=codex bash "$dir/codex-hook.sh" probe
+    [[ "$status" -eq 0 ]] || { echo "shim exited $status with no home resolvable"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------

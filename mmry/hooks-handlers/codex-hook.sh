@@ -48,6 +48,14 @@ export MMRY_HOST="codex"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
 
+# NO RESOLVABLE HOME MEANS NOTHING BELOW CAN WORK, SO STOP QUIETLY (#31245, 2026-09-20).
+#
+# Every path from here reads or writes under the customer's home: the credential, the state
+# directory, the memories file. With none of HOME, USERPROFILE or HOMEDRIVE/HOMEPATH set, those
+# become paths rooted at "/" and the handlers spend their time failing to create directories they
+# were never going to be able to use. Exiting here keeps the session clean instead.
+[[ -n "$(mmry_home)" ]] || exit 0
+
 # CLAUDE_PLUGIN_ROOT is exported by Codex itself for plugin-sourced hooks
 # (codex-rs/hooks/src/engine/discovery.rs line 267, commented "For OOTB compat with existing
 # plugins that use this env var"). It is re-derived here rather than trusted, because this script
@@ -71,4 +79,26 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 [[ -f "$TARGET" ]] || exit 0
 
-exec bash "$TARGET" "$@"
+# FAIL OPEN, FOR REAL THIS TIME (#31245, 2026-09-20).
+#
+# This file's header has always promised that a hook which cannot run must not break the
+# customer's session. It did not keep that promise: `exec` handed the handler's exit code straight
+# to Codex, and Codex renders ANY non-zero as "hook exited with code 1" to the customer, on every
+# turn, with no way to dismiss it. A single unset HOME was enough to produce that on a real
+# machine, silently, before any of our code ran.
+#
+# AND EXIT 2 IS NOT A CHANNEL HERE, WHICH IS WHY IT IS NO LONGER PASSED THROUGH. The header used
+# to argue that exit 2 had to reach Codex because it is how Stop and PostToolUse deliver text to
+# the model. That was read from the platform's source and never run. Measured: an emitter exiting
+# 2 is reported Failed on EVERY event, including SessionStart and Stop, and delivers nothing at
+# all; the same emitter exiting 0 is reported Completed. So passing 2 through buys a visible
+# failure and no delivery. Codex handlers deliver with additionalContext on stdout and exit 0,
+# which formation-check.sh already does.
+#
+# The handler's own exit code is therefore deliberately discarded. If a handler needs to tell the
+# model something, it prints it; there is no other channel, and pretending otherwise is what put
+# "Hook failed" in front of a customer every turn.
+set +e
+bash "$TARGET" "$@"
+set -e
+exit 0

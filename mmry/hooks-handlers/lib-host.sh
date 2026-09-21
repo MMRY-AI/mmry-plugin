@@ -328,6 +328,58 @@ fi
 _MMRY_HOST_KEY=$'\x01unset'
 _MMRY_HOST_V=""; _MMRY_HOST_DIR_V=""; _MMRY_HOST_CLIENT_V=""; _MMRY_HOST_LABEL_V=""
 
+# THE USER'S HOME DIRECTORY, RESOLVED RATHER THAN ASSUMED (#31245, 2026-09-20).
+#
+# This exists because a single unguarded "${HOME}" took the entire Codex feature down on Windows.
+# codex-hook.sh runs under `set -euo pipefail`; with HOME unset, expanding it aborts the hook with
+# "HOME: unbound variable", exit 1, and NO output, before a line of our code runs. Codex reports
+# that to the customer as "hook exited with code 1" on every single turn.
+#
+# HOME IS A GIT BASH CONVENTION, NOT A WINDOWS ONE. Windows sets USERPROFILE, and HOMEDRIVE plus
+# HOMEPATH. Codex's own terminal app does not set HOME: running `codex --version` inside it prints
+# "could not find home directory". Every test this project ever ran was launched from Git Bash,
+# which does set it, which is exactly why 836 passing tests never saw this.
+#
+# Order: HOME when it is genuinely set, because a customer who exports it means it. Then the two
+# Windows spellings. Empty when nothing resolves, and every caller must treat empty as "fail open",
+# never as a path rooted at "/".
+mmry_home() {
+    if [[ -n "${HOME:-}" ]]; then
+        printf '%s' "${HOME}"
+        return 0
+    fi
+    if [[ -n "${USERPROFILE:-}" ]]; then
+        _mmry_norm_path "${USERPROFILE}"
+        printf '%s' "$_MMRY_NP"
+        return 0
+    fi
+    if [[ -n "${HOMEDRIVE:-}" && -n "${HOMEPATH:-}" ]]; then
+        _mmry_norm_path "${HOMEDRIVE}${HOMEPATH}"
+        printf '%s' "$_MMRY_NP"
+        return 0
+    fi
+    # RETURNS 0 EVEN WITH NOTHING TO REPORT, DELIBERATELY. A non-zero return here is fatal to
+    # every caller: these scripts run under `set -euo pipefail`, so "$(mmry_home)" inside an
+    # assignment would abort the whole hook the moment nothing resolved, which is the exact class
+    # of failure this function was added to end. Emptiness is the signal; callers test for it.
+    printf ''
+    return 0
+}
+
+# EVERY HANDLER BENEFITS, NOT JUST THIS FILE. Eight other shipped scripts expand ${HOME} directly
+# and do not all source this file's resolver before doing so. Exporting a resolved HOME here, when
+# the environment did not provide one, fixes all of them at their existing call sites rather than
+# leaving eight more chances to get it wrong. It is only ever set when it was missing, so a
+# customer's own HOME is never overridden.
+if [[ -z "${HOME:-}" ]]; then
+    _mmry_resolved_home="$(mmry_home)" || true
+    if [[ -n "$_mmry_resolved_home" ]]; then
+        HOME="$_mmry_resolved_home"
+        export HOME
+    fi
+    unset _mmry_resolved_home
+fi
+
 _mmry_host_resolve() {
     local key="${MMRY_HOST:-}|${CODEX_HOME:-}|${HOME:-}|${_MMRY_HOST_DIR_FROM_MARKER:-}"
     [[ "$key" == "$_MMRY_HOST_KEY" ]] && return 0
@@ -344,7 +396,7 @@ _mmry_host_resolve() {
         if [[ -n "${_MMRY_HOST_DIR_FROM_MARKER:-}" ]]; then
             _MMRY_HOST_DIR_V="${_MMRY_HOST_DIR_FROM_MARKER}"
         else
-            _MMRY_HOST_DIR_V="${CODEX_HOME:-${HOME}/.codex}"
+            _MMRY_HOST_DIR_V="${CODEX_HOME:-$(mmry_home)/.codex}"
             # A TRAILING SEPARATOR IS NOT PART OF THE DIRECTORY (#31245 QA round 4). A customer
             # who set CODEX_HOME=C:\Users\x\codexhome\ - which is what tab-completion in cmd
             # hands you - produced a credential path of "...\codexhome\/mmry-config.json".
@@ -357,7 +409,7 @@ _mmry_host_resolve() {
         _MMRY_HOST_CLIENT_V="codex"
         _MMRY_HOST_LABEL_V="Codex"
     else
-        _MMRY_HOST_DIR_V="${HOME}/.claude"
+        _MMRY_HOST_DIR_V="$(mmry_home)/.claude"
         _MMRY_HOST_CLIENT_V="claude-code"
         _MMRY_HOST_LABEL_V="Claude Code"
     fi
