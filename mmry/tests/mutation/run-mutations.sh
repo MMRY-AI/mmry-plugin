@@ -49,6 +49,7 @@ CONFIG_TESTS="unit/config-loading.bats"
 WRITER_TESTS="unit/foundation-cache-write.bats"
 STATUS_TESTS="handlers/foundation-status.bats"
 STATUS_REL="hooks-handlers/foundation-status.sh"
+VERIFY_TESTS="unit/foundation-verify.bats"
 STATUS_CMD_TESTS="structural/foundation-status-command.bats"
 HELP_REL="commands/help.md"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
@@ -244,14 +245,19 @@ desc_m12="#31583 verification replaced by the old 'file is not empty' preconditi
 # specific trap #31583 test case 2 names: "Length alone is not validity, and a check that
 # only measures length would pass this while failing the customer." A harness that scored
 # m12 alone would not distinguish a real content check from a length check.
+# REPOINTED (#31583 QA r3). This matched nothing from the moment the two duplicate
+# verification blocks were merged into one routine: _act_cksum stopped existing in the
+# handler and became act_cksum inside mmry_verify_foundation_cache. The harness aborts on
+# the first no-op, so m13 matching nothing is also why m14 through m20 were never scored.
 mutate_m13() {
-    local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m13"
+    local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m13"
     awk '
-        /^if \[\[ "\$_act_cksum" != "\$_exp_cksum" \]\]; then$/ { print "if false; then"; next }
+        /^    if \[\[ "\$act_cksum" != "\$exp_cksum" \]\]; then$/ { print "    if false; then"; next }
         { print }
     ' "$f" > "$t" && mv "$t" "$f"
 }
-targets_m13="$HANDLER_TESTS"
+file_m13="$CLIENT_REL"
+targets_m13="$VERIFY_TESTS $HANDLER_TESTS"
 desc_m13="#31583 checksum comparison dropped, leaving a length-only check"
 
 # Refuse the cache but tell only the assistant, not the customer. The directives are still
@@ -266,10 +272,14 @@ desc_m14="#31583 the refusal is reported to the assistant but never to the custo
 # Warn on EVERY firing, including a healthy one. This passes any test that only checks
 # "a damaged cache is refused" and fails the customer continuously. #31583 test case 4 exists
 # precisely so the new check cannot be satisfied by warning all the time.
+# REPOINTED (#31583 QA r3), same cause as m13: the readability branch moved into the shared
+# routine and the cache variable is lowercase there. Forcing it true makes every cache, healthy
+# ones included, report as missing, which is what test case 4 exists to catch.
 mutate_m15() {
-    _sedi 's|^if \[\[ ! -r "\$CACHE" \]\]; then$|if true; then|' "$1/$HANDLER_REL"
+    _sedi 's|^    if \[\[ ! -r "\$cache" \]\]; then$|    if true; then|' "$1/$CLIENT_REL"
 }
-targets_m15="$HANDLER_TESTS"
+file_m15="$CLIENT_REL"
+targets_m15="$VERIFY_TESTS $HANDLER_TESTS"
 desc_m15="#31583 every firing reports a failure, healthy ones included"
 
 # Put the writer back to the non-atomic clobber: redirect straight at the cache, hide the
@@ -310,22 +320,32 @@ desc_m17="#31583 manifest entry count taken from a line count rather than the re
 # of directives makes the handler withhold the whole set and say NOTHING. Measured at 914
 # bytes before the guard existed. A mutation that survives here means the product can go
 # silent on a live account and no test notices.
+# REPOINTED (#31583 QA r3), same cause again.
 mutate_m18() {
-    _sedi 's|^    if \[\[ -s "\$CACHE" \]\]; then$|    if false; then|' "$1/$HANDLER_REL"
+    _sedi 's|^        if \[\[ -s "\$cache" \]\]; then$|        if false; then|' "$1/$CLIENT_REL"
 }
-targets_m18="$HANDLER_TESTS"
+file_m18="$CLIENT_REL"
+targets_m18="$VERIFY_TESTS $HANDLER_TESTS"
 desc_m18="#31583 the entries=0 claim is believed without checking the cache (silent withholding)"
 
-# The same guard in the status command. This one is nastier than m18 because nothing breaks:
-# the handler still refuses the cache, and /mmry:foundation-status cheerfully reports "VALID
-# and EMPTY - nothing is being withheld" for the state it is refusing. A customer checking
-# the one command built for asking would be sent away from a live fault.
+# REWRITTEN (#31583 QA r3). This used to mutate the status command's OWN copy of the
+# entries=0 guard. That copy is gone: merging the two duplicate verification blocks into one
+# routine is precisely the fix that removed it, so the mutation matched nothing and the
+# no-op guard aborted the run, which is the guard working correctly on a mutation that had
+# outlived its target.
+#
+# The risk it was written for has not gone away, it has moved. With one routine the two
+# callers cannot disagree about what verifies, but the status command still decides for
+# itself what to DO with the verdict, and that decision is the whole of requirement 4. This
+# mutation makes it ignore a refusal and fall through to the healthy report, which is the
+# same customer-visible harm as before: the hook refuses the cache while the one command
+# built for asking says everything is fine. Nothing crashes, which is what makes it nasty.
 mutate_m19() {
-    _sedi 's|^    if \[\[ -s "\$CACHE" \]\]; then$|    if false; then|' "$1/$STATUS_REL"
+    _sedi 's|^if (( _verdict != 0 )); then$|if false; then|' "$1/$STATUS_REL"
 }
 file_m19="$STATUS_REL"
-targets_m19="$STATUS_TESTS"
-desc_m19="#31583 the status command reports health for a cache the handler is refusing"
+targets_m19="$STATUS_TESTS $STATUS_CMD_TESTS"
+desc_m19="#31583 the status command ignores a refusal and reports health anyway"
 
 # Take the command back out of the help page. The handler still works perfectly and every
 # test of its OUTPUT still passes; the customer simply has no way to learn the command
@@ -406,7 +426,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
