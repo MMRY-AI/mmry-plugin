@@ -774,8 +774,24 @@ mmry_host_path_for_model() {
 #
 # Order matters. The Claude Code variables come first so that host's behaviour is untouched, and
 # CODEX_SESSION_ID is consulted only when they are absent.
+# THE HOST DECIDES WHICH VARIABLE IS AUTHORITATIVE, NOT THE ORDER THEY HAPPEN TO BE SET IN.
+#
+# This first shipped as "Claude variables, then CODEX_SESSION_ID", and my own delivery test caught
+# it within the hour. A Codex session launched from a shell that already had CLAUDE_CODE_SESSION_ID
+# exported INHERITED it, so the handler answered with the launching session's identity instead of
+# its own and refused with "This session already belongs to an active formation" - which was true
+# of the other session, not of itself. Any Codex session started from inside another assistant's
+# shell would have done the same, and two sessions silently sharing one identity is worse than a
+# handler that refuses outright.
+#
+# So on Codex, CODEX_SESSION_ID wins: it is the platform's own answer about the session actually
+# running, and it cannot be inherited from somewhere else. The Claude variables remain the answer
+# everywhere else, byte for byte as before.
 mmry_session_id() {
-    if [[ -n "${CLAUDE_SESSION_ID:-}" ]]; then
+    _mmry_host_resolve
+    if [[ "$_MMRY_HOST_V" == "codex" && -n "${CODEX_SESSION_ID:-}" ]]; then
+        printf '%s' "${CODEX_SESSION_ID}"
+    elif [[ -n "${CLAUDE_SESSION_ID:-}" ]]; then
         printf '%s' "${CLAUDE_SESSION_ID}"
     elif [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
         printf '%s' "${CLAUDE_CODE_SESSION_ID}"

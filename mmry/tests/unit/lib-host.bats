@@ -570,3 +570,35 @@ _stage_install() {
         MMRY_HOST=codex HOME="$HOME" bash "$hh/formation-state.sh" get "bats-probe-session"
     [[ "$output" != *"No session id is available"* ]] || { echo "still refusing: $output"; return 1; }
 }
+
+@test "codex: an inherited Claude session id does NOT override the platform's own" {
+    # FOUND BY THE DELIVERY TEST ITSELF, within an hour of shipping the first version of
+    # mmry_session_id (#31245, 2026-09-21).
+    #
+    # A Codex session launched from a shell that already had CLAUDE_CODE_SESSION_ID exported
+    # INHERITED it. The resolver checked the Claude variables first, so the handler answered with
+    # the LAUNCHING session's identity and refused with "This session already belongs to an active
+    # formation" - true of the other session, not of itself. Two sessions silently sharing one
+    # identity is worse than a handler that refuses outright, and any Codex session started from
+    # inside another assistant's shell would have done it.
+    run env MMRY_HOST=codex CLAUDE_CODE_SESSION_ID="inherited-from-parent" CODEX_SESSION_ID="my-own-id" \
+        bash -c "source '$LIB'; mmry_session_id"
+    assert_success
+    assert_output "my-own-id"
+}
+
+@test "codex: and an inherited CLAUDE_SESSION_ID loses to it as well" {
+    run env MMRY_HOST=codex CLAUDE_SESSION_ID="inherited-outer" CODEX_SESSION_ID="my-own-id" \
+        bash -c "source '$LIB'; mmry_session_id"
+    assert_success
+    assert_output "my-own-id"
+}
+
+@test "req4: a stray CODEX_SESSION_ID never displaces the Claude Code answer" {
+    # The mirror image. On Claude Code the Claude variables remain authoritative even if a Codex
+    # variable is lying around in the environment.
+    run env -u MMRY_HOST CLAUDE_CODE_SESSION_ID="claude-id" CODEX_SESSION_ID="stray-codex-id" \
+        bash -c "source '$LIB'; mmry_session_id"
+    assert_success
+    assert_output "claude-id"
+}
