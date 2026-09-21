@@ -40,8 +40,9 @@ This platform does not give plugins typed slash commands. On Claude Code a custo
    none to type on Codex and that asking in plain words is the whole interface: "remember this",
    "what do you know about X", "make that private", "start a formation".
 2. **There is no prompt before context is trimmed.** Codex hooks have no channel to you at the
-   compaction moment, so the save prompt arrives at the end of a turn instead. Treat every
-   end-of-turn prompt as the last chance to record something, because it may be.
+   compaction moment, so the save prompt arrives with the customer's NEXT message instead, and
+   only when something is still unsaved. Treat every one of those prompts as the last chance to
+   record what has happened since the last save, because it may be.
 3. **Idle delivery does not happen here.** Coordination messages reach you when a tool runs, when a
    prompt is submitted, and at session start. A Codex session that is sitting doing nothing is not
    woken by a message; it sees it on the next thing that happens.
@@ -166,6 +167,23 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/deactivate-memory.sh" 42
 Deactivate; never delete. The historical record is the point.
 
 ## Coordination groups (formations)
+
+> **Use the commands below, not the `mmry_formation_*` tools, for anything that JOINS or LEAVES a
+> group.**
+>
+> Both routes exist and both look like they work. They do not do the same thing. The tools reach
+> MMRY directly and enrol you under their own identity; the commands below enrol the identity this
+> session's hooks use. Join with the tools and you will appear on the roster, your status will say
+> you are a member, and **no message anyone sends you will ever arrive**. Nothing errors. Nothing
+> warns. You simply never hear from your teammates.
+>
+> Measured on a real machine, twice, on 2026-09-21: a session that joined with the tools received
+> nothing from two directed messages, while a session that joined with the command below received
+> the next one within seconds of its next command.
+>
+> The tools are fine for reading. `mmry_formation_list` and `mmry_formation_status` answer
+> questions without changing anything. It is joining and leaving that must go through the commands.
+
 
 A formation carries messages between assistant sessions that cannot otherwise see each other, so
 two people's assistants can work the same job without colliding.

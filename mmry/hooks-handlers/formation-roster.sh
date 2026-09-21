@@ -91,7 +91,24 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
       + (if .leftDate != null then "   (has left; cannot be addressed)" else "" end)
 ' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
 
-printf '\nDirect a message at one of them with %s. Leave the id off\n' "$(mmry_host_formation_ref say '"..." --to <id>')"
+# THE RECIPIENT IS SPELLED DIFFERENTLY ON EACH HOST, AND THIS LINE USED TO GET IT WRONG
+# (#31245, 2026-09-21).
+#
+# "--to <id>" is a CLAUDE CODE convention: the user types /mmry:formation say "..." --to 12 and
+# commands/formation.md translates it into a positional argument before the script ever sees it.
+# The script itself only ever took the id positionally.
+#
+# Codex has no commands, so the model runs the script directly, and this footer was handing it a
+# flag the script refuses outright: "A recipient is a roster entry id, a positive whole number...
+# Nothing was sent". Reproduced while testing delivery: the first send failed exactly this way.
+#
+# So the example matches the thing the reader will actually run.
+if [[ "$(mmry_host)" == "codex" ]]; then
+    _mmry_say_example='"..." <id>'
+else
+    _mmry_say_example='"..." --to <id>'
+fi
+printf '\nDirect a message at one of them with %s. Leave the id off\n' "$(mmry_host_formation_ref say "$_mmry_say_example")"
 printf 'and the message goes to the whole formation.\n'
 # #31046. The state in brackets is the last thing that member reported, and "not started" means
 # nothing has been reported against work that WAS handed out, which is the thing worth noticing on

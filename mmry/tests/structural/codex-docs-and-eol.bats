@@ -471,3 +471,50 @@ _codex_tree() {
              "$PLUGIN_ROOT"/setup/*.sh "$PLUGIN_ROOT"/hooks-handlers/*.sh 2>/dev/null | sort -u)
     [[ -z "$missing" ]] || { echo "the installer links to files this repo does not contain:${missing}"; return 1; }
 }
+
+@test "skill: joining a formation is steered away from the connector tools" {
+    # THE DEFECT THIS PREVENTS, observed twice on a real machine 2026-09-21. Asked in plain words
+    # to join a formation, a Codex session reaches for the mmry_formation_* connector tools,
+    # because they are native and right in front of it. The connector enrols the member under ITS
+    # identity; the PostToolUse hook polls for the identity Codex gave the session. They never
+    # match, so the session appears on the roster, reports inFormation true, and NEVER receives a
+    # pushed message. Nothing errors and nothing warns.
+    #
+    # Two directed messages were lost to this before the handler path was forced by hand.
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    grep -q "mmry_formation_\*" "$skill" || { echo "the skill never names the connector tools"; return 1; }
+    grep -qi "not the .mmry_formation" "$skill" || { echo "the skill does not steer joins away from them"; return 1; }
+    grep -qi "will ever arrive" "$skill" || { echo "the skill does not say what goes wrong"; return 1; }
+    grep -qi "Nothing errors" "$skill" || { echo "the skill does not warn that the failure is silent"; return 1; }
+}
+
+@test "docs: the save prompt is described at the moment it actually fires" {
+    # THE DRIFT THIS PREVENTS (#31245, 2026-09-21). The save prompt was designed to fire on Stop,
+    # and the customer page, the skill and the hook manifest all said so in customer-facing words:
+    # "at the end of each turn", "before the session ends". It was then moved to UserPromptSubmit,
+    # which is the customer's NEXT message, with a suppression gate so it stays silent when a save
+    # has already happened. The three texts were left behind, promising a moment no hook occupies.
+    #
+    # Documentation that describes a hook the product no longer registers is a defect a reviewer
+    # cannot see by reading code, so it is pinned here.
+    local doc="$PLUGIN_ROOT/../docs/codex.md"
+    [[ -f "$doc" ]] || doc="$REPO_ROOT/docs/codex.md"
+    [[ -f "$doc" ]] || skip "customer page not found from this test root"
+
+    grep -q "the save prompt at the end of each turn" "$doc" \
+        && { echo "the page still promises an end-of-turn prompt; the hook is on UserPromptSubmit"; return 1; }
+    grep -qi "save prompt arrives with your next message" "$doc" \
+        || { echo "the page does not say when the save prompt actually arrives"; return 1; }
+    grep -qi "if you have just saved, it stays quiet" "$doc" \
+        || { echo "the page does not mention the suppression gate, so it overstates how often it fires"; return 1; }
+
+    grep -qi "prompts you to save before the session ends" "$PLUGIN_ROOT/hooks/codex-hooks.json" \
+        && { echo "the hook manifest still advertises a session-end prompt"; return 1; }
+
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    grep -q "save prompt arrives at the end of a turn" "$skill" \
+        && { echo "the skill still tells the assistant the prompt lands at end of turn"; return 1; }
+    grep -qi "NEXT message" "$skill" \
+        || { echo "the skill does not tell the assistant when the prompt actually lands"; return 1; }
+    return 0
+}

@@ -389,3 +389,20 @@ FOOTER
     [ "$n_runnable" -ne "$n_claude" ]
     [[ "$codex_out" != *"/mmry:"* ]]
 }
+
+@test "roster: the recipient is spelled the way each host actually runs it" {
+    # "--to <id>" is a Claude Code convention: the user types it and commands/formation.md turns it
+    # into a positional argument before the script sees it. The script only ever took it
+    # positionally. Codex has no commands, so this footer was handing the model a flag the script
+    # refuses outright, at the exact moment somebody is trying to reach a teammate. Reproduced
+    # while testing delivery: the first send failed with "A recipient is a roster entry id".
+    local hh="$PLUGIN_ROOT/hooks-handlers"
+    local claude codex
+    claude="$(env -u MMRY_HOST -u CODEX_SESSION_ID CLAUDE_SESSION_ID="bats-roster-$$" HOME="$HOME" \
+        bash "$hh/formation-roster.sh" 2>&1 | grep -i 'Direct a message' || true)"
+    codex="$(env MMRY_HOST=codex -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID="bats-roster-$$" HOME="$HOME" \
+        bash "$hh/formation-roster.sh" 2>&1 | grep -i 'Direct a message' || true)"
+    [[ -n "$claude" && -n "$codex" ]] || skip "no roster footer produced without a live formation"
+    [[ "$claude" == *"--to"* ]] || { echo "Claude Code lost its --to convention: $claude"; return 1; }
+    [[ "$codex" != *"--to"* ]] || { echo "Codex is still told to use a flag the script refuses: $codex"; return 1; }
+}

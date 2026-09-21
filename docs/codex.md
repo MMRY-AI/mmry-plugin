@@ -2,7 +2,7 @@
 
 MMRY gives Codex the same thing it gives Claude Code: your memories, loaded automatically at the
 start of every session, and saved back as you work. This page is the honest version of what that
-means on Codex — including the four things you do not get here, and what you get instead.
+means on Codex, including the four things you do not get here, and what you get instead.
 
 ---
 
@@ -29,7 +29,7 @@ The first time Codex starts after installing, it shows a hook review listing MMR
 asks whether to trust them. Choose **Trust all and continue**.
 
 This step is not optional and it is not cosmetic. If you choose "Continue without trusting", MMRY
-appears installed and does nothing at all — no memories load, nothing is saved. If you skipped it by
+appears installed and does nothing at all: no memories load, nothing is saved. If you skipped it by
 accident, remove and re-add the plugin to see the prompt again.
 
 If your organisation has set `allow_managed_hooks_only = true` in its Codex requirements policy,
@@ -66,7 +66,7 @@ hooks and handlers work this out for themselves and need no help from you.
 
 The steps are identical. MMRY ships a small `.cmd` wrapper for Windows because Codex runs hook
 commands through `cmd.exe` there, and picks Git Bash deliberately rather than taking whatever
-`bash` happens to be first on your PATH — on a machine with WSL installed, that is often WSL's
+`bash` happens to be first on your PATH. On a machine with WSL installed, that is often WSL's
 bash, which cannot see your Windows home directory. If you keep bash somewhere unusual, set
 `MMRY_BASH` to its full path.
 
@@ -104,13 +104,15 @@ MMRY on Claude Code; what you lose is the certainty of typing an exact command.
 ### 2. There is no prompt before your conversation is trimmed
 
 When a Claude Code conversation is about to be compacted, MMRY interrupts and asks the assistant to
-record the session's state first. **Codex has no equivalent moment that a plugin can reach** — the
+record the session's state first. **Codex has no equivalent moment that a plugin can reach**. The
 event exists, but it has no channel to the assistant, so nothing we send would arrive.
 
-**What you get instead:** the save prompt at the end of each turn carries an added warning that this
-is the last reliable point before context may be trimmed. It fires more often and earlier than the
-Claude Code compaction prompt, so in practice less is at risk — but it is a different moment, and if
-you have just done something you would hate to lose, say "remember this" rather than relying on it.
+**What you get instead:** the save prompt arrives with your next message, and only when there is
+unsaved work to record: if you have just saved, it stays quiet. It carries an added warning that
+this is the last reliable point before context may be trimmed. It fires more often and earlier than
+the Claude Code compaction prompt, so in practice less is at risk, but it is a different moment, and
+if you have just done something you would hate to lose, say "remember this" rather than relying on
+it.
 
 ### 3. A message will not wake an idle session
 
@@ -118,7 +120,7 @@ On Claude Code, a session sitting idle can be woken by a formation message arriv
 **Codex has no mechanism for this.** A hook that runs in the background there cannot deliver
 anything to the assistant, and one that waits would hold up the end of every turn.
 
-**What you get instead:** messages are delivered the next time anything happens — the next tool the
+**What you get instead:** messages are delivered the next time anything happens: the next tool the
 assistant runs, the next thing you type, or the next time you open a session. Nothing is lost; it
 arrives later. If you are coordinating something time-sensitive, the person waiting should expect
 delivery on activity rather than instantly.
@@ -189,5 +191,5 @@ separate credentials and separate directories on purpose.
 | A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It re-runs the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |
 | "Your Foundation directives were NOT applied to this turn" | Re-send the prompt. If it keeps happening, ask your assistant to reload your memories; the notice itself names the exact command for your install. |
 
-To report a problem, ask the assistant to submit feedback — it has a script for it — or write to us
+To report a problem, ask the assistant to submit feedback (it has a script for it) or write to us
 through [mmryai.com](https://mmryai.com).

@@ -1,5 +1,5 @@
 {
-  "description": "MMRY AI lifecycle hooks for OpenAI Codex. Loads your memories at session start, re-states your Foundation memories each turn, delivers formation messages as you work, and prompts you to save before the session ends.",
+  "description": "MMRY AI lifecycle hooks for OpenAI Codex. Loads your memories at session start, re-states your Foundation memories each turn, delivers formation messages as you work, and prompts you to save when there is unsaved work.",
   "hooks": {
     "SessionStart": [
       {
