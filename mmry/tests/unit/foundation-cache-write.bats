@@ -55,33 +55,44 @@ JSON
     [ "$output" = "0" ]
 }
 
-@test "write_foundation_cache: the FIRST line always carries a topic and a colon (#31583 req 1)" {
-    # CORRECTED after QA disproved the claim this test used to pin. It asserted that EVERY
-    # line carries a topic and a colon, which is false: a memory whose content contains a
-    # newline followed by "- x" produces exactly that as a subsequent line. The old test
-    # passed only because no fixture content contained a newline, so the fixture was doing
-    # the work the assertion was supposed to do.
+@test "write_foundation_cache: every non-empty file it produces contains a colon-space (#31583 req 1)" {
+    # CORRECTED TWICE. Round 2 disproved "every LINE carries a topic and a colon": content
+    # containing a newline followed by "- x" produces exactly that as a later line. The
+    # replacement asserted it of the FIRST line, and round 3 disproved that too, by the same
+    # mechanism one field across: a TOPIC containing a newline puts "- x" on line 1 with no
+    # colon on it at all.
     #
-    # The property that actually rules the writer out as the source of the four-byte stub is
-    # about the whole FILE. The observed artefact was a file of "- x" and nothing else, and
-    # the writer's first line is always "- " + topic + ": " + content.
+    # Both failures came from making a claim about LINES. The writer does not work in lines,
+    # it works in entries: the filter is "- \(.topic): \(.content)", so the literal colon-space
+    # sits between the two interpolations and appears in every entry it emits, wherever
+    # newlines happen to fall inside either field. So the property that holds is about the
+    # whole file, and it is the weakest one sufficient to settle requirement 1: any non-empty
+    # file the writer produces contains ": " somewhere. The observed artefact, a four-byte file
+    # of "- x" and a newline, contains none, so it cannot be writer output for any input.
     #
-    # The counter-example is in the fixture now, so this can never again pass for want of a
-    # newline.
+    # Both counter-examples are fixtures here, so neither round's mistake can recur silently.
     local resp
+
+    # Round 2's counter-example: the newline is in the CONTENT.
     resp='[{"memoryTier":"Foundation","topic":"Notes","content":"first line\n- x"}]'
     mmry_write_foundation_cache "$resp" "$CACHE"
+    [ "$(sed -n '2p' "$CACHE")" = "- x" ]          # it really is produced
+    grep -q ': ' "$CACHE"                          # and the file still carries a colon-space
 
-    # The counter-example really is produced: line two is the bare stub.
-    [ "$(sed -n '2p' "$CACHE")" = "- x" ]
+    # Round 3's counter-example: the newline is in the TOPIC, so line 1 has no colon.
+    resp='[{"memoryTier":"Foundation","topic":"x\nNotes","content":"hello"}]'
+    mmry_write_foundation_cache "$resp" "$CACHE"
+    [ "$(head -1 "$CACHE")" = "- x" ]              # the first-line claim really is false
+    grep -q ': ' "$CACHE"                          # the whole-file claim still holds
 
-    # And the property that holds: the first line carries a topic and a colon.
-    local first
-    first="$(head -1 "$CACHE")"
-    [[ "$first" == '- '*': '* ]]
+    # The artefact itself: not producible, on either count.
+    [ "$(wc -c < "$CACHE")" -ne 4 ]
 
-    # So a file consisting solely of the stub cannot be writer output.
-    [ "$(head -1 "$CACHE")" != "- x" ]
+    # And the case that produces no colon at all produces no bytes at all, so it is not the
+    # artefact either. This is the only way out of the claim and it is closed here.
+    resp='[]'
+    mmry_write_foundation_cache "$resp" "$CACHE"
+    [ "$(wc -c < "$CACHE")" -eq 0 ]
 }
 
 @test "write_foundation_cache: the manifest's byte count and checksum match the file it wrote" {

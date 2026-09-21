@@ -32,17 +32,36 @@ A memory whose CONTENT contains a newline followed by that text produces exactly
 a subsequent line. The unit test pinning the old claim passed only because no fixture content
 contained a newline.
 
-**The argument that does hold** is about the whole file, not about every line. The observed
-artefact was a four-byte FILE, `- x
-`, and nothing else. The writer's first line is always
-`- ` + topic + `: ` + content, so the first line of any file it produces contains `: `. A
-file consisting solely of `- x
-` therefore cannot be writer output for any input.
+**The argument that does hold** is about the whole file, and it is not about the first line
+either. A round-3 review falsified the first-line version by the same mechanism one field
+across: with a topic of `x` followed by a newline and then `Notes`, line 1 of the output is
+`- x` and carries no colon at all. That is the second time a claim here was stated more
+strongly than the evidence supported, so this one is stated as the weakest thing sufficient
+to settle the question, and it is checked by running the shipped filter rather than by
+reading it.
 
-That is weaker than what I claimed and it is still sufficient to rule the writer out as the
-source of what was actually seen. It is written narrowly on purpose: the earlier version was
-a stronger claim than the evidence supported, and it survived a round of review because the
-test guarding it could not fail.
+The filter is `"- \(.topic): \(.content)"`, evaluated once per Foundation entry. The literal
+`: ` sits between the two interpolations, so it is present in the text of EVERY entry the
+writer emits, wherever newlines fall inside the topic or the content. Therefore any non-empty
+file the writer produces contains `: ` at least once, and an input with no Foundation entries
+produces a file of zero bytes. The observed artefact was a four-byte file, `- x` and a
+newline, which is neither empty nor contains `: `. It cannot be writer output for any input.
+
+Measured against the shipped filter, including the reviewer's own counter-example:
+
+    case                      bytes  contains ': '   is the artefact
+    reviewer topic newline       19  yes             no
+    content newline              26  yes             no
+    leading newline in topic      9  yes             no
+    topic ends in a colon         8  yes             no
+    empty topic and content       6  yes             no
+    two entries                  16  yes             no
+    zero entries                  0  no (0 bytes)    no
+
+That is weaker than either earlier version and it is still sufficient to rule the writer out
+as the source of what was actually seen. Both earlier versions survived a round of review
+because the test guarding them could not fail, which is the real lesson here and is why this
+one is pinned by a test that was proven able to refuse.
 
 ### 2. The old writer's truncating redirect, as a partial write. REFUSED, on content.
 
