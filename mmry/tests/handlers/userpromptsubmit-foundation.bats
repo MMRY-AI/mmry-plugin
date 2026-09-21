@@ -883,3 +883,69 @@ manifest_now
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
+
+# #31583 UPGRADE RECOVERY. Found while verifying TC4, not reported by review.
+#
+# A cache written by a plugin older than this one has no manifest, because the manifest is
+# what this ticket introduced. Refusing it is correct and must stay correct: writing a
+# manifest for whatever is on disk would bless the four-byte stub the ticket exists to catch.
+# What was wrong is that nothing rebuilt it, so the customer was warned on EVERY prompt for
+# the rest of the session and it never cleared. Measured before the fix on a manifest-less
+# cache: refused three times out of three, 922 characters of notice each time, no manifest
+# ever appearing. The age-gated daily refresh cannot cover it, because an unmanifested cache
+# is typically brand new and its age is zero.
+#
+# The stub below replaces the refresh with one that succeeds, because the point of the test is
+# what the customer experiences on the NEXT prompt, not whether the network works.
+_plugin_with_working_refresh() {
+    RECOVER_ROOT="$TEST_TMPDIR/recover-plugin"
+    cp -R "$PLUGIN_ROOT" "$RECOVER_ROOT"
+    local client="$RECOVER_ROOT/hooks-handlers/mmry-client.sh"
+    awk '{ print } /^mmry_refresh_foundation_cache\(\) \{$/ {
+        print "    printf -- '"'"'- Rebuilt: the set came back.\n'"'"' > \"$2\""
+        print "    mmry_write_foundation_manifest_for \"$2\" 2>/dev/null || {"
+        print "        local _s _b; read -r _s _b < <(cksum < \"$2\")"
+        print "        printf '"'"'mmry-foundation v1 entries=1 bytes=%s cksum=%s\n'"'"' \"$_b\" \"$_s\" > \"$2.manifest\""
+        print "    }"
+        print "    return 0"
+    }' "$client" > "$client.tmp"
+    mv "$client.tmp" "$client"
+
+    # Anchored to POSITION, the round-2 lesson: assert the line immediately after the header
+    # is the injected one, so a pattern that stops matching cannot leave the real refresh in
+    # place while the test goes green against the healthy path.
+    local after
+    after="$(awk '/^mmry_refresh_foundation_cache\(\) \{$/ { getline; print; exit }' "$client")"
+    case "$after" in
+        *Rebuilt*) : ;;
+        *) echo "injection did not land: line after the header was [$after]"; return 1 ;;
+    esac
+}
+
+@test "userpromptsubmit-foundation: #31583 a cache from an OLDER plugin is refused once, then rebuilt, not warned about forever" {
+    _plugin_with_working_refresh
+
+    # Exactly what an upgrading customer has on disk: good content, no manifest.
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    [ ! -e "${CACHE}.manifest" ]
+
+    # Prompt 1: refused, correctly, because nothing here can be verified.
+    MMRY_API_KEY=dummy run bash "$RECOVER_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'could not verify'* ]]
+
+    # The recovery was ATTEMPTED, which is the whole fix. Before it, nothing happened at all.
+    [ -e "$TEST_TMPDIR/.mmry-foundation-rebuild" ]
+
+    # The background rebuild is detached, so give it a moment to land rather than racing it.
+    local _i=0
+    while [ $_i -lt 50 ] && [ ! -e "${CACHE}.manifest" ]; do _i=$(( _i + 1 )); sleep 0.1; done
+    [ -e "${CACHE}.manifest" ]
+
+    # Prompt 2: the customer is out of it. Delivered, and silent.
+    MMRY_API_KEY=dummy run bash "$RECOVER_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'Rebuilt'* ]]
+    [[ "$output" != *'could not verify'* ]]
+    [[ "$output" != *'systemMessage'* ]]
+}

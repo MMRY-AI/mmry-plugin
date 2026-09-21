@@ -460,6 +460,37 @@ if [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_
     fi
 fi
 
+# UPGRADE RECOVERY (#31583 QA r3, found while verifying TC4 rather than reported).
+#
+# A cache written by a plugin older than this one has NO manifest beside it, because the
+# manifest is what this ticket introduced. The verifier below is right to refuse it: an
+# unmanifested file cannot be shown to be the account's own directives, and writing a manifest
+# for whatever happens to be on disk would bless the four-byte stub this ticket exists to catch.
+#
+# But nothing rebuilt it, so the customer was warned on EVERY prompt for the rest of the
+# session and the warning never cleared. Measured on a manifest-less cache over three prompts:
+# refused each time, 922 characters of notice each time, no manifest ever appearing. That is
+# the warn-all-the-time failure test case 4 exists to forbid, arriving by upgrade instead of by
+# a bug, and it would have met every customer whose session did not happen to re-fetch. The
+# live cache on the machine this was found on is exactly this shape: 15 entries, 6,279
+# characters, no manifest.
+#
+# The age-gated refresh above cannot cover it. That gate asks how OLD the cache is, and an
+# unmanifested cache is usually brand new, so its age is zero and it never fires; its lock is
+# shared with the daily window besides. This gets its own short window, so recovery takes one
+# prompt rather than a day, without hammering the API when the rebuild keeps failing.
+#
+# The turn still refuses. Recovery lands on the NEXT prompt, which is the honest order: this
+# prompt genuinely has nothing it can verify.
+if [[ -e "$CACHE" && ! -e "${CACHE}.manifest" && -n "${MMRY_API_KEY:-}" ]]; then
+    _rebuild_lock="${MMRY_TMPDIR}/.mmry-foundation-rebuild"
+    _rb_now="$(date +%s 2>/dev/null || echo 0)"
+    if (( _rb_now - $(_mmry_mtime "$_rebuild_lock") >= 60 )); then
+        touch "$_rebuild_lock" 2>/dev/null || true
+        ( mmry_refresh_foundation_cache "$PWD" "$CACHE" >/dev/null 2>&1 & ) 2>/dev/null || true
+    fi
+fi
+
 # ============================================================================
 # VERIFY THE CACHE BEFORE BELIEVING IT (#31583).
 #
