@@ -581,11 +581,36 @@ _safe_sid_for_test() {
 # Windows Git Bash machine and of any host where setup installed the bundled binary instead. The
 # bundled jq under vendor/ is deliberately left reachable: the point is that MMRY has a working jq
 # and must find it, not that no jq exists anywhere.
+# A PATH WITH NO jq ON IT, THAT STILL HAS EVERYTHING ELSE (#31245, 2026-09-21).
+#
+# This used to simply DROP any directory containing jq. On Git Bash that is harmless, because jq
+# sits in a directory of its own. On Debian, macOS Homebrew and most CI images, jq lives in
+# /usr/bin alongside bash, env, sed and grep, so dropping it left a PATH with no shell on it and
+# the test died with "env: bash: No such file or directory" before reaching a single assertion.
+#
+# Found by running this suite on Debian 12 from a clean clone. It had been passing on Windows for
+# the whole of #31245 purely because of where Git for Windows happens to put jq.
+#
+# So instead of dropping the directory, mirror it: symlink every entry EXCEPT jq into a shim
+# directory and use that in its place. Everything the handler needs is still reachable; jq is the
+# only thing missing, which is what the test is actually about.
 _path_without_jq() {
-    local out="" p
+    local out="" p shim entry base
     local IFS=":"
     for p in $PATH; do
-        [[ -e "$p/jq" || -e "$p/jq.exe" ]] && continue
+        if [[ -e "$p/jq" || -e "$p/jq.exe" ]]; then
+            shim="${BATS_TEST_TMPDIR}/nojq-shim/$(printf '%s' "$p" | tr -c 'A-Za-z0-9' '_')"
+            if [[ ! -d "$shim" ]]; then
+                mkdir -p "$shim"
+                for entry in "$p"/*; do
+                    base="${entry##*/}"
+                    [[ "$base" == "jq" || "$base" == "jq.exe" ]] && continue
+                    ln -sf "$entry" "$shim/$base" 2>/dev/null || true
+                done
+            fi
+            out="${out:+$out:}$shim"
+            continue
+        fi
         out="${out:+$out:}$p"
     done
     printf '%s' "$out"

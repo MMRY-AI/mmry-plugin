@@ -148,6 +148,18 @@ _allowed_reason() {
         [[ -n "$hits" ]] || continue
         while IFS=$'\t' read -r lineno text; do
             [[ -n "$lineno" ]] || continue
+            # STRIP THE CARRIAGE RETURN BEFORE ANYTHING COMPARES THE LINE (#31245, 2026-09-21).
+            #
+            # .gitattributes pins *.bat to CRLF, deliberately, because that is what a Windows
+            # customer must receive. So every line read out of uninstall.bat ends in a CR, and an
+            # allowlist key written by hand does not. The key could therefore never match the
+            # file as SHIPPED, on any platform.
+            #
+            # It looked green on Windows only because this worktree still held a stale LF copy of
+            # uninstall.bat from before the attribute was added: git does not re-normalise files
+            # already in the working tree. A fresh clone on Debian 12 failed immediately, which is
+            # how this was found, and a fresh clone on Windows would have failed the same way.
+            text="${text%$'\r'}"
             trimmed="${text#"${text%%[![:space:]]*}"}"
             count=$((count + 1))
             _allowed_reason "$base" "$trimmed" >/dev/null || \
@@ -196,6 +208,7 @@ _allowed_reason() {
         [[ -n "$hits" ]] || continue
         while IFS=$'\t' read -r lineno text; do
             [[ -n "$lineno" ]] || continue
+            text="${text%$'\r'}"
             trimmed="${text#"${text%%[![:space:]]*}"}"
             present="${present}
 ${base}|${trimmed}"
