@@ -23,6 +23,18 @@ set +e
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
+
+# CAPTURED BEFORE THE CLIENT IS SOURCED (#31583 QA round 4, finding 4a).
+#
+# The shared off-switch honours a genuine environment override first, exactly as the hook
+# does. But mmry_load_config POPULATES that same variable from the config file, defaulting it
+# to true, so by the time this script could ask, an inherited value and a derived one are
+# indistinguishable and the derived default would win every time. That is what kept this
+# command reporting ON while the hook was silent, even after both were pointed at one routine:
+# the routine was right and the input to it was already contaminated.
+#
+# The real environment is only knowable here, before anything is sourced.
+_MMRY_ENV_REINJECT="${MMRY_FOUNDATION_REINJECT-}"
 # shellcheck disable=SC1091
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || {
     echo "MMRY AI: the plugin's client could not be loaded, so Foundation status cannot be read."
@@ -40,15 +52,25 @@ echo
 
 # 1. Is re-injection switched on at all? A customer who turned it off, or inherited an
 #    environment that turned it off, should be told that first - everything below is moot.
-_reinject="${MMRY_FOUNDATION_REINJECT:-true}"
-case "$(printf '%s' "$_reinject" | tr '[:upper:]' '[:lower:]')" in
-    false|off|0|no|disabled)
-        echo "Re-injection is TURNED OFF (foundationReinject=${_reinject})."
-        echo "Your Foundation directives are NOT being sent to your assistant on each prompt."
-        echo "Set foundationReinject to true in ~/.claude/mmry-config.json to turn it back on."
-        exit 0
-        ;;
-esac
+# THROUGH THE SAME ROUTINE THE HOOK OBEYS (#31583 QA round 4, finding 4a).
+#
+# This used to read MMRY_FOUNDATION_REINJECT, which mmry_load_config only populates when jq
+# parses the config file and otherwise leaves at its default of true. The hook decides with a
+# jq-free text scan instead, on purpose, because a broken jq is what it was hardened against.
+# So any config jq could not read split the two: this command printed "Re-injection: ON -
+# directives are re-sent on every prompt" while the hook sent nothing. One trailing comma was
+# enough, and this command's own advice tells the customer to hand-edit that file.
+#
+# The question a customer is asking here is what the HOOK will do, so the hook's routine is
+# the one that has to answer it.
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
+if MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here; then
+    echo "Re-injection is TURNED OFF (foundationReinject=${MMRY_REINJECT_MATCHED_VALUE:-false})."
+    echo "Your Foundation directives are NOT being sent to your assistant on each prompt."
+    echo "Set foundationReinject to true in ~/.claude/mmry-config.json to turn it back on."
+    exit 0
+fi
 echo "Re-injection: ON - directives are re-sent on every prompt."
 
 # 2. What does the stored copy claim to be, and is it actually that?
@@ -65,8 +87,21 @@ _verdict=$?
 
 if (( _verdict == 1 )); then
     if [[ "$_reason" == "absent" ]]; then
-        echo "Stored copy:  NOT LOADED YET in this session."
-        echo "Action:       run /mmry:load-memories, or start a new session."
+        # TWO STATES LOOK IDENTICAL HERE AND MEAN OPPOSITE THINGS (#31583 QA round 4, 4b).
+        #
+        # This branch used to return before it ever read the delivery record further down, so
+        # a set that had vanished after being delivered was described as one that had never
+        # loaded. That is not a wording quibble: the hook's own refusal ends by telling the
+        # customer to run this command to confirm, and reviewers followed that instruction and
+        # got the opposite story from the two surfaces in the same second.
+        if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
+            echo "Stored copy:  DISAPPEARED - it was delivered in this session and is now gone."
+            echo "              It is being REFUSED, not used."
+            echo "Action:       run /mmry:load-memories to rebuild it."
+        else
+            echo "Stored copy:  NOT LOADED YET in this session."
+            echo "Action:       run /mmry:load-memories, or start a new session."
+        fi
     else
         echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
         echo "              Nothing is being withheld; there is nothing to send."
@@ -103,12 +138,18 @@ echo "Delivered:    IN FULL. There is no size limit; nothing is trimmed or cut."
 # 3. Did the most recent prompt actually inject it? The hook records this on each verified
 #    injection, so this distinguishes "the copy is good" from "the copy is good AND it
 #    reached the assistant", which are not the same claim.
-if [[ -r "$STATUS" ]]; then
-    _st="$(<"$STATUS")" 2>/dev/null || _st=""
+# THIS SESSION'S record, not any record left in a shared temp directory (#31583 QA r4, 4c).
+if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
+    _st="$(mmry_foundation_delivery_detail "$MMRY_TMPDIR")"
     _when="$(_mmry_mtime "$STATUS" 2>/dev/null)"
     _now="$(date +%s 2>/dev/null || echo 0)"
     if [[ "$_when" =~ ^[0-9]+$ ]] && [[ "$_now" =~ ^[0-9]+$ ]] && (( _now >= _when )); then
-        echo "Last sent:    $(( _now - _when )) seconds ago (${_st})."
+        _ago=$(( _now - _when ))
+        if (( _ago == 1 )); then
+            echo "Last sent:    1 second ago (${_st})."
+        else
+            echo "Last sent:    ${_ago} seconds ago (${_st})."
+        fi
     else
         echo "Last sent:    ${_st}"
     fi

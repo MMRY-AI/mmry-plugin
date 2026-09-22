@@ -257,6 +257,52 @@ mmry_foundation_manifest_path() {
 # of a sentence would break the moment the sentence was reworded.
 #
 # Exit code 2 is not used, so a caller cannot confuse "refused" with a shell error.
+# WHOSE SESSION DOES THIS TEMP DIRECTORY BELONG TO (#31583 QA round 4, finding 4c).
+#
+# SessionStart writes the current session's id here and clears the delivery record beside it.
+# Both the per-prompt hook and /mmry:foundation-status need the same answer, so it is asked
+# once, here. Two copies of a Foundation question is exactly what round 2 found drifting in
+# the verifier, and round 4 found drifting again in the off-switch.
+#
+# Returns 0 and echoes the token when one is recorded, 1 and echoes nothing otherwise. An
+# absent token is not an error: it means nothing has claimed this directory, and every caller
+# must then fail SAFE, which for a warning means staying quiet.
+mmry_foundation_session_token() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
+    local f="${dir}/mmry-foundation.session"
+    local t=""
+    [[ -r "$f" ]] && { t="$(<"$f")" 2>/dev/null || t=""; }
+    printf '%s' "$t"
+    [[ -n "$t" ]]
+}
+
+# Did THIS session record a verified delivery? The record carries the id of the session that
+# wrote it, so a record left behind by an earlier session on the same machine answers no.
+#
+# That distinction is the whole of finding 4c. Without it, a brand new session whose fetch
+# failed was told its directives had disappeared, on every prompt, when it had never had any.
+#
+#   0  this session delivered at least once
+#   1  it did not, or the record belongs to someone else, or nothing is recorded
+mmry_foundation_delivered_this_session() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
+    local rec="${dir}/mmry-foundation.status"
+    [[ -r "$rec" ]] || return 1
+    local tok rec_line rec_tok
+    tok="$(mmry_foundation_session_token "$dir")" || return 1
+    rec_line="$(<"$rec")" 2>/dev/null || return 1
+    rec_tok="${rec_line%% *}"
+    [[ -n "$rec_tok" && "$rec_tok" == "$tok" ]]
+}
+
+# The delivery record with its session stamp removed, for printing to a customer.
+mmry_foundation_delivery_detail() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
+    local rec="${dir}/mmry-foundation.status" line=""
+    [[ -r "$rec" ]] && { line="$(<"$rec")" 2>/dev/null || line=""; }
+    printf '%s' "${line#* }"
+}
+
 mmry_verify_foundation_cache() {
     local cache="$1"
     local manifest="${cache}.manifest"

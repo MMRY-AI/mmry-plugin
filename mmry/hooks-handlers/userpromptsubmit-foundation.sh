@@ -100,88 +100,17 @@ _mmry_emit() {
     printf '}'
 }
 
-# Lowercase an ASCII string using nothing but parameter expansion (#31434 QA).
+# THE OFF-SWITCH LIVES IN ONE PLACE NOW (#31583 QA round 4, finding 4a).
 #
-# This replaces `printf '%s' "$x" | tr '[:upper:]' '[:lower:]'`, which cost a subshell AND a
-# `tr` process on EVERY firing of a hook that runs on every prompt. On Windows Git Bash a
-# process spawn measured ~300 ms, so that one idiom was ~10% of the handler's whole cost.
-# bash 3.2 (what macOS ships) has no `${x,,}`, so this does the mapping by hand: the index of
-# the character within the uppercase alphabet is the length of the prefix before it, and a
-# character that is absent leaves the alphabet unchanged at length 26.
-_mmry_tolower() {
-    local s="$1" out="" c pre
-    local up="ABCDEFGHIJKLMNOPQRSTUVWXYZ" lo="abcdefghijklmnopqrstuvwxyz"
-    local i=0
-    while (( i < ${#s} )); do
-        c="${s:i:1}"
-        pre="${up%%"$c"*}"
-        if (( ${#pre} < 26 )); then
-            out="${out}${lo:${#pre}:1}"
-        else
-            out="${out}${c}"
-        fi
-        i=$(( i + 1 ))
-    done
-    printf '%s' "$out"
-}
-
-# Is Foundation re-injection switched OFF by this value? Same vocabulary the worker has always
-# honoured, now in one place because the SUPERVISOR has to answer the question too (#31434 QA).
-_mmry_reinject_off() {
-    case "$(_mmry_tolower "$1")" in
-        false|off|0|no|disabled) return 0 ;;
-    esac
-    return 1
-}
-
-# Is Foundation re-injection switched off, answered WITHOUT spawning a single process?
-# Environment override first, then the config file the client would have used (#31434 QA).
-#
-# Discovery order is kept identical to mmry_load_config in mmry-client.sh. If the two ever
-# disagree, the customer's setting is honoured on one path and ignored on the other, which
-# is the whole bug this closes.
-#
-# HOW THE CONFIG IS READ, and what that is and is not worth. This is a TEXT SCAN, not a JSON
-# parse: `$(<file)` costs a subshell and no exec, where jq would cost a process on every
-# prompt and would fail in exactly the circumstances this check matters most. The scan is
-# therefore deliberately CONSERVATIVE - it acts only on a confident match of the key in key
-# position followed by a bare or quoted scalar, and anything it cannot read that way is
-# treated as "not switched off".
-#
-# That asymmetry is the safe one in both directions. A false "off" would silently disable a
-# feature the customer wants, so the scan refuses to guess; a false "on" costs at worst a
-# notice the customer did not want, and the WORKER still holds the authoritative jq-parsed
-# answer, so a healthy firing that this scan could not read is decided correctly downstream.
-# The only thing that changes here is whether the SUPERVISOR can answer when the worker cannot.
-_mmry_reinject_is_off_here() {
-    local v="" cfg="" txt=""
-
-    # 1. Environment override. Free, and it wins, matching mmry-client.sh precedence.
-    if [[ -n "${MMRY_FOUNDATION_REINJECT:-}" ]]; then
-        _mmry_reinject_off "${MMRY_FOUNDATION_REINJECT}"
-        return $?
-    fi
-
-    # 2. The config file, same discovery order as mmry_load_config.
-    if [[ -n "${MMRY_CONFIG_FILE:-}" && -f "${MMRY_CONFIG_FILE}" ]]; then
-        cfg="$MMRY_CONFIG_FILE"
-    elif [[ -n "${PLUGIN_ROOT:-}" && -f "${PLUGIN_ROOT}/mmry-config.json" ]]; then
-        cfg="${PLUGIN_ROOT}/mmry-config.json"
-    elif [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
-        cfg="${HOME}/.claude/mmry-config.json"
-    fi
-    [[ -n "$cfg" && -r "$cfg" ]] || return 1
-
-    txt="$(<"$cfg")" 2>/dev/null || return 1
-    [[ -n "$txt" ]] || return 1
-
-    # Key in key position, then a JSON scalar: `false`, `"false"`, `0`, `"off"`. A value that
-    # is not a bare word (an object, an array, a spaced-out string) simply does not match, and
-    # an unmatched scan returns "not off".
-    [[ "$txt" =~ \"foundationReinject\"[[:space:]]*:[[:space:]]*\"?([A-Za-z0-9]+)\"? ]] || return 1
-    v="${BASH_REMATCH[1]}"
-    _mmry_reinject_off "$v"
-}
+# These three functions used to be defined here and the status command derived the same
+# answer a different way, from mmry_load_config, which only sees the value when jq parses the
+# config. A config jq cannot read therefore split them, and the command told the customer
+# re-injection was ON while this hook was sending nothing. Sourced rather than moved into
+# mmry-client.sh because the SUPERVISOR has to answer before it spawns anything, and sourcing
+# the whole client on every prompt is the cost #31434 removed. This file defines functions
+# only and spawns no process.
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
 
 # ============================================================================
 # SUPERVISOR — bounds the wall clock and owns everything the customer sees.
@@ -535,13 +464,22 @@ if (( _verdict == 1 )); then
     # to be reported exactly like damage, because the customer cannot tell those apart
     # and should not have to.
     #
-    # The status record is what separates them. It is written on every verified delivery
-    # and on a verified-empty set, so its presence means "this session has had a good
-    # answer at least once". QA round 3 measured the gap: a valid cache delivered 294
-    # characters, both files were then deleted, and the next firing emitted nothing at
-    # all - no notice to the customer and no note to the assistant.
+    # The delivery record is what separates them, and it must be THIS SESSION'S record.
+    #
+    # Round 3 closed the first half: a set that vanished after delivery emitted nothing at
+    # all, no notice to the customer and no note to the assistant. Round 4 found the second
+    # half, which the first half created. The record sat at a fixed name in a shared temp
+    # directory and nothing cleared it, so its mere presence meant "some session on this
+    # machine once delivered". A brand new session whose fetch failed, on a machine an earlier
+    # session had used, was told on every prompt that its directives had disappeared when it
+    # had never had any. Reviewers reproduced it at 932 characters a prompt, indefinitely.
+    #
+    # The record now carries the id of the session that wrote it and SessionStart clears it,
+    # so this asks the question it always meant to ask. The check lives in mmry-client.sh
+    # because the status command has to reach the same answer, and a second copy of a
+    # Foundation question is what has drifted twice on this branch already.
     if [[ "$_reason" == "absent" ]]; then
-        if [[ -e "$STATUS" ]]; then
+        if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
             printf '%s' 'the local copy of your Foundation directives has disappeared since it was last delivered in this session'
             exit 3
         fi
@@ -549,8 +487,8 @@ if (( _verdict == 1 )); then
     fi
     # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
     # so it goes on the record the status command reads.
-    printf 'ok entries=0 bytes=0
-' > "$STATUS" 2>/dev/null || true
+    printf '%s ok entries=0 bytes=0
+' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "$STATUS" 2>/dev/null || true
     exit 0
 fi
 
@@ -586,8 +524,10 @@ content="$(<"$CACHE")"
 # the set" in tests/handlers/userpromptsubmit-foundation.bats.
 # ============================================================================
 
-printf 'ok entries=%s bytes=%s
-' "$_exp_entries" "$_act_bytes" > "$STATUS" 2>/dev/null || true
+# STAMPED WITH THE SESSION THAT WROTE IT (#31583 QA round 4, finding 4c). Without the stamp
+# this record outlives its session and the next one reads it as its own.
+printf '%s ok entries=%s bytes=%s
+' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" "$_exp_entries" "$_act_bytes" > "$STATUS" 2>/dev/null || true
 
 printf '%s' "The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
 

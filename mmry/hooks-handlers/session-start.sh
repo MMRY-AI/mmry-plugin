@@ -64,6 +64,34 @@ fi
 SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 
+# SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
+#
+# The per-prompt hook records each verified delivery so it can tell two states apart that
+# look identical on disk: a session that has never had its directives built, which has lost
+# nothing and must stay silent, and a session that HAD them and finds them gone, which must
+# say so. The record lived at a fixed name in the shared temp directory and nothing ever
+# cleared it, so its presence meant "some session on this machine once delivered", not "this
+# session did". A brand new session whose fetch failed - offline, API down, expired key - on a
+# machine an earlier session had used was therefore told, on every prompt, that its directives
+# had disappeared, when nothing had been delivered and so nothing had disappeared. Reviewers
+# reproduced it at 932 characters a prompt, indefinitely.
+#
+# The record now carries the id of the session that wrote it, and this is the only place that
+# id is known: it comes off the hook payload above. The per-prompt hook cannot read stdin
+# cheaply enough to ask on every prompt, so it reads this file instead, which costs one
+# redirect and no process.
+#
+# UNCONDITIONAL AND EARLY, before any fetch, because the failure being closed is precisely a
+# session whose fetch did not happen. A clear that only ran on success would leave the exact
+# case it exists for untouched.
+#
+# WHAT THIS DOES NOT FIX, stated rather than implied: the token is one file in a shared temp
+# directory, so two concurrent sessions overwrite each other's and the older one stops
+# recognising its own record. That turns a true disappearance into silence. It is the safer
+# direction of the two and it is the same per-TMPDIR limitation the cache itself carries.
+printf '%s' "$SESSION_ID" > "${MMRY_TMPDIR}/mmry-foundation.session" 2>/dev/null || true
+rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
+
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
 # Working directory is now persisted server-side via the /api/sessions POST

@@ -8,6 +8,12 @@ load '../helpers/test-helper'
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # Every real session has one of these: SessionStart writes the session id here and clears
+    # the delivery record beside it (#31583 QA round 4, finding 4c). Without it the handler
+    # cannot tell its own delivery record from one an earlier session left in a shared temp
+    # directory, and correctly fails safe by staying quiet. A fixture with no token is
+    # therefore testing the no-SessionStart path, not the ordinary one.
+    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
 }
 
 # Write the manifest that describes whatever is currently in the cache (#31583).
