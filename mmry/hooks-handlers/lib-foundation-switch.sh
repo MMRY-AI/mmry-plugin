@@ -21,6 +21,18 @@
 # prompt is the cost #31434 exists to have removed. This file defines functions only, spawns
 # no process, and runs on the bash 3.2 that macOS ships.
 
+# Matches the repository convention every other handler and library follows, and
+# file-integrity.bats enforces it. But this file is sourced BY the one handler that must never
+# kill a prompt: userpromptsubmit-foundation.sh deliberately runs without errexit, because a
+# failure anywhere in Foundation re-injection has to cost the customer nothing. Imposing -e on
+# it from here would quietly undo that guarantee, so errexit is put back the way the caller had
+# it. The -u and pipefail options are already set by both call sites, so they are unchanged.
+_mmry_fsw_had_errexit=0
+case "$-" in *e*) _mmry_fsw_had_errexit=1 ;; esac
+set -euo pipefail
+(( _mmry_fsw_had_errexit )) || set +e
+unset _mmry_fsw_had_errexit
+
 # Lowercase an ASCII string using nothing but parameter expansion (#31434 QA).
 #
 # This replaces `printf '%s' "$x" | tr '[:upper:]' '[:lower:]'`, which cost a subshell AND a

@@ -42,6 +42,25 @@ _status_says_on() {
     bash "$STATUSCMD" 2>/dev/null | grep -qi 'Re-injection: ON'
 }
 
+# A negated command is EXEMPT from errexit in bats unless it is the final statement, so
+# `! _hook_injects` part-way through a test cannot fail it. This repository has found sixteen
+# assertions of that shape and I added three more in this file before catching it the same way
+# the others were caught: by breaking the thing and watching the suite stay green. These two
+# wrappers return non-zero properly and say what they saw.
+_refute_hook_injects() {
+    if _hook_injects; then
+        echo "the hook injected when it should have been switched off"
+        return 1
+    fi
+}
+
+_refute_status_says_on() {
+    if _status_says_on; then
+        echo "the command reported re-injection ON when it should have been off"
+        return 1
+    fi
+}
+
 _assert_agree() {
     local what="$1" hookv statusv
     if _hook_injects; then hookv=ON; else hookv=OFF; fi
@@ -60,8 +79,8 @@ _assert_agree() {
 @test "cross-surface: CONTROL a well-formed false switches BOTH off" {
     _seed_valid_cache
     printf '{"foundationReinject": false}\n' > "$CFG"
-    ! _hook_injects
-    ! _status_says_on
+    _refute_hook_injects
+    _refute_status_says_on
     _assert_agree "a well-formed false"
 }
 
@@ -77,7 +96,7 @@ _assert_agree() {
     _seed_valid_cache
     # One trailing comma. The product tells the customer to hand-edit this file.
     printf '{"foundationReinject": false,}\n' > "$CFG"
-    ! _hook_injects
+    _refute_hook_injects
     _assert_agree "a malformed config holding false"
 }
 
@@ -94,7 +113,7 @@ _assert_agree() {
     # A broken jq is the exact circumstance the hook scan was hardened against, so the
     # command must not be the one surface that still needs jq to answer.
     export MMRY_JQ="$TEST_TMPDIR/no-such-jq"
-    ! _hook_injects
+    _refute_hook_injects
     _assert_agree "an unresolvable jq"
 }
 

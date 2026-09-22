@@ -429,19 +429,44 @@ SHIMEOF
     # So the definition line is excluded explicitly, and every line number is identified rather
     # than assumed: a definition that stopped matching, or a call that disappeared, fails here
     # instead of quietly leaving an empty string to be compared.
-    local def_line off_line worker_line
-    def_line="$(printf '%s
-' "$body" | grep -n '_mmry_reinject_is_off_here()' | head -1 | cut -d: -f1)"
+    # THE DEFINITION MOVED, THE PROPERTY DID NOT (#31583 QA round 4). The off-switch used to
+    # be defined in this file and is now in lib-foundation-switch.sh, because the status
+    # command has to reach the same answer and two derivations of it disagreed in front of a
+    # customer. So the definition is asserted where it now lives, and this file is required to
+    # SOURCE it before calling it, which is a third way this check can go red.
+    #
+    # The original lesson stands and is why every line number is still identified rather than
+    # assumed: this once took the first line mentioning the function, which was its own
+    # definition near the top, so the ordering held wherever the call was. A reviewer proved it
+    # inert by moving the call after the worker spawn and the test still passed.
+    local def_line src_line off_line worker_line
+    def_line="$(grep -n '_mmry_reinject_is_off_here()' "$PLUGIN_ROOT/hooks-handlers/lib-foundation-switch.sh" | head -1 | cut -d: -f1)"
+    src_line="$(printf '%s
+' "$body" | grep -n 'source .*lib-foundation-switch.sh' | head -1 | cut -d: -f1)"
     off_line="$(printf '%s
-' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()'                 | head -1 | cut -d: -f1)"
+' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()' | head -1 | cut -d: -f1)"
     worker_line="$(printf '%s
 ' "$body" | grep -n 'MMRY_FOUNDATION_WORKER=1 bash' | head -1 | cut -d: -f1)"
     [[ "$def_line" =~ ^[0-9]+$ ]]
+    [[ "$src_line" =~ ^[0-9]+$ ]]
     [[ "$off_line" =~ ^[0-9]+$ ]]
     [[ "$worker_line" =~ ^[0-9]+$ ]]
-    # The line this check is about must be a CALL, not the definition it used to find.
-    (( off_line != def_line ))
+    # The supervisor must not carry its own copy of the definition any more; one answer only.
+    #
+    # Written as an if rather than `! cmd ...`, because a negated command is EXEMPT from
+    # errexit in bats unless it is the final statement, so the short form here could never
+    # fail. I wrote the short form first and proved it inert by reintroducing a definition and
+    # watching the suite stay green. That is the same shape this repository has found sixteen
+    # times, added by the person auditing for it.
+    if printf '%s
+' "$body" | grep -q '_mmry_reinject_is_off_here()'; then
+        echo "the supervisor has its own copy of the off-switch definition again"
+        return 1
+    fi
+    # The line this check is about must be a CALL.
     printf '%s
 ' "$body" | sed -n "${off_line}p" | grep -q 'if _mmry_reinject_is_off_here'
+    # Sourced before it is called, and both before anything is spawned.
+    (( src_line < off_line ))
     (( off_line < worker_line ))
 }
