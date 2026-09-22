@@ -111,3 +111,31 @@ true regardless of which of possibilities 3 and 4 actually occurred.
 
 The finding that matters for the product is therefore not "process P did it" but that the
 product had no way to tell its own output from anything else's, and now does.
+
+## What is deliberately NOT closed here, and where it lives
+
+**The torn read is #31597, and it is scheduled in this release rather than deferred.**
+
+The cache and the manifest are two files. Each is replaced safely on its own, so neither is
+ever half-written, but there is no way to replace BOTH as one act. A reader arriving between
+the two renames sees a new manifest against an old cache, refuses a set that is in fact
+healthy, and the turn runs with no directives. QA measured it at 225 of 2,808 reads, about 8
+percent, on a live refresh loop.
+
+It was attempted inside this ticket and reverted, which produced two results worth keeping,
+because the obvious fix is not sufficient on its own:
+
+- Storing everything in ONE self-describing file removes the disagreement, but measured
+  WORSE than the two-file arrangement on its own: 46 of 177 reads refused, 26 percent,
+  because the reader opened that single file three times during one check.
+- Reading the whole file once into memory and answering every question from that one copy
+  took it to 0 refusals in 290 reads. Both halves are required.
+
+The change also alters what several verifier states MEAN, so about a dozen checks need
+rewriting rather than re-fixturing; thirty were measured red against the attempted version.
+That is why it is its own task rather than a fix inside this one.
+
+**Related, and not closed here either:** a torn or otherwise bad manifest has no recovery
+path, so it warns on every prompt by the same shape the no-manifest case did until it was
+given one. Raised by QA round 4 and recorded here so the next person reading this file finds
+it beside the defect rather than only in a ticket.

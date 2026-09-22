@@ -909,7 +909,9 @@ _plugin_with_working_refresh() {
     local client="$RECOVER_ROOT/hooks-handlers/mmry-client.sh"
     awk '{ print } /^mmry_refresh_foundation_cache\(\) \{$/ {
         print "    printf -- '"'"'- Rebuilt: the set came back.\n'"'"' > \"$2\""
-        print "    mmry_write_foundation_manifest_for \"$2\" 2>/dev/null || {"
+        # NO manifest helper call here (#31583 QA round 4). The first version of this stub
+        # called mmry_write_foundation_manifest_for, which does not exist: it returned 127
+        # and the fallback below always ran, so the call was decoration that read like logic.
         print "        local _s _b; read -r _s _b < <(cksum < \"$2\")"
         print "        printf '"'"'mmry-foundation v1 entries=1 bytes=%s cksum=%s\n'"'"' \"$_b\" \"$_s\" > \"$2.manifest\""
         print "    }"
@@ -954,4 +956,36 @@ _plugin_with_working_refresh() {
     [[ "$output" == *'Rebuilt'* ]]
     [[ "$output" != *'could not verify'* ]]
     [[ "$output" != *'systemMessage'* ]]
+}
+
+# #31583 QA round 4. One sentence used to cover every refusal, telling the customer the local
+# copy "did not match the record MMRY wrote". For the states where there IS no record, no
+# comparison happened and the sentence contradicted its own first clause. Six of eight
+# reviewers raised it, and no-manifest is the state EVERY upgrading customer meets.
+@test "userpromptsubmit-foundation: #31583 an upgraded customer is told it is an upgrade, not damage" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    rm -f "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'upgrading the MMRY plugin'* ]]
+    [[ "$output" == *'next prompt will use it'* ]]
+    [[ "$output" == *'No action needed'* ]]
+    # And it must NOT claim a comparison that never happened, nor prescribe a rebuild the
+    # customer does not need to run.
+    [[ "$output" != *'did not match the record'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31583 a genuinely damaged copy still says so and still prescribes the rebuild" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    # Same length, different bytes: the classic substitution, where a comparison really did
+    # happen and really did fail.
+    printf -- '- Identity: someone elses text!\n' > "$CACHE"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'did not match the record'* ]]
+    [[ "$output" == *'load-memories'* ]]
+    [[ "$output" != *'upgrading the MMRY plugin'* ]]
 }

@@ -291,9 +291,35 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # The worker puts the specific reason on stdout; it is repeated verbatim to both
     # audiences so the assistant and the customer are told the same thing.
     if (( WORKER_RC == 3 )); then
-        REASON="${BODY:-the cached directives could not be verified}"
+        # THE REMEDY HAS TO MATCH THE CAUSE (#31583 QA round 4).
+        #
+        # One sentence used to cover every refusal: "the local copy did not match the record
+        # MMRY wrote when it fetched them". For a damaged or substituted file that is exactly
+        # right. For the three states where there IS no record, no comparison happened at all
+        # and the sentence contradicted its own first clause. Six of eight reviewers raised it
+        # independently, and the no-manifest case is the one EVERY upgrading customer meets.
+        REASON="${BODY#*|}"
+        _STATE="${BODY%%|*}"
+        [[ "$BODY" == *"|"* ]] || { REASON="${BODY:-the cached directives could not be verified}"; _STATE=""; }
+        case "$_STATE" in
+            no-manifest)
+                # Not damage. The manifest is what this release introduced, so every cache
+                # written by an earlier version looks like this once, and the rebuild started
+                # above clears it on the next prompt without the customer doing anything.
+                _WHY="This is the expected one-off effect of upgrading the MMRY plugin: directives stored by the previous version carry no record to check them against, so they cannot be trusted this turn. A fresh copy is already being fetched and the next prompt will use it."
+                _DO="No action needed. If you still see this after a few prompts, run /mmry:load-memories."
+                ;;
+            gone|missing)
+                _WHY="Nothing was truncated and nothing was guessed at; the stored copy is no longer there to check, so nothing was sent rather than something unverified."
+                _DO="Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+                ;;
+            *)
+                _WHY="Nothing was truncated and nothing was guessed at; the local copy did not match the record MMRY wrote when it fetched them, so it was refused rather than used."
+                _DO="Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+                ;;
+        esac
         NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. Nothing was truncated and nothing was guessed at; the local copy did not match the record MMRY wrote when it fetched them, so it was refused rather than used. Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_DO}"
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
@@ -411,10 +437,14 @@ fi
 #
 # The turn still refuses. Recovery lands on the NEXT prompt, which is the honest order: this
 # prompt genuinely has nothing it can verify.
+# Named, like every other window on this path (#31583 QA round 4). Short enough that an
+# upgrading customer recovers within a prompt or two, long enough that a rebuild which keeps
+# failing - offline, dead key - does not make one API call per prompt.
+REBUILD_RETRY_SECS="${MMRY_FOUNDATION_REBUILD_RETRY_SECONDS:-60}"
 if [[ -e "$CACHE" && ! -e "${CACHE}.manifest" && -n "${MMRY_API_KEY:-}" ]]; then
     _rebuild_lock="${MMRY_TMPDIR}/.mmry-foundation-rebuild"
     _rb_now="$(date +%s 2>/dev/null || echo 0)"
-    if (( _rb_now - $(_mmry_mtime "$_rebuild_lock") >= 60 )); then
+    if (( _rb_now - $(_mmry_mtime "$_rebuild_lock") >= REBUILD_RETRY_SECS )); then
         touch "$_rebuild_lock" 2>/dev/null || true
         ( mmry_refresh_foundation_cache "$PWD" "$CACHE" >/dev/null 2>&1 & ) 2>/dev/null || true
     fi
@@ -480,7 +510,7 @@ if (( _verdict == 1 )); then
     # Foundation question is what has drifted twice on this branch already.
     if [[ "$_reason" == "absent" ]]; then
         if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
-            printf '%s' 'the local copy of your Foundation directives has disappeared since it was last delivered in this session'
+            printf '%s' 'gone|the local copy of your Foundation directives has disappeared since it was last delivered in this session'
             exit 3
         fi
         exit 0
@@ -494,7 +524,11 @@ fi
 
 if (( _verdict != 0 )); then
     # The state token is for the status command's label; this channel is prose only.
-    printf '%s' "${_reason#*|}"
+    # THE STATE TRAVELS WITH THE PROSE (#31583 QA round 4). The supervisor has to pick the
+    # remedy, and the remedy differs: a cache carried over from an older plugin clears itself
+    # on the next prompt, while a damaged one needs rebuilding. It used to strip the state and
+    # then describe every refusal as a failed comparison.
+    printf '%s' "$_reason"
     exit 3
 fi
 

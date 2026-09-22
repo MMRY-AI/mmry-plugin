@@ -184,9 +184,18 @@ manifest_now() {
     printf -- '- Identity: Eric builds MMRY, and rather more besides.\n' > "$CACHE"
     run bash "$STATUS_CMD"
     [[ "$output" == *'DAMAGED'* ]]
-    # The two numbers must differ. The old wording printed that 28 bytes did not match 28
-    # bytes, because the size and checksum cases shared one branch.
-    [[ "$output" == *"$(wc -c < "$CACHE" | tr -d ' ')"* ]]
+    # BOTH numbers, which is what this test is named for (#31583 QA round 4). It asserted
+    # only the actual size, so the regression it exists to catch - printing that 28 bytes
+    # does not match 28 bytes, because the size and checksum cases once shared one branch -
+    # would have passed it. The manifest's recorded size has to appear too, and the two have
+    # to differ, or the sentence is the nonsense it was written to prevent.
+    local _actual _recorded
+    _actual="$(wc -c < "$CACHE" | tr -d ' ')"
+    _recorded="$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^bytes=/) { sub(/^bytes=/, "", $i); print $i } }' "${CACHE}.manifest")"
+    [ -n "$_recorded" ]
+    [ "$_actual" != "$_recorded" ]
+    [[ "$output" == *"$_actual"* ]]
+    [[ "$output" == *"$_recorded"* ]]
 }
 
 @test "foundation-status: state contents maps to DAMAGED, with the length-matched wording" {
