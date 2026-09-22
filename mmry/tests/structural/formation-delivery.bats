@@ -581,11 +581,36 @@ _safe_sid_for_test() {
 # Windows Git Bash machine and of any host where setup installed the bundled binary instead. The
 # bundled jq under vendor/ is deliberately left reachable: the point is that MMRY has a working jq
 # and must find it, not that no jq exists anywhere.
+# A PATH WITH NO jq ON IT, THAT STILL HAS EVERYTHING ELSE (#31245, 2026-09-21).
+#
+# This used to simply DROP any directory containing jq. On Git Bash that is harmless, because jq
+# sits in a directory of its own. On Debian, macOS Homebrew and most CI images, jq lives in
+# /usr/bin alongside bash, env, sed and grep, so dropping it left a PATH with no shell on it and
+# the test died with "env: bash: No such file or directory" before reaching a single assertion.
+#
+# Found by running this suite on Debian 12 from a clean clone. It had been passing on Windows for
+# the whole of #31245 purely because of where Git for Windows happens to put jq.
+#
+# So instead of dropping the directory, mirror it: symlink every entry EXCEPT jq into a shim
+# directory and use that in its place. Everything the handler needs is still reachable; jq is the
+# only thing missing, which is what the test is actually about.
 _path_without_jq() {
-    local out="" p
+    local out="" p shim entry base
     local IFS=":"
     for p in $PATH; do
-        [[ -e "$p/jq" || -e "$p/jq.exe" ]] && continue
+        if [[ -e "$p/jq" || -e "$p/jq.exe" ]]; then
+            shim="${BATS_TEST_TMPDIR}/nojq-shim/$(printf '%s' "$p" | tr -c 'A-Za-z0-9' '_')"
+            if [[ ! -d "$shim" ]]; then
+                mkdir -p "$shim"
+                for entry in "$p"/*; do
+                    base="${entry##*/}"
+                    [[ "$base" == "jq" || "$base" == "jq.exe" ]] && continue
+                    ln -sf "$entry" "$shim/$base" 2>/dev/null || true
+                done
+            fi
+            out="${out:+$out:}$shim"
+            continue
+        fi
         out="${out:+$out:}$p"
     done
     printf '%s' "$out"
@@ -1095,4 +1120,72 @@ BSDSTAT
     [ "$status" -eq 0 ]
     run grep -c "2\.1\.64" "${HANDLERS}/formation-check.sh"
     [ "$output" -ge 1 ]
+}
+
+@test "identity: a Codex session that inherits a Claude id does not adopt it" {
+    # THE CONFIDENTIALITY CASE (#31245 QA round 7). formation-check.sh resolved the session id
+    # through CLAUDE_SESSION_ID then CLAUDE_CODE_SESSION_ID and never consulted CODEX_SESSION_ID,
+    # and formation-state.sh had its own divergent chain that preferred the Claude variables too.
+    #
+    # Launch Codex from a shell that already exports a Claude session id, which is exactly what
+    # happens when one assistant starts another, and the Codex session polls as the LAUNCHING
+    # session: it can consume directed messages addressed to somebody else. QA confirmed delivery
+    # itself was fine on a real machine, because Codex puts the id in the hook payload, so this is
+    # the case that survives once the payload is absent or unreadable.
+    #
+    # The state file is the visible consequence: its name is the identity this session believes it
+    # has.
+    local state_dir="${TMPDIR:-/tmp}"
+    local codex_sid="qa7-codex-own-$$"
+    local claude_sid="qa7-inherited-claude-$$"
+
+    rm -f "${state_dir}/.mmry-formation-${codex_sid}" "${state_dir}/.mmry-formation-${claude_sid}"
+
+    run env MMRY_HOST=codex \
+        CODEX_SESSION_ID="$codex_sid" \
+        CLAUDE_SESSION_ID="$claude_sid" \
+        CLAUDE_CODE_SESSION_ID="$claude_sid" \
+        TMPDIR="$state_dir" \
+        bash "${HANDLERS}/formation-state.sh" set 4242
+    [ "$status" -eq 0 ]
+
+    [[ -f "${state_dir}/.mmry-formation-${codex_sid}" ]] || {
+        echo "the Codex session did not record state under its own id"
+        return 1
+    }
+    [[ ! -f "${state_dir}/.mmry-formation-${claude_sid}" ]] || {
+        echo "the Codex session wrote state under the INHERITED Claude id, which is another"
+        echo "session's identity: it would poll as them and can consume their directed messages"
+        return 1
+    }
+    rm -f "${state_dir}/.mmry-formation-${codex_sid}"
+}
+
+@test "identity: and on Claude Code a stray Codex id does not displace the real one" {
+    # The mirror image, so the fix cannot be "always prefer Codex".
+    local state_dir="${TMPDIR:-/tmp}"
+    local claude_sid="qa7-claude-own-$$"
+    local codex_sid="qa7-stray-codex-$$"
+
+    rm -f "${state_dir}/.mmry-formation-${claude_sid}" "${state_dir}/.mmry-formation-${codex_sid}"
+
+    # setup() exports CLAUDE_SESSION_ID for every test in this file, and on Claude Code
+    # that is the FIRST variable in the precedence chain, so it has to go or it answers
+    # instead of the one this test is about.
+    run env -u MMRY_HOST -u CLAUDE_SESSION_ID \
+        CLAUDE_CODE_SESSION_ID="$claude_sid" \
+        CODEX_SESSION_ID="$codex_sid" \
+        TMPDIR="$state_dir" \
+        bash "${HANDLERS}/formation-state.sh" set 4242
+    [ "$status" -eq 0 ]
+
+    [[ -f "${state_dir}/.mmry-formation-${claude_sid}" ]] || {
+        echo "the Claude Code session did not record state under its own id"
+        return 1
+    }
+    [[ ! -f "${state_dir}/.mmry-formation-${codex_sid}" ]] || {
+        echo "a stray CODEX_SESSION_ID displaced the Claude Code identity"
+        return 1
+    }
+    rm -f "${state_dir}/.mmry-formation-${claude_sid}"
 }

@@ -1,0 +1,67 @@
+{
+  "description": "MMRY AI lifecycle hooks for OpenAI Codex. Loads your memories at session start, re-states your Foundation memories each turn, delivers formation messages as you work, and prompts you to save when there is unsaved work.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" session-init",
+            "statusMessage": "MMRY AI: loading your memories",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "statusMessage": "MMRY AI: checking for formation messages",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

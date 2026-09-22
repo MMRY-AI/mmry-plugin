@@ -38,7 +38,7 @@ second="${2:-}"
 third="${3:-}"
 
 if [[ -z "$first" ]]; then
-    echo "Say how it is going. Usage: /mmry:formation progress <Accepted|Done|Blocked|Abandoned> \"optional note\". Add a member id first to report for somebody else, which only the lead may do."
+    echo "Say how it is going. Usage: $(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned> "optional note"'). Add a member id first to report for somebody else, which only the lead may do."
     exit 1
 fi
 
@@ -52,19 +52,19 @@ if [[ "$first" =~ ^[1-9][0-9]*$ ]]; then
     progress="$second"
     note="$third"
     if [[ -z "$progress" ]]; then
-        echo "Member ${member_id} needs a state. Usage: /mmry:formation progress ${member_id} <Accepted|Done|Blocked|Abandoned> \"optional note\"."
+        echo "Member ${member_id} needs a state. Usage: $(mmry_host_formation_ref progress "${member_id}" '<Accepted|Done|Blocked|Abandoned> "optional note"')."
         exit 1
     fi
 else
     progress="$first"
     note="$second"
     if [[ -n "$third" ]]; then
-        echo "Too many arguments. Reporting for another member goes /mmry:formation progress <memberId> <state> \"note\", and a member id is a whole number. Nothing was sent."
+        echo "Too many arguments. Reporting for another member goes $(mmry_host_formation_ref progress '<memberId> <state> "note"'), and a member id is a whole number. Nothing was sent."
         exit 1
     fi
 fi
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is no participation to report on. This needs to run inside a session."
     exit 1
@@ -72,13 +72,13 @@ fi
 
 state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -z "$state" ]]; then
-    echo "This session is not in a formation, so there is nothing to report. Run /mmry:formation list to see what is active, then /mmry:formation join <id>."
+    echo "This session is not in a formation, so there is nothing to report. Run $(mmry_host_formation_ref list) to see what is active, then $(mmry_host_formation_ref join '<id>')."
     exit 1
 fi
 
 formation_id="${state%% *}"
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The local formation state is not a number, so it cannot be trusted. Run /mmry:formation leave and join again."
+    echo "The local formation state is not a number, so it cannot be trusted. Run $(mmry_host_formation_ref leave) and join again."
     exit 1
 fi
 
@@ -99,7 +99,7 @@ if [[ -z "$member_id" ]]; then
         exit 1
     fi
     if [[ -z "${MMRY_JQ:-}" ]]; then
-        echo "jq is not available, so this session's own roster entry could not be identified. Run /mmry:formation roster and report with the member id: /mmry:formation progress <memberId> ${progress}."
+        echo "jq is not available, so this session's own roster entry could not be identified. Run $(mmry_host_formation_ref roster) and report with the member id: $(mmry_host_formation_ref progress '<memberId>' "${progress}")."
         exit 1
     fi
     member_id="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
@@ -107,7 +107,7 @@ if [[ -z "$member_id" ]]; then
         '[(.members // [])[] | select(.sessionId == $s and .leftDate == null)][0].id // empty' \
         2>/dev/null || true)"
     if [[ -z "$member_id" ]]; then
-        echo "This session is not on formation ${formation_id}'s roster, so there is nothing to report against. It may have been released. Run /mmry:formation leave and join again."
+        echo "This session is not on formation ${formation_id}'s roster, so there is nothing to report against. It may have been released. Run $(mmry_host_formation_ref leave) and join again."
         exit 1
     fi
 fi
@@ -131,11 +131,11 @@ if ! mmry_update_formation_member_progress "$formation_id" "$member_id" "$sessio
         # formation, a formation already closed out, and a state outside the permitted set - so
         # this prints the server's own reason rather than guessing which one it was.
         400) echo "The server refused it, and nothing was recorded. ${server_said}" ;;
-        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run $(mmry_host_formation_ref leave)." ;;
         # The gateway family. Not a refusal, and it says nothing about standing or about the
         # roster, so this stays clear of both. It does not claim the report was discarded either: a
         # 502 can be raised after the row was written.
-        502|503|504) echo "The server failed while handling the report (HTTP ${code}) and did not confirm it, so treat it as not recorded. This is a fault on the server side, not something about formation ${formation_id} or your standing in it. Check /mmry:formation roster before trying again." ;;
+        502|503|504) echo "The server failed while handling the report (HTTP ${code}) and did not confirm it, so treat it as not recorded. This is a fault on the server side, not something about formation ${formation_id} or your standing in it. Check $(mmry_host_formation_ref roster) before trying again." ;;
         *)   echo "Could not record progress for member ${member_id} in formation ${formation_id} (HTTP ${code}). The server did not confirm it, so treat it as not recorded." ;;
     esac
     # NO AUTOMATIC RETRY. A retry after an unconfirmed failure sends a SECOND notification for a
@@ -154,7 +154,7 @@ fi
 if [[ -z "$applied" ]]; then
     # No jq, or a body that could not be read. Say what is known rather than inventing a
     # confirmation.
-    echo "The server accepted the report for member ${member_id} in formation ${formation_id}. Run /mmry:formation report to see what the record now says."
+    echo "The server accepted the report for member ${member_id} in formation ${formation_id}. Run $(mmry_host_formation_ref report) to see what the record now says."
     exit 0
 fi
 

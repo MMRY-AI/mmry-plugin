@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# stop-check.sh — Stop hook: nags the assistant to save incremental session memories.
+# stop-check.sh - the save prompt. Registered on Stop on Claude Code, and on UserPromptSubmit
+# on Codex, because a Stop hook that exits 2 is reported there as a failure. See item 6 below.
 #
 # Design (#29912):
 #   The Claude Code "Stop" event fires after every assistant turn, not at session end.
@@ -24,7 +25,36 @@
 #     5. Debounce extended from 120s to 900s (15 min). A 4-hour session goes from
 #        ~120 firings to ~16, each covering enough new substance to warrant a save.
 
+#     6. #31245, Codex. On Codex this hook carries TWO jobs, not one. Codex has no channel to the
+#        model at the pre-compaction moment at all - pre-compact.command.output.schema.json has no
+#        hookSpecificOutput and no decision/reason, and compact.rs has no case for exit 2 - so the
+#        "save before your context is trimmed" directive has nowhere else to go and is folded in
+#        here. That is a change of moment, not of meaning, and it is stated to the model rather
+#        than left implicit: a customer who silently loses work they believed was kept is the one
+#        failure this feature exists to prevent.
+#
+#        ON CODEX THIS IS NOT A STOP HOOK AT ALL. An earlier version of this comment said "Stop
+#        DOES work on Codex, and identically", and that claim outlived the code: Codex reports a
+#        Stop hook that exits 2 as a FAILED hook to the customer, so the prompt arrives as an
+#        error rather than as a directive. The registration moved to UserPromptSubmit, where the
+#        prompt is delivered as additionalContext with exit 0, and Eric's decision on 2026-09-20
+#        was that it must stay silent when there is nothing to save. So on Codex it fires at the
+#        START of the customer's next turn, gated on the save marker, and hooks/codex-hooks.json
+#        registers no Stop hook whatsoever. Claude Code is untouched: stderr plus exit 2, on Stop.
+
 set -euo pipefail
+
+# Optional, with the pre-#31245 behaviour as the fallback. This handler is reached through
+# hook-guard.sh from the COPIED handler directory, which is assembled by whoever did the copying
+# and is not guaranteed complete. A missing resolver must produce the directive this file has
+# always produced, not a dead hook.
+_mmry_sc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+if ! source "${_mmry_sc_dir}/lib-host.sh" 2>/dev/null; then
+    mmry_host() { printf 'claude'; }
+    mmry_host_label() { printf 'Claude Code'; }
+    mmry_host_script_ref() { printf '${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' "$1"; }
+fi
 
 TMPDIR="${TMPDIR:-/tmp}"
 MARKER="${TMPDIR}/.mmry-stop-checked"
@@ -49,6 +79,26 @@ if [[ -f "$MARKER" ]]; then
     mtime=$(_mmry_mtime "$MARKER")
     age=$(( now - mtime ))
     if (( age < DEBOUNCE_SECONDS )); then
+        exit 0
+    fi
+fi
+
+# NOTHING TO SAVE MEANS SAY NOTHING (Eric, 2026-09-20).
+#
+# The hook is a shell script: it cannot read the conversation, so it cannot judge whether anything
+# is worth keeping. Only the model can, and the directive below already asks it to ("If nothing new
+# is worth keeping, skip and proceed"). What the hook CAN know for certain is that a save has
+# already landed since the last time it spoke, and in that case there is positive evidence nothing
+# is outstanding and the cheapest correct behaviour is silence.
+#
+# Compares the save sentinel against this hook's own marker rather than against the clock, so a
+# customer who saves once per hour is not nudged an hour later about work they already kept.
+if [[ -f "$MARKER" && -f "$LAST_SAVE" ]]; then
+    _sc_marker_at=$(_mmry_mtime "$MARKER")
+    _sc_save_at=$(head -1 "$LAST_SAVE" 2>/dev/null | tr -d '[:space:]')
+    if [[ "$_sc_save_at" =~ ^[0-9]+$ ]] && (( _sc_save_at >= _sc_marker_at )); then
+        touch "$MARKER" 2>/dev/null || true
+        echo "0" > "$STOP_COUNT_FILE" 2>/dev/null || true
         exit 0
     fi
 fi
@@ -86,16 +136,57 @@ if (( firings >= ESCALATION_THRESHOLD )); then
     escalation_clause=" You have skipped ${firings} Stop firings without saving. Either save now or briefly state in your reply why this segment has nothing worth keeping."
 fi
 
+# The compaction clause exists only on a host that has no pre-compaction moment of its own
+# (#31245). On Claude Code it is empty, so the directive below is byte-for-byte the string this
+# file has always produced; precompact-check.sh still owns that job there.
+compaction_clause=""
+if [[ "$(mmry_host)" == "codex" ]]; then
+    compaction_clause=" $(mmry_host_label) gives MMRY no moment at compaction and no channel at session end, so this periodic prompt is the only warning you get: anything not saved can be lost when the conversation is trimmed."
+fi
+
 # Build the directive — one imperative line, explicit skip clause, anchored by last-save info
-# when available. Plain double quotes around the path (the model sees them literally on stderr);
-# the ${CLAUDE_PLUGIN_ROOT} reference is intentionally literal so the model expands it when it
-# runs save-memory.sh.
-DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \"\${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}"
+# when available. Plain double quotes around the path (the model sees them literally on stderr).
+#
+# On Claude Code the ${CLAUDE_PLUGIN_ROOT} reference is intentionally literal so the model expands
+# it when it runs save-memory.sh. On Codex that variable is exported to HOOK processes only
+# (codex-rs/hooks/src/engine/discovery.rs line 267), not to the shell the model runs its own
+# commands in, so mmry_host_script_ref resolves an absolute path there instead. Getting this wrong
+# is silent: the model would run a command against an empty prefix and report a missing file.
+DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \"$(mmry_host_script_ref save-memory.sh)\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}${compaction_clause}"
 
 # #30642: deliver the directive on stderr and keep exit 2. On exit 2 (which blocks the stop)
 # Claude Code discards stdout entirely and feeds the hook's STDERR to the model, so we emit
 # ONLY to stderr - no JSON. Emitting the directive as JSON would force backslash escaping that
 # leaks into the model-visible text; stderr-only keeps it clean. exit 2 preserves the block;
 # moving to exit 0 would risk changing it. The user-only systemMessage is dropped.
+# HOW THIS REACHES THE MODEL, PER HOST (#31245, 2026-09-20).
+#
+# Claude Code: unchanged. stderr plus exit 2, the #30642 contract. On exit 2 Claude Code discards
+# stdout and feeds stderr to the model, so we emit ONLY to stderr; emitting JSON there would force
+# escaping that leaks into the model-visible text.
+#
+# Codex: additionalContext on stdout with exit 0, registered on UserPromptSubmit rather than Stop.
+# Measured against real sessions: exit 2 is reported Failed on EVERY Codex event and delivers
+# nothing, and Stop rejects an additionalContext payload outright, so Stop has no channel to the
+# model at all. The research design recommended moving this prompt to Stop and said it would work;
+# that was reasoned from source and never run.
+#
+# UserPromptSubmit is also the better moment on its own merits. Codex trims conversations
+# mid-session (auto_compact), and a prompt delivered at session end cannot save anyone from a
+# trim that happened fifty turns earlier. The debounce above keeps it periodic rather than
+# per-turn.
+if [[ "$(mmry_host)" == "codex" ]]; then
+    if [[ -n "${MMRY_JQ:-}" ]] && "$MMRY_JQ" --version >/dev/null 2>&1; then
+        printf '%s' "$DIRECTIVE" | "$MMRY_JQ" -Rs \
+            '{hookSpecificOutput:{hookEventName:"UserPromptSubmit", additionalContext:.}}'
+    else
+        # No jq: escape by hand rather than stay silent. The directive is one line of prose, so
+        # backslashes and quotes are the only characters that can break the payload.
+        _sc_escaped="$(printf '%s' "$DIRECTIVE" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}' "$_sc_escaped"
+    fi
+    exit 0
+fi
+
 printf '%s\n' "$DIRECTIVE" >&2
 exit 2

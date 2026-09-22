@@ -29,21 +29,21 @@ source "${HANDLER_DIR}/mmry-client.sh"
 formation_id="${1:-}"
 
 if [[ -z "$formation_id" ]]; then
-    session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # #31143: the command runtime provides CLAUDE_CODE_SESSION_ID
+    session_id="$(mmry_session_id)"  # #31143: the command runtime provides CLAUDE_CODE_SESSION_ID
     if [[ -z "$session_id" ]]; then
         echo "No session id is available and no formation id was given, so there is no roster to show."
         exit 1
     fi
     state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
     if [[ -z "$state" ]]; then
-        echo "This session is not in a formation. Run /mmry:formation list to see what is active, then /mmry:formation join <id>."
+        echo "This session is not in a formation. Run $(mmry_host_formation_ref list) to see what is active, then $(mmry_host_formation_ref join "<id>")."
         exit 1
     fi
     formation_id="${state%% *}"
 fi
 
 if ! [[ "$formation_id" =~ ^[1-9][0-9]*$ ]]; then
-    echo "A formation id is a positive whole number. Run /mmry:formation list to see what is active."
+    echo "A formation id is a positive whole number. Run $(mmry_host_formation_ref list) to see what is active."
     exit 1
 fi
 
@@ -91,12 +91,42 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
       + (if .leftDate != null then "   (has left; cannot be addressed)" else "" end)
 ' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
 
-printf '\nDirect a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off\n'
+# THE RECIPIENT IS SPELLED DIFFERENTLY ON EACH HOST, AND THIS LINE USED TO GET IT WRONG
+# (#31245, 2026-09-21).
+#
+# "--to <id>" is a CLAUDE CODE convention: the user types /mmry:formation say "..." --to 12 and
+# commands/formation.md translates it into a positional argument before the script ever sees it.
+# The script itself only ever took the id positionally.
+#
+# Codex has no commands, so the model runs the script directly, and this footer was handing it a
+# flag the script refuses outright: "A recipient is a roster entry id, a positive whole number...
+# Nothing was sent". Reproduced while testing delivery: the first send failed exactly this way.
+#
+# So the example matches the thing the reader will actually run.
+if [[ "$(mmry_host)" == "codex" ]]; then
+    _mmry_say_example='"..." <id>'
+else
+    _mmry_say_example='"..." --to <id>'
+fi
+printf '\nDirect a message at one of them with %s. Leave the id off\n' "$(mmry_host_formation_ref say "$_mmry_say_example")"
 printf 'and the message goes to the whole formation.\n'
 # #31046. The state in brackets is the last thing that member reported, and "not started" means
 # nothing has been reported against work that WAS handed out, which is the thing worth noticing on
 # this list. The full account, one section per member, is /mmry:formation report.
+#
+# THE LINE BREAKS ARE PART OF THE CLAUDE OUTPUT, NOT A DETAIL OF IT (#31245 QA round 6).
+#
+# The first cut of this derivation printed the same 199 bytes with the WRAP MOVED: it ended
+# "...Abandoned>,\nand read the whole account with /mmry:formation report." where this footer has
+# always read "...Abandoned>, and read the whole account\nwith /mmry:formation report." That is a
+# change in what an existing Claude Code customer sees, which requirement 4 forbids - and the
+# substring assertions meant to protect it could not see it, because every substring was still
+# present in a different arrangement.
+#
+# The format strings below put the breaks back exactly where they were, and the Claude control in
+# codex-formation-instructions.bats now compares the WHOLE footer byte for byte rather than
+# hunting for three fragments inside it.
 printf 'The state in brackets is the last thing that member reported. Report your own with\n'
-printf '/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account\n'
-printf 'with /mmry:formation report.\n'
+printf '%s, and read the whole account\n' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
+printf 'with %s.\n' "$(mmry_host_formation_ref report)"
 exit 0

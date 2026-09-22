@@ -28,7 +28,7 @@ source "${HANDLER_DIR}/mmry-client.sh"
 
 summary="${1:-}"
 if [[ -z "$summary" ]]; then
-    echo "A debrief needs a summary. Usage: /mmry:formation debrief \"what was accomplished, what was decided, what went wrong\""
+    echo "A debrief needs a summary. Usage: $(mmry_host_formation_ref debrief '"what was accomplished, what was decided, what went wrong"')"
     exit 1
 fi
 # The server refuses under 20 characters with its own message; catching the obvious case here saves
@@ -38,7 +38,7 @@ if [[ "${#summary}" -lt 20 ]]; then
     exit 1
 fi
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available. This needs to run inside a session."
     exit 1
@@ -46,13 +46,13 @@ fi
 
 state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -z "$state" ]]; then
-    echo "This session is not in a formation, so there is nothing to close out. Run /mmry:formation list to see what is active."
+    echo "This session is not in a formation, so there is nothing to close out. Run $(mmry_host_formation_ref list) to see what is active."
     exit 1
 fi
 
 formation_id="${state%% *}"
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The local formation state is not a number, so it cannot be trusted. Run /mmry:formation leave and join again."
+    echo "The local formation state is not a number, so it cannot be trusted. Run $(mmry_host_formation_ref leave) and join again."
     exit 1
 fi
 
@@ -68,7 +68,7 @@ if ! mmry_debrief_formation "$formation_id" "$summary"; then
     case "$code" in
         502) echo "The debrief could not be consolidated, so the formation has been left active and nothing was recorded. Try again shortly." ;;
         403) echo "Refused. Only the formation's lead, its creator, or an administrator can close it out." ;;
-        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run $(mmry_host_formation_ref leave)." ;;
         400) echo "The server refused the summary. ${MMRY_RESPONSE:-}" ;;
         409) echo "Formation ${formation_id} is not active, so there is nothing to close out." ;;
         *)   echo "Could not close out formation ${formation_id} (HTTP ${code}). It has not been changed." ;;
@@ -95,6 +95,6 @@ fi
 
 echo "Formation ${formation_id} closed out. The summary and the account above have been recorded as lasting memories, and the formation's chatter has stopped."
 if [[ -z "$record" ]]; then
-    echo "The account itself could not be read from the reply. Run /mmry:formation report ${formation_id} to see it."
+    echo "The account itself could not be read from the reply. Run $(mmry_host_formation_ref report "${formation_id}") to see it."
 fi
 exit 0

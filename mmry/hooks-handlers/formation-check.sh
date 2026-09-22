@@ -99,9 +99,24 @@ MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
 # two. Measured, not assumed: 20 invocations of a session that is in no formation averaged 961ms
 # on round 1 and 743ms on this, on the same machine, both figures dominated by bash startup. On a
 # machine with no system jq it is the difference between working and not working at all.
+#
+# THE HOST RESOLVER IS SOURCED FIRST, and the credential is checked before lib-jq.sh is reached.
+# lib-jq.sh refuses on a Codex install that has no credential of its own, rather than let the
+# client fall through to the other product's account (#31245 QA round 2) - and it refuses by
+# exiting 1. That is the right answer for a handler the model runs, and the wrong one HERE: this
+# hook runs after every tool call in every session, and its governing rule at the top of the file
+# is to fail open and SILENT. So the same question is asked here first and answered with exit 0.
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
+mmry_host_assert_own_credential 2>/dev/null || exit 0
+
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-jq.sh" 2>/dev/null || exit 0
 mmry_resolve_jq >/dev/null 2>&1 || true
+
+# lib-host.sh is already sourced above, before lib-jq.sh, because the credential question has to be
+# asked before anything can answer it wrongly. The delivery routes below are not the same on both
+# hosts (#31245), and mmry_host is what tells them apart.
 
 # ---- Resolve this session's id and the event we are running in. ----
 # CLAUDE_SESSION_ID is unreliable (session-init.sh says so and reads stdin instead), and the join
@@ -157,6 +172,33 @@ if [[ ! -t 0 ]]; then
         fi
     fi
 fi
+# A PAYLOAD THAT ARRIVED WITHOUT THE FIELDS WE ASSUME IS A FAULT, NOT SILENCE (#31245 QA round 2).
+#
+# "session_id" and "hook_event_name" are CLAUDE CODE's field names. On Codex they are an
+# assumption: no captured Codex payload exists yet, and every Codex delivery test in this suite
+# sets MMRY_FORMATION_MODE instead, a variable whose own comment says it exists for the test suite.
+# If Codex spells these differently, this handler exits 0 at the line below on every single event -
+# installed, silent, and doing nothing, which is the exact failure mode this work exists to end.
+#
+# This hook may not speak to the model, so it leaves the breadcrumb session-start.sh reads and
+# reports out loud. Keys only, never values: this payload can carry a prompt or a tool result.
+if [[ -z "$session_id" && "$hook_read_status" == "ok" ]]; then
+    _fc_keys="$(printf '%s' "${payload:-}" | "${MMRY_JQ:-jq}" -r 'if type=="object" then (keys | join(",")) else "not-an-object" end' 2>/dev/null || true)"
+    mmry_note_hook_read_fault "formation-check-session-id-absent" "fields=${_fc_keys:-unparsable}" || true
+fi
+
+# RESOLVE THE SESSION ID THROUGH THE HOST (#31245 QA round 7). This line used to read
+# CLAUDE_SESSION_ID then CLAUDE_CODE_SESSION_ID and never consulted CODEX_SESSION_ID at all.
+#
+# On a real Codex machine delivery still worked, because Codex supplies the session id in the hook
+# payload and $session_id is already set by the time we get here, and QA proved that twice with
+# both Claude variables unset. So this was not the delivery bug it was reported as. What it IS, is
+# the case where a Codex session is launched from a shell that already exports a Claude session
+# id: the payload read fails or the id is absent, this chain answers with the LAUNCHING session's
+# identity, and the Codex session then polls as that session and can consume directed messages
+# meant for it. mmry_session_id, from lib-host.sh sourced above, gets the precedence right per
+# host and was fixed for this in b3cefd0.
+session_id="${session_id:-$(mmry_session_id)}"
 session_id="${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
 [[ -n "$session_id" ]] || exit 0
 
@@ -395,8 +437,27 @@ _poll_once() {
 case "$mode" in
 
     tool)
-        # PostToolUse: stderr plus exit 2, the original contract. Exit 0 means "nothing to say".
+        # PostToolUse. Exit 0 means "nothing to say" on both hosts.
+        #
+        # THE DELIVERY ROUTE DIFFERS BY HOST, AND THE CODEX ONE IS BETTER (#31245).
+        #
+        # Claude Code: stderr plus exit 2, the original #31012 contract, kept exactly. Claude Code
+        # had no additionalContext channel on PostToolUse when that was built, so exit 2 was the
+        # only way to reach the model and a blocked tool call was the price.
+        #
+        # Codex: additionalContext on stdout with exit 0. post-tool-use.command.output.schema.json
+        # defines PostToolUseHookSpecificOutputWire carrying an additionalContext string, and
+        # events/post_tool_use.rs appends it to the contexts shown to the model. It reaches the
+        # model identically and does NOT set should_block, so a colleague's message stops costing
+        # the customer a cancelled tool call. Exit 2 also works on Codex and is deliberately not
+        # used.
         _poll_once || exit 0
+        if [[ "$(mmry_host)" == "codex" ]]; then
+            printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rsc \
+                '{hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:.}}' \
+                2>/dev/null || exit 0
+            exit 0
+        fi
         printf '%s\n' "$FORMATION_BLOCK" >&2
         exit 2
         ;;
@@ -444,6 +505,31 @@ case "$mode" in
         #
         # Exit 0 on every path except an actual message. A Stop hook that exits 2 with nothing to say
         # would wake the model for no reason, which is the "worse defect" requirement 2 warns about.
+        #
+        # CODEX CANNOT DO THIS, AND MUST NOT TRY (#31245). The whole mechanism rests on
+        # "asyncRewake": true, which Codex does not have: its hook handler schema
+        # (codex-rs/config/src/hook_config.rs, HookHandlerConfig::Command) carries command,
+        # commandWindows, timeout, async, statusMessage and additionalContextLimit and nothing else,
+        # and its own Claude-settings importer explicitly SKIPS any handler carrying asyncRewake
+        # (external-agent-migration/src/hooks_cla.rs line 158). An async Codex hook additionally
+        # cannot apply control effects at all (engine/mod.rs: can_apply_control_effects requires
+        # Sync), so its exit 2 is discarded.
+        #
+        # A synchronous poller would therefore not deliver anything AND would hold the end of every
+        # turn open for up to four minutes. hooks/codex-hooks.json does not register this handler on
+        # Stop for that reason; this guard is the second line of defence, for a customer or a test
+        # that registers it by hand.
+        #
+        # What Codex DOES support on Stop is one synchronous pass: events/stop.rs line 343 takes
+        # exit 2 with non-empty stderr and makes it the continuation prompt. So a message that is
+        # already waiting is delivered; one that arrives while the session sits idle is not, and is
+        # picked up instead by the PostToolUse and UserPromptSubmit routes on the next thing that
+        # happens. NOT hookSpecificOutput: stop.command.output.schema.json has no such property.
+        if [[ "$(mmry_host)" == "codex" ]]; then
+            _poll_once || exit 0
+            printf '%s\n' "$FORMATION_BLOCK" >&2
+            exit 2
+        fi
         _acquire "$_poller_dir" $(( MMRY_IDLE_POLL_SECONDS + 60 )) || exit 0
         _held_poller=1
 

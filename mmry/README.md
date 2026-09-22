@@ -1,12 +1,24 @@
 # MMRY AI
 
-Persistent memory system for Claude Code. Automatically loads memories at session start, prompts to save at session end, before context compression, and when plans are accepted.
+Persistent memory for Claude Code and OpenAI Codex. On Claude Code it loads memories at session start and prompts to save at session end, before context compression, and when plans are accepted. On Codex only the session-start load carries over: the save prompt arrives with your next message instead, and the platform gives a plugin no channel at context compression or plan acceptance. See [docs/codex.md](../docs/codex.md).
 
 Cross-platform: works on Windows (Git Bash), macOS, and Linux.
 
+## Which assistant are you using?
+
+This plugin serves two hosts from one codebase, and they are not set up the same way.
+
+- **Claude Code** - everything below applies as written. Typed slash commands (`/mmry:save`,
+  `/mmry:search`, `/mmry:formation`) are available.
+- **OpenAI Codex** - see **[docs/codex.md](../docs/codex.md)** for installation, setup, what is
+  and is not supported, and how to uninstall. Codex has no typed slash commands; you ask for what
+  you want in plain words. Do not follow the Claude Code instructions below on Codex: the setup
+  command differs, and running the wrong one writes your credential into the other product's
+  account file.
+
 ## Requirements
 
-- **Claude Code** (latest version)
+- **Claude Code** (latest version) **or OpenAI Codex**
 - **bash** (Git Bash on Windows, native on macOS/Linux)
 - **curl** (included with Git Bash, native on macOS/Linux)
 - **jq** (ships bundled with the plugin, so nothing to install; a system jq is used automatically when present)
@@ -104,9 +116,9 @@ Both failures are recorded in `mmry-foundation.log` in your temp directory. Sett
 |------|-------------|
 | **Session starts** | Your memories load automatically via API (Foundation + directory-matched) |
 | **Every prompt** | Foundation memories are re-injected so they consistently guide responses (configurable; see Configuration) |
-| **Session ends** | Claude is prompted to save any decisions, issues, or notes before exiting |
-| **Context compresses** | Claude saves a "Session Continuity" memory so nothing is lost |
-| **Plan accepted** | Claude saves the accepted plan as a Decision memory |
+| **Session ends** | Claude is prompted to save any decisions, issues, or notes before exiting. Claude Code only: on Codex this prompt arrives with your next message instead, and only when something is unsaved |
+| **Context compresses** | Claude saves a "Session Continuity" memory so nothing is lost. Claude Code only: Codex gives a plugin no channel at that moment |
+| **Plan accepted** | Claude saves the accepted plan as a Decision memory. Claude Code only: Codex has no plan-accepted tool to trigger on |
 
 ## Commands
 

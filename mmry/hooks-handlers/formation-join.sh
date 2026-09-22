@@ -18,7 +18,7 @@ source "${HANDLER_DIR}/mmry-client.sh"
 
 formation_id="${1:-}"
 if [[ -z "$formation_id" ]]; then
-    echo "Which formation? Usage: /mmry:formation join <formationId>"
+    echo "Which formation? Usage: $(mmry_host_formation_ref join "<formationId>")"
     exit 1
 fi
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
@@ -26,7 +26,7 @@ if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is nothing to enrol. This needs to run inside a session."
     exit 1
@@ -36,14 +36,23 @@ mmry_load_config || true
 
 # Register the session first. A formation is joined by a session, and the server refuses a session
 # it has never seen, which would otherwise read as a permission problem.
-mmry_register_session "$session_id" "claude-code" "$PWD" 2>/dev/null || true
+# #31245 QA round 3: the client name is the HOST's, not the constant "claude-code". A Codex session
+# registered as claude-code is a session the customer cannot find in their own session list - and
+# docs/codex.md tells them, in as many words, that Codex sessions are listed as `codex`. The
+# resolver is reached through mmry-client.sh; the fallback keeps the old literal if it is not.
+if declare -F mmry_host_client_name >/dev/null 2>&1; then
+    _mmry_client_name="$(mmry_host_client_name)"
+else
+    _mmry_client_name="claude-code"
+fi
+mmry_register_session "$session_id" "$_mmry_client_name" "$PWD" 2>/dev/null || true
 
 if ! mmry_join_formation "$formation_id" "$session_id"; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
         403) echo "Refused. Either you share no access group with whoever created formation ${formation_id}, or your account is not active. An administrator can add you to the group." ;;
         404) echo "Formation ${formation_id} does not exist, or it belongs to another account." ;;
-        409) echo "This session already belongs to an active formation. Run /mmry:formation leave first." ;;
+        409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
         *)   echo "Could not join formation ${formation_id} (HTTP ${code}). Nothing has been changed locally." ;;
     esac
     exit 1
