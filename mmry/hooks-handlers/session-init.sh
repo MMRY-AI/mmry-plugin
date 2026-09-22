@@ -106,7 +106,11 @@ fi
 
 # Copy current handler and setup scripts (all platforms)
 cp "$P"/hooks-handlers/*.sh "${MMRY_STATE_DIR}/hooks-handlers/"
-cp "$P"/hooks-handlers/*.cmd "${MMRY_STATE_DIR}/hooks-handlers/" 2>/dev/null || true
+# There is no .cmd to stage any more. codex-hook.cmd was deleted in #31245 QA round 7: every
+# registration in hooks/codex-hooks.json launches with `sh`, nothing referenced the wrapper, and
+# shipping a dead executable whose own header described a mechanism the branch had removed was
+# worse than shipping nothing. If a Windows entry point is ever reintroduced, restore a copy line
+# here AND a registration that uses it, in the same change.
 cp "$P"/setup/*.sh "${MMRY_STATE_DIR}/setup/"
 cp "$P"/setup/*.bat "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
 cp "$P"/setup/*.ps1 "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true

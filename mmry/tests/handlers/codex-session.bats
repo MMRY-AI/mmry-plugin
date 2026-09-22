@@ -58,15 +58,17 @@ _fake_plugin_root() {
     [ ! -d "$HOME/.codex/mmry" ]
 }
 
-@test "codex: session-init copies the Windows entry point, which is the whole Codex hot path there" {
-    # codex-hook.cmd is what every Codex hook runs through on Windows. If the copy line that
-    # carries .cmd files is lost, a Windows Codex install has hook registrations pointing at a file
-    # that is not there - and every one of them fails open, silently.
+@test "codex: session-init stages the handlers, and no longer stages a wrapper nothing runs" {
+    # This used to assert that session-init copied codex-hook.cmd, on the grounds that it was the
+    # whole Codex hot path on Windows. That stopped being true when the registrations moved to
+    # `sh`, and the file was deleted in #31245 QA round 7. What matters now is that the SHELL
+    # handlers are staged, because those are what the registrations actually launch.
     local root; root="$(_fake_plugin_root)"
-    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root" \
-        bash "$root/hooks-handlers/session-init.sh"
+    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root"         bash "$root/hooks-handlers/session-init.sh"
     assert_success
-    [ -f "$HOME/.codex/mmry/hooks-handlers/codex-hook.cmd" ]
+    [ -f "$HOME/.codex/mmry/hooks-handlers/codex-hook.sh" ]
+    [ -f "$HOME/.codex/mmry/hooks-handlers/formation-join.sh" ]
+    [ ! -e "$HOME/.codex/mmry/hooks-handlers/codex-hook.cmd" ]
 }
 
 @test "codex: session-init installs the setup script the customer is told to run" {

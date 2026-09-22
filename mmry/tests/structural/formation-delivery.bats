@@ -1121,3 +1121,71 @@ BSDSTAT
     run grep -c "2\.1\.64" "${HANDLERS}/formation-check.sh"
     [ "$output" -ge 1 ]
 }
+
+@test "identity: a Codex session that inherits a Claude id does not adopt it" {
+    # THE CONFIDENTIALITY CASE (#31245 QA round 7). formation-check.sh resolved the session id
+    # through CLAUDE_SESSION_ID then CLAUDE_CODE_SESSION_ID and never consulted CODEX_SESSION_ID,
+    # and formation-state.sh had its own divergent chain that preferred the Claude variables too.
+    #
+    # Launch Codex from a shell that already exports a Claude session id, which is exactly what
+    # happens when one assistant starts another, and the Codex session polls as the LAUNCHING
+    # session: it can consume directed messages addressed to somebody else. QA confirmed delivery
+    # itself was fine on a real machine, because Codex puts the id in the hook payload, so this is
+    # the case that survives once the payload is absent or unreadable.
+    #
+    # The state file is the visible consequence: its name is the identity this session believes it
+    # has.
+    local state_dir="${TMPDIR:-/tmp}"
+    local codex_sid="qa7-codex-own-$$"
+    local claude_sid="qa7-inherited-claude-$$"
+
+    rm -f "${state_dir}/.mmry-formation-${codex_sid}" "${state_dir}/.mmry-formation-${claude_sid}"
+
+    run env MMRY_HOST=codex \
+        CODEX_SESSION_ID="$codex_sid" \
+        CLAUDE_SESSION_ID="$claude_sid" \
+        CLAUDE_CODE_SESSION_ID="$claude_sid" \
+        TMPDIR="$state_dir" \
+        bash "${HANDLERS}/formation-state.sh" set 4242
+    [ "$status" -eq 0 ]
+
+    [[ -f "${state_dir}/.mmry-formation-${codex_sid}" ]] || {
+        echo "the Codex session did not record state under its own id"
+        return 1
+    }
+    [[ ! -f "${state_dir}/.mmry-formation-${claude_sid}" ]] || {
+        echo "the Codex session wrote state under the INHERITED Claude id, which is another"
+        echo "session's identity: it would poll as them and can consume their directed messages"
+        return 1
+    }
+    rm -f "${state_dir}/.mmry-formation-${codex_sid}"
+}
+
+@test "identity: and on Claude Code a stray Codex id does not displace the real one" {
+    # The mirror image, so the fix cannot be "always prefer Codex".
+    local state_dir="${TMPDIR:-/tmp}"
+    local claude_sid="qa7-claude-own-$$"
+    local codex_sid="qa7-stray-codex-$$"
+
+    rm -f "${state_dir}/.mmry-formation-${claude_sid}" "${state_dir}/.mmry-formation-${codex_sid}"
+
+    # setup() exports CLAUDE_SESSION_ID for every test in this file, and on Claude Code
+    # that is the FIRST variable in the precedence chain, so it has to go or it answers
+    # instead of the one this test is about.
+    run env -u MMRY_HOST -u CLAUDE_SESSION_ID \
+        CLAUDE_CODE_SESSION_ID="$claude_sid" \
+        CODEX_SESSION_ID="$codex_sid" \
+        TMPDIR="$state_dir" \
+        bash "${HANDLERS}/formation-state.sh" set 4242
+    [ "$status" -eq 0 ]
+
+    [[ -f "${state_dir}/.mmry-formation-${claude_sid}" ]] || {
+        echo "the Claude Code session did not record state under its own id"
+        return 1
+    }
+    [[ ! -f "${state_dir}/.mmry-formation-${codex_sid}" ]] || {
+        echo "a stray CODEX_SESSION_ID displaced the Claude Code identity"
+        return 1
+    }
+    rm -f "${state_dir}/.mmry-formation-${claude_sid}"
+}

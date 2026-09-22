@@ -8,7 +8,7 @@
   "interface": {
     "displayName": "MMRY AI",
     "shortDescription": "Persistent memory that follows you between sessions.",
-    "longDescription": "MMRY AI remembers your decisions, conventions and project context, and restores them at the start of every session so you are not re-explaining yourself. On Codex it loads your memories when a session starts, re-states your Foundation memories on each prompt, delivers coordination-group messages while you work, and prompts you to save what is new before the session ends. Typed slash commands are not available on this platform; you ask for what you want in plain words and the matching skill is used.",
+    "longDescription": "MMRY AI remembers your decisions, conventions and project context, and restores them at the start of every session so you are not re-explaining yourself. On Codex it loads your memories when a session starts, re-states your Foundation memories on each prompt, delivers coordination-group messages while you work, and prompts you to save what is new when there is unsaved work. Typed slash commands are not available on this platform; you ask for what you want in plain words and the matching skill is used.",
     "developerName": "MMRY AI",
     "category": "productivity",
     "capabilities": ["memory", "coordination"],

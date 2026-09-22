@@ -25,11 +25,29 @@ set -euo pipefail
 
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
 
+# RESOLVE THE SESSION ID THROUGH THE HOST, NOT THROUGH A HAND-ROLLED CHAIN (#31245 QA round 7).
+#
+# This file used to fall back to CLAUDE_SESSION_ID, then CLAUDE_CODE_SESSION_ID, then
+# CODEX_SESSION_ID, in that order, because it did not source lib-host.sh. On a Codex session
+# launched from a shell that already exports a Claude session id, the Claude id won, and this
+# session then read and wrote ANOTHER session's formation state: it could consume directed
+# messages addressed to that session. lib-host.sh's mmry_session_id already gets the precedence
+# right per host, and was fixed for exactly this in b3cefd0. There is no reason for a second,
+# divergent copy of that decision to exist here.
+#
+# Sourcing is best-effort: this is a state helper called from a hook, and it must not take a
+# working session down if the library is missing from a partial install. The old chain stays as
+# the fallback for that case only.
+_MMRY_STATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${_MMRY_STATE_DIR}/lib-host.sh" 2>/dev/null || true
+
 _state_file() {
-    # CODEX_SESSION_ID is in the chain because this file does not source lib-host.sh and so
-    # cannot call mmry_session_id. Callers normally pass the id explicitly; this is the
-    # fallback, and on Codex it was resolving to "unknown" for every model-invoked handler.
-    local sid="${1:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${CODEX_SESSION_ID:-unknown}}}}"
+    local sid="${1:-}"
+    if [[ -z "$sid" ]] && command -v mmry_session_id >/dev/null 2>&1; then
+        sid="$(mmry_session_id)"
+    fi
+    sid="${sid:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${CODEX_SESSION_ID:-unknown}}}}"
     # Session ids come from the client and can carry characters that are awkward in a filename.
     local safe
     safe="$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')"

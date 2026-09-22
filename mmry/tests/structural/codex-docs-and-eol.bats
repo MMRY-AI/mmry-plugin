@@ -63,14 +63,37 @@ _require_git() {
     }
 }
 
-@test "eol: the checked-out codex-hook.cmd really does carry CRLF, not just a rule saying so" {
-    # The attribute is the instruction; this is the result. They come apart when a file was
-    # committed before the rule existed and nobody re-normalised it.
-    local cr lf
-    cr="$(tr -cd '\r' < "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" | wc -c | tr -d ' ')"
-    lf="$(tr -cd '\n' < "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" | wc -c | tr -d ' ')"
-    [ "$lf" -gt 0 ]
-    [ "$cr" -eq "$lf" ]
+@test "windows: the dead .cmd wrapper is gone, and nothing has quietly reintroduced it" {
+    # codex-hook.cmd used to be the Windows entry point and this test used to pin its CRLF bytes.
+    # It was deleted in #31245 QA round 7. Every registration in hooks/codex-hooks.json launches
+    # with `sh`, which on Windows can only be Git's because Windows ships no sh.exe, and NOTHING
+    # referenced the wrapper any more: not a registration, not the installer, not a handler.
+    #
+    # It still shipped to every customer, CRLF-pinned, with a header describing a mechanism the
+    # branch had removed, and the customer page sent people to an MMRY_BASH override that only that
+    # orphaned file read. QA found the remedy inert.
+    #
+    # So the invariant is inverted: the file must NOT exist, and if a Windows entry point is ever
+    # reintroduced it has to arrive with a registration that uses it, in the same change.
+    [[ ! -e "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" ]] || {
+        echo "codex-hook.cmd is back. If that is deliberate, it needs a registration in"
+        echo "hooks/codex-hooks.json that actually launches it, and this test updated to match."
+        return 1
+    }
+    # Only EXECUTABLE lines. A comment explaining why the wrapper was deleted names it, and a raw
+    # grep would report the deletion as a reintroduction forever after. Same convention as the
+    # absence checks in structural/formation-delivery.bats.
+    local named="" f
+    for f in "$PLUGIN_ROOT"/hooks/*.json "$PLUGIN_ROOT"/hooks-handlers/*.sh; do
+        [[ -f "$f" ]] || continue
+        if sed 's/#.*$//' "$f" | grep -q 'codex-hook\.cmd'; then
+            named="${named} ${f##*/}"
+        fi
+    done
+    [[ -z "$named" ]] || {
+        echo "something still names the deleted wrapper in executable code:${named}"
+        return 1
+    }
 }
 
 @test "eol: and the shell entry point beside it carries none, because Git Bash would choke on them" {
@@ -488,33 +511,205 @@ _codex_tree() {
     grep -qi "Nothing errors" "$skill" || { echo "the skill does not warn that the failure is silent"; return 1; }
 }
 
-@test "docs: the save prompt is described at the moment it actually fires" {
-    # THE DRIFT THIS PREVENTS (#31245, 2026-09-21). The save prompt was designed to fire on Stop,
-    # and the customer page, the skill and the hook manifest all said so in customer-facing words:
-    # "at the end of each turn", "before the session ends". It was then moved to UserPromptSubmit,
-    # which is the customer's NEXT message, with a suppression gate so it stays silent when a save
-    # has already happened. The three texts were left behind, promising a moment no hook occupies.
+@test "docs: no customer surface promises a moment Codex does not have" {
+    # THE DRIFT THIS PREVENTS, and the two ways an earlier version of it failed to (#31245).
     #
-    # Documentation that describes a hook the product no longer registers is a defect a reviewer
-    # cannot see by reading code, so it is pinned here.
-    local doc="$PLUGIN_ROOT/../docs/codex.md"
-    [[ -f "$doc" ]] || doc="$REPO_ROOT/docs/codex.md"
+    # The save prompt was designed to fire on Stop. The customer page, the Codex skill and the hook
+    # manifest all said so in customer-facing words: "at the end of each turn", "before the session
+    # ends". It then moved to UserPromptSubmit, which is the customer's NEXT message, with a
+    # suppression gate. Three texts were corrected and a guard written over THOSE THREE FILES for
+    # THOSE TWO PHRASES.
+    #
+    # ROUND 7 FOUND THREE MORE AT THE SAME COMMIT, on surfaces that guard never looked at: the
+    # Codex storefront listing in .codex-plugin/plugin.json, which is the one text a customer reads
+    # BEFORE they can check anything; a summary row on docs/codex.md that contradicted the prose
+    # eleven lines further down the same page; and both READMEs, which name Codex and then list
+    # saving at session end, at context compression and on plan acceptance, three behaviours the
+    # Codex page documents as unavailable. A guard keyed to the files somebody happened to edit
+    # only ever proves they edited them.
+    #
+    # THEN THE FIRST REWRITE OF THIS TEST, swept over every surface but compared LINE BY LINE, and
+    # a deliberate re-introduction of the storefront string SURVIVED it. That JSON value is one
+    # very long line carrying both the bad promise and, forty words later, an unrelated sentence
+    # containing "not available". The line looked like a disclosure and was skipped. So the unit
+    # here is a SENTENCE or a TABLE CELL, never a line: a qualification has to sit next to the
+    # claim it qualifies, which is also the only version a customer reads correctly.
+    local f bad=""
+    local -a _lines
+
+    # Codex-only surfaces must never make the promise at all.
+    local codex_only=(
+        "$REPO_ROOT/docs/codex.md"
+        "$PLUGIN_ROOT/.codex-plugin/plugin.json"
+        "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+        "$PLUGIN_ROOT/hooks/codex-hooks.json"
+    )
+    # Shared surfaces may, because on Claude Code it is TRUE, but the same sentence or cell has to
+    # say which host it is talking about.
+    local shared=(
+        "$REPO_ROOT/README.md"
+        "$PLUGIN_ROOT/README.md"
+    )
+
+    _promises_a_missing_moment() {
+        local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+        case "$l" in
+            *"before the session ends"*)   return 0 ;;
+            *"save at session end"*)       return 0 ;;
+            *"at the end of a turn"*)      return 0 ;;
+            *"at the end of each turn"*)   return 0 ;;
+            *"end of a turn"*prompt*)      return 0 ;;
+            *"session end"*prompt*)        return 0 ;;
+            *prompt*"session end"*)        return 0 ;;
+            *"context compression"*)       return 0 ;;
+            *"plan accepted"*)             return 0 ;;
+        esac
+        return 1
+    }
+
+    _is_disclosure() {
+        local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+        case "$l" in
+            *"claude code only"*)          return 0 ;;
+            *"on claude code"*)            return 0 ;;
+            *"claude code |"*)             return 0 ;;
+            *"not available"*)             return 0 ;;
+            *"no channel"*)                return 0 ;;
+            *"do not exist"*)              return 0 ;;
+            *"there is no"*)               return 0 ;;
+            *"has no"*)                    return 0 ;;
+            *"gives a plugin no"*)         return 0 ;;
+            *cannot*)                      return 0 ;;
+        esac
+        return 1
+    }
+
+    for f in "${codex_only[@]}" "${shared[@]}"; do
+        [[ -f "$f" ]] || { echo "a surface this test must sweep is missing: $f"; return 1; }
+
+        # THE UNIT OF JUDGEMENT IS WHAT A READER TAKES IN AT ONCE, which is not a line.
+        #
+        # A markdown TABLE ROW is read against its header, so "| A prompt to save | at session end
+        # | on your next message |" is not a promise about Codex: the header says which column is
+        # which. Those are tested as header plus row, together.
+        #
+        # Everything else is tested a SENTENCE at a time, because the storefront listing is a
+        # single JSON value forty words long, and an earlier line-based version of this test let a
+        # deliberate re-introduction of the bad string through: the same line carried an unrelated
+        # "not available" further along and read as a disclosure.
+        mapfile -t _lines < <(tr -d '\r' < "$f")
+        local i n subject header="" frag
+        n=${#_lines[@]}
+        for ((i = 0; i < n; i++)); do
+            # A separator row means the line before it was the header of this table.
+            if [[ "${_lines[$i]}" =~ ^[[:space:]]*\|[-:[:space:]|]+$ ]]; then
+                [[ $i -gt 0 ]] && header="${_lines[$((i - 1))]}"
+                continue
+            fi
+            if [[ "${_lines[$i]}" == *"|"* && -n "$header" ]]; then
+                subject="${header} ${_lines[$i]}"
+                _promises_a_missing_moment "$subject" || continue
+                _is_disclosure "$subject" && continue
+                bad="${bad}
+  ${f#$REPO_ROOT/}: ${_lines[$i]}"
+                continue
+            fi
+            while IFS= read -r frag; do
+                [[ -n "$frag" ]] || continue
+                _promises_a_missing_moment "$frag" || continue
+                _is_disclosure "$frag" && continue
+                bad="${bad}
+  ${f#$REPO_ROOT/}: ${frag}"
+                # printf '%s\n', NOT '%s': with no trailing newline `read` returns non-zero on the
+                # last fragment and the loop body never runs for it, so any line that is a SINGLE
+                # sentence was never examined at all. Caught by mutation: a bullet re-introducing
+                # "Session end: Prompts to save decisions..." into the root README SURVIVED this
+                # sweep, while the storefront JSON was correctly refused, because that value
+                # happens to hold several sentences and only its last one was being dropped.
+            done < <(printf '%s\n' "${_lines[$i]}" | sed 's/\. /.\n/g')
+        done
+    done
+
+    [ -z "$bad" ] || {
+        echo "these customer-facing sentences promise a moment Codex has no channel at, without" >&2
+        echo "saying in the same breath that it is Claude Code only:${bad}" >&2
+        return 1
+    }
+
+    # And the positive statement has to be present, or the sweep above passes on a page that says
+    # nothing at all about when the prompt actually arrives.
+    local doc="$REPO_ROOT/docs/codex.md"
+    grep -qi "save prompt arrives with your next message" "$doc"         || { echo "the page does not say when the save prompt actually arrives"; return 1; }
+    grep -qi "if you have just saved, it stays quiet" "$doc"         || { echo "the page does not mention the suppression gate, so it overstates how often it fires"; return 1; }
+    grep -qi "NEXT message" "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"         || { echo "the skill does not tell the assistant when the prompt actually lands"; return 1; }
+    return 0
+}
+
+@test "docs: no published remedy names a setting the shipped code never reads" {
+    # THE DEFECT THIS PREVENTS (#31245 QA round 7). docs/codex.md told a Windows customer whose
+    # bash was in an unusual place to set MMRY_BASH, and the troubleshooting table repeated it as
+    # the first thing to try for "nothing happens at all", which is the highest-severity Windows
+    # failure there is.
+    #
+    # MMRY_BASH was read in exactly one file, hooks-handlers/codex-hook.cmd, and once the
+    # registrations moved to `sh` NOTHING launched that file. So the only self-serve remedy
+    # published for the worst Windows symptom could not take effect, and support reading the same
+    # table would have handed the customer the same inert advice.
+    #
+    # A remedy nobody can carry out is worse than no remedy: it ends the conversation.
+    local doc="$REPO_ROOT/docs/codex.md"
     [[ -f "$doc" ]] || skip "customer page not found from this test root"
 
-    grep -q "the save prompt at the end of each turn" "$doc" \
-        && { echo "the page still promises an end-of-turn prompt; the hook is on UserPromptSubmit"; return 1; }
-    grep -qi "save prompt arrives with your next message" "$doc" \
-        || { echo "the page does not say when the save prompt actually arrives"; return 1; }
-    grep -qi "if you have just saved, it stays quiet" "$doc" \
-        || { echo "the page does not mention the suppression gate, so it overstates how often it fires"; return 1; }
+    local var unread=""
+    # Every MMRY_* setting the page tells a customer to set.
+    while IFS= read -r var; do
+        [[ -n "$var" ]] || continue
+        # Where could it be read? Any shipped shell file, the manifests, or the installers.
+        if grep -rqs "$var" \
+            "$PLUGIN_ROOT"/hooks-handlers/*.sh \
+            "$PLUGIN_ROOT"/setup/* \
+            "$PLUGIN_ROOT"/hooks/*.json; then
+            continue
+        fi
+        unread="${unread} ${var}"
+    done < <(grep -o 'MMRY_[A-Z0-9_]*' "$doc" | sort -u)
 
-    grep -qi "prompts you to save before the session ends" "$PLUGIN_ROOT/hooks/codex-hooks.json" \
-        && { echo "the hook manifest still advertises a session-end prompt"; return 1; }
+    [[ -z "$unread" ]] || {
+        echo "the customer page names these settings, and no shipped file reads any of them:${unread}" >&2
+        echo "Either wire them up or stop publishing them as a remedy." >&2
+        return 1
+    }
+}
 
-    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
-    grep -q "save prompt arrives at the end of a turn" "$skill" \
-        && { echo "the skill still tells the assistant the prompt lands at end of turn"; return 1; }
-    grep -qi "NEXT message" "$skill" \
-        || { echo "the skill does not tell the assistant when the prompt actually lands"; return 1; }
-    return 0
+@test "docs: the page says which Codex surfaces this does and does not reach" {
+    # THE ESTIMATE MADE THIS A CONDITION OF APPROVAL (#31245, QA round 7). The approved estimate
+    # said: "It is not yet known whether session events fire in that platform's desktop
+    # application and cloud product. If they do not, the reachable audience shrinks and this
+    # estimate should be redone before approval rather than absorbed."
+    #
+    # Ninety-four commits later the branch still did not mention the cloud product anywhere, and
+    # the customer page did not tell a customer on an unsupported surface that this is not for
+    # them. A customer who installs into a surface that cannot run it gets silence, which is the
+    # failure mode this whole feature was built to avoid.
+    #
+    # OpenAI's plugin documentation settles two of the four: plugins run in Codex CLI and in Codex
+    # in the ChatGPT desktop app, and "the IDE extension doesn't support plugins". Cloud tasks are
+    # not addressed there and we have not run one, so the page says so rather than guessing.
+    local doc="$REPO_ROOT/docs/codex.md"
+    [[ -f "$doc" ]] || skip "customer page not found from this test root"
+
+    grep -qi "^## Where this works" "$doc" \
+        || { echo "the page does not say which surfaces this reaches"; return 1; }
+
+    local surface
+    for surface in "Codex CLI" "desktop app" "IDE extension" "cloud"; do
+        grep -qi "$surface" "$doc" \
+            || { echo "the surface table does not mention: $surface"; return 1; }
+    done
+
+    # The unsupported ones have to be named as unsupported, not merely listed.
+    grep -qi "doesn't support plugins\|does not support plugins" "$doc" \
+        || { echo "the page lists the IDE extension without saying plugins do not run there"; return 1; }
+    grep -qi "not established\|treat it as unsupported" "$doc" \
+        || { echo "the page does not admit the cloud surface is unestablished"; return 1; }
 }

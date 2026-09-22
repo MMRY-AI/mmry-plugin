@@ -1,6 +1,6 @@
 # MMRY AI
 
-Persistent memory for Claude Code and OpenAI Codex. Automatically loads memories at session start, prompts to save at session end, before context compression, and when plans are accepted.
+Persistent memory for Claude Code and OpenAI Codex. On Claude Code it loads memories at session start and prompts to save at session end, before context compression, and when plans are accepted. On Codex only the session-start load carries over: the save prompt arrives with your next message instead, and the platform gives a plugin no channel at context compression or plan acceptance. See [docs/codex.md](../docs/codex.md).
 
 Cross-platform: works on Windows (Git Bash), macOS, and Linux.
 
@@ -116,9 +116,9 @@ Both failures are recorded in `mmry-foundation.log` in your temp directory. Sett
 |------|-------------|
 | **Session starts** | Your memories load automatically via API (Foundation + directory-matched) |
 | **Every prompt** | Foundation memories are re-injected so they consistently guide responses (configurable; see Configuration) |
-| **Session ends** | Claude is prompted to save any decisions, issues, or notes before exiting |
-| **Context compresses** | Claude saves a "Session Continuity" memory so nothing is lost |
-| **Plan accepted** | Claude saves the accepted plan as a Decision memory |
+| **Session ends** | Claude is prompted to save any decisions, issues, or notes before exiting. Claude Code only: on Codex this prompt arrives with your next message instead, and only when something is unsaved |
+| **Context compresses** | Claude saves a "Session Continuity" memory so nothing is lost. Claude Code only: Codex gives a plugin no channel at that moment |
+| **Plan accepted** | Claude saves the accepted plan as a Decision memory. Claude Code only: Codex has no plan-accepted tool to trigger on |
 
 ## Commands
 

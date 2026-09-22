@@ -29,7 +29,7 @@ than anything that names the real problem.
 | Session start | Loads your memories (Foundation, universals, and any matching this directory) and writes them to a file you are told to read |
 | Every prompt you receive | Re-states the account's Foundation memories so they stay in effect |
 | After a tool call | Delivers any new coordination-group messages |
-| End of a turn | Prompts you to save what is new since the last save |
+| The next prompt, when work is unsaved | Prompts you to save what is new since the last save, and stays silent when nothing is |
 
 ## What is different on Codex, and what to do instead
 

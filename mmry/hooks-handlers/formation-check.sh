@@ -187,6 +187,18 @@ if [[ -z "$session_id" && "$hook_read_status" == "ok" ]]; then
     mmry_note_hook_read_fault "formation-check-session-id-absent" "fields=${_fc_keys:-unparsable}" || true
 fi
 
+# RESOLVE THE SESSION ID THROUGH THE HOST (#31245 QA round 7). This line used to read
+# CLAUDE_SESSION_ID then CLAUDE_CODE_SESSION_ID and never consulted CODEX_SESSION_ID at all.
+#
+# On a real Codex machine delivery still worked, because Codex supplies the session id in the hook
+# payload and $session_id is already set by the time we get here, and QA proved that twice with
+# both Claude variables unset. So this was not the delivery bug it was reported as. What it IS, is
+# the case where a Codex session is launched from a shell that already exports a Claude session
+# id: the payload read fails or the id is absent, this chain answers with the LAUNCHING session's
+# identity, and the Codex session then polls as that session and can consume directed messages
+# meant for it. mmry_session_id, from lib-host.sh sourced above, gets the precedence right per
+# host and was fixed for this in b3cefd0.
+session_id="${session_id:-$(mmry_session_id)}"
 session_id="${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
 [[ -n "$session_id" ]] || exit 0
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# userpromptsubmit-foundation.sh — UserPromptSubmit hook (#30579, #31434).
+# userpromptsubmit-foundation.sh, UserPromptSubmit hook (#30579, #31434).
 #
 # Re-injects the account's Foundation-tier memories inline on EVERY prompt, framed as
 # authoritative directives, from a session-local cache written at SessionStart
@@ -15,7 +15,7 @@
 #   - Opt-out. foundationReinject=false (config or env) makes this a no-op.
 #   - BOUNDED WALL CLOCK, and it says so when it fails (#31434). See below.
 #
-# #31434 — why this file is split into a supervisor and a worker.
+# #31434, why this file is split into a supervisor and a worker.
 #
 # When a hook exceeds its hooks.json timeout, Claude Code kills it and DISCARDS its
 # output. For this hook that means the turn silently runs with none of the account's
@@ -42,7 +42,7 @@
 #      on the NEXT firing and reported then. Belt and braces, because a silent loss is the
 #      whole defect.
 
-# NOTE: deliberately NOT `set -e` — a failure here must never fail the user's prompt.
+# NOTE: deliberately NOT `set -e`, a failure here must never fail the user's prompt.
 set -uo pipefail 2>/dev/null || true
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -180,7 +180,7 @@ _mmry_reinject_is_off_here() {
 }
 
 # ============================================================================
-# SUPERVISOR — bounds the wall clock and owns everything the customer sees.
+# SUPERVISOR, bounds the wall clock and owns everything the customer sees.
 # ============================================================================
 if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # This handler's contract is "one JSON object on stdout, or nothing at all". It has no
@@ -289,7 +289,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=10
 
     # A marker left behind by a previous firing means that firing never reached its own
-    # exit — the harness killed the whole handler — so that turn ran without directives
+    # exit, the harness killed the whole handler, so that turn ran without directives
     # and nobody was told. Report it now.
     MISSED_PREVIOUS=0
     [[ -f "$_INFLIGHT" ]] && MISSED_PREVIOUS=1
@@ -382,7 +382,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 
     if (( WORKER_RC != 0 )); then
         # The turn proceeds either way; what matters is that the customer is told, in terms
-        # they can act on, that this turn is running WITHOUT their standing directives — and
+        # they can act on, that this turn is running WITHOUT their standing directives, and
         # told the RIGHT thing. A crash and a deadline need different remedies, so they are
         # reported as different events rather than both as "it was slow".
 
@@ -425,7 +425,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             # false cause, an invented duration, and a remedy (re-send the prompt) that cannot
             # work, because whatever made the worker exit non-zero will do it again.
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: the loader failed with exit code ${WORKER_RC}. This was a failure, not a slow turn. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run ${_FOUND_RELOAD_REF} to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn, the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run ${_FOUND_RELOAD_REF} to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
         fi
         printf '%s foundation reinjection FAILED: %s\n' \
@@ -435,7 +435,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     fi
 
     # Worker finished inside the deadline with nothing to inject (toggle off, no cache,
-    # empty cache). Nothing was lost, so say nothing — including about a previous miss,
+    # empty cache). Nothing was lost, so say nothing, including about a previous miss,
     # which would be a false alarm when there are no directives to apply.
     [[ -n "${BODY//[[:space:]]/}" ]] || exit 0
 
@@ -452,12 +452,12 @@ ${BODY}"
 fi
 
 # ============================================================================
-# WORKER — the real work. Writes PLAIN TEXT to stdout; the supervisor does the
+# WORKER, the real work. Writes PLAIN TEXT to stdout; the supervisor does the
 # JSON. Anything that goes wrong here means "emit nothing", never "fail".
 # ============================================================================
 
 # Source the client for MMRY_TMPDIR + config parsing. It runs `set -euo pipefail` at the
-# top, so relax those options again immediately after — we must not fail the prompt.
+# top, so relax those options again immediately after, we must not fail the prompt.
 # shellcheck disable=SC1091
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || exit 0
 set +e +u
@@ -501,7 +501,7 @@ content="$(<"$CACHE")"
 # Guard against a non-numeric cap.
 [[ "$CAP_TOKENS" =~ ^[0-9]+$ ]] || CAP_TOKENS=1500
 
-# Token cap (~4 chars/token). Truncate + log if over — never silently balloon context.
+# Token cap (~4 chars/token). Truncate + log if over, never silently balloon context.
 cap_chars=$(( CAP_TOKENS * 4 ))
 truncated_note=""
 if (( ${#content} > cap_chars )); then

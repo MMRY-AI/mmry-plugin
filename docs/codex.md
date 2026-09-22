@@ -64,11 +64,22 @@ hooks and handlers work this out for themselves and need no help from you.
 
 ### On Windows
 
-The steps are identical. MMRY ships a small `.cmd` wrapper for Windows because Codex runs hook
-commands through `cmd.exe` there, and picks Git Bash deliberately rather than taking whatever
-`bash` happens to be first on your PATH. On a machine with WSL installed, that is often WSL's
-bash, which cannot see your Windows home directory. If you keep bash somewhere unusual, set
-`MMRY_BASH` to its full path.
+The steps are identical. You need **Git for Windows** installed, because MMRY's hooks are shell
+scripts and that is where Windows gets a shell.
+
+Every hook is launched with `sh`, deliberately, rather than with `bash`. Windows ships a
+`bash.exe` in System32 when the Windows Subsystem for Linux is installed, and that one cannot see
+your Windows files, so a hook that asked for `bash` could get the wrong shell and fail with
+nothing useful printed. Windows ships no `sh.exe` at all, so `sh` can only be Git's.
+
+If nothing happens at all, check that Git for Windows is installed and on your PATH:
+
+```
+where.exe sh
+```
+
+That should print a path inside your Git installation, usually `C:\Program Files\Git\usr\bin\sh.exe`.
+If it prints nothing, reinstall Git for Windows and choose the option that adds it to your PATH.
 
 ---
 
@@ -79,11 +90,27 @@ bash, which cannot see your Windows home directory. If you keep bash somewhere u
 | **Memories at session start** | Your Foundation memories, your account's shared knowledge, and anything matching the directory you are working in, loaded before you type anything. |
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
-| **A prompt to save before you finish** | At the end of a turn, Codex is reminded to record what is new. |
+| **A prompt to save what is new** | When you send your next message and something is still unsaved, Codex is reminded to record it. If you have just saved, it stays quiet. |
 | **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and every formation operation. |
 | **Reloading your memories mid-session** | Ask your assistant to reload and it re-runs the session-start load, which also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
+
+## Where this works
+
+MMRY is a Codex plugin, so it reaches you wherever Codex runs plugins.
+
+| Surface | MMRY |
+|---|---|
+| Codex CLI | yes, this is what the instructions above install |
+| Codex in the ChatGPT desktop app | yes, plugins are supported there |
+| The Codex IDE extension | no. OpenAI's plugin documentation states plainly that "the IDE extension doesn't support plugins", so no plugin reaches it, not only ours |
+| Codex cloud tasks | not established. OpenAI's plugin documentation does not name it either way, and we have not run a cloud task to find out. Treat it as unsupported until we say otherwise |
+
+Source: OpenAI's plugin documentation at
+[learn.chatgpt.com/docs/plugins](https://learn.chatgpt.com/docs/plugins), read 2026-09-21, which
+says "Plugins work in Chat and Work across ChatGPT on the web, desktop, and mobile, and in Codex
+in the ChatGPT desktop app" and "The IDE extension doesn't support plugins".
 
 ## What is NOT available on Codex, and what you get instead
 
@@ -184,12 +211,14 @@ separate credentials and separate directories on purpose.
 |---|---|
 | No memories at session start | Did you answer **Trust all and continue** at the hook review? Restart Codex and look for it. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
-| Nothing at all happens, on Windows | Is Git for Windows installed? Try setting `MMRY_BASH` to your `bash.exe`. |
+| Nothing at all happens, on Windows | Run `where.exe sh`. If it prints nothing, Git for Windows is missing from your PATH, and MMRY's hooks have no shell to run in. Reinstall it with the PATH option. |
 | Setup says "Failed to translate" or `execvpe(/bin/bash) failed` | You ran it in PowerShell and it picked the Linux subsystem's bash. Use the Git Bash window, or the explicit PowerShell form above. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |
 | A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It re-runs the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |
-| "Your Foundation directives were NOT applied to this turn" | Re-send the prompt. If it keeps happening, ask your assistant to reload your memories; the notice itself names the exact command for your install. |
+| "Your Foundation directives were NOT applied to this turn (loading took over Ns and was stopped)" | That one is a slow load, so re-send the prompt. If it keeps happening, ask your assistant to reload your memories; the notice names the exact command for your install. |
+| "Your Foundation directives were NOT applied to this turn, the loader exited with code N" | That one is a failure, not a slow load, and the notice says so: re-sending will not help. The usual cause is an incomplete install, so reinstall the plugin. |
+| You joined a group but no message ever arrives | You almost certainly joined with the `mmry_formation_*` connector tools. They enrol you under a different identity from the one your hooks poll with, so you appear on the roster and receive nothing, with no error. Leave and rejoin by asking your assistant to run the formation join script. |
 
 To report a problem, ask the assistant to submit feedback (it has a script for it) or write to us
 through [mmryai.com](https://mmryai.com).

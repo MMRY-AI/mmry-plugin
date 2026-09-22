@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# stop-check.sh — Stop hook: nags the assistant to save incremental session memories.
+# stop-check.sh - the save prompt. Registered on Stop on Claude Code, and on UserPromptSubmit
+# on Codex, because a Stop hook that exits 2 is reported there as a failure. See item 6 below.
 #
 # Design (#29912):
 #   The Claude Code "Stop" event fires after every assistant turn, not at session end.
@@ -32,10 +33,14 @@
 #        than left implicit: a customer who silently loses work they believed was kept is the one
 #        failure this feature exists to prevent.
 #
-#        Stop DOES work on Codex, and identically: events/stop.rs line 343 takes exit 2 with
-#        non-empty stderr and makes it the continuation prompt. The requirement is that a Codex
-#        session ending produces the same save prompt a Claude Code session produces, and it does,
-#        with one added sentence.
+#        ON CODEX THIS IS NOT A STOP HOOK AT ALL. An earlier version of this comment said "Stop
+#        DOES work on Codex, and identically", and that claim outlived the code: Codex reports a
+#        Stop hook that exits 2 as a FAILED hook to the customer, so the prompt arrives as an
+#        error rather than as a directive. The registration moved to UserPromptSubmit, where the
+#        prompt is delivered as additionalContext with exit 0, and Eric's decision on 2026-09-20
+#        was that it must stay silent when there is nothing to save. So on Codex it fires at the
+#        START of the customer's next turn, gated on the save marker, and hooks/codex-hooks.json
+#        registers no Stop hook whatsoever. Claude Code is untouched: stderr plus exit 2, on Stop.
 
 set -euo pipefail
 
