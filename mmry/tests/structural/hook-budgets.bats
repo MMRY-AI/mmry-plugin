@@ -446,7 +446,7 @@ SHIMEOF
     off_line="$(printf '%s
 ' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()' | head -1 | cut -d: -f1)"
     worker_line="$(printf '%s
-' "$body" | grep -n 'MMRY_FOUNDATION_WORKER=1 bash' | head -1 | cut -d: -f1)"
+' "$body" | grep -n '^ *MMRY_FOUNDATION_WORKER=1 ' | head -1 | cut -d: -f1)"
     [[ "$def_line" =~ ^[0-9]+$ ]]
     [[ "$src_line" =~ ^[0-9]+$ ]]
     [[ "$off_line" =~ ^[0-9]+$ ]]
