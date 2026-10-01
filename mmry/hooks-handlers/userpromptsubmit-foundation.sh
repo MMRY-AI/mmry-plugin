@@ -182,10 +182,13 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # the worker survives briefly and keeps writing, so its out-file is orphaned. `kill -0` is
     # a bash builtin, so this costs no process spawn.
     #
-    # Both file families end in the supervisor's PID deliberately, so one loop reaps both and
-    # neither can accumulate in the customer's temp directory across a long session.
+    # All three file families end in the supervisor's PID deliberately, so one loop reaps them
+    # and none can accumulate in the customer's temp directory across a long session. The
+    # pending delivery record joined them in #31583: a supervisor killed inside its emit never
+    # promotes or removes its own, by design, so somebody else has to.
     for _stale in "${_FOUND_TMPDIR}"/.mmry-foundation-out.* \
-                  "${_FOUND_TMPDIR}"/.mmry-foundation-deadline.*; do
+                  "${_FOUND_TMPDIR}"/.mmry-foundation-deadline.* \
+                  "${_FOUND_TMPDIR}"/mmry-foundation.status.pending.*; do
         [[ -e "$_stale" ]] || continue
         _stale_pid="${_stale##*.}"
         [[ "$_stale_pid" =~ ^[0-9]+$ ]] || continue
@@ -204,7 +207,22 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     : > "$OUTFILE" 2>/dev/null || true
     : > "$_INFLIGHT" 2>/dev/null || true
 
-    MMRY_FOUNDATION_WORKER=1 bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" \
+    # THE WORKER DOES NOT GET TO SAY THE TURN WAS DELIVERED (#31583, security on QA round 4).
+    #
+    # It used to write the delivery record itself, and it did so BEFORE this supervisor had
+    # emitted anything. Every way a turn can still lose its output after that point - the
+    # harness killing this process past the hook budget, the JSON never reaching a reader -
+    # left a record saying the set had been sent, so /mmry:foundation-status answered
+    # "Delivered: IN FULL, last sent 1 second ago" for a turn that delivered nothing. That is
+    # the defect this ticket exists to close, reappearing in the command built to detect it.
+    #
+    # The worker now writes a PENDING record, scoped to this supervisor, and only this process
+    # promotes it, and only after its own emit has returned success.
+    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status"
+    _PENDING="${_STATUS}.pending.$$"
+    rm -f "$_PENDING" 2>/dev/null || true
+    MMRY_FOUNDATION_WORKER=1 MMRY_FOUNDATION_PENDING="$_PENDING" \
+        bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" \
         > "$OUTFILE" 2>>"$_FOUND_ERR" &
     WORKER_PID=$!
 
@@ -323,7 +341,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
-        rm -f "$_INFLIGHT" 2>/dev/null || true
+        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
 
@@ -347,7 +365,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection FAILED: %s\n' \
             "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
-        rm -f "$_INFLIGHT" 2>/dev/null || true
+        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
 
@@ -355,7 +373,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # empty cache). Nothing was lost, so say nothing — including about a previous miss,
     # which would be a false alarm when there are no directives to apply.
     if [[ -z "${BODY//[[:space:]]/}" ]]; then
-        rm -f "$_INFLIGHT" 2>/dev/null || true
+        # Nothing to send, so nothing can go missing in the sending. A verified-empty record
+        # is a true answer and is promoted; for toggle-off or no-cache there is no pending
+        # record and this is a no-op.
+        [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
 
@@ -367,8 +389,13 @@ ${BODY}"
         USERMSG="MMRY AI: your Foundation directives were not applied to the previous turn (the hook was cut short). They are applied again now."
     fi
 
-    _mmry_emit "$BODY" "$USERMSG"
-    rm -f "$_INFLIGHT" 2>/dev/null || true
+    # Promoted only if the emit itself succeeded. If this process is killed inside the emit,
+    # or the reader is gone, the record keeps describing the last turn that DID deliver,
+    # which stays true.
+    if _mmry_emit "$BODY" "$USERMSG"; then
+        [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+    fi
+    rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
     exit 0
 fi
 
@@ -474,6 +501,10 @@ MANIFEST="${CACHE}.manifest"
 # directives reaching my assistants right now" without anyone reading a cache file
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
 STATUS="${MMRY_TMPDIR}/mmry-foundation.status"
+# Where the worker writes its delivery record. Under the supervisor this is a pending file the
+# supervisor promotes after a successful emit; run on its own, as the unit tests do, the
+# worker has no supervisor and writes the record directly.
+STATUS_OUT="${MMRY_FOUNDATION_PENDING:-$STATUS}"
 
 # THROUGH THE SHARED VERIFIER (#31583 QA). This block used to carry its own copy of the
 # manifest regex, the entries=0 check, the checksum comparison and the whitespace check, and
@@ -518,7 +549,7 @@ if (( _verdict == 1 )); then
     # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
     # so it goes on the record the status command reads.
     printf '%s ok entries=0 bytes=0
-' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "$STATUS" 2>/dev/null || true
+' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "$STATUS_OUT" 2>/dev/null || true
     exit 0
 fi
 
@@ -561,7 +592,7 @@ content="$(<"$CACHE")"
 # STAMPED WITH THE SESSION THAT WROTE IT (#31583 QA round 4, finding 4c). Without the stamp
 # this record outlives its session and the next one reads it as its own.
 printf '%s ok entries=%s bytes=%s
-' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" "$_exp_entries" "$_act_bytes" > "$STATUS" 2>/dev/null || true
+' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
 
 printf '%s' "The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
 

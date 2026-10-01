@@ -207,3 +207,30 @@ _assert_agree() {
     run bash "$copy"
     [[ "$output" != *'Last sent'* ]]
 }
+
+# #31583, security on QA round 4: the delivery record must describe a DELIVERY, not an intent.
+# The worker used to write it before the supervisor had emitted anything, so a turn whose
+# output never reached a reader was reported by the command as "Delivered: IN FULL, last sent
+# 1 second ago". The turn below has no reader: its stdout is closed before the emit.
+@test "cross-surface: #31583 a turn whose output reaches nobody is NOT recorded as delivered" {
+    printf '{"foundationReinject": true}\n' > "$CFG"
+
+    # CONTROL first: an ordinary turn with a reader does record its delivery, so the
+    # assertion below cannot be satisfied by a record that is never written at all.
+    _seed_valid_cache
+    run bash "$HOOK"
+    [[ "$output" == *'Eric builds MMRY'* ]]
+    [ -e "$TEST_TMPDIR/mmry-foundation.status" ]
+
+    # The same turn again, with nobody reading it.
+    rm -f "$TEST_TMPDIR/mmry-foundation.status"
+    bash "$HOOK" 2>/dev/null | head -c 0 || true
+    sleep 1
+
+    if [ -e "$TEST_TMPDIR/mmry-foundation.status" ]; then
+        echo "a turn that delivered nothing was recorded as delivered: $(cat "$TEST_TMPDIR/mmry-foundation.status")"
+        return 1
+    fi
+    run bash "$STATUSCMD"
+    [[ "$output" == *'not yet in this session'* ]]
+}
