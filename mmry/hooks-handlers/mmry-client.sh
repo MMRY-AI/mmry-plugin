@@ -423,16 +423,24 @@ mmry_write_foundation_cache() {
     #   next successful write.
     #
     # Renaming both from PID-scoped temps makes each file's arrival atomic and stops two
-    # writers clobbering a shared filename mid-write.
+    # writers clobbering a shared filename MID-WRITE. That is all it does, and an earlier
+    # version of this comment implied more (#31583 QA round 4, architecture). It does NOT stop
+    # two writers interleaving the PAIR: each file still lands by its own rename, so writer A
+    # renaming its manifest, writer B renaming both, then A renaming its cache leaves A's cache
+    # beside B's manifest, which stays inconsistent until the next successful write. That
+    # follows from the order of the four renames rather than from a reproduction; it is the
+    # same two-file gap described below, seen from the writer's side instead of the reader's.
     #
     # WHAT THIS DOES NOT FIX, stated rather than implied. There are still TWO files and they
     # arrive one after the other, so a reader in the gap sees a new manifest against an old
     # cache and refuses a set that is in fact healthy. QA measured that at 225 of 2,808 reads,
     # 8 percent, on a live refresh loop. I could not reproduce it myself: both attempts were
-    # timing-fragile and neither contradicts their measurement. Closing it properly needs the
-    # manifest and the cache to become ONE file so a single rename publishes both, which is a
-    # format change and its own piece of work. Ordering the two renames differently does not
-    # help; it only moves which side of the pair is stale.
+    # timing-fragile and neither contradicts their measurement. This is #31597, scheduled in
+    # the same release. ONE file published by a single rename is necessary and is NOT
+    # sufficient: an attempt here measured 46 refusals in 177 reads, worse than today, because
+    # the reader opened that one file three times during a single check. Reading it once into
+    # memory and answering every question from that copy took it to 0 in 290. Ordering the two
+    # renames differently does not help; it only moves which side of the pair is stale.
     local mtmp="${manifest}.new.$$"
     printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s
 '         "$entries" "$count" "$sum" > "$mtmp" 2>/dev/null || {

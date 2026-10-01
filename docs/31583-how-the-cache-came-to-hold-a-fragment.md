@@ -104,13 +104,19 @@ possibility remains open and, on the evidence available, cannot be closed.
 
 ## Why the product no longer depends on the answer
 
-The manifest makes attribution unnecessary for safety. The writer records what it wrote and
-the reader refuses anything that is not byte for byte that, so a file written by something
-else is refused whatever wrote it and whatever it contains. That is the part that had to be
-true regardless of which of possibilities 3 and 4 actually occurred.
+The manifest makes attribution unnecessary for THIS failure. The writer records what it
+wrote and the reader refuses a cache that is not byte for byte what its record describes. The
+observed artefact was a four-byte cache beside nothing that described four bytes, so whichever
+of possibilities 3 and 4 produced it, it is now refused and reported rather than delivered.
 
-The finding that matters for the product is therefore not "process P did it" but that the
-product had no way to tell its own output from anything else's, and now does.
+What the manifest does NOT do, corrected after QA round 4 showed the earlier wording claimed
+it: it is a plaintext checksum written beside the cache by anything able to write the cache.
+A process that replaces the cache AND writes a matching manifest is accepted, and Compliance
+demonstrated exactly that. So the claim is mutual consistency, not provenance. The product can
+now tell a damaged, truncated, half-written or orphaned copy from a sound one. It still cannot
+tell its own output from a deliberate impostor's, and nothing in a shared, world-writable temp
+directory can, without a key or a private location. Restricting where these files live and who
+may write them is recorded as its own piece of work rather than claimed here.
 
 ## What is deliberately NOT closed here, and where it lives
 
