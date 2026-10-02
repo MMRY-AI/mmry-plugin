@@ -50,6 +50,10 @@ WRITER_TESTS="unit/foundation-cache-write.bats"
 STATUS_TESTS="handlers/foundation-status.bats"
 STATUS_REL="hooks-handlers/foundation-status.sh"
 VERIFY_TESTS="unit/foundation-verify.bats"
+# The two-paths comparison (#31411 TC5): session-start's bytes on disk against the per-prompt
+# hook's decoded output. Added to the harness at QA's request, so that its bite is proven by
+# the committed run rather than by a reviewer re-deriving it.
+BOTH_PATHS_TESTS="handlers/foundation-both-paths.bats"
 STATUS_CMD_TESTS="structural/foundation-status-command.bats"
 HELP_REL="commands/help.md"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
@@ -215,7 +219,7 @@ mutate_m11() {
         }
     ' "$f" > "$t" && mv "$t" "$f"
 }
-targets_m11="$HANDLER_TESTS"
+targets_m11="$HANDLER_TESTS $BOTH_PATHS_TESTS"
 desc_m11="#31411 the token-cap cut reinstated (the set is silently truncated again)"
 
 # Replace the whole verification with the precondition it replaced: "the file is not empty".
@@ -426,7 +430,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS $BOTH_PATHS_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
