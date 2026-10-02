@@ -159,10 +159,11 @@ else:
 # WORKER, and the escape is parameter expansion whose cost grows faster than its input
 # (measured on this host, worst case: 8 KB 57 ms, 128 KB 428 ms, 360 KB 2,720 ms).
 #
-# The timing is not the problem. Nothing a customer has comes close to the 10 s deadline; the
-# largest Foundation set ever measured on the platform is 34,338 characters and it would take
-# roughly 700 KB to reach it. The problem was that IF it ever ran long, the next turn would
-# say nothing, because the evidence had already been deleted.
+# CORRECTED (#31411 QA): this used to say the timing was not the problem and that it would take
+# roughly 700 KB to reach the deadline. QA measured turns lost in silence at 400 KB. The timing
+# is now fixed and bounded, see the escape in userpromptsubmit-foundation.sh and the R6 tests in
+# hook-budgets.bats. The problem recorded here still stands on its own: IF a turn ran long, the
+# next turn said nothing, because the evidence had already been deleted.
 # ============================================================================
 
 @test "#31411 the in-flight marker is cleared AFTER the emit, never before it" {

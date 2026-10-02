@@ -119,7 +119,7 @@ EOF
     # A REALISTIC SET, NOT ONE LINE (#31411 QA, performance). This was a single 45-byte
     # directive, the smallest set possible, on the one change whose whole point is that there
     # is no largest size. The bar was sound and could not see a cost that grows with the set.
-    # About 35 KB: the largest Foundation set ever measured on the platform is 34,338 characters.
+    # About 35 KB: the largest Foundation set on the platform is 34,343 characters (2026-10-02).
     yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
         | head -n 400 > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"

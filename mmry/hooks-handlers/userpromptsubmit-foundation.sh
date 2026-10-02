@@ -344,16 +344,16 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # after the emit (#31411 QA).
     #
     # It used to be cleared at this point, which left the rest of this path unreported: the
-    # emit and its JSON escape run after it, the watchdog only ever kills the WORKER, and the
-    # escape is pure parameter expansion whose cost grows faster than its input. Measured on
-    # this host with worst-case content, every line short so the newline replacement does the
-    # most work: 8 KB 57 ms, 64 KB 120 ms, 128 KB 428 ms, 256 KB 1,435 ms, 360 KB 2,720 ms.
+    # emit ran after it and the watchdog only ever kills the WORKER.
     #
-    # That is superlinear and it is nowhere near the 10 s deadline or the 20 s budget at any
-    # size a customer has: the largest Foundation set ever measured on the platform is 34,338
-    # characters. Extrapolating the curve, it would take roughly 700 KB to reach 10 s. So the
-    # speed is not the defect and I have NOT put a jq process on this path to fix it; #31434
-    # deliberately took the processes out of here.
+    # CORRECTED (#31411 QA). This comment used to say the escape's cost was "nowhere near" the
+    # deadline at any size a customer has, extrapolating roughly 700 KB to reach 10 s. That
+    # was wrong: QA measured turns lost in silence at 400 KB, and it reproduced here at 17 s.
+    # The cost was two whole-set whitespace scans plus a JSON escape that is quadratic in the
+    # number of lines, all after the watchdog had let go. The scans are now a search for one
+    # character, the escape runs in chunks and INSIDE the worker's deadline, and the supervisor
+    # only copies bytes. Measured after: 400 KB 822 ms, 2 MB 3,211 ms, 8 MB stopped at the
+    # deadline and reported. The largest set on the platform is 34,343 characters (2026-10-02).
     #
     # The defect was that if it ever did run long, the turn would be silent about it, because
     # the marker saying "a turn was cut short" had already been removed. Clearing it after the
