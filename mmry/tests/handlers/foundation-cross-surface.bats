@@ -234,3 +234,20 @@ _assert_agree() {
     run bash "$STATUSCMD"
     [[ "$output" == *'not yet in this session'* ]]
 }
+
+
+# #31583 QA round 5, 4d. The worker made its own on/off decision from the jq-parsed value while
+# the supervisor and the command used the text scan, so wherever the scan read ON and jq read OFF
+# the hook sent nothing and the command promised the next prompt would send it. Both configs
+# below are QA's reproductions; the first is an ordinary hand-edit, a false appended after true.
+@test "cross-surface: #31583 4d true-then-false duplicate keys must not split the hook from the command" {
+    _seed_valid_cache
+    printf '{"foundationReinject": true, "foundationReinject": false}\n' > "$CFG"
+    _assert_agree "a true-then-false duplicate key"
+}
+
+@test "cross-surface: #31583 4d a nested key before the real one must not split the hook from the command" {
+    _seed_valid_cache
+    printf '{"x": {"foundationReinject": true}, "foundationReinject": false}\n' > "$CFG"
+    _assert_agree "a nested foundationReinject before the top-level one"
+}

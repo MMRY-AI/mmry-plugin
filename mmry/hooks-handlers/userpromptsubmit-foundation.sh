@@ -468,6 +468,11 @@ fi
 # JSON. Anything that goes wrong here means "emit nothing", never "fail".
 # ============================================================================
 
+# The REAL environment value of the switch, taken before the client is sourced, because
+# mmry_load_config populates that same variable from the config file (defaulting it to true) and
+# afterwards an inherited value and a derived one cannot be told apart (#31583 QA round 5, 4d).
+_MMRY_ENV_REINJECT="${MMRY_FOUNDATION_REINJECT-}"
+
 # Source the client for MMRY_TMPDIR + config parsing. It runs `set -euo pipefail` at the
 # top, so relax those options again immediately after — we must not fail the prompt.
 # shellcheck disable=SC1091
@@ -485,9 +490,17 @@ CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
 # affected machine read "had 6000 chars" (#31411).
 LOG="${MMRY_TMPDIR}/mmry-foundation.log"
 
-# Toggle off -> no-op. NOTE the supervisor checks this too, before it ever spawns this
-# worker, so that the remedy the crash notice recommends actually works (#31434 QA).
-_mmry_reinject_off "$REINJECT" && exit 0
+# Toggle off -> no-op. The supervisor checks this too, before it ever spawns this worker, so
+# that the remedy the crash notice recommends actually works (#31434 QA).
+#
+# ONE INPUT, NOT TWO (#31583 QA round 5, 4d). This used to decide from REINJECT, the jq-parsed
+# value, while the supervisor and /mmry:foundation-status decide with the text scan in
+# lib-foundation-switch.sh. Wherever the two disagree the customer was misled: a config saying
+# true and then false (an ordinary hand-edit) has the scan reading ON and jq reading OFF, so the
+# supervisor spawned this worker, this worker exited silently, and the status command promised
+# the next prompt would send the set. It now asks the same routine, with the same input, that
+# the other two use.
+MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && exit 0
 
 # TTL-gated BACKGROUND refresh (#30579): if the cache is older than the refresh window,
 # re-fetch Foundation memories in the background so an admin-added memory propagates without
