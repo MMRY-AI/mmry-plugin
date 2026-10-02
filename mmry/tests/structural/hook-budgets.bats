@@ -116,7 +116,12 @@ EOF
 
 @test "hook-budgets: the Foundation hook's budget is a large multiple of its MEASURED cost" {
     _write_config
-    printf -- '- Truthfulness: never overstate evidence.\n' > "$TEST_TMPDIR/mmry-foundation.md"
+    # A REALISTIC SET, NOT ONE LINE (#31411 QA, performance). This was a single 45-byte
+    # directive, the smallest set possible, on the one change whose whole point is that there
+    # is no largest size. The bar was sound and could not see a cost that grows with the set.
+    # About 35 KB: the largest Foundation set ever measured on the platform is 34,338 characters.
+    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
+        | head -n 400 > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
 
     local handler cost budget
@@ -144,7 +149,7 @@ EOF
     (( probe_rc == 0 ))
     [[ -n "$probe_out" ]]
     printf '%s' "$probe_out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-    [[ "$probe_out" == *'Truthfulness: never overstate evidence'* ]]
+    [[ "$probe_out" == *'every claim backed by something you ran'* ]]
     # Headroom of at least 5x. At the 5 s budget this refuses for any cost above 1000 ms,
     # which is exactly the range that was measured in the field.
     #
@@ -469,4 +474,56 @@ SHIMEOF
     # Sourced before it is called, and both before anything is spawned.
     (( src_line < off_line ))
     (( off_line < worker_line ))
+}
+
+
+# #31411 R6: there is no size at which the product SILENTLY withholds the set.
+#
+# Before this, the whole-set escape ran in the supervisor after the watchdog had released the
+# worker, so nothing bounded it: measured at 17 s for 400 KB and 28 s for 2 MB, past the 20 s
+# hook budget, where Claude Code discards the output and neither channel says anything. The
+# escape now runs inside the worker's deadline. These two pin both halves of that.
+
+@test "hook-budgets: #31411 a set thirty times the largest ever measured is delivered in full, inside the budget" {
+    _write_config
+    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
+        | head -n 12000 > "$TEST_TMPDIR/mmry-foundation.md"
+    _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
+    local bytes; bytes="$(wc -c < "$TEST_TMPDIR/mmry-foundation.md" | tr -d ' ')"
+    # About 1 MB. Sized so the OLD code could not pass: at 400 KB its two whole-set scans took
+    # 17 s, which is still inside a 20 s budget, so a smaller fixture would have gone green
+    # against exactly the regression this exists to catch.
+    (( bytes > 1000000 ))
+
+    local budget t0 t1 ms
+    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
+    t0="$(date +%s%N)"
+    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    t1="$(date +%s%N)"
+    ms=$(( (t1 - t0) / 1000000 ))
+    echo "${bytes} bytes delivered in ${ms} ms against a ${budget} s budget" >&3
+
+    [ "$status" -eq 0 ]
+    # In full: every directive is there, and nothing reported a failure.
+    [ "$(printf '%s' "$output" | grep -o 'every claim backed by something you ran' | wc -l | tr -d ' ')" -eq 12000 ]
+    [[ "$output" != *systemMessage* ]]
+    (( ms < budget * 1000 ))
+}
+
+@test "hook-budgets: #31411 a set too large to escape before the deadline is REPORTED, never dropped in silence" {
+    _write_config
+    # Large enough that the escape cannot finish inside a one-second deadline on any machine
+    # this suite runs on, so the watchdog has to act.
+    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
+        | head -n 50000 > "$TEST_TMPDIR/mmry-foundation.md"
+    _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
+
+    MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [ "$status" -eq 0 ]
+    # Not silent: the customer channel carries a notice, and it says the set was NOT applied.
+    [ -n "$output" ]
+    [[ "$output" == *systemMessage* ]]
+    [[ "$output" == *'NOT applied'* ]]
+    # And no partial set was passed off as the account guidance.
+    [[ "$output" != *'every claim backed by something you ran'* ]]
 }

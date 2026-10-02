@@ -77,25 +77,85 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight"
 # it now escapes tab and CR as well - previously those went into the string raw, which is
 # invalid JSON. Other control characters below 0x20 are still passed through unescaped; that
 # is unchanged behaviour and Foundation memories are prose, not binary.
-_mmry_json_escape() {
-    local s="$1"
-    s="${s//\\/\\\\}"       # backslash FIRST or it re-escapes the escapes below
-    s="${s//\"/\\\"}"
-    s="${s//$'\015'/\\r}"
-    s="${s//$'\011'/\\t}"
-    s="${s//$'\012'/\\n}"
-    printf '%s' "$s"
+# NAMED FOR THIS FILE ALONE (#31411 QA). It was _mmry_json_escape, and mmry-client.sh defines a
+# function of that same name. The supervisor never sources the client, so it got this one. The
+# WORKER sources the client after this definition, so the client's silently replaced it there:
+# moving the payload escape into the worker therefore ran a different, older escaper - one that
+# leaves most control characters raw and is quadratic on newlines - while every test of this
+# function passed against this copy. Found because a form feed came out escaped and a 0x01 did
+# not. A unique name makes the override impossible rather than unlikely.
+_mmry_fnd_json_escape() {
+    # IN FIXED-SIZE CHUNKS (#31411 QA, performance, R6).
+    #
+    # Each replacement below is one character for one escape, so a match can never straddle a
+    # chunk boundary, and escaping the set chunk by chunk gives exactly the same bytes as
+    # escaping it whole. It matters because bash replacement is quadratic in the number of
+    # matches: the newline pass alone took 24,097 ms on a 2 MB set of 21,500 lines, after the
+    # worker's deadline had already released it, so the harness discarded the output and
+    # nothing was said. Chunked, the whole escape took about 3 s at that size.
+    #
+    # Byte offsets, not characters, so a multibyte sequence is copied through a boundary intact;
+    # every pattern here is ASCII and no UTF-8 continuation byte can match one. The locale is
+    # local to this function and is restored on return.
+    local LC_ALL=C
+    local s="$1" out="" p i=0 n step=16384
+    n=${#s}
+    local _cc=$'[\001-\010\013\014\016-\037]' _need=0 _i _ch _hex
+    # EVERY OTHER CONTROL CHARACTER, BUT ONLY WHEN ONE IS THERE (#31411 QA, R1). JSON forbids
+    # raw characters below 0x20 in a string, and only tab, CR and LF used to be escaped, so a
+    # form feed pasted from a PDF or a word processor broke the hook's JSON while the product
+    # recorded the turn as delivered. One test decides; the extra passes run only if needed.
+    [[ "$s" =~ $_cc ]] && _need=1
+    while (( i < n )); do
+        p="${s:i:step}"
+        p="${p//\\/\\\\}"       # backslash FIRST or it re-escapes the escapes below
+        p="${p//\"/\\\"}"
+        p="${p//$'\015'/\\r}"
+        p="${p//$'\011'/\\t}"
+        p="${p//$'\012'/\\n}"
+        if (( _need )); then
+            for (( _i = 1; _i < 32; _i++ )); do
+                case "$_i" in 9|10|13) continue ;; esac
+                printf -v _hex '%02x' "$_i"
+                printf -v _ch "\x${_hex}"
+                p="${p//"$_ch"/\\u00${_hex}}"
+            done
+        fi
+        out+="$p"
+        i=$(( i + step ))
+    done
+    printf '%s' "$out"
+}
+
+# The same object, for a context the WORKER has already JSON-escaped (#31411 QA, R6).
+#
+# The success payload is the whole Foundation set, and escaping it is the one cost on this path
+# that grows faster than the set does. It used to happen HERE, in the supervisor, after the
+# watchdog had already released the worker, so on a large enough set it alone could carry the
+# turn past the hook budget, where Claude Code discards the output and nothing is said on either
+# channel. The worker now escapes its own payload inside its deadline, so a set too large to
+# escape in time is killed at the deadline and REPORTED, and this side only copies bytes.
+# R6 says there is no size at which the product silently withholds the set; this is what makes
+# that true at any size rather than merely at every size anyone has measured.
+_mmry_emit_escaped() {
+    local ctx_escaped="$1" msg="$2"
+    [[ -z "$ctx_escaped" && -z "$msg" ]] && return 0
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$ctx_escaped"
+    if [[ -n "$msg" ]]; then
+        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")"
+    fi
+    printf '}'
 }
 
 _mmry_emit() {
     local ctx="$1" msg="$2"
     [[ -z "$ctx" && -z "$msg" ]] && return 0
     printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' \
-        "$(_mmry_json_escape "$ctx")"
+        "$(_mmry_fnd_json_escape "$ctx")"
     # Omit systemMessage entirely when there is nothing to say, rather than emitting an
     # empty string that a client could render as a blank notice.
     if [[ -n "$msg" ]]; then
-        printf ',"systemMessage":"%s"' "$(_mmry_json_escape "$msg")"
+        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")"
     fi
     printf '}'
 }
@@ -372,7 +432,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # Worker finished inside the deadline with nothing to inject (toggle off, no cache,
     # empty cache). Nothing was lost, so say nothing — including about a previous miss,
     # which would be a false alarm when there are no directives to apply.
-    if [[ -z "${BODY//[[:space:]]/}" ]]; then
+    # Same fix as the verifier's blank check, for the same measured reason (#31411 QA): this
+    # was a whole-set rewrite costing 8,306 ms at 400 KB and sat OUTSIDE every guard, after the
+    # watchdog had already let the worker go, so on a large set it alone could carry the turn
+    # past the hook budget, where the harness discards the output and nothing is said.
+    if [[ ! "$BODY" =~ [^[:space:]] ]]; then
         # Nothing to send, so nothing can go missing in the sending. A verified-empty record
         # is a true answer and is promoted; for toggle-off or no-cache there is no pending
         # record and this is a no-op.
@@ -383,16 +447,16 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 
     USERMSG=""
     if (( MISSED_PREVIOUS == 1 )); then
-        BODY="NOTE: on the PREVIOUS turn these directives were not applied - loading them was cut short and its output discarded. Treat that turn's response as having been produced without them.
-
-${BODY}"
+        # BODY is already escaped by the worker, so only the note is escaped here, and the
+        # blank line between them is written as its escaped form.
+        BODY="$(_mmry_fnd_json_escape "NOTE: on the PREVIOUS turn these directives were not applied - loading them was cut short and its output discarded. Treat that turn's response as having been produced without them.")\n\n${BODY}"
         USERMSG="MMRY AI: your Foundation directives were not applied to the previous turn (the hook was cut short). They are applied again now."
     fi
 
     # Promoted only if the emit itself succeeded. If this process is killed inside the emit,
     # or the reader is gone, the record keeps describing the last turn that DID deliver,
     # which stays true.
-    if _mmry_emit "$BODY" "$USERMSG"; then
+    if _mmry_emit_escaped "$BODY" "$USERMSG"; then
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
     fi
     rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
@@ -594,7 +658,18 @@ content="$(<"$CACHE")"
 printf '%s ok entries=%s bytes=%s
 ' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
 
-printf '%s' "The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
+# ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
+# treats a successful worker's output as already-escaped JSON string content and copies it.
+_payload="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
 
 ${content}"
+printf '%s' "$(_mmry_fnd_json_escape "$_payload")" || {
+    # A FAILED EMIT IS A FAILURE, NOT A DELIVERY (#31411 QA). This exited 0 unconditionally,
+    # so a write to the supervisor's out-file that failed - disk full, file gone - was handed
+    # back as success and the supervisor emitted whatever partial text had landed. Non-zero
+    # takes the supervisor's crash path, which tells the customer, and the pending delivery
+    # record is withdrawn so nothing claims a turn that did not happen.
+    rm -f "$STATUS_OUT" 2>/dev/null
+    exit 5
+}
 exit 0

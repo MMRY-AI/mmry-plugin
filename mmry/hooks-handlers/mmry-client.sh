@@ -360,7 +360,13 @@ mmry_verify_foundation_cache() {
     # status command missed this branch for a whole round and told customers IN FULL.
     local content
     content="$(<"$cache")"
-    if [[ -z "${content//[[:space:]]/}" ]]; then
+    # A SEARCH FOR ONE CHARACTER, NOT A REWRITE OF THE WHOLE SET (#31411 QA, performance).
+    # This was `[[ -z "${content//[[:space:]]/}" ]]`, which builds a second copy of the entire
+    # set with every space removed just to ask whether anything is left. Bash does that by
+    # rescanning, so the cost is superlinear: measured at 8,306 ms on 400 KB, and there were two
+    # copies of it on the per-prompt path. The regex stops at the first non-space character and
+    # took 53 ms on the same input; on any real set that character is near the very start.
+    if [[ ! "$content" =~ [^[:space:]] ]]; then
         printf 'blank|the cached directives verified but contain no readable text'
         return 3
     fi

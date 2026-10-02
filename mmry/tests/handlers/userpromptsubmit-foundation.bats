@@ -989,3 +989,52 @@ _plugin_with_working_refresh() {
     [[ "$output" == *'load-memories'* ]]
     [[ "$output" != *'upgrading the MMRY plugin'* ]]
 }
+
+
+# #31411 R1: a Foundation memory with a control character in it must still produce valid JSON.
+# The API stores a form feed and returns it as a valid escape; it arrives by pasting from a
+# PDF or a word processor. Only tab, CR and LF used to be escaped, so the hook emitted the raw
+# byte, strict JSON.parse refused the whole output, and the product recorded a delivery.
+# jq is strict about this: it rejects an unescaped control character, which the control
+# assertion below proves before the real one relies on it.
+@test "userpromptsubmit-foundation: #31411 control characters in a directive still produce valid JSON, decoded intact" {
+    # CONTROL: the parser used here really does refuse the raw byte.
+    if printf '{"a":"x\fy"}' | jq -e .a >/dev/null 2>&1; then
+        echo "jq accepted a raw form feed, so it cannot prove anything below"; return 1
+    fi
+
+    printf -- '- Pasted: page one\fpage two \001 and \037 end\n' > "$CACHE"
+    manifest_now
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    local ctx
+    ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')" || {
+        echo "the hook emitted JSON that a strict parser refused"; return 1; }
+    # Decoded intact: the form feed and both other control bytes are back where they were.
+    [[ "$ctx" == *'page one'$'\f''page two'* ]]
+    [[ "$ctx" == *$'\001'* ]]
+    [[ "$ctx" == *$'\037'* ]]
+}
+
+# #31411: a worker whose own emit fails must say so, not exit 0. It used to exit 0
+# unconditionally, so a failed write was handed back as a delivery. Its pending delivery
+# record is withdrawn too, so nothing claims a turn that did not happen.
+@test "userpromptsubmit-foundation: #31411 a worker whose emit fails exits non-zero and withdraws its delivery record" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    manifest_now
+    local pending="$TEST_TMPDIR/pending-under-test"
+
+    # Stdout closed: the final printf has nowhere to go.
+    MMRY_FOUNDATION_WORKER=1 MMRY_FOUNDATION_PENDING="$pending" run bash -c 'exec >&-; bash "$1"' _ "$HANDLER"
+    [ "$status" -ne 0 ]
+    if [ -e "$pending" ]; then
+        echo "a failed emit left a record claiming delivery: $(cat "$pending")"; return 1
+    fi
+
+    # CONTROL: the same worker with a working stdout exits 0 and DOES write the record, so
+    # the assertions above are not satisfied by a worker that never writes one at all.
+    MMRY_FOUNDATION_WORKER=1 MMRY_FOUNDATION_PENDING="$pending" run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ -e "$pending" ]
+}
