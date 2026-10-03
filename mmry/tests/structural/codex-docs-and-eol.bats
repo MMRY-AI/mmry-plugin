@@ -471,7 +471,9 @@ _codex_tree() {
     # install folder (#31245 QA round 8: the old line hardcoded C:\Program Files\Git and ignored
     # CODEX_HOME, on a page that said every command was relocatable).
     grep -q "bin.bash.exe" "$doc" || { echo "no explicit interpreter form for PowerShell users"; return 1; }
-    grep -q "Get-Command git" "$doc" || { echo "the PowerShell form does not locate Git from the git on PATH"; return 1; }
+    # Round 9: from git --exec-path, not by splitting the path of git.exe, which lands in Git\mingw64
+    # when that folder is on PATH. structural/codex-windows-commands.bats runs the derivation.
+    grep -q "git --exec-path" "$doc" || { echo "the PowerShell form does not locate Git from git --exec-path"; return 1; }
     ! grep -q "Program Files.Git.bin.bash.exe" "$doc" || { echo "the PowerShell form hardcodes an install folder"; return 1; }
 }
 
@@ -591,6 +593,11 @@ _codex_tree() {
             *"session end"*prompt*)        return 0 ;;
             *prompt*"session end"*)        return 0 ;;
             *"context compression"*)       return 0 ;;
+            # Round 9: a Codex cell saying "yes" beside these two README rows survived, because
+            # the rows are worded "the context is compressed" and "an accepted plan".
+            *"context is compressed"*)     return 0 ;;
+            *"context compresses"*)        return 0 ;;
+            *"accepted plan"*)             return 0 ;;
             *"plan accepted"*)             return 0 ;;
         esac
         return 1
@@ -774,4 +781,15 @@ _codex_tree() {
         || { echo "the page lists the IDE extension without saying plugins do not run there"; return 1; }
     grep -qi "not established\|treat it as unsupported" "$doc" \
         || { echo "the page does not admit the cloud surface is unestablished"; return 1; }
+}
+
+@test "docs: the README table says typed slash commands are not available on Codex" {
+    # Round 9 added this row because QA found the comparison table silent about the first gap a
+    # Codex customer meets. The moment sweep above does not cover it (it is not a moment), so the
+    # row is pinned here: its Codex cell must say it is not available.
+    local readme; readme="$(cd "$PLUGIN_ROOT/.." && pwd)/README.md"
+    local row; row="$(grep -i '^| *typed slash commands' "$readme" | tr -d '\r')"
+    [[ -n "$row" ]] || { echo "the README table has no slash-command row"; return 1; }
+    local codex; codex="$(printf '%s' "$row" | awk -F'|' '{print $4}')"
+    [[ "$codex" == *"not available"* ]] || { echo "the Codex cell does not say not available: $codex"; return 1; }
 }

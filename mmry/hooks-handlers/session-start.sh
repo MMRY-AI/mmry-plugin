@@ -28,13 +28,35 @@ _mmry_emit_setup_message() {
     else
         help_line='Mention /mmry:help for a quick reference.'
     fi
+
+    # ON WINDOWS CODEX, THE COMMAND ABOVE CANNOT BE RUN AS WRITTEN (#31245 QA round 9). Codex runs
+    # the model's commands in PowerShell, where a bare `bash` is the Linux subsystem's and fails with
+    # execvpe(/bin/bash). QA's evidence shows a session improvising its way round it; the message
+    # now gives the working form, the same one the Codex skill teaches. The block is read with a
+    # quoted heredoc so that its $, quotes, backslash and backtick reach the model untouched.
+    local win_block=""
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        case "$(uname -s 2>/dev/null)" in
+            MINGW*|MSYS*|CYGWIN*)
+                IFS= read -r -d '' win_block <<'PS' || true
+
+On Windows, do NOT type bash at the PowerShell prompt; it is the Linux subsystem's and fails. Run this whole block as one command instead, which hands the same setup script to Git Bash:
+
+$c = @'
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
+'@; $f = Join-Path $env:TEMP "mmry-$PID.sh"; [IO.File]::WriteAllText($f, $c.Replace("`r", "")); & (Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) 'bin\bash.exe') $f; Remove-Item $f
+PS
+                win_block="${win_block%$'\n'}"
+                ;;
+        esac
+    fi
     setup_msg="MMRY AI is installed but needs to be set up. Run the setup script to authenticate via the browser.
 
 ## Setup
 
 Run this command using the Bash tool:
 
-$(mmry_host_setup_hint)
+$(mmry_host_setup_hint)${win_block}
 
 This will open a browser window where the user can log in or create an account on mmryai.com. Once they authorize, the script writes the config file and permissions automatically.
 

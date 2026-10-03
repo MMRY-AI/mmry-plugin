@@ -44,11 +44,12 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 ```
 
 If you are on Windows and would rather not open Git Bash, this runs the same thing from PowerShell.
-It finds Git for Windows' bash from the `git` on your PATH and follows `CODEX_HOME` the same way,
-so it cannot pick the wrong shell or the wrong folder:
+It finds Git for Windows' bash from your Git install (`git --exec-path` points into it whichever
+`git.exe` is on your PATH) and follows `CODEX_HOME` the same way, so it cannot pick the wrong shell
+or the wrong folder:
 
 ```
-& (Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\bash.exe') "$(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$env:USERPROFILE\.codex" })\mmry\setup\mmry-setup.sh"
+& (Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) 'bin\bash.exe') "$(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$env:USERPROFILE\.codex" })\mmry\setup\mmry-setup.sh"
 ```
 
 It opens a browser so you can sign in at [mmryai.com](https://mmryai.com), then writes your
@@ -76,9 +77,9 @@ installer records, or in the standard install folders. It never uses a bare `bas
 ships a `bash.exe` in System32 when the Windows Subsystem for Linux is installed, and that one
 cannot see your Windows files.
 
-If Git for Windows cannot be found at all, your session says so in one line, "MMRY AI could not
-start on this Windows machine: Git for Windows was not found", and carries on without your
-memories rather than failing. To check from PowerShell:
+If Git for Windows cannot be found at all, your assistant is told "MMRY AI could not start on this
+Windows machine: Git for Windows was not found" and asked to tell you, and the session carries on
+without your memories rather than failing. To check from PowerShell:
 
 ```
 git --version
@@ -86,6 +87,13 @@ git --version
 
 If that prints an error rather than a version, install Git for Windows from
 [gitforwindows.org](https://gitforwindows.org) and start a new session.
+
+### What MMRY's commands need from Codex
+
+When your assistant saves, searches or joins a coordination group, it runs one of MMRY's scripts.
+Those scripts reach mmryai.com over the network and write under your Codex home folder, which is
+outside your project. If your Codex sandbox settings block network access or writes outside the
+project, those commands fail. Every test run behind this page was made with Codex allowed both.
 
 ---
 
@@ -109,8 +117,8 @@ MMRY is a Codex plugin, so it reaches you wherever Codex runs plugins.
 | Surface | MMRY |
 |---|---|
 | Codex CLI | yes, this is what the instructions above install |
-| Codex in the ChatGPT desktop app | yes, plugins are supported there |
-| The Codex IDE extension | no. OpenAI's plugin documentation states plainly that "the IDE extension doesn't support plugins", so no plugin reaches it, not only ours |
+| Codex in the ChatGPT desktop app | yes according to OpenAI's plugin documentation, which says plugins run there. We have run MMRY in the Codex CLI, not in the desktop app |
+| The Codex IDE extension | no. OpenAI's plugin documentation states plainly that "the IDE extension doesn't support plugins", so no plugin reaches it, not only ours. Use the Codex CLI in a terminal beside your editor instead |
 | Codex cloud tasks | not established. OpenAI's plugin documentation does not name it either way, and we have not run a cloud task to find out. Treat it as unsupported until we say otherwise |
 
 Source: OpenAI's plugin documentation at
@@ -193,7 +201,10 @@ Both uninstaller scripts in this plugin remove the **Claude Code** installation,
 to run when they are started from a Codex directory - so there is no single command here. Removing
 it from Codex is three steps:
 
-1. **Remove the plugin through Codex**, the same way you added it.
+1. **Remove the plugin through Codex**, the same way you added it:
+   ```bash
+   codex plugin remove mmry@mmry-plugin
+   ```
 2. **Delete the MMRY directory** inside your Codex home:
    ```bash
    rm -rf "${CODEX_HOME:-$HOME/.codex}/mmry"

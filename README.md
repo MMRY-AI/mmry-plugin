@@ -11,8 +11,9 @@ supported surface, and uninstall all differ from the Claude Code instructions be
 | Foundation memories restated on every prompt | yes | yes |
 | Coordination-group messages delivered as you work | yes | yes |
 | A prompt to save what is new | at session end | on your next message, when something is unsaved |
-| Continuity notes saved before the context is compressed | yes | no channel at that moment |
-| An accepted plan saved as a decision record | yes | no plan-accepted event to trigger on |
+| Continuity notes saved before the context is compressed | yes | not available: Codex gives plugins no moment before it compresses |
+| An accepted plan saved as a decision record | yes | not available: Codex has no plan-accepted moment |
+| Typed slash commands such as /mmry:save | yes | not available: ask in plain words, for example "save this" |
 
 [docs/codex.md](docs/codex.md) states each Codex gap and what you get instead.
 

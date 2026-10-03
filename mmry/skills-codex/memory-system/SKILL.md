@@ -31,6 +31,34 @@ than anything that names the real problem.
 | After a tool call | Delivers any new coordination-group messages |
 | The next prompt, when work is unsaved | Prompts you to save what is new since the last save, and stays silent when nothing is |
 
+## On Windows: run every command here through Git Bash
+
+Every command in this skill is a bash command. On Windows, Codex runs your commands in PowerShell,
+and there a bare `bash` is the Windows Subsystem for Linux's: it cannot see the user's Windows
+files and fails with `execvpe(/bin/bash) failed`. Never type `bash` at the PowerShell prompt.
+
+Instead, put the command exactly as it is written in this skill between the `@'` line and the `'@`
+line below, and run the whole block as one command:
+
+```powershell
+$c = @'
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" "UPC"
+'@; $f = Join-Path $env:TEMP "mmry-$PID.sh"; [IO.File]::WriteAllText($f, $c.Replace("`r", "")); & (Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) 'bin\bash.exe') $f; Remove-Item $f
+```
+
+Why it is shaped like that, so you do not "simplify" it:
+
+- The command travels to Git Bash in a file, not as an argument. Windows PowerShell 5.1 strips the
+  double quotes out of arguments it hands to another program, so `bash -c "..."` arrives broken
+  there, and memory text full of quotes would be mangled.
+- `@'` ... `'@` is a literal block: nothing inside it is changed by PowerShell, so `$`, quotes and
+  backslashes reach bash as written. `'@` must start its own line.
+- Git Bash is found from `git --exec-path`, which points into the Git install whichever `git.exe`
+  is on PATH. Splitting the path of `git.exe` itself gives the wrong folder when Git's `mingw64\bin`
+  is on PATH.
+
+On macOS and Linux, run the commands as written.
+
 ## What is different on Codex, and what to do instead
 
 This platform does not give plugins typed slash commands. On Claude Code a customer types
