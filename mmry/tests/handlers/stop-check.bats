@@ -16,7 +16,7 @@ setup() {
     # #30642: exit 2 keeps the stop blocked; Claude Code discards stdout on exit 2 and feeds
     # the hook's stderr to the model, so stdout must be empty and the directive lives on stderr.
     run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>/dev/null'
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 2 ]] || return 1
     [[ -z "$output" ]]
 }
 
@@ -29,7 +29,7 @@ setup() {
     # Pre-stamp a fresh marker.
     touch "$TEST_TMPDIR/.mmry-stop-checked"
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [[ -z "$output" ]]
 }
 
@@ -37,7 +37,7 @@ setup() {
     # #29912 — debounce extended from 120s to 900s. Use a clearly-old marker.
     touch -t 202001010000.00 "$TEST_TMPDIR/.mmry-stop-checked"
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 2 ]] || return 1
     # #30642: block is signalled by exit 2; the directive (merged stderr) is the payload.
     [[ "$output" == *'Save what is new since the last memory'* ]]
 }
@@ -47,23 +47,23 @@ setup() {
 @test "stop-check: directive is emitted on stderr, the channel the model gets on exit 2 (#30642)" {
     # Capture stderr only (stdout to /dev/null).
     run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>&1 1>/dev/null'
-    [[ "$output" == *'Save what is new since the last memory'* ]]
-    [[ "$output" == *'save-memory.sh'* ]]
+    [[ "$output" == *'Save what is new since the last memory'* ]] || return 1
+    [[ "$output" == *'save-memory.sh'* ]] || return 1
     [[ "$output" == *'skip'* ]]
 }
 
 @test "stop-check: no stdout JSON on exit 2 (discarded by the harness anyway) (#30642)" {
     # stdout only — must be empty. No decision:block, no systemMessage, no reason field.
     run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>/dev/null'
-    [[ -z "$output" ]]
-    [[ "$output" != *'decision'* ]]
+    [[ -z "$output" ]] || return 1
+    [[ "$output" != *'decision'* ]] || return 1
     [[ "$output" != *'systemMessage'* ]]
 }
 
 @test "stop-check: does not use systemMessage (user-only) anywhere (#30642)" {
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
-    [[ "$output" != *'systemMessage'* ]]
+    [[ "$status" -eq 2 ]] || return 1
+    [[ "$output" != *'systemMessage'* ]] || return 1
     # Old status-line phrasing must be gone.
     [[ "$output" != *'Mnemo: saving important memories'* ]]
 }
@@ -71,15 +71,15 @@ setup() {
 @test "stop-check: stderr carries no literal backslash-n escape markers (#30642 regression)" {
     # The directive must reach the model as clean text, not with visible \n markers.
     run bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>&1 1>/dev/null'
-    [[ "$output" != *'\n'* ]]
+    [[ "$output" != *'\n'* ]] || return 1
     [[ "$output" != *'\"'* ]]
 }
 
 @test "stop-check: directive is a single imperative with an explicit skip clause" {
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
-    [[ "$output" == *'Save what is new since the last memory'* ]]
-    [[ "$output" == *'save-memory.sh'* ]]
+    [[ "$status" -eq 2 ]] || return 1
+    [[ "$output" == *'Save what is new since the last memory'* ]] || return 1
+    [[ "$output" == *'save-memory.sh'* ]] || return 1
     [[ "$output" == *'skip'* ]]
 }
 
@@ -89,7 +89,7 @@ setup() {
     bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" >/dev/null 2>&1 || true
     local first
     first="$(cat "$TEST_TMPDIR/.mmry-stop-count" 2>/dev/null)"
-    [[ "$first" == "1" ]]
+    [[ "$first" == "1" ]] || return 1
 
     # Force the marker old so the next call is not debounced.
     touch -t 202001010000.00 "$TEST_TMPDIR/.mmry-stop-checked"
@@ -103,14 +103,14 @@ setup() {
     # Pre-set counter to 2 so this firing becomes the 3rd.
     echo "2" > "$TEST_TMPDIR/.mmry-stop-count"
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
-    [[ "$output" == *'You have skipped 3 Stop firings without saving'* ]]
+    [[ "$status" -eq 2 ]] || return 1
+    [[ "$output" == *'You have skipped 3 Stop firings without saving'* ]] || return 1
     [[ "$output" == *'briefly state'* ]]
 }
 
 @test "stop-check: no escalation on first firing" {
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 2 ]] || return 1
     [[ "$output" != *'You have skipped'* ]]
 }
 
@@ -120,14 +120,14 @@ setup() {
     echo "$python_or_date_ts" > "$TEST_TMPDIR/.mmry-last-save"
 
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
-    [[ "$output" == *'Your last save was 5 minute(s) ago'* ]]
+    [[ "$status" -eq 2 ]] || return 1
+    [[ "$output" == *'Your last save was 5 minute(s) ago'* ]] || return 1
     [[ "$output" == *'save only what is new'* ]]
 }
 
 @test "stop-check: no last-save clause when sentinel absent" {
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 2 ]] || return 1
     [[ "$output" != *'Your last save was'* ]]
 }
 
@@ -136,7 +136,7 @@ setup() {
     echo "5" > "$TEST_TMPDIR/.mmry-stop-count"
     rm -f "$TEST_TMPDIR/.mmry-stop-count"  # simulate save success reset
     run bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh"
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 2 ]] || return 1
     [[ "$output" != *'You have skipped'* ]]
 }
 
@@ -152,6 +152,6 @@ setup() {
     date +%s > "$TEST_TMPDIR/.mmry-last-save"
     run env -u MMRY_HOST bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>&1 1>/dev/null'
     [[ "$status" -eq 2 ]] || { echo "exit $status, expected 2: $output"; return 1; }
-    [[ "$output" == *'Save what is new since the last memory'* ]]
+    [[ "$output" == *'Save what is new since the last memory'* ]] || return 1
     [[ "$output" == *'Your last save was under a minute ago'* ]]
 }

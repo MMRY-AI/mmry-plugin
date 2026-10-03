@@ -793,3 +793,29 @@ _codex_tree() {
     local codex; codex="$(printf '%s' "$row" | awk -F'|' '{print $4}')"
     [[ "$codex" == *"not available"* ]] || { echo "the Codex cell does not say not available: $codex"; return 1; }
 }
+
+@test "docs: the README table has a not-available row for every gap the Codex page lists" {
+    # QA round 10: the page listed four gaps and the table three; the idle-wake gap had no row.
+    # Counted from both documents, so a fifth gap added to the page needs a fifth row.
+    local root doc readme gaps rows
+    root="$(cd "$PLUGIN_ROOT/.." && pwd)"
+    doc="$root/docs/codex.md"; readme="$root/README.md"
+    gaps="$(tr -d '\r' < "$doc" | awk '/^## What is NOT available on Codex/ { on = 1; next } on && /^## / { on = 0 } on && /^### [0-9]+\. / { n++ } END { print n + 0 }')"
+    rows="$(tr -d '\r' < "$readme" | awk -F'|' '/^\|/ && $4 ~ /^ *not available/ { n++ } END { print n + 0 }')"
+    echo "gaps on the Codex page: $gaps; not-available rows in the README: $rows" >&3
+    (( gaps >= 4 )) || { echo "the gap section was not found or has shrunk: $gaps"; return 1; }
+    (( rows == gaps )) || { echo "the README table has $rows not-available rows for $gaps gaps"; return 1; }
+}
+
+@test "uninstall.bat: no tool is called by bare name, so the current folder cannot supply it" {
+    # QA round 10, security (low). Every non-comment line naming findstr or powershell must name it
+    # by its System32 path. The same protection the Codex launcher has.
+    local bat="$PLUGIN_ROOT/setup/uninstall.bat" bad n=0
+    [[ -f "$bat" ]] || return 1
+    n="$(tr -d '\r' < "$bat" | grep -viE '^[[:space:]]*(rem|::)' | grep -ciE '(findstr|powershell)(\.exe)?[[:space:]]' || true)"
+    bad="$(tr -d '\r' < "$bat" | grep -viE '^[[:space:]]*(rem|::)' | grep -iE '(findstr|powershell)(\.exe)?[[:space:]]' \
+        | grep -viE '%SystemRoot%\\System32\\(findstr\.exe|WindowsPowerShell\\v1\.0\\powershell\.exe)[[:space:]]' || true)"
+    echo "tool calls checked: $n" >&3
+    (( n >= 4 )) || { echo "only $n tool calls found; the pattern is not seeing them"; return 1; }
+    [[ -z "$bad" ]] || { echo "called by bare name:"; echo "$bad"; return 1; }
+}

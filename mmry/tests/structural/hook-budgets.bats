@@ -707,10 +707,10 @@ _mmry_count_cygpath() {
     # SAMPLE SIZE. The Codex manifest registers six hooks today; if a refactor drops them all,
     # every assertion below would pass vacuously.
     echo "codex hooks found: ${count}" >&3
-    (( count >= 6 ))
+    (( count >= 6 )) || return 1
     for t in $timeouts; do
         [[ "$t" =~ ^[0-9]+$ ]] || return 1
-        (( t > 0 ))
+        (( t > 0 )) || return 1
     done
 }
 
@@ -745,10 +745,10 @@ _mmry_count_cygpath() {
 
     [[ "$default" =~ ^[0-9]+$ ]] || return 1
     [[ "$budget" =~ ^[0-9]+$ ]] || return 1
-    (( default > 0 ))
+    (( default > 0 )) || return 1
     # The plugin must stop ITSELF before Codex stops it, with room to write the JSON that tells
     # the customer what happened. Without that margin the supervisor is decoration.
-    (( default < budget ))
+    (( default < budget )) || return 1
     (( default + 3 <= budget ))
 }
 
@@ -770,7 +770,7 @@ _mmry_count_cygpath() {
     timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$CODEX_HOOKS_FILE" | tr -d '\r')"
     count=0
     for t in $timeouts; do
-        (( t * 1000 >= floor * 5 ))
+        (( t * 1000 >= floor * 5 )) || return 1
         count=$(( count + 1 ))
     done
     echo "codex hooks checked against the floor: ${count}" >&3

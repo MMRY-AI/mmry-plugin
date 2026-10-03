@@ -286,7 +286,7 @@ EOF
     [[ "$create_line" =~ ^[0-9]+$ ]] || return 1
     [[ "$chmod_line" =~ ^[0-9]+$ ]] || return 1
     [[ "$write_line" =~ ^[0-9]+$ ]] || return 1
-    (( create_line < chmod_line ))
+    (( create_line < chmod_line )) || return 1
     (( chmod_line < write_line ))
 }
 

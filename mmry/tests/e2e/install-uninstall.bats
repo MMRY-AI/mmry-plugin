@@ -21,10 +21,10 @@ setup() {
 
 @test "install: sets autoMemoryEnabled to false on fresh install" {
     run bash "$INSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 
     local settings="$HOME/.claude/settings.json"
-    [[ -f "$settings" ]]
+    [[ -f "$settings" ]] || return 1
     run jq '.autoMemoryEnabled' "$settings"
     assert_output "false"
 }
@@ -33,7 +33,7 @@ setup() {
     echo '{"autoMemoryEnabled": true}' > "$HOME/.claude/settings.json"
 
     run bash "$INSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 
     run jq '.autoMemoryEnabled' "$HOME/.claude/settings.json"
     assert_output "false"
@@ -43,7 +43,7 @@ setup() {
     echo '{"someOtherSetting": "keep-me"}' > "$HOME/.claude/settings.json"
 
     run bash "$INSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 
     run jq '.someOtherSetting' "$HOME/.claude/settings.json"
     assert_output '"keep-me"'
@@ -60,7 +60,7 @@ setup() {
     echo '{"autoMemoryEnabled": false, "otherSetting": true}' > "$HOME/.claude/settings.json"
 
     run bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 
     run jq 'has("autoMemoryEnabled")' "$HOME/.claude/settings.json"
     assert_output "false"
@@ -73,7 +73,7 @@ setup() {
     echo '{"otherSetting": true}' > "$HOME/.claude/settings.json"
 
     run bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 
     run jq 'has("autoMemoryEnabled")' "$HOME/.claude/settings.json"
     assert_output "false"
@@ -86,7 +86,7 @@ setup() {
 @test "req4: uninstall removes the Claude credential on a Claude install, as it always did" {
     printf '%s' '{"apiUrl":"https://mmryai.com","authMethod":"apikey","apiKey":"claude-key"}'         > "$HOME/.claude/mmry-config.json"
     run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$HOME" bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [[ ! -f "$HOME/.claude/mmry-config.json" ]]
 }
 
@@ -127,9 +127,9 @@ _assert_claude_installation_intact() {
 @test "codex: the Codex copy of uninstall.sh REFUSES, exits 1, and removes nothing at all" {
     _both_products_installed
     run env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 1 ]]
-    [[ "$output" == *"uninstalls the CLAUDE CODE installation"* ]]
-    [[ "$output" == *"changed nothing"* ]]
+    [[ "$status" -eq 1 ]] || return 1
+    [[ "$output" == *"uninstalls the CLAUDE CODE installation"* ]] || return 1
+    [[ "$output" == *"changed nothing"* ]] || return 1
     # And the Codex side is untouched too - a refusal that deleted the Codex credential on the way
     # out would still be a half-uninstall, just of the other product.
     [[ -f "$HOME/.codex/mmry-config.json" ]]
@@ -140,14 +140,14 @@ _assert_claude_installation_intact() {
     # unconditionally, forty lines below a host-aware Step 1.
     _both_products_installed
     run env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" bash "$UNINSTALL_SCRIPT"
-    [[ -d "$HOME/.claude/mmry" ]]
+    [[ -d "$HOME/.claude/mmry" ]] || return 1
     [[ -f "$HOME/.claude/mmry/hooks-handlers/save-memory.sh" ]]
 }
 
 @test "codex: the Claude Code PLUGIN CACHE survives a Codex uninstall" {
     _both_products_installed
     run env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" bash "$UNINSTALL_SCRIPT"
-    [[ -d "$HOME/.claude/plugins/cache/mmry-plugin/mmry" ]]
+    [[ -d "$HOME/.claude/plugins/cache/mmry-plugin/mmry" ]] || return 1
     [[ -f "$HOME/.claude/plugins/cache/mmry-plugin/mmry/plugin.json" ]]
 }
 
@@ -162,8 +162,8 @@ _assert_claude_installation_intact() {
     # the RELOCATED one when CODEX_HOME is set, because that is where their files are.
     _both_products_installed
     run env -u MMRY_CONFIG_FILE MMRY_HOST=codex CODEX_HOME="$HOME/moved-codex" HOME="$HOME"         bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 1 ]]
-    [[ "$output" == *"$HOME/moved-codex/mmry-config.json"* ]]
+    [[ "$status" -eq 1 ]] || return 1
+    [[ "$output" == *"$HOME/moved-codex/mmry-config.json"* ]] || return 1
     [[ "$output" == *"$HOME/moved-codex/mmry"* ]]
 }
 
@@ -175,8 +175,8 @@ _assert_claude_installation_intact() {
     cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$HOME/.codex/mmry/hooks-handlers/"
     cp "$PLUGIN_ROOT/setup/uninstall.sh" "$HOME/.codex/mmry/setup/"
     run env -u MMRY_HOST -u MMRY_CONFIG_FILE -u CODEX_HOME HOME="$HOME"         bash "$HOME/.codex/mmry/setup/uninstall.sh"
-    [[ "$status" -eq 1 ]]
-    [[ "$output" == *"changed nothing"* ]]
+    [[ "$status" -eq 1 ]] || return 1
+    [[ "$output" == *"changed nothing"* ]] || return 1
     _assert_claude_installation_intact
 }
 
@@ -188,17 +188,17 @@ _assert_claude_installation_intact() {
 @test "req4: a CLAUDE uninstall still removes the Claude state directory and plugin cache" {
     _both_products_installed
     run env -u MMRY_HOST -u MMRY_CONFIG_FILE -u CODEX_HOME HOME="$HOME" bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
-    [[ ! -f "$HOME/.claude/mmry-config.json" ]]
-    [[ ! -d "$HOME/.claude/mmry" ]]
-    [[ ! -d "$HOME/.claude/plugins/cache/mmry-plugin/mmry" ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ ! -f "$HOME/.claude/mmry-config.json" ]] || return 1
+    [[ ! -d "$HOME/.claude/mmry" ]] || return 1
+    [[ ! -d "$HOME/.claude/plugins/cache/mmry-plugin/mmry" ]] || return 1
     [[ "$output" == *"Restart Claude Code"* ]]
 }
 
 @test "req4: and a Claude uninstall leaves the CODEX installation alone" {
     _both_products_installed
     run env -u MMRY_HOST -u MMRY_CONFIG_FILE -u CODEX_HOME HOME="$HOME" bash "$UNINSTALL_SCRIPT"
-    [[ "$status" -eq 0 ]]
-    [[ -f "$HOME/.codex/mmry-config.json" ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ -f "$HOME/.codex/mmry-config.json" ]] || return 1
     [[ -d "$HOME/.codex/mmry" ]]
 }

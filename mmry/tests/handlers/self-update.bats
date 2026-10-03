@@ -50,10 +50,10 @@ EOF
 EOF
 
     run bash "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     # Must reach the marketplace fetch (which our mock force-fails). Seeing this
     # message proves the version detection did NOT bail at step 1.
-    [[ "$output" == *"failed to fetch marketplace.json"* ]]
+    [[ "$output" == *"failed to fetch marketplace.json"* ]] || return 1
     # Must NOT show the bootstrap message because plugin.json exists.
     [[ "$output" != *"no local version anchor"* ]]
 }
@@ -63,8 +63,8 @@ EOF
     echo "1.2.10" > "$TEST_PLUGIN_DIR/.last-self-update"
 
     run bash "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *"failed to fetch marketplace.json"* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"failed to fetch marketplace.json"* ]] || return 1
     # Sentinel is the local-version source; not the bootstrap fallback.
     [[ "$output" != *"no local version anchor"* ]]
 }
@@ -74,8 +74,8 @@ EOF
     # Without the fallback chain, the script silently bailed here. With the fix it
     # bootstraps to "0.0.0" and proceeds to the network fetch.
     run bash "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *"no local version anchor found"* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"no local version anchor found"* ]] || return 1
     [[ "$output" == *"failed to fetch marketplace.json"* ]]
 }
 
@@ -83,7 +83,7 @@ EOF
     # No plugin.json — would previously exit 0 with no output (silent bail).
     # Now produces a discoverable stderr line.
     run bash "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     # Output must include the "mmry self-update:" prefix from the log() function.
     [[ "$output" == *"mmry self-update:"* ]]
 }
@@ -97,7 +97,7 @@ EOF
     touch "$TMPDIR/.mmry-update-checked"
 
     run bash "$TEST_PLUGIN_DIR/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     # Within the debounce window we should NOT reach the network fetch at all.
     [[ "$output" != *"failed to fetch marketplace.json"* ]]
 }
@@ -147,7 +147,7 @@ EOF
     _updatable_plugin "$root"
 
     run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [ -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
     [ ! -f "$HOME/.claude/mmry/hooks-handlers/updated-marker.txt" ]
 }
@@ -159,7 +159,7 @@ EOF
     _updatable_plugin "$root"
 
     run env -u MMRY_HOST -u CODEX_HOME HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [ -f "$HOME/.claude/mmry/hooks-handlers/updated-marker.txt" ]
     [ ! -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
 }
@@ -176,6 +176,6 @@ EOF
 
     run env -u MMRY_CONFIG_FILE -u MMRY_API_KEY MMRY_HOST=codex HOME="$HOME" \
         bash "$root/hooks-handlers/self-update.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [ -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
 }

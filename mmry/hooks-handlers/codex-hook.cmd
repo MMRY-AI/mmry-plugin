@@ -29,14 +29,21 @@ rem `@echo off` is load-bearing. With echo on, cmd.exe writes each command line 
 rem stdout is what Codex hands the model.
 
 setlocal enableextensions
-rem NEVER RUN A PROGRAM FROM THE CUSTOMER'S PROJECT FOLDER (#31245 QA round 9, security N1).
+rem NEVER RUN A PROGRAM FROM THE CUSTOMER'S PROJECT FOLDER (#31245 QA rounds 9 and 10, security).
 rem Codex runs this hook with the customer's project as the current folder, and cmd.exe looks
-rem in the current folder BEFORE PATH. A where.bat, reg.bat or findstr.bat committed to any
-rem repository the customer opens would run silently on every hook. This setting turns that
-rem lookup off for this script and every child it starts, and the three tools are called by
-rem their full System32 path as well, so neither safeguard depends on the other. The Claude
-rem Code harness sets this variable itself, which is why tests launched from it could not see
-rem the hole; the test that plants the fixtures unsets it first.
+rem in the current folder BEFORE PATH. Three safeguards, each closing something the others leave
+rem open:
+rem   1. NoDefaultCurrentDirectoryInExePath=1, below, turns cmd's current-folder lookup off for
+rem      this script and every child it starts, so a where.bat, reg.bat or findstr.bat committed
+rem      to a repository cannot stand in for the real tool.
+rem   2. Those three tools are also called by their full System32 path, so the first safeguard
+rem      is not the only thing between a planted tool and the hook.
+rem   3. where.exe is asked for $PATH:git.exe, not git.exe. Neither safeguard above covers this:
+rem      where.exe searches the current folder for the FILE it is looking for whatever that
+rem      variable says, so a git.exe planted in a repository subfolder would be listed first and
+rem      the bash.exe beside it, inside the repository, would run as the hook.
+rem The Claude Code harness sets the variable itself, which is why tests launched from it could
+rem not see these holes; the tests that plant the fixtures unset it first.
 set "NoDefaultCurrentDirectoryInExePath=1"
 rem Unquoted inside the for /f commands below on purpose: a for /f command that begins with a
 rem quote has its outer quotes stripped by cmd /c. SystemRoot contains no spaces.

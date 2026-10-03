@@ -10,6 +10,7 @@ supported surface, and uninstall all differ from the Claude Code instructions be
 | Your memories load at session start | yes | yes |
 | Foundation memories restated on every prompt | yes | yes |
 | Coordination-group messages delivered as you work | yes | yes |
+| A message that arrives while your assistant is idle wakes it | yes | not available: it arrives with the next thing that happens in the session |
 | A prompt to save what is new | at session end | on your next message, when something is unsaved |
 | Continuity notes saved before the context is compressed | yes | not available: Codex gives plugins no moment before it compresses |
 | An accepted plan saved as a decision record | yes | not available: Codex has no plan-accepted moment |

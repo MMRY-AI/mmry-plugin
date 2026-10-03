@@ -62,7 +62,7 @@ On macOS and Linux, run the commands as written.
 ## What is different on Codex, and what to do instead
 
 This platform does not give plugins typed slash commands. On Claude Code a customer types
-`/mmry:save`; here they ask in plain words and you use this skill. Three specific consequences:
+`/mmry:save`; here they ask in plain words and you use this skill. Four specific consequences:
 
 1. **There is nothing to type.** If a customer asks "what commands do I have", tell them there are
    none to type on Codex and that asking in plain words is the whole interface: "remember this",
@@ -74,6 +74,9 @@ This platform does not give plugins typed slash commands. On Claude Code a custo
 3. **Idle delivery does not happen here.** Coordination messages reach you when a tool runs, when a
    prompt is submitted, and at session start. A Codex session that is sitting doing nothing is not
    woken by a message; it sees it on the next thing that happens.
+4. **There is no plan-accepted prompt.** Claude Code tells MMRY when a plan is accepted; Codex has
+   no equivalent, so nothing saves an agreed plan automatically. When the customer accepts a plan,
+   or says "remember this plan", save it as a Decision memory yourself.
 
 State these plainly if asked. Do not imply a capability this platform does not have.
 
@@ -91,7 +94,8 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh" \
 ```
 
 Optional: `--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`.
-Returns the new memory id.
+It prints a one-line confirmation that MMRY AI received the memory. It does not print the new
+memory's id, so do not tell the customer one.
 
 ### When to save
 
@@ -262,7 +266,10 @@ If the customer asks how to uninstall, do NOT point them at uninstall.sh or unin
 those remove the CLAUDE CODE installation and both refuse to run from a Codex directory. The Codex
 removal is three steps, and the first one is theirs to do in the Codex interface:
 
-1. They remove the plugin through Codex, the same way they added it.
+1. They remove the plugin through Codex, the same way they added it:
+   ```bash
+   codex plugin remove mmry@mmry-plugin
+   ```
 2. Delete the MMRY directory:
    ```bash
    rm -rf "${CODEX_HOME:-$HOME/.codex}/mmry"

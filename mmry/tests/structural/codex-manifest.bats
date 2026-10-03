@@ -452,6 +452,48 @@ setup() {
     [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "the launcher did not reach the handler: $output"; return 1; }
 }
 
+@test "codex hooks: on Windows a git.exe planted in a project SUBFOLDER never chooses the bash (security, QA round 10)" {
+    # where.exe searches the current folder for the FILE it is asked to find, whatever
+    # NoDefaultCurrentDirectoryInExePath says. Asked for plain git.exe from <project>\tools, it lists
+    # <project>\tools\git.exe first, and the launcher's %%~dpG..\bin\bash.exe then resolves to
+    # <project>\bin\bash.exe: a program inside the repository, run on every hook. $PATH:git.exe keeps
+    # the search on PATH. Run from the SUBFOLDER: from the project root ..\bin is outside the
+    # repository and the plant cannot fire. The N1 test above does not cover this, and dropping only
+    # "$PATH:" survived it. Adapted from QA's Security reviewer's prototype.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+
+    local root="$BATS_TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+
+    # The plant: an empty tools\git.exe (where.exe matches by name) and a bin\bash.exe that is a copy
+    # of the vendored jq, which announces itself with "jq: error" when handed a script path.
+    local project="$BATS_TEST_TMPDIR/customer project"
+    mkdir -p "$project/tools" "$project/bin"
+    : > "$project/tools/git.exe"
+    cp "$jq" "$project/bin/bash.exe"
+
+    # Control: where.exe on this machine does list the plant from that folder, so the hole is live
+    # here. Without this the test could pass on a machine where it never could have fired.
+    local first
+    first="$(cd "$project/tools" && "$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")/System32/where.exe" git.exe 2>/dev/null | head -1 | tr -d '\r')"
+    [[ "$first" == *"customer project\tools\git.exe" ]] || skip "where.exe did not list the plant here: $first"
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS" | tr -d '\r')"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+    cd "$project/tools"
+    run env -u NoDefaultCurrentDirectoryInExePath powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    cd - >/dev/null
+    [[ "$output" != *"jq: error"* ]] || { echo "the launcher ran the bash planted beside a project git.exe: $output"; return 1; }
+    [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "the launcher did not reach the handler: $output"; return 1; }
+}
+
 @test "codex hooks: every command uses Codex own PLUGIN_ROOT token, not the other product alias" {
     # ${PLUGIN_ROOT} is expanded by Codex itself, on every platform, and was measured working:
     # the same token emitter referenced this way delivered its payload 4 times.

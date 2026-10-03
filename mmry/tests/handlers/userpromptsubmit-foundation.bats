@@ -652,18 +652,18 @@ EOF
     [ "$status" -eq 0 ]
     # It still fires: a configured install is NOT silenced by the round-4 unconfigured-install
     # guard, and a test that merely asserted silence here would pass against the defect.
-    [[ "$output" == *'systemMessage'* ]]
-    [[ "$output" == *'NOT applied to this turn'* ]]
-    [[ "$output" == *'exceeded'* ]]
+    [[ "$output" == *'systemMessage'* ]] || return 1
+    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
+    [[ "$output" == *'exceeded'* ]] || return 1
 
     # THE DEFECT, ASSERTED AS ABSENT.
-    [[ "$output" != *'/mmry:load-memories'* ]]
-    [[ "$output" != *'~/.claude/mmry-config.json'* ]]
+    [[ "$output" != *'/mmry:load-memories'* ]] || return 1
+    [[ "$output" != *'~/.claude/mmry-config.json'* ]] || return 1
 
     # AND THE REMEDY, ASSERTED AS PRESENT. Absence alone is satisfied by a notice that stopped
     # offering any remedy at all, which is worse for the customer, not better.
-    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]]
-    [[ "$output" == *"${codex}/mmry-config.json"* ]]
+    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]] || return 1
+    [[ "$output" == *"${codex}/mmry-config.json"* ]] || return 1
     # The script it names is really there. A path that reads plausibly and is not on disk is the
     # same failure in a nicer font.
     [ -f "$PLUGIN_ROOT/hooks-handlers/session-start.sh" ]
@@ -679,9 +679,9 @@ EOF
     MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *'systemMessage'* ]]
-    [[ "$output" == *'/mmry:load-memories'* ]]
-    [[ "$output" == *'~/.claude/mmry-config.json'* ]]
+    [[ "$output" == *'systemMessage'* ]] || return 1
+    [[ "$output" == *'/mmry:load-memories'* ]] || return 1
+    [[ "$output" == *'~/.claude/mmry-config.json'* ]] || return 1
     [ -f "$PLUGIN_ROOT/commands/load-memories.md" ]
 }
 
@@ -709,8 +709,8 @@ EOF
         # swallow. Say so rather than passing silently on a test that checked nothing.
         skip "the worker did not exit non-zero in this environment; the deadline branch above covers the same two strings"
     fi
-    [[ "$output" != *'/mmry:load-memories'* ]]
-    [[ "$output" != *'~/.claude/mmry-config.json'* ]]
+    [[ "$output" != *'/mmry:load-memories'* ]] || return 1
+    [[ "$output" != *'~/.claude/mmry-config.json'* ]] || return 1
     [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]]
 }
 
@@ -1005,8 +1005,8 @@ _stage_codex_install() {
     # These three are the literal contents of the banner the merge produced. Asserted
     # separately from the emptiness check above so that a future change which emits SOMETHING
     # here still cannot emit THIS.
-    [[ "$output" != *"/mmry:load-memories"* ]]
-    [[ "$output" != *".claude/mmry-config.json"* ]]
+    [[ "$output" != *"/mmry:load-memories"* ]] || return 1
+    [[ "$output" != *".claude/mmry-config.json"* ]] || return 1
     [[ "$output" != *"incomplete plugin install"* ]]
 }
 
@@ -1022,7 +1022,7 @@ _stage_codex_install() {
         bash "$handler"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *'FOUNDATION'* ]]
+    [[ "$output" == *'FOUNDATION'* ]] || return 1
     [[ "$output" == *'never overstate evidence'* ]]
 }
 

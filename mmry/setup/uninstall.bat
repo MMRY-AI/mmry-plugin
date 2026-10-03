@@ -14,10 +14,14 @@ rem beside the handlers it installs and is the only signal that survives a reloc
 rem nothing exported; CODEX_HOME covers the case where the variable IS present.
 set "MMRY_SELF_DIR=%~dp0"
 
+rem Every tool below is called by its full System32 path (#31245 QA round 10, security). cmd.exe
+rem looks in the current folder before PATH, so started from a folder holding a findstr.bat or a
+rem powershell.exe, a bare name would run that file instead of the tool.
+
 rem 1. The marker the install wrote about itself, at <state-dir>\.mmry-host. %~dp0 ends with a
 rem    backslash, so this resolves to the parent of setup\.
 if exist "%~dp0..\.mmry-host" (
-  findstr /i /l /c:"codex" "%~dp0..\.mmry-host" >nul
+  %SystemRoot%\System32\findstr.exe /i /l /c:"codex" "%~dp0..\.mmry-host" >nul
   if not errorlevel 1 goto :codex_install
 )
 
@@ -45,7 +49,7 @@ if "%MMRY_CODEX_HOME:~-1%"=="/" (
 )
 :done_strip_codex_home
 if defined MMRY_CODEX_HOME (
-  echo "%MMRY_SELF_DIR%" | findstr /i /l /c:"%MMRY_CODEX_HOME%" >nul
+  echo "%MMRY_SELF_DIR%" | %SystemRoot%\System32\findstr.exe /i /l /c:"%MMRY_CODEX_HOME%" >nul
   if not errorlevel 1 goto :codex_install
 )
 
@@ -53,10 +57,10 @@ rem 3. The default Codex home, and any path segment that is literally ".codex".
 rem The pattern deliberately has no TRAILING backslash: in a cmd string, \" escapes the quote,
 rem and findstr then receives a pattern that never matches - which is how the first version of
 rem this guard silently did nothing. /l keeps it a literal, not a regex.
-echo "%MMRY_SELF_DIR%" | findstr /i /l /c:"\.codex" >nul
+echo "%MMRY_SELF_DIR%" | %SystemRoot%\System32\findstr.exe /i /l /c:"\.codex" >nul
 if %ERRORLEVEL% EQU 0 goto :codex_install
 
-powershell.exe -ExecutionPolicy Bypass -Command ^
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -Command ^
   "$settingsPath = Join-Path $env:USERPROFILE '.claude\settings.json';" ^
   "$configPath = Join-Path $env:USERPROFILE '.claude\mmry-config.json';" ^
   "$pluginNames = @('mmry@mmry-plugin', 'mmry@internal-plugins');" ^
