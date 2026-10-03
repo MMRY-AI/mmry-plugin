@@ -603,6 +603,14 @@ mutate "the customer page promises Codex a save before the session ends" ../docs
 mutate "session-init stops copying the bundled jq beside the installed handlers" hooks-handlers/session-init.sh   's = s.replace("if [[ " + chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " && -f " + chr(34) + "$P/vendor/jq/CHECKSUMS.txt" + chr(34) + " ]]; then", "if false; then", 1)'   handlers/codex-session.bats "bundled jq where"
 mutate "session-init copies the bundled jq on Claude Code too" hooks-handlers/session-init.sh   's = s.replace("if [[ " + chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " && -f " + chr(34) + "$P/vendor/jq/CHECKSUMS.txt" + chr(34) + " ]]; then", "if [[ -f " + chr(34) + "$P/vendor/jq/CHECKSUMS.txt" + chr(34) + " ]]; then", 1)'   handlers/codex-session.bats "copies no vendor directory"
 
+# ---- QA round 9 -> round 10 fixes (2026-10-03) ----------------------------------------------
+mutate "the Windows setup message loses its Git Bash block" hooks-handlers/session-start.sh   's = s.replace("$(mmry_host_setup_hint)${win_block}", "$(mmry_host_setup_hint)", 1)'   structural/codex-windows-commands.bats "setup message: on Windows Codex"
+mutate "the skill's Windows block goes back to finding Git from the git.exe path" skills-codex/memory-system/SKILL.md   's = s.replace("(Split-Path (Split-Path (Split-Path (git --exec-path))))", "(Split-Path (Split-Path (Get-Command git).Source))", 1)'   structural/codex-windows-commands.bats "skill: the Windows block"
+mutate "the README promises Codex continuity notes before compression" ../README.md   's = s.replace("| not available: Codex gives plugins no moment before it compresses |", "| yes |", 1)'   structural/codex-docs-and-eol.bats "no customer surface promises"
+mutate "the README promises Codex an accepted-plan record" ../README.md   's = s.replace("| not available: Codex has no plan-accepted moment |", "| yes |", 1)'   structural/codex-docs-and-eol.bats "no customer surface promises"
+mutate "the README promises Codex typed slash commands" ../README.md   's = s.replace("| not available: ask in plain words, for example " + chr(34) + "save this" + chr(34) + " |", "| yes |", 1)'   structural/codex-docs-and-eol.bats "slash commands are not available"
+mutate "session-start goes back to the GNU-only sed for the fault note" hooks-handlers/session-start.sh   's = s.replace("MMRY_HOOK_FAULT_NOTE=" + chr(34) + "$(_mmry_json_escape " + chr(34) + "$MMRY_HOOK_FAULT_NOTE" + chr(34) + ")" + chr(34), "MMRY_HOOK_FAULT_NOTE=" + chr(34) + "$(printf %s " + chr(34) + "$MMRY_HOOK_FAULT_NOTE" + chr(34) + ")" + chr(34), 1)'   handlers/codex-session.bats "quote in a field name"
+
 echo
 if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then
     echo "=== DRY RUN: patterns that still apply: $DRYRUN_OK   stale or broken: $ERRORS   (checked $RUN of $TOTAL) ==="
