@@ -182,7 +182,7 @@ _assert_agree() {
     [ -e "$TEST_TMPDIR/mmry-foundation.status" ]
     run bash "$STATUSCMD"
     [[ "$output" == *'Last sent'* ]]
-    [[ "$output" != *'not yet in this session'* ]]
+    [[ "$output" != *'nothing yet in this session'* ]]
 }
 
 # Product showed that deleting the whole last-sent block left every status test green, so the
@@ -194,18 +194,13 @@ _assert_agree() {
 
     run bash "$STATUSCMD"
     [[ "$output" == *'Last sent'* ]]
-    [[ "$output" == *entries=2* ]]
+    [[ "$output" == *'2 directives'* ]]
 
-    # Remove the block from a COPY and prove the assertion above goes red. Without this the
-    # test proves only that the line exists today, not that anything would notice its loss.
-    local copy="$TEST_TMPDIR/status-without-lastsent.sh"
-    grep -v 'Last sent' "$STATUSCMD" > "$copy"
-    if grep -q 'Last sent' "$copy"; then
-        echo "the excision did not land, so the proof below would be vacuous"
-        return 1
-    fi
-    run bash "$copy"
-    [[ "$output" != *'Last sent'* ]]
+    # The proof that this assertion can fail lives in the committed mutation harness (m21),
+    # which removes the "Last sent" output from the command itself and runs this suite against
+    # it. It used to live here: the block was excised from a copy and the test then checked that
+    # the copy's output lacked the line, which could not fail, because removing the line is
+    # exactly what guaranteed it was absent (#31583 QA round 5).
 }
 
 # #31583, security on QA round 4: the delivery record must describe a DELIVERY, not an intent.
@@ -232,7 +227,7 @@ _assert_agree() {
         return 1
     fi
     run bash "$STATUSCMD"
-    [[ "$output" == *'not yet in this session'* ]]
+    [[ "$output" == *'nothing yet in this session'* ]]
 }
 
 
@@ -250,4 +245,86 @@ _assert_agree() {
     _seed_valid_cache
     printf '{"x": {"foundationReinject": true}, "foundationReinject": false}\n' > "$CFG"
     _assert_agree "a nested foundationReinject before the top-level one"
+}
+
+
+# #31583 QA round 5, 4e. The command printed "Delivered: IN FULL" whenever the copy verified,
+# without reading the evidence the hook writes when a prompt fails. Straight after a prompt the
+# hook's own log recorded as FAILED, a customer who asked was told IN FULL.
+_seed_big_cache() {
+    # Two MB: loads in about 3 s here, so a 1 s deadline really does stop it, while a normal
+    # deadline lets it through. Sized for the deadline, not for realism.
+    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
+        | head -n 25000 > "$CACHE"
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    printf 'mmry-foundation v1 entries=25000 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+}
+
+@test "cross-surface: #31583 4e a prompt that fails after a delivery is reported as NOT delivered, then recovers" {
+    printf '{"foundationReinject": true}\n' > "$CFG"
+    _seed_big_cache
+
+    # CONTROL: a prompt that succeeds is reported as delivered.
+    bash "$HOOK" >/dev/null 2>&1
+    run bash "$STATUSCMD"
+    [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]]
+
+    # The failure: the same set, stopped at a one-second deadline. The hook says so on the turn.
+    sleep 1
+    MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$HOOK"
+    [[ "$output" == *'NOT applied'* ]]
+
+    # And now the command says so too, instead of IN FULL.
+    run bash "$STATUSCMD"
+    [[ "$output" == *'NOT on the most recent prompt'* ]]
+    [[ "$output" != *'IN FULL'* ]]
+    [[ "$output" == *'took longer than the 1s limit'* ]]
+
+    # CONTROL on the other side: the next prompt succeeds and the report recovers, so the
+    # assertion above cannot be satisfied by a command that always says NOT.
+    sleep 1
+    bash "$HOOK" >/dev/null 2>&1
+    run bash "$STATUSCMD"
+    [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]]
+}
+
+@test "cross-surface: #31583 4e a failure logged by an EARLIER session is not this session news" {
+    printf '{"foundationReinject": true}\n' > "$CFG"
+    _seed_valid_cache
+    printf '2026-01-01T00:00:00 foundation reinjection FAILED: deadline exceeded (10s), worker killed\n' > "$TEST_TMPDIR/mmry-foundation.log"
+    # SessionStart for THIS session happens after that line was written.
+    sleep 1
+    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+
+    run bash "$STATUSCMD"
+    [[ "$output" != *'NOT on the most recent prompt'* ]]
+    [[ "$output" == *'nothing yet in this session'* ]]
+}
+
+@test "cross-surface: #31583 4e a firing that never finished is reported as NOT delivered" {
+    printf '{"foundationReinject": true}\n' > "$CFG"
+    _seed_valid_cache
+    bash "$HOOK" >/dev/null 2>&1
+    sleep 1
+    # What the harness leaves behind when it kills the hook past its budget.
+    : > "$TEST_TMPDIR/.mmry-foundation-inflight"
+
+    run bash "$STATUSCMD"
+    [[ "$output" == *'NOT on the most recent prompt'* ]]
+    [[ "$output" == *'stopped before it finished'* ]]
+}
+
+# QA round 5 quick tweak: nothing tested the session gate in the VERIFIED branch. A record
+# another session wrote must not be shown as this session's delivery.
+@test "cross-surface: #31583 a valid copy with another session record is not reported as delivered here" {
+    printf '{"foundationReinject": true}\n' > "$CFG"
+    _seed_valid_cache
+    printf 'session-from-yesterday ok entries=2 bytes=45\n' > "$TEST_TMPDIR/mmry-foundation.status"
+
+    run bash "$STATUSCMD"
+    [[ "$output" == *'Stored copy:  VERIFIED'* ]]
+    [[ "$output" != *'IN FULL'* ]]
+    [[ "$output" != *'entries=2'* ]]
+    [[ "$output" == *'nothing yet in this session'* ]]
 }

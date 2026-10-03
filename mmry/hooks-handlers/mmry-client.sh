@@ -271,7 +271,9 @@ mmry_foundation_session_token() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
     local f="${dir}/mmry-foundation.session"
     local t=""
-    [[ -r "$f" ]] && { t="$(<"$f")" 2>/dev/null || t=""; }
+    # Regular files only (#31583 QA round 5): a FIFO put in place of either file blocked the
+    # read, and with it every prompt, until the 10-second deadline.
+    [[ -f "$f" && -r "$f" ]] && { t="$(<"$f")" 2>/dev/null || t=""; }
     printf '%s' "$t"
     [[ -n "$t" ]]
 }
@@ -287,7 +289,7 @@ mmry_foundation_session_token() {
 mmry_foundation_delivered_this_session() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
     local rec="${dir}/mmry-foundation.status"
-    [[ -r "$rec" ]] || return 1
+    [[ -f "$rec" && -r "$rec" ]] || return 1
     local tok rec_line rec_tok
     tok="$(mmry_foundation_session_token "$dir")" || return 1
     rec_line="$(<"$rec")" 2>/dev/null || return 1
@@ -299,7 +301,7 @@ mmry_foundation_delivered_this_session() {
 mmry_foundation_delivery_detail() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
     local rec="${dir}/mmry-foundation.status" line=""
-    [[ -r "$rec" ]] && { line="$(<"$rec")" 2>/dev/null || line=""; }
+    [[ -f "$rec" && -r "$rec" ]] && { line="$(<"$rec")" 2>/dev/null || line=""; }
     printf '%s' "${line#* }"
 }
 

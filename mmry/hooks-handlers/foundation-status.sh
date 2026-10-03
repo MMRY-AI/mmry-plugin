@@ -133,27 +133,77 @@ fi
 # Verified. The verdict carries the numbers so they cannot be recomputed differently here.
 read -r _ok_word _exp_entries _act_bytes <<<"$_reason"
 echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_act_bytes} bytes, matching what was stored."
-echo "Delivered:    IN FULL. There is no size limit; nothing is trimmed or cut."
 
-# 3. Did the most recent prompt actually inject it? The hook records this on each verified
-#    injection, so this distinguishes "the copy is good" from "the copy is good AND it
-#    reached the assistant", which are not the same claim.
-# THIS SESSION'S record, not any record left in a shared temp directory (#31583 QA r4, 4c).
-if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
+# 3. WAS THE MOST RECENT PROMPT ACTUALLY DELIVERED? (#31583 QA round 5, 4e)
+#
+# "The copy verifies" and "the copy reached the assistant" are different claims, and this used to
+# print "Delivered: IN FULL" on the first alone. Straight after a prompt the hook's own log
+# recorded as FAILED - deadline exceeded, worker killed - a customer who asked was told IN FULL
+# and could not learn that their latest prompt went out with no directives at all.
+#
+# The hook leaves three pieces of evidence and this now reads all of them before it speaks:
+#   - the delivery record, written only after a successful emit and stamped with the session;
+#   - the in-flight marker, which survives only if a firing was killed before it finished;
+#   - the failure log, one line per refused or failed firing.
+# Evidence counts only if it is newer than this session's start (the token SessionStart wrote)
+# and, for a failure, newer than the last successful delivery. Older lines belong to a turn the
+# customer has already moved past, or to an earlier session in the same temp directory.
+_session_file="${MMRY_TMPDIR}/mmry-foundation.session"
+_inflight="${MMRY_TMPDIR}/.mmry-foundation-inflight"
+_log="${MMRY_TMPDIR}/mmry-foundation.log"
+
+_delivered=0
+mmry_foundation_delivered_this_session "$MMRY_TMPDIR" && _delivered=1
+
+_failed_why=""
+if [[ -f "$_inflight" ]] && { [[ ! -f "$_session_file" ]] || [[ "$_inflight" -nt "$_session_file" ]]; }; then
+    _failed_why="the last prompt was stopped before it finished loading them"
+fi
+if [[ -z "$_failed_why" && -f "$_log" ]]    && { [[ ! -f "$_session_file" ]] || [[ "$_log" -nt "$_session_file" ]]; }    && { (( _delivered == 0 )) || [[ "$_log" -nt "$STATUS" ]]; }; then
+    _last_line="$(tail -n 1 "$_log" 2>/dev/null)"
+    case "$_last_line" in
+        *"reinjection FAILED: deadline exceeded ("*)
+            # The log line is for whoever investigates; the customer gets plain words.
+            _secs="${_last_line#*deadline exceeded (}"; _secs="${_secs%%)*}"
+            _failed_why="loading them took longer than the ${_secs} limit and was stopped" ;;
+        *"reinjection FAILED: worker exited "*)
+            _failed_why="the loader failed before it finished" ;;
+        *"reinjection FAILED: "*)  _failed_why="${_last_line#*reinjection FAILED: }" ;;
+        *"reinjection REFUSED: "*) _failed_why="the stored copy was refused: ${_last_line#*reinjection REFUSED: }" ;;
+    esac
+fi
+
+if [[ -n "$_failed_why" ]]; then
+    echo "Delivered:    NOT on the most recent prompt - ${_failed_why}."
+    echo "              That prompt ran without your Foundation directives."
+    echo "Action:       re-send the prompt. If it keeps happening, run /mmry:load-memories."
+elif (( _delivered )); then
+    echo "Delivered:    IN FULL on the most recent prompt. There is no size limit; nothing is trimmed or cut."
+else
+    echo "Delivered:    nothing yet in this session."
+fi
+
+# Last successful delivery, from THIS session's record only, parsed rather than echoed. The raw
+# record used to be printed verbatim, so anything written after the token reached the customer.
+if (( _delivered )); then
     _st="$(mmry_foundation_delivery_detail "$MMRY_TMPDIR")"
     _when="$(_mmry_mtime "$STATUS" 2>/dev/null)"
     _now="$(date +%s 2>/dev/null || echo 0)"
+    _what=""
+    if [[ "$_st" =~ ^ok[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)$ ]]; then
+        _what=" (${BASH_REMATCH[1]} directives, ${BASH_REMATCH[2]} bytes)"
+    fi
     if [[ "$_when" =~ ^[0-9]+$ ]] && [[ "$_now" =~ ^[0-9]+$ ]] && (( _now >= _when )); then
         _ago=$(( _now - _when ))
         if (( _ago == 1 )); then
-            echo "Last sent:    1 second ago (${_st})."
+            echo "Last sent:    1 second ago${_what}."
         else
-            echo "Last sent:    ${_ago} seconds ago (${_st})."
+            echo "Last sent:    ${_ago} seconds ago${_what}."
         fi
     else
-        echo "Last sent:    ${_st}"
+        echo "Last sent:    earlier in this session${_what}."
     fi
 else
-    echo "Last sent:    not yet in this session - the next prompt will send it."
+    echo "Last sent:    nothing yet in this session."
 fi
 exit 0

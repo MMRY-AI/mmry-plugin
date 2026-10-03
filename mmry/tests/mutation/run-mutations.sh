@@ -54,6 +54,8 @@ VERIFY_TESTS="unit/foundation-verify.bats"
 # hook's decoded output. Added to the harness at QA's request, so that its bite is proven by
 # the committed run rather than by a reviewer re-deriving it.
 BOTH_PATHS_TESTS="handlers/foundation-both-paths.bats"
+# Both surfaces against one config in one temp directory (#31583 QA round 4 and 5).
+CROSS_TESTS="handlers/foundation-cross-surface.bats"
 STATUS_CMD_TESTS="structural/foundation-status-command.bats"
 HELP_REL="commands/help.md"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
@@ -362,7 +364,28 @@ file_m20="$HELP_REL"
 targets_m20="$STATUS_CMD_TESTS"
 desc_m20="#31583 the status command is no longer advertised anywhere a customer would look"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20"
+# The status command stops saying when the set was last sent. The one line that answers "are my
+# directives reaching my assistant RIGHT NOW" was, at QA round 4, guarded by nothing: deleting
+# it left every status test green. Its guard used to prove itself by excising the line from a
+# copy and checking the copy lacked it, which could not fail (#31583 QA round 5).
+mutate_m21() {
+    local f="$1/$STATUS_REL" t="$1/$STATUS_REL.m21"
+    grep -v 'echo "Last sent:' "$f" > "$t" && mv "$t" "$f"
+}
+file_m21="$STATUS_REL"
+targets_m21="$CROSS_TESTS"
+desc_m21="#31583 the status command no longer says when the set was last sent"
+
+# The status command says Delivered IN FULL without reading the hook's failure evidence, which is
+# what it did until QA round 5 (4e): IN FULL straight after a prompt the log recorded as FAILED.
+mutate_m22() {
+    _sedi 's|^if \[\[ -n "\$_failed_why" \]\]; then$|if false; then|' "$1/$STATUS_REL"
+}
+file_m22="$STATUS_REL"
+targets_m22="$CROSS_TESTS"
+desc_m22="#31583 the status command reports delivery without reading the failure evidence"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
@@ -430,7 +453,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS $BOTH_PATHS_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS $BOTH_PATHS_TESTS $CROSS_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
