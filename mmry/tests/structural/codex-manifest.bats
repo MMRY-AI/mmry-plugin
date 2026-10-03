@@ -240,9 +240,19 @@ setup() {
     assert_output "0"
 }
 
-@test "codex hooks: Foundation re-injection is registered on UserPromptSubmit" {
-    run jq -r '[.hooks.UserPromptSubmit[]? | .hooks[] | .command | select(contains("userpromptsubmit-foundation"))] | length' "$CODEX_HOOKS"
-    assert_output "1"
+@test "codex hooks: Foundation re-injection is registered on UserPromptSubmit, as the SAME parts as Claude Code" {
+    # #31411 sends a large set as up to six labelled parts, one per registered hook. This asserted
+    # exactly ONE registration, which after the merge meant a Codex customer only ever got part 1.
+    # Now the two manifests must register the same parts, so they cannot drift apart again.
+    local q claude codex all
+    q='[.hooks.UserPromptSubmit[]? | .hooks[] | .command | select(contains("userpromptsubmit-foundation"))
+        | (capture("--part (?<k>[0-9]+)$").k // "NONE")] | join(",")'
+    claude="$(jq -r "$q" "$PLUGIN_ROOT/hooks/hooks.json" | tr -d '\r')"
+    codex="$(jq -r "$q" "$CODEX_HOOKS" | tr -d '\r')"
+    echo "claude parts [$claude], codex parts [$codex]" >&3
+    # SAMPLE SIZE: a split set needs more than one part to exist at all.
+    [[ "$claude" == *,* ]] || { echo "hooks.json registers [$claude]: not a split"; return 1; }
+    [[ "$codex" == "$claude" ]] || { echo "codex registers [$codex], claude [$claude]"; return 1; }
 }
 
 @test "codex hooks: every handler routes through codex-hook.sh, never straight at a handler" {
@@ -282,7 +292,7 @@ setup() {
     # Compared inside jq, so no tab or backslash escaping stands between the file and the check.
     local bad n
     bad="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[]
-        | (.command | split(" ") | last) as $h
+        | (.command | split("codex-hook.sh\" ") | last) as $h
         | select((.commandWindows // "") != ("cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" " + $h))
         | "\($h): \(.commandWindows // "MISSING")"' "$CODEX_HOOKS")"
     [[ -z "$bad" ]] || { echo "handlers whose commandWindows is not the launcher for the same handler:"; echo "$bad"; return 1; }
@@ -462,11 +472,17 @@ setup() {
     # string carries a carriage return and a bare ${c##* } yields "session-init\r", which names no
     # file. Without this the check fails on every handler for a reason that has nothing to do with
     # the handlers.
-    local c name
+    #
+    # The handler is the word AFTER codex-hook.sh, not the last word: since #31411 the Foundation
+    # hook carries "--part k", and the last word of that command is a number.
+    local c name n=0
     while IFS= read -r c; do
-        name="${c##* }"
+        name="${c#*codex-hook.sh\" }"
+        name="${name%% *}"
+        n=$((n + 1))
         [[ -f "$PLUGIN_ROOT/hooks-handlers/${name}.sh" ]] || { echo "registered handler has no script: $name"; return 1; }
     done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$CODEX_HOOKS" | tr -d '\r')
+    (( n > 0 )) || return 1
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -498,9 +514,12 @@ setup() {
     assert_output "0"
 }
 
-@test "req4: the Claude Code commands directory still holds all nine command files" {
-    run bash -c "ls '$PLUGIN_ROOT'/commands/*.md | wc -l | tr -d ' '"
-    assert_output "9"
+@test "req4: the Claude Code commands directory still holds every command file, by name" {
+    # Nine before #31411, which added foundation-status. Named rather than counted, so a removal
+    # and an unrelated addition cannot cancel out.
+    local want="feedback formation foundation-status help load-memories save search setup uninstall visibility"
+    run bash -c "cd '$PLUGIN_ROOT/commands' && ls *.md | sed 's/\\.md\$//' | tr -d '\\r' | sort | tr '\\n' ' ' | sed 's/ \$//'"
+    assert_output "$want"
 }
 
 @test "req4: no Claude Code command file has gained YAML frontmatter" {

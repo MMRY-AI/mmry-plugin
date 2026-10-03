@@ -30,8 +30,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation",
-            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation --part 1",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation --part 1",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation --part 2",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation --part 2",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation --part 3",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation --part 3",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation --part 4",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation --part 4",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation --part 5",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation --part 5",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation --part 6",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation --part 6",
             "timeout": 20
           }
         ]

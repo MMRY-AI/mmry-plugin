@@ -60,6 +60,27 @@ _mmry_urlencode() {
         -e 's|@|%40|g'
 }
 
+# THE OTHER PRODUCT'S CREDENTIAL IS NEVER A FALLBACK ON CODEX (#31245 TC6).
+#
+# ~/.claude/mmry-config.json is the Claude Code credential. On Codex, lib-host.sh points
+# MMRY_CONFIG_FILE at the Codex home and refuses when that file is missing, but two doors stay
+# open past the refusal by design: MMRY_ALLOW_NO_CREDENTIAL=1 (mmry-setup.sh, which runs before a
+# Codex credential exists) and a key given in the environment. Through either, a missing Codex
+# file fell through to this one, and Codex setup on a machine that also runs Claude Code loaded
+# the Claude account's key. tests/unit/codex-claude-config-isolation.bats plants a sentinel there.
+#
+# No process: the host is resolved in this shell (already cached by the time anything calls
+# this), because the Foundation path runs on every prompt. With no resolver at all - a curated
+# copy without lib-host.sh - the environment is the only evidence there is, and it is used.
+_mmry_claude_config_fallback_ok() {
+    if declare -F _mmry_host_resolve >/dev/null 2>&1; then
+        _mmry_host_resolve
+        [[ "${_MMRY_HOST_V:-}" != "codex" ]]
+        return
+    fi
+    [[ "${MMRY_HOST:-}" != "codex" ]]
+}
+
 mmry_load_config() {
     # Idempotent per process (#31434). Every entry-point handler sources this file - which
     # runs mmry_load_config once at AUTO-INIT - and then calls mmry_load_config again. That
@@ -80,7 +101,7 @@ mmry_load_config() {
         config_file="$MMRY_CONFIG_FILE"
     elif [[ -n "$plugin_root" && -f "${plugin_root}/mmry-config.json" ]]; then
         config_file="${plugin_root}/mmry-config.json"
-    elif [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
+    elif _mmry_claude_config_fallback_ok && [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
         config_file="${HOME}/.claude/mmry-config.json"
     fi
 

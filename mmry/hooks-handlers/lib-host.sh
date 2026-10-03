@@ -622,6 +622,8 @@ _mmry_host_command_script() {
         visibility)     printf 'hooks-handlers/visibility.sh' ;;
         feedback)       printf 'hooks-handlers/submit-feedback.sh' ;;
         load-memories)  printf 'hooks-handlers/session-start.sh' ;;
+        # #31411's status command. session-init.sh copies every handler, so it is on disk on Codex.
+        foundation-status) printf 'hooks-handlers/foundation-status.sh' ;;
         *)              printf '' ;;
     esac
 }

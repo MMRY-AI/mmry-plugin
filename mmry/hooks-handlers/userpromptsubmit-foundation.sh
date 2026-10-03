@@ -501,6 +501,36 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # emit instead costs nothing and restores the guarantee: a firing killed anywhere, in the
     # worker or in the emit, leaves the marker, and the next turn says so.
 
+    # THE REMEDIES AND THE PRODUCT NAME, PER HOST (#31245 merged onto #31411).
+    #
+    # #31411 added three customer messages to this file that the Codex work had never seen: the
+    # refusal and upgrade notices, which named /mmry:load-memories and /mmry:foundation-status, and
+    # the by-reference notice, which said the set was "larger than Claude Code lets a plugin show".
+    # On Codex there is nothing to type and the product is not Claude Code. The deadline and crash
+    # notices below already derived their references; this is that derivation, moved into one place
+    # so every notice in the file takes it from the same source. Called only on paths that are
+    # already reporting something, so the forks never land on an ordinary prompt. The literals are
+    # the fallback for a copy with no lib-host.sh, and are what Claude Code customers see, byte for
+    # byte (requirement 4).
+    _fnd_host_refs() {
+        local _x=""
+        _FOUND_RELOAD_REF='/mmry:load-memories'
+        _FOUND_CONFIG_REF='~/.claude/mmry-config.json'
+        _FOUND_STATUS_REF='/mmry:foundation-status'
+        _FOUND_HOST_LABEL='Claude Code'
+        if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+            _FOUND_RELOAD_REF="$(mmry_host_command_ref load-memories)"
+            _x="$(mmry_host_command_ref foundation-status)" && [[ -n "$_x" ]] && _FOUND_STATUS_REF="$_x"
+        fi
+        if declare -F mmry_host_config_file_ref >/dev/null 2>&1; then
+            _FOUND_CONFIG_REF="$(mmry_host_config_file_ref)"
+        fi
+        if declare -F mmry_host_label >/dev/null 2>&1; then
+            _x="$(mmry_host_label)" && [[ -n "$_x" ]] && _FOUND_HOST_LABEL="$_x"
+        fi
+        return 0
+    }
+
     # THE CACHE WAS THERE AND COULD NOT BE TRUSTED (#31583).
     #
     # Distinct from both a crash and a deadline, and it needs its own words: nothing was
@@ -557,10 +587,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
                 ;;
         esac
         NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
+        _fnd_host_refs
         if (( ${_UPGRADE:-0} )); then
-            USERMSG="MMRY AI: you have just updated the MMRY plugin, so this one turn ran without your Foundation directives while they are fetched again in the new format. Normally the next prompt has them. No action needed; if you still see this after a few prompts, run /mmry:load-memories."
+            USERMSG="MMRY AI: you have just updated the MMRY plugin, so this one turn ran without your Foundation directives while they are fetched again in the new format. Normally the next prompt has them. No action needed; if you still see this after a few prompts, run ${_FOUND_RELOAD_REF}."
         else
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} Run ${_FOUND_RELOAD_REF} to rebuild it, then ${_FOUND_STATUS_REF} to confirm."
         fi
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
@@ -605,14 +636,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # the functions are already defined; the guard covers the curated-copy case documented
         # there, and its fallback is the literal this file has always carried, byte for byte,
         # which is requirement 4.
-        _FOUND_RELOAD_REF='/mmry:load-memories'
-        _FOUND_CONFIG_REF='~/.claude/mmry-config.json'
-        if declare -F mmry_host_command_ref >/dev/null 2>&1; then
-            _FOUND_RELOAD_REF="$(mmry_host_command_ref load-memories)"
-        fi
-        if declare -F mmry_host_config_file_ref >/dev/null 2>&1; then
-            _FOUND_CONFIG_REF="$(mmry_host_config_file_ref)"
-        fi
+        _fnd_host_refs
         if (( HIT_DEADLINE == 1 )); then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
             USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run ${_FOUND_RELOAD_REF} to rebuild the local cache, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
@@ -675,7 +699,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         [[ -z "$_tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
-            USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to the full copy and asked to read it before answering. That works, but it relies on the assistant opening the file. To have the set applied directly, keep it under about $(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )) characters. ${USERMSG}"
+            _fnd_host_refs
+            USERMSG="MMRY AI: your Foundation set is larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to the full copy and asked to read it before answering. That works, but it relies on the assistant opening the file. To have the set applied directly, keep it under about $(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )) characters. ${USERMSG}"
             printf '%s' "$_tok" > "$_told" 2>/dev/null || true
         fi
     fi
@@ -957,7 +982,11 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
     fi
     _fnd_path="$CACHE"
     command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$CACHE" 2>/dev/null || printf '%s' "$CACHE")"
-    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than Claude Code lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool; it is the complete, verified set: ${_fnd_path}
+    # The product named is the one this host is (#31245 merged onto #31411): Codex spills a hook
+    # over 10,000 bytes to a file much as Claude Code previews one over 10,000 characters.
+    _fnd_lbl='Claude Code'
+    if declare -F _mmry_host_resolve >/dev/null 2>&1; then _mmry_host_resolve; _fnd_lbl="${_MMRY_HOST_LABEL_V:-$_fnd_lbl}"; fi
+    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than ${_fnd_lbl} lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool; it is the complete, verified set: ${_fnd_path}
 If a response would conflict with any directive in it, follow the directive. If you cannot read the file, tell the user plainly that their Foundation directives were not applied to this turn."
     printf '@@MMRY-BYREF %s@@' "$_fnd_n"
 elif (( MMRY_FND_PART > _fnd_n )); then

@@ -491,16 +491,16 @@ _codex_setup() {
     CODEX_HOOKS_FILE="$PLUGIN_ROOT/hooks/codex-hooks.json"
 }
 
+# One budget per host, or DISAGREE: since #31411 each host registers the Foundation hook once per
+# part, and a part budgeted differently from its siblings must not hide behind the first one read.
 _codex_foundation_timeout() {
-    jq -r '.hooks.UserPromptSubmit[].hooks[]
-           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
-        "$CODEX_HOOKS_FILE" | tr -d '\r'
+    jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout]
+           | unique | if length == 1 then .[0] else "DISAGREE" end' "$CODEX_HOOKS_FILE" | tr -d '\r'
 }
 
 _claude_foundation_timeout() {
-    jq -r '.hooks.UserPromptSubmit[].hooks[]
-           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
-        "$HOOKS_FILE" | tr -d '\r'
+    jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout]
+           | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r'
 }
 
 # ---------------------------------------------------------------------------------------------

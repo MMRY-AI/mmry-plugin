@@ -287,7 +287,14 @@ count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 
 # silent. `if !` is exempt from errexit, and the fault note is the channel this file already
 # uses to put a warning in front of the model before it decides anything about the turn.
 if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"; then
-    MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: your Foundation directives could not be stored for this session, so they will NOT be applied on each prompt. Nothing partial was kept and nothing was guessed at. Tell the user, and ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check. "
+    # The remedy is the host's own (#31245 merged onto #31411): on Codex there is nothing to type,
+    # so the assistant is told it can run the script itself, as the other Codex hints here do.
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        _mmry_fnd_retry_hint="offer to run $(mmry_host_command_ref load-memories) to try again, or $(mmry_host_command_ref foundation-status) to check"
+    else
+        _mmry_fnd_retry_hint="ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check"
+    fi
+    MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: your Foundation directives could not be stored for this session, so they will NOT be applied on each prompt. Nothing partial was kept and nothing was guessed at. Tell the user, and ${_mmry_fnd_retry_hint}. "
 fi
 
 # Register session — uses session_id read from hook stdin (see top of file).

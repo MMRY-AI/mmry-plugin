@@ -89,7 +89,7 @@ _emitting_hits() {
         { line = $0; sub(/^[ \t]+/, "", line)
           if (line ~ /^#/) next
           if (line ~ /^(rem|REM|::)/) next
-          if ($0 ~ /\/mmry:/ || $0 ~ /\.claude\/mmry-config\.json/ || $0 ~ /~\/\.claude/)
+          if ($0 ~ /\/mmry:/ || $0 ~ /\.claude\/mmry-config\.json/ || $0 ~ /~\/\.claude/ || $0 ~ /Claude Code/)
               printf "%d\t%s\n", NR, $0
         }' "$f"
 }
@@ -132,10 +132,31 @@ _allowed_reason() {
 
         # (N) credential DISCOVERY, not a message. lib-host.sh points MMRY_CONFIG_FILE at the right
         #     file ahead of these, and refuses rather than letting the chain reach them on Codex.
-        "mmry-client.sh|elif [[ -f \"\${HOME}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "mmry-client.sh|config_file=\"\${HOME}/.claude/mmry-config.json\"")        printf 'N'; return 0 ;;
-        "userpromptsubmit-foundation.sh|elif [[ -f \"\${HOME:-}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
-        "userpromptsubmit-foundation.sh|cfg=\"\${HOME}/.claude/mmry-config.json\"") printf 'N'; return 0 ;;
+        # (D) the host table itself: this IS the derivation of the product name.
+        "lib-host.sh|_MMRY_HOST_LABEL_V=\"Claude Code\"") printf 'D'; return 0 ;;
+        # (F) more fallbacks behind `declare -F` guards (#31245 merged onto #31411).
+        "userpromptsubmit-foundation.sh|_FOUND_STATUS_REF='/mmry:foundation-status'") printf 'F'; return 0 ;;
+        "userpromptsubmit-foundation.sh|_FOUND_HOST_LABEL='Claude Code'") printf 'F'; return 0 ;;
+        "userpromptsubmit-foundation.sh|_fnd_lbl='Claude Code'") printf 'F'; return 0 ;;
+        "foundation-status.sh|_FS_RELOAD='/mmry:load-memories'") printf 'F'; return 0 ;;
+        "foundation-status.sh|_FS_CONFIG='~/.claude/mmry-config.json'") printf 'F'; return 0 ;;
+        "foundation-status.sh|_FS_HOST='Claude Code'") printf 'F'; return 0 ;;
+        "stop-check.sh|mmry_host_label() { printf 'Claude Code'; }") printf 'F'; return 0 ;;
+        # (B) the Claude branch of the Foundation-store fault hint.
+        "session-start.sh|_mmry_fnd_retry_hint=\"ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check\"") printf 'B'; return 0 ;;
+        # (P) names Claude Code's PAYLOAD FORMAT, which Codex also speaks, not the customer's product.
+        "session-start.sh|MMRY_HOOK_FAULT_NOTE=\"\${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: the \$(mmry_host_label) hook payload was read successfully but carried no 'session_id' field (fields present: \${_mmry_keys:-none - it did not parse as JSON}). MMRY assumes the Claude Code payload field names; this session is being registered without a real id, so coordination features will not work. Tell the user and ask them to report it. \"") printf 'P'; return 0 ;;
+        # (I) the Claude Code installers. Codex installs with `codex plugin`, never these.
+        "install.sh|echo \"Restart Claude Code to activate.\"") printf 'I'; return 0 ;;
+        "install.ps1|Write-Host 'Restart Claude Code to activate.'") printf 'I'; return 0 ;;
+        # (R) the uninstallers again, for their closing line.
+        "uninstall.sh|echo \"Restart Claude Code to take effect.\"") printf 'R'; return 0 ;;
+        "uninstall.bat|\"Write-Host 'Restart Claude Code to take effect.';\" ^") printf 'R'; return 0 ;;
+        # (N) discovery behind _mmry_claude_config_fallback_ok, which is false on Codex (TC6).
+        "mmry-client.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
+        "lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME:-}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
+        "lib-foundation-switch.sh|cfg=\"\${HOME}/.claude/mmry-config.json\"") printf 'N'; return 0 ;;
     esac
     return 1
 }
@@ -237,10 +258,24 @@ session-start.sh|_mmry_reauth_hint="run /mmry:setup"
 session-start.sh|_mmry_onboard_hint="they can always say remember this to save something new, or /mmry:help for a quick reference"
 mmry-setup.sh|echo "Anytime you need help, type: /mmry:help"
 uninstall.sh|echo "  Removed ~/.claude/mmry/"
-mmry-client.sh|elif [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
 mmry-client.sh|config_file="${HOME}/.claude/mmry-config.json"
-userpromptsubmit-foundation.sh|elif [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
-userpromptsubmit-foundation.sh|cfg="${HOME}/.claude/mmry-config.json"
+lib-host.sh|_MMRY_HOST_LABEL_V="Claude Code"
+userpromptsubmit-foundation.sh|_FOUND_STATUS_REF='/mmry:foundation-status'
+userpromptsubmit-foundation.sh|_FOUND_HOST_LABEL='Claude Code'
+userpromptsubmit-foundation.sh|_fnd_lbl='Claude Code'
+foundation-status.sh|_FS_RELOAD='/mmry:load-memories'
+foundation-status.sh|_FS_CONFIG='~/.claude/mmry-config.json'
+foundation-status.sh|_FS_HOST='Claude Code'
+stop-check.sh|mmry_host_label() { printf 'Claude Code'; }
+session-start.sh|_mmry_fnd_retry_hint="ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check"
+session-start.sh|MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: the $(mmry_host_label) hook payload was read successfully but carried no 'session_id' field (fields present: ${_mmry_keys:-none - it did not parse as JSON}). MMRY assumes the Claude Code payload field names; this session is being registered without a real id, so coordination features will not work. Tell the user and ask them to report it. "
+install.sh|echo "Restart Claude Code to activate."
+install.ps1|Write-Host 'Restart Claude Code to activate.'
+uninstall.sh|echo "Restart Claude Code to take effect."
+uninstall.bat|"Write-Host 'Restart Claude Code to take effect.';" ^
+mmry-client.sh|elif _mmry_claude_config_fallback_ok && [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
+lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
+lib-foundation-switch.sh|cfg="${HOME}/.claude/mmry-config.json"
 KEYS
 
     [ -z "$missing" ] || {
