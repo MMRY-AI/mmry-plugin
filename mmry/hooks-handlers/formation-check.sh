@@ -198,8 +198,12 @@ fi
 # identity, and the Codex session then polls as that session and can consume directed messages
 # meant for it. mmry_session_id, from lib-host.sh sourced above, gets the precedence right per
 # host and was fixed for this in b3cefd0.
+#
+# The old CLAUDE_SESSION_ID / CLAUDE_CODE_SESSION_ID chain that used to follow this line is gone
+# (#31245 QA round 8): mmry_session_id already consults both, in that order, and lib-host.sh is a
+# hard requirement of this file (it exits above when it cannot be sourced), so the chain could
+# never answer. structural/formation-check-identity.bats pins this line in both directions.
 session_id="${session_id:-$(mmry_session_id)}"
-session_id="${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
 [[ -n "$session_id" ]] || exit 0
 
 # MMRY_FORMATION_MODE exists for the test suite, which has no Claude Code runtime to be launched by
