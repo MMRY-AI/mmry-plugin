@@ -7,6 +7,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" session-init",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" session-init",
             "statusMessage": "MMRY AI: loading your memories",
             "timeout": 30
           }
@@ -17,6 +18,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "statusMessage": "MMRY AI: checking for formation messages",
             "timeout": 15
           }
@@ -29,6 +31,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" userpromptsubmit-foundation",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" userpromptsubmit-foundation",
             "timeout": 20
           }
         ]
@@ -38,6 +41,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "timeout": 10
           }
         ]
@@ -47,6 +51,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" stop-check",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" stop-check",
             "timeout": 10
           }
         ]
@@ -58,6 +63,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "timeout": 8
           }
         ]

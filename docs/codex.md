@@ -43,11 +43,12 @@ Ask Codex to run MMRY setup, or run it yourself:
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 ```
 
-If you are on Windows and would rather not open Git Bash, this runs the same thing from PowerShell
-by naming the shell explicitly, so it cannot pick the wrong one:
+If you are on Windows and would rather not open Git Bash, this runs the same thing from PowerShell.
+It finds Git for Windows' bash from the `git` on your PATH and follows `CODEX_HOME` the same way,
+so it cannot pick the wrong shell or the wrong folder:
 
 ```
-& 'C:\Program Files\Git\bin\bash.exe' "$env:USERPROFILE\.codex\mmry\setup\mmry-setup.sh"
+& (Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\bash.exe') "$(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$env:USERPROFILE\.codex" })\mmry\setup\mmry-setup.sh"
 ```
 
 It opens a browser so you can sign in at [mmryai.com](https://mmryai.com), then writes your
@@ -57,7 +58,8 @@ script prints a URL to paste.
 **Why the command is written that way.** Codex reads `CODEX_HOME` to find its own configuration and
 MMRY follows it, so your files are under `$CODEX_HOME` if you have set it and under `~/.codex` if
 you have not. `"${CODEX_HOME:-$HOME/.codex}"` resolves to the right one either way, which is why
-every runnable command on this page is written with it - paste any of them as they are. MMRY's own
+every bash command on this page is written with it, and the PowerShell one makes the same
+choice with $env:CODEX_HOME - paste any of them as they are. MMRY's own
 hooks and handlers work this out for themselves and need no help from you.
 
 **4. Restart Codex once more.** Your memories load on the next session start.
@@ -65,21 +67,25 @@ hooks and handlers work this out for themselves and need no help from you.
 ### On Windows
 
 The steps are identical. You need **Git for Windows** installed, because MMRY's hooks are shell
-scripts and that is where Windows gets a shell.
+scripts and that is where Windows gets a shell. Install it with its default options; you do not
+need to change how it sets up your PATH.
 
-Every hook is launched with `sh`, deliberately, rather than with `bash`. Windows ships a
-`bash.exe` in System32 when the Windows Subsystem for Linux is installed, and that one cannot see
-your Windows files, so a hook that asked for `bash` could get the wrong shell and fail with
-nothing useful printed. Windows ships no `sh.exe` at all, so `sh` can only be Git's.
+On Windows, Codex starts every MMRY hook through a small launcher, `codex-hook.cmd`, that finds
+Git for Windows' own shell for itself: beside the `git` on your PATH, from the location the Git
+installer records, or in the standard install folders. It never uses a bare `bash`, because Windows
+ships a `bash.exe` in System32 when the Windows Subsystem for Linux is installed, and that one
+cannot see your Windows files.
 
-If nothing happens at all, check that Git for Windows is installed and on your PATH:
+If Git for Windows cannot be found at all, your session says so in one line, "MMRY AI could not
+start on this Windows machine: Git for Windows was not found", and carries on without your
+memories rather than failing. To check from PowerShell:
 
 ```
-where.exe sh
+git --version
 ```
 
-That should print a path inside your Git installation, usually `C:\Program Files\Git\usr\bin\sh.exe`.
-If it prints nothing, reinstall Git for Windows and choose the option that adds it to your PATH.
+If that prints an error rather than a version, install Git for Windows from
+[gitforwindows.org](https://gitforwindows.org) and start a new session.
 
 ---
 
@@ -211,7 +217,7 @@ separate credentials and separate directories on purpose.
 |---|---|
 | No memories at session start | Did you answer **Trust all and continue** at the hook review? Restart Codex and look for it. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
-| Nothing at all happens, on Windows | Run `where.exe sh`. If it prints nothing, Git for Windows is missing from your PATH, and MMRY's hooks have no shell to run in. Reinstall it with the PATH option. |
+| Nothing at all happens, on Windows | Look for the line "MMRY AI could not start on this Windows machine" at the start of your session. If it is there, Git for Windows is not installed: install it with its default options and start a new session. If it is not, run `git --version` in PowerShell; an error there means the same thing. |
 | Setup says "Failed to translate" or `execvpe(/bin/bash) failed` | You ran it in PowerShell and it picked the Linux subsystem's bash. Use the Git Bash window, or the explicit PowerShell form above. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |

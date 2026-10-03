@@ -107,7 +107,9 @@ SURVIVED=0
 ERRORS=0
 RUN=0
 SKIPPED=0
-TOTAL=99
+# Counted from this file rather than typed in: a hand-maintained total drifted every time an
+# experiment was added or retired, and "ran 99 of 99" then meant nothing.
+TOTAL="$(grep -c '^mutate ' "${BASH_SOURCE[0]}")"
 SURVIVOR_LIST=""
 ERROR_LIST=""
 CURRENT_FILE=""
@@ -318,9 +320,9 @@ mutate "additionalContextLimit is emitted" hooks/codex-hooks.json \
   "s = s.replace('\"timeout\": 30', '\"additionalContextLimit\": 2500, \"timeout\": 30', 1)" \
   structural/codex-manifest.bats "additionalContextLimit"
 
-mutate "Windows command uses POSIX expansion" hooks/codex-hooks.json \
-  "s = s.replace('%CLAUDE_PLUGIN_ROOT%', '\${CLAUDE_PLUGIN_ROOT}')" \
-  structural/codex-manifest.bats "%VAR%"
+mutate "commandWindows reverts to the quoted form PowerShell prints instead of running" hooks/codex-hooks.json \
+  "s = s.replace('\"commandWindows\": \"cmd /d /c ', '\"commandWindows\": \"')" \
+  structural/codex-manifest.bats "runs through PowerShell"
 
 mutate "an unknown event name is registered" hooks/codex-hooks.json \
   "s = s.replace('\"SessionStart\": [', '\"SessionStarted\": [', 1)" \
@@ -407,7 +409,6 @@ mutate "the refusal fires on Claude Code too" hooks-handlers/lib-host.sh \
 # ---- session-init.sh and session-start.sh, which had no mutation coverage at all -------------
 mutate "session-init installs into the Claude directory on every host" hooks-handlers/session-init.sh   's = s.replace("MMRY_STATE_DIR=" + chr(34) + "$(mmry_host_state_dir)" + chr(34), "MMRY_STATE_DIR=" + chr(34) + "${HOME}/.claude/mmry" + chr(34), 1)'   handlers/codex-session.bats "installs the handlers under"
 
-mutate "session-init stops copying the Windows entry point" hooks-handlers/session-init.sh   's = s.replace("cp " + chr(34) + "$P" + chr(34) + "/hooks-handlers/*.cmd", "true # cp " + chr(34) + "$P" + chr(34) + "/hooks-handlers/*.cmd", 1)'   handlers/codex-session.bats "copies the Windows entry point"
 
 mutate "session-init loses the pipefail guard on the plugin-root search" hooks-handlers/session-init.sh   's = s.replace("|| true)" + chr(34), ")" + chr(34), 1)'   handlers/codex-session.bats "plugin root cannot be found"
 
@@ -586,6 +587,20 @@ mutate "the recovery remedy names the Claude command on Codex too [R6+]" hooks-h
 mutate "the documented install command drifts from the printed one [R6+]" ../docs/codex.md \
   's = s.replace("codex plugin add mmry@mmry-plugin", "codex plugin add mmry@mmry-ai")' \
   structural/codex-docs-and-eol.bats "is the one this page documents"
+
+# ---- QA round 8 (2026-10-02): the six failed items, each with an experiment ------------------
+#
+# Replaced in this round, not silently dropped: "Windows command uses POSIX expansion" looked for
+# %CLAUDE_PLUGIN_ROOT%, which no registration has carried since 1a5560d, and "session-init stops
+# copying the Windows entry point" looked for a cp of hooks-handlers/*.cmd, which session-init has
+# never needed: the Windows launcher runs from the plugin root, beside codex-hook.sh. Both reported
+# NOT APPLIED. The first is replaced by the commandWindows experiment above.
+mutate "the Claude Code save prompt goes quiet after a save again" hooks-handlers/stop-check.sh   's = s.replace("if [[ " + chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " && -f ", "if [[ -f ", 1)'   handlers/stop-check.bats "aged marker still blocks"
+mutate "formation-check reverts to the Claude-first session chain" hooks-handlers/formation-check.sh   's = s.replace("session_id=" + chr(34) + "${session_id:-$(mmry_session_id)}" + chr(34), "session_id=" + chr(34) + "${session_id:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}}" + chr(34), 1)'   structural/formation-check-identity.bats "polls as its own id"
+mutate "the Windows launcher echoes its commands into the model's context" hooks-handlers/codex-hook.cmd   's = s.replace("@echo off", "@echo on", 1)'   structural/codex-manifest.bats "starts with @echo off"
+mutate "the Windows launcher stops finding Git from the git.exe on PATH" hooks-handlers/codex-hook.cmd   's = s.replace("where git.exe", "where no-such-git.exe", 1)'   structural/codex-manifest.bats "runs through PowerShell"
+mutate "the README comparison table promises Codex a save prompt at session end" ../README.md   's = s.replace("| on your next message, when something is unsaved |", "| at session end |", 1)'   structural/codex-docs-and-eol.bats "no customer surface promises"
+mutate "the customer page promises Codex a save before the session ends" ../docs/codex.md   's = s + chr(10) + "On Codex, MMRY prompts you to save before the session ends." + chr(10)'   structural/codex-docs-and-eol.bats "no customer surface promises"
 
 echo
 if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then

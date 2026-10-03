@@ -3,11 +3,11 @@
 # round 2): the BYTES of the Windows entry point, and whether the documentation tells them to run a
 # path that exists on their machine.
 #
-# WHY THE BYTES. codex-hook.cmd is committed LF. .gitattributes pinned *.sh and nothing else, and
-# core.autocrlf decides the rest - so the file a customer executed was CRLF on one machine and LF
-# on another, from the same commit, and only the CRLF form had ever been run. That was tolerable
-# while the only Windows scripts were installers that run once. It is not tolerable now: every MMRY
-# hook on Windows Codex routes through this .cmd, four registrations deep.
+# WHY THE BYTES. codex-hook.cmd was once committed LF. .gitattributes pinned *.sh and nothing else,
+# and core.autocrlf decided the rest - so the file a customer executed was CRLF on one machine and
+# LF on another, from the same commit. Tolerable while the only Windows scripts were installers
+# that run once; not for a launcher every MMRY hook on Windows Codex starts through (all six
+# registrations, since #31245 QA round 8).
 #
 # WHY THE DOCUMENTATION. lib-host.sh honours CODEX_HOME, Codex's own documented override, and
 # tests/handlers/codex-hook.bats asserts that a relocated home is resolved. The skill document then
@@ -63,37 +63,24 @@ _require_git() {
     }
 }
 
-@test "windows: the dead .cmd wrapper is gone, and nothing has quietly reintroduced it" {
-    # codex-hook.cmd used to be the Windows entry point and this test used to pin its CRLF bytes.
-    # It was deleted in #31245 QA round 7. Every registration in hooks/codex-hooks.json launches
-    # with `sh`, which on Windows can only be Git's because Windows ships no sh.exe, and NOTHING
-    # referenced the wrapper any more: not a registration, not the installer, not a handler.
-    #
-    # It still shipped to every customer, CRLF-pinned, with a header describing a mechanism the
-    # branch had removed, and the customer page sent people to an MMRY_BASH override that only that
-    # orphaned file read. QA found the remedy inert.
-    #
-    # So the invariant is inverted: the file must NOT exist, and if a Windows entry point is ever
-    # reintroduced it has to arrive with a registration that uses it, in the same change.
-    [[ ! -e "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" ]] || {
-        echo "codex-hook.cmd is back. If that is deliberate, it needs a registration in"
-        echo "hooks/codex-hooks.json that actually launches it, and this test updated to match."
-        return 1
-    }
-    # Only EXECUTABLE lines. A comment explaining why the wrapper was deleted names it, and a raw
-    # grep would report the deletion as a reintroduction forever after. Same convention as the
-    # absence checks in structural/formation-delivery.bats.
-    local named="" f
-    for f in "$PLUGIN_ROOT"/hooks/*.json "$PLUGIN_ROOT"/hooks-handlers/*.sh; do
-        [[ -f "$f" ]] || continue
-        if sed 's/#.*$//' "$f" | grep -q 'codex-hook\.cmd'; then
-            named="${named} ${f##*/}"
-        fi
-    done
-    [[ -z "$named" ]] || {
-        echo "something still names the deleted wrapper in executable code:${named}"
-        return 1
-    }
+@test "windows: the launcher every commandWindows names is shipped, and in CRLF bytes" {
+    # HISTORY, so the next reader does not repeat it. codex-hook.cmd was the Windows entry point,
+    # was deleted in #31245 QA round 7 as unreferenced, and is back since QA round 8: on a stock
+    # Windows machine `sh` is not on PATH, so the `sh` registrations never ran, and the deletion of
+    # commandWindows that left them as the only route was a misdiagnosis (PowerShell, not cmd, runs
+    # Codex hooks on Windows; see structural/codex-manifest.bats). This test used to require the
+    # file to be ABSENT. It now requires the opposite, and requires it to be the file that is named.
+    local f="$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd"
+    [[ -f "$f" ]] || { echo "commandWindows names codex-hook.cmd and it is not shipped"; return 1; }
+    local named
+    named="$(jq -r '[.hooks[][] .hooks[] | select((.commandWindows // "") | contains("codex-hook.cmd"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")"
+    [[ "$named" -gt 0 ]] || { echo "the launcher ships but no registration names it"; return 1; }
+    # cmd.exe runs LF-only batch files, mostly; "mostly" is not good enough for a file on the hot path
+    # of every hook. Every line must end CRLF in the file as it sits in this tree.
+    local total crlf
+    total="$(wc -l < "$f" | tr -d '[:space:]')"
+    crlf="$(grep -c $'\r$' "$f" || true)"
+    [[ "$total" -gt 0 && "$total" == "$crlf" ]] || { echo "$crlf of $total lines end CRLF"; return 1; }
 }
 
 @test "eol: and the shell entry point beside it carries none, because Git Bash would choke on them" {
@@ -152,7 +139,10 @@ _codex_doc() { printf '%s' "$(cd "$PLUGIN_ROOT/.." && pwd)/docs/codex.md"; }
 # shell command, and inline `code` after the word "Run".
 _runnable_lines() {
     local doc; doc="$(_codex_doc)"
-    grep -nE '(^[[:space:]]*bash |Run `)' "$doc" || true
+    # PowerShell lines too (#31245 QA round 8): the page's one PowerShell command hardcoded a Git
+    # path and ignored CODEX_HOME while the page said every command was relocatable, and this helper
+    # never saw it because it only matched lines starting with bash.
+    grep -nE '(^[[:space:]]*bash |^[[:space:]]*& |Run `)' "$doc" || true
 }
 
 @test "docs: the customer-facing page has runnable commands at all" {
@@ -177,7 +167,7 @@ _runnable_lines() {
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
         [[ "$line" == *'.codex'* ]] || continue    # commands that name no Codex path are fine
-        [[ "$line" == *'CODEX_HOME:-$HOME/.codex'* ]] || missing="${missing}
+        [[ "$line" == *'CODEX_HOME:-$HOME/.codex'* || "$line" == *'$env:CODEX_HOME'* ]] || missing="${missing}
   ${line}"
     done < <(_runnable_lines)
     [[ -z "$missing" ]] || {
@@ -477,7 +467,12 @@ _codex_tree() {
 
 @test "docs: the page offers a Windows invocation that cannot pick the wrong shell" {
     local doc; doc="$(_codex_doc)"
-    grep -q "Git.bin.bash.exe" "$doc" || { echo "no explicit interpreter form for PowerShell users"; return 1; }
+    # Git for Windows' own bash from its bin folder, located from the git on PATH rather than from a typed-in
+    # install folder (#31245 QA round 8: the old line hardcoded C:\Program Files\Git and ignored
+    # CODEX_HOME, on a page that said every command was relocatable).
+    grep -q "bin.bash.exe" "$doc" || { echo "no explicit interpreter form for PowerShell users"; return 1; }
+    grep -q "Get-Command git" "$doc" || { echo "the PowerShell form does not locate Git from the git on PATH"; return 1; }
+    ! grep -q "Program Files.Git.bin.bash.exe" "$doc" || { echo "the PowerShell form hardcodes an install folder"; return 1; }
 }
 
 @test "docs: every documentation URL the installer prints names a file that exists in this repo" {
@@ -534,22 +529,56 @@ _codex_tree() {
     # containing "not available". The line looked like a disclosure and was skipped. So the unit
     # here is a SENTENCE or a TABLE CELL, never a line: a qualification has to sit next to the
     # claim it qualifies, which is also the only version a customer reads correctly.
-    local f bad=""
-    local -a _lines
+    #
+    # ROUND 8 FOUND THE TABLE EXEMPTION. A table row was judged as header plus row, and a header
+    # containing "claude code |" counted as a disclosure, so the comparison table added to the root
+    # README to FIX this defect exempted every row in both columns: rewriting its Codex column to
+    # promise a save prompt at session end passed. A row is now judged one CELL at a time, each cell
+    # read with the row's label and against ITS OWN column header. A cell under a column headed
+    # Claude Code only may describe Claude Code; any other cell is judged on what it says.
+    #
+    # ROUND 8 ALSO FOUND THIS TEST COULD NOT RUN ON macOS. It used mapfile, a bash 4 builtin, and the
+    # floor this product documents is the bash 3.2 macOS ships; and it split sentences with a sed
+    # expression whose newline-in-the-replacement is a GNU extension BSD sed does not honour. Lines
+    # are now read with a plain while-read loop and sentences are split by parameter expansion,
+    # both bash 3.2.
+    #
+    # AND THE SURFACE LIST IS DISCOVERED, NOT TYPED IN. Six hardcoded paths meant a new customer
+    # document that names Codex escaped the guard silently. Every shipped .md and .json outside the
+    # tests, the vendored tools, the internal design notes and the captured test evidence that mentions Codex is swept; a path
+    # that itself names Codex is a Codex-only surface. The six original paths are asserted to be in
+    # the discovered set, so the discovery cannot quietly lose one.
+    local f bad="" nl
+    nl='
+'
+    local -a _lines _codex_only _shared
 
-    # Codex-only surfaces must never make the promise at all.
-    local codex_only=(
-        "$REPO_ROOT/docs/codex.md"
-        "$PLUGIN_ROOT/.codex-plugin/plugin.json"
-        "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
-        "$PLUGIN_ROOT/hooks/codex-hooks.json"
-    )
-    # Shared surfaces may, because on Claude Code it is TRUE, but the same sentence or cell has to
-    # say which host it is talking about.
-    local shared=(
-        "$REPO_ROOT/README.md"
-        "$PLUGIN_ROOT/README.md"
-    )
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        grep -qi "codex" "$f" || continue
+        case "$(printf '%s' "${f#$REPO_ROOT/}" | tr 'A-Z' 'a-z')" in
+            *codex*) _codex_only[${#_codex_only[@]}]="$f" ;;
+            *)       _shared[${#_shared[@]}]="$f" ;;
+        esac
+    done < <(find "$REPO_ROOT" \
+                \( -name .git -o -name tests -o -name vendor -o -name node_modules -o -name superpowers -o -name evidence \) -prune \
+                -o -type f \( -name '*.md' -o -name '*.json' \) -print | sort)
+
+    local must _found
+    for must in \
+        "$REPO_ROOT/docs/codex.md" \
+        "$PLUGIN_ROOT/.codex-plugin/plugin.json" \
+        "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" \
+        "$PLUGIN_ROOT/hooks/codex-hooks.json" \
+        "$REPO_ROOT/README.md" \
+        "$PLUGIN_ROOT/README.md"; do
+        [[ -f "$must" ]] || { echo "a surface this test must sweep is missing: $must"; return 1; }
+        _found=""
+        for f in "${_codex_only[@]}" "${_shared[@]}"; do
+            [[ "$f" -ef "$must" ]] && { _found=1; break; }
+        done
+        [[ -n "$_found" ]] || { echo "surface discovery lost a known customer surface: $must"; return 1; }
+    done
 
     _promises_a_missing_moment() {
         local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
@@ -567,12 +596,12 @@ _codex_tree() {
         return 1
     }
 
+    # No table-syntax entry any more: a pipe is never part of what is judged, only cell text is.
     _is_disclosure() {
         local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
         case "$l" in
             *"claude code only"*)          return 0 ;;
             *"on claude code"*)            return 0 ;;
-            *"claude code |"*)             return 0 ;;
             *"not available"*)             return 0 ;;
             *"no channel"*)                return 0 ;;
             *"do not exist"*)              return 0 ;;
@@ -584,49 +613,75 @@ _codex_tree() {
         return 1
     }
 
-    for f in "${codex_only[@]}" "${shared[@]}"; do
-        [[ -f "$f" ]] || { echo "a surface this test must sweep is missing: $f"; return 1; }
+    # A header cell that names Claude Code and not Codex: the column is ABOUT Claude Code, so what a
+    # cell under it says is true of Claude Code and is not a promise to a Codex customer.
+    _is_claude_column() {
+        local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+        [[ "$l" == *"claude code"* && "$l" != *codex* ]]
+    }
 
-        # THE UNIT OF JUDGEMENT IS WHAT A READER TAKES IN AT ONCE, which is not a line.
-        #
-        # A markdown TABLE ROW is read against its header, so "| A prompt to save | at session end
-        # | on your next message |" is not a promise about Codex: the header says which column is
-        # which. Those are tested as header plus row, together.
-        #
-        # Everything else is tested a SENTENCE at a time, because the storefront listing is a
-        # single JSON value forty words long, and an earlier line-based version of this test let a
-        # deliberate re-introduction of the bad string through: the same line carried an unrelated
-        # "not available" further along and read as a disclosure.
-        mapfile -t _lines < <(tr -d '\r' < "$f")
-        local i n subject header="" frag
+    # Print a markdown table row as one cell per line, outer pipes dropped. bash 3.2.
+    _cells() {
+        local row="$1"
+        row="${row#"${row%%[![:space:]]*}"}"
+        row="${row#|}"
+        row="${row%"${row##*[![:space:]]}"}"
+        row="${row%|}"
+        printf '%s\n' "${row//|/$nl}"
+    }
+
+    local i j n subject header="" frag label cell hcell line
+    local -a _h _r
+    for f in "${_codex_only[@]}" "${_shared[@]}"; do
+        # THE UNIT OF JUDGEMENT IS WHAT A READER TAKES IN AT ONCE, which is not a line: a sentence,
+        # or a table cell read with its row label and its column header.
+        _lines=()
+        header=""
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            _lines[${#_lines[@]}]="${line%$'\r'}"
+        done < "$f"
         n=${#_lines[@]}
         for ((i = 0; i < n; i++)); do
             # A separator row means the line before it was the header of this table.
             if [[ "${_lines[$i]}" =~ ^[[:space:]]*\|[-:[:space:]|]+$ ]]; then
+                header=""
                 [[ $i -gt 0 ]] && header="${_lines[$((i - 1))]}"
                 continue
             fi
             if [[ "${_lines[$i]}" == *"|"* && -n "$header" ]]; then
-                subject="${header} ${_lines[$i]}"
-                _promises_a_missing_moment "$subject" || continue
-                _is_disclosure "$subject" && continue
-                bad="${bad}
-  ${f#$REPO_ROOT/}: ${_lines[$i]}"
+                _h=(); _r=()
+                while IFS= read -r cell; do _h[${#_h[@]}]="$cell"; done < <(_cells "$header")
+                while IFS= read -r cell; do _r[${#_r[@]}]="$cell"; done < <(_cells "${_lines[$i]}")
+                # The first cell is the row's LABEL. It is never judged alone, because a reader never
+                # reads it alone: it is read with each cell beside it. A one-cell row has only a label.
+                label="${_r[0]:-}"
+                j=1
+                [[ ${#_r[@]} -gt 1 ]] || j=0
+                for ((; j < ${#_r[@]}; j++)); do
+                    cell="${_r[$j]}"
+                    hcell="${_h[$j]:-}"
+                    _is_claude_column "$hcell" && continue
+                    if [[ $j -eq 0 ]]; then subject="$cell"; else subject="${label} ${cell}"; fi
+                    _promises_a_missing_moment "$subject" || continue
+                    _is_disclosure "$subject" && continue
+                    bad="${bad}${nl}  ${f#$REPO_ROOT/}: [${hcell}] ${subject}"
+                done
                 continue
             fi
-            while IFS= read -r frag; do
+            # A line with no pipe ends any table that was open.
+            [[ "${_lines[$i]}" == *"|"* ]] || header=""
+            # One sentence per line: ". " becomes ".<newline>". Parameter expansion, not sed.
+            line="${_lines[$i]}"
+            line="${line//. /.$nl}"
+            # The "|| -n" keeps the last fragment, which has no trailing newline when the
+            # here-string below is the only source; without it a single-sentence line was never
+            # examined (caught by mutation in round 7).
+            while IFS= read -r frag || [[ -n "$frag" ]]; do
                 [[ -n "$frag" ]] || continue
                 _promises_a_missing_moment "$frag" || continue
                 _is_disclosure "$frag" && continue
-                bad="${bad}
-  ${f#$REPO_ROOT/}: ${frag}"
-                # printf '%s\n', NOT '%s': with no trailing newline `read` returns non-zero on the
-                # last fragment and the loop body never runs for it, so any line that is a SINGLE
-                # sentence was never examined at all. Caught by mutation: a bullet re-introducing
-                # "Session end: Prompts to save decisions..." into the root README SURVIVED this
-                # sweep, while the storefront JSON was correctly refused, because that value
-                # happens to hold several sentences and only its last one was being dropped.
-            done < <(printf '%s\n' "${_lines[$i]}" | sed 's/\. /.\n/g')
+                bad="${bad}${nl}  ${f#$REPO_ROOT/}: ${frag}"
+            done < <(printf '%s\n' "$line")
         done
     done
 
@@ -662,15 +717,22 @@ _codex_tree() {
 
     local var unread=""
     # Every MMRY_* setting the page tells a customer to set.
+    #
+    # A READ, NOT A MENTION (#31245 QA round 8). This used to grep for the name anywhere in a
+    # shipped file, so a commented-out reference, or a comment explaining that a setting had been
+    # removed, satisfied it. Comment lines are dropped first: '#' in shell, 'rem' and '::' in batch.
+    _code_lines() {
+        local f
+        for f in "$PLUGIN_ROOT"/hooks-handlers/*.sh "$PLUGIN_ROOT"/hooks-handlers/*.cmd \
+                 "$PLUGIN_ROOT"/setup/* "$PLUGIN_ROOT"/hooks/*.json; do
+            [[ -f "$f" ]] || continue
+            grep -v -E '^[[:space:]]*(#|rem([[:space:]]|$)|REM([[:space:]]|$)|::)' "$f" || true
+        done
+    }
+    local code; code="$(_code_lines)"
     while IFS= read -r var; do
         [[ -n "$var" ]] || continue
-        # Where could it be read? Any shipped shell file, the manifests, or the installers.
-        if grep -rqs "$var" \
-            "$PLUGIN_ROOT"/hooks-handlers/*.sh \
-            "$PLUGIN_ROOT"/setup/* \
-            "$PLUGIN_ROOT"/hooks/*.json; then
-            continue
-        fi
+        grep -q "$var" <<< "$code" && continue
         unread="${unread} ${var}"
     done < <(grep -o 'MMRY_[A-Z0-9_]*' "$doc" | sort -u)
 

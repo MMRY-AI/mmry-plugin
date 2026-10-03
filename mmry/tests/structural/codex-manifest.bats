@@ -256,31 +256,101 @@ setup() {
     [[ "$n_total" == "$n_routed" ]] || { echo "$n_routed of $n_total handlers route through codex-hook.sh"; return 1; }
 }
 
-@test "codex hooks: NO handler declares commandWindows, because it silently eats the output" {
-    # THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, AND THE OLD ONE WAS WRONG (#31245, 2026-09-20).
+@test "codex hooks: every handler declares commandWindows, launching codex-hook.cmd through cmd /d /c" {
+    # WHY WINDOWS HAS ITS OWN COMMAND AGAIN (#31245 QA round 8).
     #
-    # The old test required every handler to carry commandWindows, reasoning that Windows runs
-    # COMSPEC /C and a POSIX command string would leave ${PLUGIN_ROOT} unexpanded. The reasoning was
-    # plausible and the consequence was that the entire Codex feature did nothing on Windows.
+    # `command` begins with `sh`, and on a stock Windows machine there is no sh on PATH. The Git for
+    # Windows installer's recommended PATH option adds Git\cmd, which holds git.exe and no shell, so
+    # every MMRY hook failed before any MMRY code ran, and the published remedy sent the customer to
+    # the installer option it flags as hazardous. Measured live on 2026-10-02 with the machine PATH
+    # this box carries (System32, Windows, WindowsPowerShell, Git\cmd): HEAD's registrations delivered
+    # nothing at all; these delivered the memory load and the Foundation block.
     #
-    # MEASURED on codex-cli 0.154.0, against a real session, with a batch file that echoes a valid
-    # additionalContext payload carrying a unique token:
+    # WHY THE DELETION IN 1a5560d WAS A MISDIAGNOSIS. On Windows Codex runs a hook through POWERSHELL,
+    # not cmd: core/src/session/mod.rs build_hooks_config takes the session shell, and
+    # shell_detect.rs default_user_shell is PowerShell on Windows, `-NoProfile -Command <string>`.
+    # The commandWindows tried then was `"<path>\codex-hook.cmd" session-init`. To PowerShell a
+    # string that begins with a quote is an EXPRESSION: alone it prints itself, which is exactly the
+    # "Codex injects THE COMMAND STRING ITSELF" that was measured, and followed by an argument it is
+    # a parse error, which is exactly the "fails outright when it carries an argument". The field
+    # worked; the string was not PowerShell.
     #
-    #   commandWindows declared      -> hook reports Completed, token appears 0 times in the
-    #                                   transcript, and Codex injects THE COMMAND STRING ITSELF as
-    #                                   hooks.additional_context. The handler output never arrives.
-    #   commandWindows absent        -> token appears 4 times. Output is consumed correctly.
-    #
-    # A second, independent fault in the same field: commandWindows fails outright when it carries
-    # an argument. One identical file invoked bare Completes; invoked as "<path>" session-init it
-    # Fails, and so do the unquoted, `call` and `cmd /c` forms. Every MMRY hook passes a handler
-    # name, which is why all six failed rather than misbehaved.
-    local n_win
-    n_win="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | select(.commandWindows != null)] | length' "$CODEX_HOOKS")"
-    [[ "$n_win" == "0" ]] || {
-        echo "$n_win handler(s) declare commandWindows; on Windows that stops Codex consuming their stdout"
-        return 1
-    }
+    # `cmd /d /c "<path>" <handler>` is a native command invocation in PowerShell AND a valid line in
+    # cmd, which is Codex's fallback when no PowerShell is found. /d skips cmd AutoRun, which would
+    # otherwise let a registry entry print text into the hook's stdout, and stdout is what the model
+    # reads.
+    # Compared inside jq, so no tab or backslash escaping stands between the file and the check.
+    local bad n
+    bad="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[]
+        | (.command | split(" ") | last) as $h
+        | select((.commandWindows // "") != ("cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" " + $h))
+        | "\($h): \(.commandWindows // "MISSING")"' "$CODEX_HOOKS")"
+    [[ -z "$bad" ]] || { echo "handlers whose commandWindows is not the launcher for the same handler:"; echo "$bad"; return 1; }
+    n="$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$CODEX_HOOKS")"
+    [[ "$n" -gt 0 ]]
+}
+
+@test "codex hooks: no commandWindows starts with a quote, which PowerShell prints instead of running" {
+    # The exact shape 1a5560d measured as "injects the command string itself". Kept as its own test so
+    # the reason survives anyone rewriting the launcher form above.
+    local c
+    while IFS= read -r c; do
+        [[ "$c" != \"* ]] || { echo "PowerShell would print this rather than run it: $c"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .commandWindows // empty' "$CODEX_HOOKS")
+}
+
+@test "codex hooks: the Windows launcher exists, starts with @echo off, and never takes a bare bash" {
+    local cmdf="$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd"
+    [[ -f "$cmdf" ]] || { echo "commandWindows names a launcher that does not exist"; return 1; }
+    # With echo on, cmd writes every command line to stdout, and stdout is what Codex hands the model.
+    [[ "$(head -1 "$cmdf" | tr -d '\r')" == "@echo off" ]] || { echo "first line is not @echo off"; return 1; }
+    # bin\bash.exe sets up the PATH the handlers need; usr\bin\bash.exe does not, and a bare bash can
+    # be the Linux subsystem's. Measured: under a stock PATH bin\bash.exe finds /usr/bin/tr and
+    # /mingw64/bin/curl, usr\bin\bash.exe finds neither.
+    # Code lines only: the comments name usr\bin\bash.exe to explain why it is not used.
+    local code; code="$(grep -v -i '^[[:space:]]*rem' "$cmdf")"
+    grep -q 'bin\\bash.exe' <<< "$code" || { echo "the launcher does not look for Git's bin\\bash.exe"; return 1; }
+    ! grep -qi 'usr\\bin\\bash.exe' <<< "$code" || { echo "the launcher can pick usr\\bin\\bash.exe"; return 1; }
+    ! grep -Eiq 'where(\.exe)? bash' <<< "$code" || { echo "the launcher resolves a bare bash from PATH"; return 1; }
+}
+
+@test "codex hooks: on Windows the registered commandWindows runs through PowerShell with no sh on PATH" {
+    # Behaviour, not text: the exact registered string, run the way Codex runs it, by PowerShell
+    # with -NoProfile -Command, under the PATH a stock Git for Windows install leaves: no sh, no
+    # Git\bin, only Git\cmd. A stand-in codex-hook.sh beside the real launcher reports what reached
+    # it, so the test proves the launcher found a bash, passed the handler name, passed stdin, and
+    # passed the exit code back.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+
+    local root="$BATS_TEST_TMPDIR/plugin root with space"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1] stdin=[$(cat)] tr=$(command -v tr)"\nexit "${MMRY_TEST_EXIT:-0}"\n' \
+        > "$root/hooks-handlers/codex-hook.sh"
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS")"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+
+    local sysroot; sysroot="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")"
+    local stock="$sysroot/System32:$sysroot:$sysroot/System32/WindowsPowerShell/v1.0"
+    local gitcmd; gitcmd="$(dirname "$(command -v git)")"
+    [[ "$gitcmd" == */cmd ]] || gitcmd=""
+    [[ -n "$gitcmd" ]] && stock="$stock:$gitcmd"
+
+    # Exactly how Codex runs it: the string as -Command, the payload on PowerShell's own stdin, which
+    # PowerShell hands to the native cmd it starts (measured).
+    run env PATH="$stock" powershell.exe -NoProfile -Command "$cmdline" <<< '{"session_id":"t"}'
+    [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "launcher did not reach the handler: $output"; return 1; }
+    [[ "$output" == *'stdin=[{"session_id":"t"}'* ]] || { echo "stdin did not reach the handler: $output"; return 1; }
+    [[ "$output" == *"tr=/usr/bin/tr"* ]] || { echo "the handler did not get Git's tools on PATH: $output"; return 1; }
+
+    # A failing handler must still read as a failure. PowerShell -Command reports any non-zero native
+    # exit as 1, the same for the sh form this replaces, so non-zero is the property, not the number.
+    run env PATH="$stock" MMRY_TEST_EXIT=3 powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    [[ "$status" -ne 0 ]] || { echo "a failing handler was reported as success: $output"; return 1; }
 }
 
 @test "codex hooks: every command uses Codex own PLUGIN_ROOT token, not the other product alias" {

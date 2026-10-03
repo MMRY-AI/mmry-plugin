@@ -256,7 +256,9 @@ stop_run() {
     cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$dir/"
     env MMRY_HOST=codex TMPDIR="$dir" HOME="$HOME" bash "$dir/stop-check.sh" >/dev/null 2>&1
     # Age the marker past the debounce, then record a save as having happened just now.
-    touch -d "20 minutes ago" "$dir/.mmry-stop-checked" 2>/dev/null || skip "touch -d unavailable"
+    # touch -t, not touch -d: BSD touch on macOS has no -d, and this used to skip there, so the
+    # Codex silence was never exercised on the platform R6 is about (#31245 QA round 8).
+    touch -t 202001010000.00 "$dir/.mmry-stop-checked"
     date +%s > "$dir/.mmry-last-save"
     run env MMRY_HOST=codex TMPDIR="$dir" HOME="$HOME" bash "$dir/stop-check.sh"
     assert_success

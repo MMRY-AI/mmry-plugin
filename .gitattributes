@@ -17,7 +17,7 @@
 # different files from one commit.
 #
 # This matters more since #31245 than it did before: codex-hook.cmd is on the hot path of EVERY
-# MMRY hook on Windows Codex - four registrations route through it - where the other Windows
+# MMRY hook on Windows Codex - all six registrations start through it - where the other Windows
 # scripts run once, at install time. cmd.exe's handling of LF-only input is not something to leave
 # to chance in a file that runs after every tool call.
 *.cmd text eol=crlf
