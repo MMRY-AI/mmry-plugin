@@ -66,7 +66,20 @@ After setup completes, tell the user: \"You are all set. Restart $(mmry_host_lab
 
 If the user does not have an account yet, direct them to https://mmryai.com to sign up first, then run setup again."
 
-    escaped="$(printf '%s' "$setup_msg" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+    # Escaped by parameter expansion, NOT sed (#31245 QA round 10, found on the Mac bench). The
+    # sed ':a;N;$!ba' that joined lines here is GNU sed only: BSD sed on macOS rejects the label,
+    # exits 0 anyway and passes the text through, so every new Mac user with no credential got a
+    # setup message with raw newlines inside the JSON string, which the host rejects. The same idiom
+    # was fixed for the fault note further down; this one was missed. _mmry_json_escape cannot be
+    # called here because on Codex this runs BEFORE mmry-client.sh is sourced (deliberately, see
+    # the credential check below), so the same expansions are written out. Output is byte-identical
+    # wherever GNU sed worked, since the message holds no tab or carriage return.
+    escaped="$setup_msg"
+    escaped="${escaped//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//$'\n'/\\n}"
+    escaped="${escaped//$'\r'/\\r}"
+    escaped="${escaped//$'\t'/\\t}"
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' "$escaped"
 }
 

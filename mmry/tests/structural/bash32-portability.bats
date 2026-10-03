@@ -22,6 +22,9 @@ _BASH4_PATTERNS=(
     'transformation expansion ${x@Q} (bash 4.4)|\$\{[A-Za-z_][A-Za-z0-9_]*@[QEPAa]\}'
     'EPOCHSECONDS or EPOCHREALTIME (bash 5)|EPOCH(SECONDS|REALTIME)'
     'wait -n (bash 4.3)|wait[[:space:]]+-n'
+    # Not bash, but the same macOS failure: BSD sed rejects the label, exits 0 and passes the text
+    # through unescaped (#31245 QA round 10, session-start.sh setup message, found on a Mac).
+    'GNU-only sed label loop :a;N;$!ba|:a;N;[$]!ba'
 )
 
 # Prints "file:line: construct: text" for every hit under the given root.
@@ -65,12 +68,14 @@ case x in a) echo ;;& esac
 echo "${v@Q}"
 echo "$EPOCHSECONDS"
 wait -n
+printf x | sed ':a;N;$!ba;s/\n/ /g'
 # mapfile in a comment is not a use
 BAD
     local hits; hits="$(_scan_bash4 "$root")"
     local expect
     for expect in "mapfile or readarray" "associative array" "case-modification" "&>>" \
-                  "case fall-through" "transformation expansion" "EPOCHSECONDS" "wait -n"; do
+                  "case fall-through" "transformation expansion" "EPOCHSECONDS" "wait -n" \
+                  "GNU-only sed label loop"; do
         [[ "$hits" == *"$expect"* ]] || { echo "the scanner missed: $expect"; echo "$hits"; return 1; }
     done
     [[ "$(grep -c 'mapfile or readarray' <<< "$hits")" -eq 2 ]] || {
