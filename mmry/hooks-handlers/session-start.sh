@@ -173,6 +173,43 @@ fi
 
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 
+# SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
+#
+# The per-prompt hook records each verified delivery so it can tell two states apart that
+# look identical on disk: a session that has never had its directives built, which has lost
+# nothing and must stay silent, and a session that HAD them and finds them gone, which must
+# say so. The record lived at a fixed name in the shared temp directory and nothing ever
+# cleared it, so its presence meant "some session on this machine once delivered", not "this
+# session did". A brand new session whose fetch failed - offline, API down, expired key - on a
+# machine an earlier session had used was therefore told, on every prompt, that its directives
+# had disappeared, when nothing had been delivered and so nothing had disappeared. Reviewers
+# reproduced it at 932 characters a prompt, indefinitely.
+#
+# The record now carries the id of the session that wrote it, and this is the only place that
+# id is known: it comes off the hook payload above. The per-prompt hook cannot read stdin
+# cheaply enough to ask on every prompt, so it reads this file instead, which costs one
+# redirect and no process.
+#
+# UNCONDITIONAL AND EARLY, before any fetch, because the failure being closed is precisely a
+# session whose fetch did not happen. A clear that only ran on success would leave the exact
+# case it exists for untouched.
+#
+# WHAT THIS DOES NOT FIX, stated rather than implied, and CORRECTED (#31583 QA round 5): the
+# token is one file in a shared temp directory, so it means "the most recent SessionStart in this
+# temp directory", not "this session". Two concurrent sessions overwrite each other's token, and
+# that errs in BOTH directions. The older session stops recognising its own record, which turns a
+# true disappearance into silence. And a delivery by session A is stamped with session B's token,
+# so B can be told "Last sent: 1 second ago" having sent nothing; three reviewers reproduced that
+# one. An earlier version of this comment claimed only the first, safer direction could happen.
+# Real per-session scoping needs the per-prompt hook to know its own session id, which it does
+# not today; that is its own piece of work.
+printf '%s' "$SESSION_ID" > "${MMRY_TMPDIR}/mmry-foundation.session" 2>/dev/null || true
+rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
+# Records named by session id (#31583 QA round 6) are never cleared by the session that wrote them,
+# because it cannot know it has ended. They are a few dozen bytes each; anything a week old is from
+# a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*'     -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
+
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
 # Working directory is now persisted server-side via the /api/sessions POST
@@ -235,8 +272,23 @@ fi
 count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
 
 # Write the Foundation-only cache the UserPromptSubmit hook re-injects each turn (#30579).
-# Presentation/framing is applied at inject time; this file holds just the data. Best-effort.
-mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"
+# Presentation/framing is applied at inject time; this file holds just the data.
+#
+# GUARDED, AND REPORTED (#31411 QA). This call used to be bare, and the comment here used to
+# say "Best-effort", which was true while mmry_write_foundation_cache ended in `|| true` and
+# had no failing path. #31583 gave it six. This file runs under `set -euo pipefail` with no
+# trap, so from that point a bare call meant any writer failure terminated the hook HERE,
+# before it printed its JSON: the session then ran with no Foundation directives and nobody
+# was told. That is precisely the failure this release exists to remove, arriving through the
+# code written to remove it. The neighbouring mmry_register_session call was already guarded,
+# so the difference sat in the same screenful.
+#
+# Two things are therefore true of the line below. It cannot kill the hook, and it cannot be
+# silent. `if !` is exempt from errexit, and the fault note is the channel this file already
+# uses to put a warning in front of the model before it decides anything about the turn.
+if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"; then
+    MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: your Foundation directives could not be stored for this session, so they will NOT be applied on each prompt. Nothing partial was kept and nothing was guessed at. Tell the user, and ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check. "
+fi
 
 # Register session — uses session_id read from hook stdin (see top of file).
 # WORK_DIR is persisted server-side here; subsequent save calls reference it

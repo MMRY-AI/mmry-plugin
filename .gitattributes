@@ -11,6 +11,13 @@
 *.bats text eol=lf
 *.bash text eol=lf
 
+# Force LF for the documents the suite reads as text too (#31583 QA). Without this the
+# command pages and README check out CRLF on Windows, and a phrase assertion that
+# flattens newlines but not carriage returns goes red in a fresh checkout while staying
+# green in CI, which covers ubuntu and macos only. The helpers strip CR as well now, so
+# this is belt and braces rather than the only defence.
+*.md text eol=lf
+
 # And the Windows scripts are the mirror image. cmd.exe and PowerShell are CRLF runtimes, and
 # nothing here pinned them, so what a customer received depended on the core.autocrlf setting of
 # whoever last checked the file out - LF with autocrlf=false, CRLF with autocrlf=true. Two
