@@ -205,13 +205,13 @@ _mmry_emit_escaped() {
 # Stamped with the session token like the delivery record, so another session's outcome is never
 # read as this one's. Read without sourcing the client: the supervisor stays process-free.
 _mmry_outcome() {
-    local tok="" f="${_FOUND_TMPDIR}/mmry-foundation.session"
-    [[ -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
+    local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
+    [[ -z "$tok" && -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
     # One redirect, no process (#31411 QA round 2, latency). The first version wrote a temp file and
     # renamed it into place, which cost two process starts, mv and rm, on every prompt: measured on
     # Windows, part 1 alone ran 975 ms against 797 ms for the hook before it. The line is a few dozen
     # bytes and is read only by /mmry:foundation-status, on a later prompt, never during this one.
-    printf '%s %s' "$tok" "$1" > "${_FOUND_TMPDIR}/mmry-foundation.outcome${_SFX}" 2>/dev/null
+    printf '%s %s' "$tok" "$1" > "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" 2>/dev/null
     return 0
 }
 
@@ -288,6 +288,22 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         exit 0
     fi
 
+    # THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Claude Code
+    # sends session_id as the first field (captured from a real payload: offset 1), so 160 bytes is
+    # enough whatever the prompt size; bash reads a pipe a byte at a time, and reading the whole
+    # payload would make a long pasted prompt cost every part process. The rest is left unread, as
+    # this hook has always left all of it. No id means the old token-named records, unchanged.
+    MMRY_FND_SID=""
+    if [[ ! -t 0 ]]; then
+        _fnd_head=""
+        IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
+        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
+            MMRY_FND_SID="${BASH_REMATCH[1]}"
+        fi
+    fi
+    export MMRY_FND_SID
+    _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
     # story: the supervisor still has to start, reap the worker, decide WHY it failed and
     # write the JSON afterwards, and on Windows Git Bash every one of those steps is a
@@ -346,7 +362,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     #
     # The worker now writes a PENDING record, scoped to this supervisor, and only this process
     # promotes it, and only after its own emit has returned success.
-    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status"
+    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status${MMRY_FND_SID:+.$MMRY_FND_SID}"
     _PENDING="${_STATUS}.pending.$$"
     rm -f "$_PENDING" 2>/dev/null || true
     MMRY_FOUNDATION_WORKER=1 MMRY_FOUNDATION_PENDING="$_PENDING" \
@@ -446,7 +462,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # audiences so the assistant and the customer are told the same thing.
     if (( WORKER_RC == 3 && MMRY_FND_PART > 1 )); then
         # NO EMIT ON THIS PATH: a refusal is about the whole set and part 1 reports it.
-        _mmry_outcome "failed the stored copy was refused"
+        _mmry_outcome "failed refused"
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
@@ -501,9 +517,12 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
         if (( ${_UPGRADE:-0} )); then
-            _mmry_outcome "failed it was stored by an earlier plugin version and is being fetched again"
+            _mmry_outcome "failed upgrade"
         else
-            _mmry_outcome "failed the stored copy was refused: ${REASON}"
+            # A CAUSE CODE, NOT PROSE (#31583 QA round 6). The status command used to print whatever
+            # text this record held, and the record sits in a shared temp directory. It now holds a
+            # code and a number only; the command turns those into fixed sentences.
+            _mmry_outcome "failed refused ${_STATE:-unknown}"
         fi
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
@@ -518,7 +537,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
             USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run /mmry:load-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
             _FOUND_EVENT="deadline exceeded (${DEADLINE}s), worker killed"
-            _FOUND_OUTCOME="loading them took longer than the ${DEADLINE}s limit and was stopped"
+            _FOUND_OUTCOME="deadline ${DEADLINE}"
         else
             # NOT a timeout. Saying "it took too long" here would be three lies at once: a
             # false cause, an invented duration, and a remedy (re-send the prompt) that cannot
@@ -526,7 +545,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: the loader failed with exit code ${WORKER_RC}. This was a failure, not a slow turn. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
             USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run /mmry:load-memories to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
-            _FOUND_OUTCOME="the loader failed before it finished"
+            _FOUND_OUTCOME="crash"
         fi
         printf '%s foundation reinjection FAILED: %s\n' \
             "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
@@ -572,7 +591,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # told on every prompt, because it needs the instruction every time.
     if [[ "$_FND_KIND" == BYREF* ]]; then
         _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""
-        [[ -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
+        _tok="${MMRY_FND_SID:-}"
+        [[ -z "$_tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
             USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to the full copy and asked to read it before answering. That works, but it relies on the assistant opening the file. To have the set applied directly, keep it under about $(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )) characters. ${USERMSG}"
@@ -710,7 +730,7 @@ MANIFEST="${CACHE}.manifest"
 # Written on every verified injection so /mmry:foundation-status can answer "are my
 # directives reaching my assistants right now" without anyone reading a cache file
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
-STATUS="${MMRY_TMPDIR}/mmry-foundation.status"
+STATUS="${MMRY_TMPDIR}/mmry-foundation.status${MMRY_FND_SID:+.$MMRY_FND_SID}"
 # Where the worker writes its delivery record. Under the supervisor this is a pending file the
 # supervisor promotes after a successful emit; run on its own, as the unit tests do, the
 # worker has no supervisor and writes the record directly.
@@ -752,7 +772,7 @@ if (( _verdict == 1 )); then
     # because the status command has to reach the same answer, and a second copy of a
     # Foundation question is what has drifted twice on this branch already.
     if [[ "$_reason" == "absent" ]]; then
-        if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
+        if mmry_foundation_delivered_this_session "$MMRY_TMPDIR" "${MMRY_FND_SID:-}"; then
             printf '%s' 'gone|the local copy of your Foundation directives has disappeared since it was last delivered in this session'
             exit 3
         fi
@@ -761,7 +781,7 @@ if (( _verdict == 1 )); then
     # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
     # so it goes on the record the status command reads.
     [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=0 bytes=0
-' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "$STATUS_OUT" 2>/dev/null || true
+' "${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}" > "$STATUS_OUT" 2>/dev/null || true
     exit 0
 fi
 
@@ -804,7 +824,7 @@ content="$(<"$CACHE")"
 # STAMPED WITH THE SESSION THAT WROTE IT (#31583 QA round 4, finding 4c). Without the stamp
 # this record outlives its session and the next one reads it as its own.
 [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=%s bytes=%s
-' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
+' "${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
 
 # ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
 # treats a successful worker's output as already-escaped JSON string content and copies it.

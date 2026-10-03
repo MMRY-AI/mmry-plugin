@@ -96,6 +96,10 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 # not today; that is its own piece of work.
 printf '%s' "$SESSION_ID" > "${MMRY_TMPDIR}/mmry-foundation.session" 2>/dev/null || true
 rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
+# Records named by session id (#31583 QA round 6) are never cleared by the session that wrote them,
+# because it cannot know it has ended. They are a few dozen bytes each; anything a week old is from
+# a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*'     -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.

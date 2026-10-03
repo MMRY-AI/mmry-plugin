@@ -45,7 +45,12 @@ mmry_load_config 2>/dev/null || true
 
 CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
 MANIFEST="${CACHE}.manifest"
-STATUS="${MMRY_TMPDIR}/mmry-foundation.status"
+# THIS SESSION, by its own id (#31583 QA round 6, R4(c)). The command runtime provides
+# CLAUDE_CODE_SESSION_ID; the per-prompt hook reads the same id from its payload, so both file this
+# session's records under one name and another session's are never read here. With no id, the old
+# token-named records are read, exactly as before.
+_sid="$(mmry_foundation_sid "${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}")"
+STATUS="$(mmry_foundation_record_path "$MMRY_TMPDIR" "$_sid")"
 
 echo "MMRY AI - Foundation directive status"
 echo
@@ -94,7 +99,7 @@ if (( _verdict == 1 )); then
         # loaded. That is not a wording quibble: the hook's own refusal ends by telling the
         # customer to run this command to confirm, and reviewers followed that instruction and
         # got the opposite story from the two surfaces in the same second.
-        if mmry_foundation_delivered_this_session "$MMRY_TMPDIR"; then
+        if mmry_foundation_delivered_this_session "$MMRY_TMPDIR" "$_sid"; then
             echo "Stored copy:  DISAPPEARED - it was delivered in this session and is now gone."
             echo "              It is being REFUSED, not used."
             echo "Action:       run /mmry:load-memories to rebuild it."
@@ -159,7 +164,7 @@ echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_act_bytes} bytes, 
 # and, for a failure, newer than the last successful delivery. Older lines belong to a turn the
 # customer has already moved past, or to an earlier session in the same temp directory.
 _session_file="${MMRY_TMPDIR}/mmry-foundation.session"
-_tok="$(mmry_foundation_session_token "$MMRY_TMPDIR")"
+_tok="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$_sid")"
 _parts_max="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 [[ "$_parts_max" =~ ^[1-9][0-9]*$ ]] || _parts_max=6
 
@@ -172,7 +177,7 @@ _parts_max="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 # "ok by-reference n", "failed <why>" or "none". Part 1's file has no suffix, part k's ends ".k".
 # An outcome stamped with another session's token is not this session's and is not read.
 _outcome() {
-    local f="${MMRY_TMPDIR}/mmry-foundation.outcome$1" l=""
+    local f="${MMRY_TMPDIR}/mmry-foundation.outcome${_sid:+.$_sid}$1" l=""
     [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
     [[ -n "$_tok" && "${l%% *}" == "$_tok" ]] || return 1
     printf '%s' "${l#* }"
@@ -180,14 +185,43 @@ _outcome() {
 # A firing killed before it finished leaves its in-flight marker behind. Markers older than this
 # session's start belong to an earlier session in the same temp directory and are not read.
 _cut_short() {
-    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight$1"
+    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight${_sid:+.$_sid}$1"
     [[ -f "$f" ]] || return 1
+    # A marker named by this session is this session's. Only the token-named fallback can belong
+    # to an earlier session in the same temp directory, and only it needs the age check.
+    [[ -n "$_sid" ]] && return 0
     [[ ! -f "$_session_file" ]] || [[ "$f" -nt "$_session_file" ]]
 }
 _sfx() { (( $1 > 1 )) && printf '.%s' "$1"; }
 
+# FIXED SENTENCES FROM A CAUSE CODE (#31583 QA round 6). The outcome record lives in a shared temp
+# directory, so nothing in it is printed: only a code and a number are read, and anything else reads
+# as "unrecorded". The advice follows the cause, because the hook gives cause-specific advice on the
+# same turn and the two must not contradict each other: after a loader crash the hook says re-sending
+# will not help, so this must not tell the customer to re-send.
+_why_and_action() {
+    local code="$1"
+    _WHY="" _ACTION=""
+    if [[ "$code" =~ ^deadline\ ([0-9]{1,4})$ ]]; then
+        _WHY="loading them took longer than the ${BASH_REMATCH[1]}s limit and was stopped"
+        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+    elif [[ "$code" == "crash" ]]; then
+        _WHY="the loader failed before it finished"
+        _ACTION="re-sending will not help. Run /mmry:load-memories, and reinstall the plugin if that fails."
+    elif [[ "$code" == "upgrade" ]]; then
+        _WHY="they were stored by an earlier plugin version and are being fetched again"
+        _ACTION="none needed. If this persists after a few prompts, run /mmry:load-memories."
+    elif [[ "$code" =~ ^refused($|\ [a-z-]{1,20}$) ]]; then
+        _WHY="the stored copy could not be verified, so it was refused rather than used"
+        _ACTION="run /mmry:load-memories to rebuild it."
+    else
+        _WHY="the reason was not recorded"
+        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+    fi
+}
+
 _delivered=0
-mmry_foundation_delivered_this_session "$MMRY_TMPDIR" && _delivered=1
+mmry_foundation_delivered_this_session "$MMRY_TMPDIR" "$_sid" && _delivered=1
 
 _failed_why=""
 _partly=""
@@ -196,7 +230,9 @@ _o1="$(_outcome "")"
 if _cut_short ""; then
     _failed_why="the last prompt was stopped before it finished loading them"
 elif [[ "$_o1" == failed* ]]; then
-    _failed_why="${_o1#failed }"
+    _why_and_action "${_o1#failed }"
+    _failed_why="$_WHY"
+    _failed_action="$_ACTION"
 elif [[ "$_o1" == "ok by-reference "* ]]; then
     _byref=1
 elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([0-9]+)$ ]]; then
@@ -210,7 +246,8 @@ elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([0-9]+)$ ]]; then
         elif [[ "$_ok" == "ok part ${_k} of ${_n}" ]]; then
             _got=$(( _got + 1 ))
         elif [[ "$_ok" == failed* ]]; then
-            _missing="${_missing}; part ${_k}: ${_ok#failed }"
+            _why_and_action "${_ok#failed }"
+            _missing="${_missing}; part ${_k}: ${_WHY}"
         else
             _missing="${_missing}; part ${_k} has no record of arriving"
         fi
@@ -221,7 +258,7 @@ fi
 if [[ -n "$_failed_why" ]]; then
     echo "Delivered:    NOT on the most recent prompt - ${_failed_why}."
     echo "              That prompt ran without your Foundation directives."
-    echo "Action:       re-send the prompt. If it keeps happening, run /mmry:load-memories."
+    echo "Action:       ${_failed_action:-re-send the prompt. If it keeps happening, run /mmry:load-memories.}"
 elif [[ -n "$_partly" ]]; then
     echo "Delivered:    PARTLY on the most recent prompt - ${_partly}."
     echo "              That prompt ran without part of your Foundation directives."
@@ -242,7 +279,7 @@ fi
 # Last successful delivery, from THIS session's record only, parsed rather than echoed. The raw
 # record used to be printed verbatim, so anything written after the token reached the customer.
 if (( _delivered )); then
-    _st="$(mmry_foundation_delivery_detail "$MMRY_TMPDIR")"
+    _st="$(mmry_foundation_delivery_detail "$MMRY_TMPDIR" "$_sid")"
     _when="$(_mmry_mtime "$STATUS" 2>/dev/null)"
     _now="$(date +%s 2>/dev/null || echo 0)"
     _what=""

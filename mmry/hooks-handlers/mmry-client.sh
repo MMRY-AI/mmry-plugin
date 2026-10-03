@@ -288,21 +288,58 @@ mmry_foundation_session_token() {
 #
 #   0  this session delivered at least once
 #   1  it did not, or the record belongs to someone else, or nothing is recorded
-mmry_foundation_delivered_this_session() {
-    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
-    local rec="${dir}/mmry-foundation.status"
-    [[ -f "$rec" && -r "$rec" ]] || return 1
-    local tok rec_line rec_tok
-    tok="$(mmry_foundation_session_token "$dir")" || return 1
-    rec_line="$(<"$rec")" 2>/dev/null || return 1
-    rec_tok="${rec_line%% *}"
-    [[ -n "$rec_tok" && "$rec_tok" == "$tok" ]]
+# THE SESSION KEY THESE RECORDS ARE FILED UNDER (#31583 QA round 6, R4(c)).
+#
+# The token above means "the most recent SessionStart in this temp directory", not "this session",
+# so with two sessions running, one could be told about the other's delivery. The per-prompt hook
+# now reads the real session id from its own payload (session_id is the first field Claude Code
+# sends) and the status command has CLAUDE_CODE_SESSION_ID, so the delivery record, the per-part
+# outcomes and the in-flight markers are named by the session they belong to. The token remains
+# the fallback for a caller that has no session id, which is exactly the old behaviour.
+#
+# Only characters that are safe in a file name are accepted; anything else is no session id at all.
+mmry_foundation_sid() {
+    local sid="${1:-}"
+    [[ "$sid" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || sid=""
+    printf '%s' "$sid"
 }
 
-# The delivery record with its session stamp removed, for printing to a customer.
+# The value a record is stamped with: the session id when there is one, else the token.
+mmry_foundation_session_key() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid
+    sid="$(mmry_foundation_sid "${2:-}")"
+    if [[ -n "$sid" ]]; then printf '%s' "$sid"; return 0; fi
+    mmry_foundation_session_token "$dir"
+}
+
+# Where this session's delivery record lives.
+mmry_foundation_record_path() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid
+    sid="$(mmry_foundation_sid "${2:-}")"
+    printf '%s/mmry-foundation.status%s' "$dir" "${sid:+.$sid}"
+}
+
+# Did THIS session record a verified delivery? The record is named by the session and stamped with
+# its key, so a record left by another session, concurrent or earlier, answers no.
+#
+#   0  this session delivered at least once
+#   1  it did not, or the record belongs to someone else, or nothing is recorded
+mmry_foundation_delivered_this_session() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid="${2:-}"
+    local rec key rec_line rec_tok
+    rec="$(mmry_foundation_record_path "$dir" "$sid")"
+    [[ -f "$rec" && -r "$rec" ]] || return 1
+    key="$(mmry_foundation_session_key "$dir" "$sid")" || return 1
+    [[ -n "$key" ]] || return 1
+    rec_line="$(<"$rec")" 2>/dev/null || return 1
+    rec_tok="${rec_line%% *}"
+    [[ -n "$rec_tok" && "$rec_tok" == "$key" ]]
+}
+
+# The delivery record with its stamp removed, for printing to a customer.
 mmry_foundation_delivery_detail() {
-    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
-    local rec="${dir}/mmry-foundation.status" line=""
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid="${2:-}" rec line=""
+    rec="$(mmry_foundation_record_path "$dir" "$sid")"
     [[ -f "$rec" && -r "$rec" ]] && { line="$(<"$rec")" 2>/dev/null || line=""; }
     printf '%s' "${line#* }"
 }
