@@ -277,7 +277,10 @@ _big_foundation_set() {
     _big_foundation_set > "$CACHE"
     manifest_now
     local total
-    total="$(wc -c < "$CACHE")"
+    # Spaces stripped: BSD wc pads the count ("      11"), and this is matched as text below, so on
+    # macOS the assertion looked for "bytes=      11" beside a record holding "bytes=11" (#31411 QA,
+    # Mac bench at 4733efa). It only showed once the assertion gained its || return 1 and could fail.
+    total="$(wc -c < "$CACHE" | tr -d ' ')"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
