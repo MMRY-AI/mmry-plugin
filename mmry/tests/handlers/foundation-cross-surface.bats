@@ -123,16 +123,16 @@ _assert_agree() {
 
     run bash "$HOOK"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Eric builds MMRY'* ]]
+    [[ "$output" == *'Eric builds MMRY'* ]] || return 1
 
     rm -f "$CACHE" "${CACHE}.manifest"
 
     run bash "$HOOK"
-    [[ "$output" == *disappeared* ]]
+    [[ "$output" == *disappeared* ]] || return 1
 
     run bash "$STATUSCMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *DISAPPEARED* ]]
+    [[ "$output" == *DISAPPEARED* ]] || return 1
     [[ "$output" != *'NOT LOADED YET'* ]]
 }
 
@@ -145,7 +145,7 @@ _assert_agree() {
     [ -z "$output" ]
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'NOT LOADED YET'* ]]
+    [[ "$output" == *'NOT LOADED YET'* ]] || return 1
     [[ "$output" != *DISAPPEARED* ]]
 }
 
@@ -166,8 +166,8 @@ _assert_agree() {
     done
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'NOT LOADED YET'* ]]
-    [[ "$output" != *DISAPPEARED* ]]
+    [[ "$output" == *'NOT LOADED YET'* ]] || return 1
+    [[ "$output" != *DISAPPEARED* ]] || return 1
     # And it must not quote another session numbers back as this session delivery.
     [[ "$output" != *'entries=2 bytes=45'* ]]
 }
@@ -177,11 +177,11 @@ _assert_agree() {
     printf '{"foundationReinject": true}\n' > "$CFG"
 
     run bash "$HOOK"
-    [[ "$output" == *'Eric builds MMRY'* ]]
+    [[ "$output" == *'Eric builds MMRY'* ]] || return 1
 
     [ -e "$TEST_TMPDIR/mmry-foundation.status" ]
     run bash "$STATUSCMD"
-    [[ "$output" == *'Last sent'* ]]
+    [[ "$output" == *'Last sent'* ]] || return 1
     [[ "$output" != *'nothing yet in this session'* ]]
 }
 
@@ -193,7 +193,7 @@ _assert_agree() {
     bash "$HOOK" >/dev/null 2>&1
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'Last sent'* ]]
+    [[ "$output" == *'Last sent'* ]] || return 1
     [[ "$output" == *'2 directives'* ]]
 
     # The proof that this assertion can fail lives in the committed mutation harness (m21),
@@ -214,7 +214,7 @@ _assert_agree() {
     # assertion below cannot be satisfied by a record that is never written at all.
     _seed_valid_cache
     run bash "$HOOK"
-    [[ "$output" == *'Eric builds MMRY'* ]]
+    [[ "$output" == *'Eric builds MMRY'* ]] || return 1
     [ -e "$TEST_TMPDIR/mmry-foundation.status" ]
 
     # The same turn again, with nobody reading it.
@@ -254,8 +254,7 @@ _assert_agree() {
 _seed_big_cache() {
     # Two MB: loads in about 3 s here, so a 1 s deadline really does stop it, while a normal
     # deadline lets it through. Sized for the deadline, not for realism.
-    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
-        | head -n 25000 > "$CACHE"
+    awk -v n=25000 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$CACHE"
     local s b
     read -r s b < <(cksum < "$CACHE")
     printf 'mmry-foundation v1 entries=25000 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
@@ -268,18 +267,18 @@ _seed_big_cache() {
     # CONTROL: a prompt that succeeds is reported as delivered.
     bash "$HOOK" >/dev/null 2>&1
     run bash "$STATUSCMD"
-    [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]]
+    [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]] || return 1
 
     # The failure: the same set, stopped at a one-second deadline. The hook says so on the turn.
     sleep 1
     MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$HOOK"
-    [[ "$output" == *'NOT applied'* ]]
+    [[ "$output" == *'NOT applied'* ]] || return 1
 
     # And now the command says so too, instead of IN FULL.
     run bash "$STATUSCMD"
-    [[ "$output" == *'NOT on the most recent prompt'* ]]
-    [[ "$output" != *'IN FULL'* ]]
-    [[ "$output" == *'took longer than the 1s limit'* ]]
+    [[ "$output" == *'NOT on the most recent prompt'* ]] || return 1
+    [[ "$output" != *'IN FULL'* ]] || return 1
+    [[ "$output" == *'took longer than the 1s limit'* ]] || return 1
 
     # CONTROL on the other side: the next prompt succeeds and the report recovers, so the
     # assertion above cannot be satisfied by a command that always says NOT.
@@ -298,7 +297,7 @@ _seed_big_cache() {
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
 
     run bash "$STATUSCMD"
-    [[ "$output" != *'NOT on the most recent prompt'* ]]
+    [[ "$output" != *'NOT on the most recent prompt'* ]] || return 1
     [[ "$output" == *'nothing yet in this session'* ]]
 }
 
@@ -311,7 +310,7 @@ _seed_big_cache() {
     : > "$TEST_TMPDIR/.mmry-foundation-inflight"
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'NOT on the most recent prompt'* ]]
+    [[ "$output" == *'NOT on the most recent prompt'* ]] || return 1
     [[ "$output" == *'stopped before it finished'* ]]
 }
 
@@ -323,9 +322,9 @@ _seed_big_cache() {
     printf 'session-from-yesterday ok entries=2 bytes=45\n' > "$TEST_TMPDIR/mmry-foundation.status"
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'Stored copy:  VERIFIED'* ]]
-    [[ "$output" != *'IN FULL'* ]]
-    [[ "$output" != *'entries=2'* ]]
+    [[ "$output" == *'Stored copy:  VERIFIED'* ]] || return 1
+    [[ "$output" != *'IN FULL'* ]] || return 1
+    [[ "$output" != *'entries=2'* ]] || return 1
     [[ "$output" == *'nothing yet in this session'* ]]
 }
 
@@ -338,10 +337,10 @@ _seed_big_cache() {
     rm -f "${CACHE}.manifest"
 
     run bash "$HOOK"
-    [[ "$output" == *'No action needed'* ]]
+    [[ "$output" == *'No action needed'* ]] || return 1
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]]
-    [[ "$output" == *'none needed'* ]]
+    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]] || return 1
+    [[ "$output" == *'none needed'* ]] || return 1
     [[ "$output" != *'run /mmry:load-memories to rebuild it'* ]]
 }

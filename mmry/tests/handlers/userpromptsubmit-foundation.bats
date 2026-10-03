@@ -42,10 +42,10 @@ manifest_now() {
     manifest_now
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]]
-    [[ "$output" == *'"additionalContext"'* ]]
-    [[ "$output" == *'FOUNDATION'* ]]
-    [[ "$output" == *'authoritative'* ]]
+    [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]] || return 1
+    [[ "$output" == *'"additionalContext"'* ]] || return 1
+    [[ "$output" == *'FOUNDATION'* ]] || return 1
+    [[ "$output" == *'authoritative'* ]] || return 1
     [[ "$output" == *'clarity over cleverness'* ]]
 }
 
@@ -145,9 +145,9 @@ _big_foundation_set() {
 
     # PRESENCE, not merely the absence of a warning. A handler that emitted nothing at all
     # would satisfy "no truncation note" perfectly well.
-    [[ "$output" == *'Directive 00'* ]]
-    [[ "$output" == *'Directive 19'* ]]
-    [[ "$output" == *'FinalDirective: this last line must arrive intact and uncut.'* ]]
+    [[ "$output" == *'Directive 00'* ]] || return 1
+    [[ "$output" == *'Directive 19'* ]] || return 1
+    [[ "$output" == *'FinalDirective: this last line must arrive intact and uncut.'* ]] || return 1
     # And every one in between, so a cut anywhere is caught, not only at the two ends.
     local i
     for i in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18; do
@@ -195,8 +195,8 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'FinalDirective: this last line must arrive intact and uncut.'* ]]
-    [[ "$output" != *'truncated'* ]]
+    [[ "$output" == *'FinalDirective: this last line must arrive intact and uncut.'* ]] || return 1
+    [[ "$output" != *'truncated'* ]] || return 1
     [ ${#output} -gt 7000 ]
 }
 
@@ -205,8 +205,8 @@ _big_foundation_set() {
     manifest_now
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" != *'truncated'* ]]
-    [[ "$output" != *'token cap'* ]]
+    [[ "$output" != *'truncated'* ]] || return 1
+    [[ "$output" != *'token cap'* ]] || return 1
     # The old log line recorded the length AFTER the cut, so all 1,457 entries on the
     # affected machine read "had 6000 chars". Nothing may write that line any more.
     if [ -f "$TEST_TMPDIR/mmry-foundation.log" ]; then
@@ -220,8 +220,8 @@ _big_foundation_set() {
     manifest_now
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Eric builds MMRY.'* ]]
-    [[ "$output" == *'clarity over cleverness.'* ]]
+    [[ "$output" == *'Eric builds MMRY.'* ]] || return 1
+    [[ "$output" == *'clarity over cleverness.'* ]] || return 1
     [[ "$output" != *'truncated'* ]]
 }
 
@@ -257,8 +257,8 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]]
-    [[ "$output" == *'do not match'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
+    [[ "$output" == *'do not match'* ]] || return 1
     [[ "$output" != *'zzzz'* ]]
 }
 
@@ -269,7 +269,7 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
     [[ "$output" == *'systemMessage'* ]]
 }
 
@@ -282,14 +282,14 @@ _big_foundation_set() {
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     # The new check must not be satisfiable by warning all the time.
-    [[ "$output" != *'could not verify'* ]]
-    [[ "$output" != *'systemMessage'* ]]
-    [[ "$output" == *'FinalDirective'* ]]
+    [[ "$output" != *'could not verify'* ]] || return 1
+    [[ "$output" != *'systemMessage'* ]] || return 1
+    [[ "$output" == *'FinalDirective'* ]] || return 1
 
     # Delivered count against the account's true total, as the ticket asks for.
     [ -f "$TEST_TMPDIR/mmry-foundation.status" ]
     run cat "$TEST_TMPDIR/mmry-foundation.status"
-    [[ "$output" == *"bytes=$total"* ]]
+    [[ "$output" == *"bytes=$total"* ]] || return 1
     [[ "$output" == *'entries=21'* ]]
 }
 
@@ -299,7 +299,7 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
     [[ "$output" != *'Eric builds MMRY'* ]]
 }
 
@@ -309,7 +309,7 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
     [[ "$output" != *'Eric builds MMRY'* ]]
 }
 
@@ -346,7 +346,7 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Eric builds MMRY'* ]]
+    [[ "$output" == *'Eric builds MMRY'* ]] || return 1
 
     # Both files, exactly as the reviewer did. Not just the cache.
     rm -f "$CACHE" "${CACHE}.manifest"
@@ -356,8 +356,8 @@ _big_foundation_set() {
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
-    [[ "$output" == *'could not verify'* ]]
-    [[ "$output" == *'disappeared'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
+    [[ "$output" == *'disappeared'* ]] || return 1
     [[ "$output" == *'systemMessage'* ]]
 }
 
@@ -428,8 +428,8 @@ _registered_timeout() {
     shim="$(_make_slow_jq 6)"
     budget="$(_registered_timeout)"
     # The premise of the test: 6s must be past the old budget and inside the new one.
-    (( 6 > 5 ))
-    (( 6 < budget ))
+    (( 6 > 5 )) || return 1
+    (( 6 < budget )) || return 1
 
     start="$(date +%s)"
     MMRY_JQ="$shim" run bash "$HANDLER"
@@ -437,10 +437,10 @@ _registered_timeout() {
 
     [ "$status" -eq 0 ]
     # Asserted on the INJECTED CONTENT, not on the absence of a warning.
-    [[ "$output" == *'never overstate evidence'* ]]
-    [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]]
+    [[ "$output" == *'never overstate evidence'* ]] || return 1
+    [[ "$output" == *'"hookEventName":"UserPromptSubmit"'* ]] || return 1
     # It really was slow — otherwise this test proves nothing about the budget.
-    (( elapsed >= 5 ))
+    (( elapsed >= 5 )) || return 1
     # And it still finished inside the budget the plugin actually ships.
     (( elapsed < budget ))
 }
@@ -459,27 +459,27 @@ _registered_timeout() {
 
     # Did not hang: stopped itself at its own deadline, well inside the hook budget.
     [ "$status" -eq 0 ]
-    (( elapsed >= 3 ))
-    (( elapsed < 12 ))
-    (( elapsed < budget ))
+    (( elapsed >= 3 )) || return 1
+    (( elapsed < 12 )) || return 1
+    (( elapsed < budget )) || return 1
     # The user is told, in terms they can act on.
-    [[ "$output" == *'systemMessage'* ]]
-    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'systemMessage'* ]] || return 1
+    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
     # The remedy must name a command that EXISTS. This assertion previously read
     # '/mmry:reload-memories', which this plugin does not ship - so a green suite actively
     # defended handing a confused customer an unknown command at the one moment their
     # directives had just vanished. Now checked against commands/, not by eye.
-    [[ "$output" == *'/mmry:load-memories'* ]]
+    [[ "$output" == *'/mmry:load-memories'* ]] || return 1
     [ -f "$PLUGIN_ROOT/commands/load-memories.md" ]
     # The model is told too, so it cannot claim to be following directives it never got.
-    [[ "$output" == *'running WITHOUT the account'* ]]
+    [[ "$output" == *'running WITHOUT the account'* ]] || return 1
     # And it is still one valid JSON object.
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
     # It must NOT pretend to have delivered the Foundation set.
-    [[ "$output" != *'never overstate evidence'* ]]
+    [[ "$output" != *'never overstate evidence'* ]] || return 1
     # It must say the DEADLINE was hit, in the words reserved for that cause.
-    [[ "$output" == *'exceeded'* ]]
-    [[ "$output" != *'exit code'* ]]
+    [[ "$output" == *'exceeded'* ]] || return 1
+    [[ "$output" != *'exit code'* ]] || return 1
     # And it must leave a trace. A failure that drops the customer's directives and records
     # nothing is how this defect survived three reports without anyone being able to act on it.
     grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
@@ -515,19 +515,19 @@ _registered_timeout() {
 
     [ "$status" -eq 0 ]
     # It failed FAST. Anything that took a deadline's worth of time is not this scenario.
-    (( elapsed < 5 ))
+    (( elapsed < 5 )) || return 1
     # Told as a failure, with the real exit code, and explicitly NOT as a duration.
-    [[ "$output" == *'systemMessage'* ]]
-    [[ "$output" == *'NOT applied to this turn'* ]]
-    [[ "$output" == *'exit code'* ]]
-    [[ "$output" == *'failure, not a slow turn'* ]]
+    [[ "$output" == *'systemMessage'* ]] || return 1
+    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
+    [[ "$output" == *'exit code'* ]] || return 1
+    [[ "$output" == *'failure, not a slow turn'* ]] || return 1
     # The three lies the old single-branch version told, each asserted absent.
-    [[ "$output" != *'exceeded'* ]]
-    [[ "$output" != *'took over'* ]]
-    [[ "$output" != *'Re-send the prompt to try again'* ]]
+    [[ "$output" != *'exceeded'* ]] || return 1
+    [[ "$output" != *'took over'* ]] || return 1
+    [[ "$output" != *'Re-send the prompt to try again'* ]] || return 1
     # Still exactly one valid JSON object, and still no false claim of delivery.
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-    [[ "$output" != *'never overstate evidence'* ]]
+    [[ "$output" != *'never overstate evidence'* ]] || return 1
     # Logged as a crash, not as a deadline, so the log agrees with what the customer was told.
     grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
     grep -q 'without hitting' "$TEST_TMPDIR/mmry-foundation.log"
@@ -557,7 +557,7 @@ _registered_timeout() {
     rm -f "$dbg"
     MMRY_DEBUG=1 run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'never overstate evidence'* ]]
+    [[ "$output" == *'never overstate evidence'* ]] || return 1
     # ...and the diagnostics now have somewhere to land.
     [ -f "$dbg" ]
 }
@@ -570,10 +570,10 @@ _registered_timeout() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'PREVIOUS turn'* ]]
+    [[ "$output" == *'PREVIOUS turn'* ]] || return 1
     [[ "$output" == *'previous turn'* ]]          # the user-facing half
     # The miss is reported AND this turn's directives are still delivered.
-    [[ "$output" == *'never overstate evidence'* ]]
+    [[ "$output" == *'never overstate evidence'* ]] || return 1
     # The marker is consumed, so the report is not repeated forever.
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
 }
@@ -585,10 +585,10 @@ _registered_timeout() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'never overstate evidence'* ]]
+    [[ "$output" == *'never overstate evidence'* ]] || return 1
     # No notice of any kind on a healthy turn — a nag on every prompt would be its own bug.
-    [[ "$output" != *'systemMessage'* ]]
-    [[ "$output" != *'PREVIOUS turn'* ]]
+    [[ "$output" != *'systemMessage'* ]] || return 1
+    [[ "$output" != *'PREVIOUS turn'* ]] || return 1
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
 }
 
@@ -626,9 +626,9 @@ _registered_timeout() {
 
     local ctx
     ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
-    [[ "$ctx" == *'he said "no".'* ]]
-    [[ "$ctx" == *'C:\Users\x'* ]]
-    [[ "$ctx" == *'Ampersand & percent %'* ]]
+    [[ "$ctx" == *'he said "no".'* ]] || return 1
+    [[ "$ctx" == *'C:\Users\x'* ]] || return 1
+    [[ "$ctx" == *'Ampersand & percent %'* ]] || return 1
     # The newlines are real newlines again after the round trip, not a literal backslash-n.
     [ "$(printf '%s' "$ctx" | wc -l)" -ge 4 ]
     # And a tab is a tab.
@@ -664,7 +664,7 @@ _registered_timeout() {
     elapsed=$(( $(date +%s) - start ))
 
     # The answer is right...
-    [[ "$captured" == *'never overstate evidence'* ]]
+    [[ "$captured" == *'never overstate evidence'* ]] || return 1
     # ...and the reader was released as soon as it was produced, not at the deadline.
     echo "time to EOF with an extra inherited descriptor: ${elapsed}s against a 12s deadline" >&3
     (( elapsed < 6 ))
@@ -771,7 +771,7 @@ manifest_now
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
 
     # Now the remedy the notice just handed the customer.
     _write_toggle_config '"false"'
@@ -794,7 +794,7 @@ manifest_now
     _write_toggle_config 'true'
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
-    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
 
     _write_toggle_config 'false'
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
@@ -816,7 +816,7 @@ manifest_now
 
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
-    [[ "$output" == *'NOT applied to this turn'* ]]
+    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
 
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     MMRY_FOUNDATION_REINJECT=false PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
@@ -939,7 +939,7 @@ _plugin_with_working_refresh() {
     # Prompt 1: refused, correctly, because nothing here can be verified.
     MMRY_API_KEY=dummy run bash "$RECOVER_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
 
     # The recovery was ATTEMPTED, which is the whole fix. Before it, nothing happened at all.
     [ -e "$TEST_TMPDIR/.mmry-foundation-rebuild" ]
@@ -952,8 +952,8 @@ _plugin_with_working_refresh() {
     # Prompt 2: the customer is out of it. Delivered, and silent.
     MMRY_API_KEY=dummy run bash "$RECOVER_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Rebuilt'* ]]
-    [[ "$output" != *'could not verify'* ]]
+    [[ "$output" == *'Rebuilt'* ]] || return 1
+    [[ "$output" != *'could not verify'* ]] || return 1
     [[ "$output" != *'systemMessage'* ]]
 }
 
@@ -967,17 +967,17 @@ _plugin_with_working_refresh() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'just updated the MMRY plugin'* ]]
-    [[ "$output" == *'Normally the next prompt has them'* ]]
-    [[ "$output" == *'No action needed'* ]]
+    [[ "$output" == *'just updated the MMRY plugin'* ]] || return 1
+    [[ "$output" == *'Normally the next prompt has them'* ]] || return 1
+    [[ "$output" == *'No action needed'* ]] || return 1
     # The CUSTOMER's message leads with the reassurance and does not talk about caches or
     # manifests (#31583 QA round 5). The assistant's note still carries the technical reason.
     local msg
     msg="$(printf '%s' "$output" | jq -r '.systemMessage')"
-    [[ "$msg" == 'MMRY AI: you have just updated'* ]]
-    [[ "$msg" != *cache* && "$msg" != *manifest* ]]
+    [[ "$msg" == 'MMRY AI: you have just updated'* ]] || return 1
+    [[ "$msg" != *cache* && "$msg" != *manifest* ]] || return 1
     # And it no longer promises a fetch is under way, which is false offline or inside the window.
-    [[ "$msg" != *'already being fetched'* ]]
+    [[ "$msg" != *'already being fetched'* ]] || return 1
     # And it must NOT claim a comparison that never happened, nor prescribe a rebuild the
     # customer does not need to run.
     [[ "$output" != *'did not match the record'* ]]
@@ -992,8 +992,8 @@ _plugin_with_working_refresh() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'did not match the record'* ]]
-    [[ "$output" == *'load-memories'* ]]
+    [[ "$output" == *'did not match the record'* ]] || return 1
+    [[ "$output" == *'load-memories'* ]] || return 1
     [[ "$output" != *'just updated the MMRY plugin'* ]]
 }
 
@@ -1019,8 +1019,8 @@ _plugin_with_working_refresh() {
     ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')" || {
         echo "the hook emitted JSON that a strict parser refused"; return 1; }
     # Decoded intact: the form feed and both other control bytes are back where they were.
-    [[ "$ctx" == *'page one'$'\f''page two'* ]]
-    [[ "$ctx" == *$'\001'* ]]
+    [[ "$ctx" == *'page one'$'\f''page two'* ]] || return 1
+    [[ "$ctx" == *$'\001'* ]] || return 1
     [[ "$ctx" == *$'\037'* ]]
 }
 
@@ -1054,7 +1054,7 @@ _plugin_with_working_refresh() {
     printf 'garbage not a manifest\n' > "${CACHE}.manifest"
 
     run bash "$HANDLER"
-    [[ "$output" == *'could not verify'* ]]
-    [[ "$output" == *'could not be read'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
+    [[ "$output" == *'could not be read'* ]] || return 1
     [[ "$output" != *'did not match the record'* ]]
 }

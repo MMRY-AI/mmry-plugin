@@ -75,13 +75,13 @@ EOF
 }
 
 @test "hook-budgets: the file under test is the repo's shipped hooks.json, not an installed copy" {
-    [[ -f "$HOOKS_FILE" ]]
+    [[ -f "$HOOKS_FILE" ]] || return 1
     # An installed plugin lives under .../plugins/cache/... or .../plugins/marketplaces/...
     # Reading either would make every assertion below meaningless.
-    [[ "$HOOKS_FILE" != */plugins/cache/* ]]
-    [[ "$HOOKS_FILE" != */plugins/marketplaces/* ]]
+    [[ "$HOOKS_FILE" != */plugins/cache/* ]] || return 1
+    [[ "$HOOKS_FILE" != */plugins/marketplaces/* ]] || return 1
     # And it must be the copy git tracks, in a repository that contains this test.
-    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]]
+    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]] || return 1
     [[ -d "$PLUGIN_ROOT/tests" ]]
 }
 
@@ -91,22 +91,22 @@ EOF
     count="$(printf '%s\n' "$timeouts" | grep -c '[0-9]')"
     # SAMPLE SIZE. The plugin registers nine hooks today; if a refactor drops them all,
     # every "no hook is below its cost" assertion below would pass vacuously.
-    (( count >= 9 ))
+    (( count >= 9 )) || return 1
     for t in $timeouts; do
-        [[ "$t" =~ ^[0-9]+$ ]]
-        (( t > 0 ))
+        [[ "$t" =~ ^[0-9]+$ ]] || return 1
+        (( t > 0 )) || return 1
     done
 }
 
 @test "hook-budgets: the Foundation hook's budget is not the outlier it was" {
     local mine others min_other
     mine="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
-    [[ "$mine" =~ ^[0-9]+$ ]]
+    [[ "$mine" =~ ^[0-9]+$ ]] || return 1
 
     others="$(jq -r '[.hooks[][].hooks[] | select((.command | test("userpromptsubmit-foundation")) | not) | .timeout]
                      | .[]' "$HOOKS_FILE" | tr -d '\r')"
     # SAMPLE SIZE: there must be other hooks to be an outlier against.
-    (( $(printf '%s\n' "$others" | grep -c '[0-9]') >= 8 ))
+    (( $(printf '%s\n' "$others" | grep -c '[0-9]') >= 8 )) || return 1
 
     min_other="$(printf '%s\n' "$others" | sort -n | head -1)"
     # The whole complaint in the ticket: this handler alone was budgeted below every other.
@@ -119,8 +119,7 @@ EOF
     # directive, the smallest set possible, on the one change whose whole point is that there
     # is no largest size. The bar was sound and could not see a cost that grows with the set.
     # About 35 KB: the largest Foundation set on the platform is 34,343 characters (2026-10-02).
-    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
-        | head -n 400 > "$TEST_TMPDIR/mmry-foundation.md"
+    awk -v n=400 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
 
     local handler cost budget
@@ -144,10 +143,10 @@ EOF
     # injected nothing emits nothing at all. Both go red here.
     local probe_rc=0 probe_out
     probe_out="$(bash "$handler" 2>/dev/null </dev/null)" || probe_rc=$?
-    (( probe_rc == 0 ))
-    [[ -n "$probe_out" ]]
+    (( probe_rc == 0 )) || return 1
+    [[ -n "$probe_out" ]] || return 1
     printf '%s' "$probe_out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-    [[ "$probe_out" == *'every claim backed by something you ran'* ]]
+    [[ "$probe_out" == *'every claim backed by something you ran'* ]] || return 1
     # Headroom of at least 5x. At the 5 s budget this refuses for any cost above 1000 ms,
     # which is exactly the range that was measured in the field.
     #
@@ -157,7 +156,7 @@ EOF
     # business paying. Removing them (`$(<file)` for two `cat`s, parameter expansion for a
     # `tr` pipeline, and the opt-out answered before the worker is spawned at all) brought the
     # same measurement to 2600-3200 ms on the same machine.
-    (( budget * 1000 >= cost * 5 ))
+    (( budget * 1000 >= cost * 5 )) || return 1
 
     # AND against the number that now actually stops this handler (#31434 QA). The registered
     # budget is the HARNESS's limit; since the supervisor landed, the plugin's own deadline is
@@ -166,7 +165,7 @@ EOF
     # leave the operative limit unmeasured.
     local deadline
     deadline="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*'         "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" | head -1 | sed 's/.*:-//')"
-    [[ "$deadline" =~ ^[0-9]+$ ]]
+    [[ "$deadline" =~ ^[0-9]+$ ]] || return 1
     echo "measured cost: ${cost} ms; shipped deadline: ${deadline} s" >&3
     # A 3x BAR, WHICH IS NOT THE SAME THING AS A 3x MARGIN - and the difference was reported
     # the wrong way round, so it is stated correctly here (#31434 QA round 2).
@@ -209,7 +208,7 @@ EOF
     # ships.
     local handler default fallback budget documented
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # The `:-N` default, and the N the handler falls back to when the env override is not a
     # positive integer. Both are shipped constants and a disagreement between them is its own
@@ -222,23 +221,23 @@ EOF
 
     # SAMPLE SIZE, in the form this file uses everywhere else: an extraction that found
     # nothing must fail loudly, not silently pass a comparison against an empty string.
-    [[ "$default" =~ ^[0-9]+$ ]]
-    [[ "$fallback" =~ ^[0-9]+$ ]]
-    [[ "$budget" =~ ^[0-9]+$ ]]
-    (( default > 0 ))
-    [[ "$default" == "$fallback" ]]
+    [[ "$default" =~ ^[0-9]+$ ]] || return 1
+    [[ "$fallback" =~ ^[0-9]+$ ]] || return 1
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
+    (( default > 0 )) || return 1
+    [[ "$default" == "$fallback" ]] || return 1
 
     # The plugin must stop ITSELF before the harness stops it, with room left over to write
     # the JSON that tells the customer what happened. Without that margin the whole supervisor
     # is decoration: the harness wins the race and the output is discarded regardless.
-    (( default < budget ))
-    (( default + 3 <= budget ))
+    (( default < budget )) || return 1
+    (( default + 3 <= budget )) || return 1
 
     # And the number the customer is told in the README is the number that ships. A doc
     # promising a 15 s stop against a handler that waits 900 is the same defect wearing
     # a different hat.
     documented="$(grep -o 'stops itself after [0-9][0-9]* seconds' "$PLUGIN_ROOT/README.md" | head -1 | sed 's/[^0-9]//g')"
-    [[ "$documented" =~ ^[0-9]+$ ]]
+    [[ "$documented" =~ ^[0-9]+$ ]] || return 1
     [[ "$documented" == "$default" ]]
 }
 
@@ -258,12 +257,12 @@ EOF
     # client's API, so that is what is asserted.
     local sourced
     sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'         && declare -F mmry_load_config >/dev/null         && declare -F mmry_get_startup_memories >/dev/null         && printf SOURCED" 2>/dev/null)"
-    [[ "$sourced" == "SOURCED" ]]
+    [[ "$sourced" == "SOURCED" ]] || return 1
 
     timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$HOOKS_FILE" | tr -d '\r')"
     count=0
     for t in $timeouts; do
-        (( t * 1000 >= floor * 5 ))
+        (( t * 1000 >= floor * 5 )) || return 1
         count=$(( count + 1 ))
     done
     # SAMPLE SIZE, stated beside the verdict.
@@ -309,7 +308,7 @@ SHIMEOF
     # `tr -d` with a LITERAL CR in the source, which git's CRLF normalisation turned
     # into a line break on checkout and silently broke this extraction (#31434 QA).
     budget="${budget%%[![:digit:]]*}"
-    [[ "$budget" =~ ^[0-9]+$ ]]
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
 
     start="$(date +%s)"
     out="$(MMRY_JQ="$shim" bash "$handler" 2>/dev/null)"
@@ -318,16 +317,16 @@ SHIMEOF
     echo "ENFORCED wall clock: ${elapsed_ms} ms; registered budget: ${budget}s; margin: ${margin_ms} ms" >&3
 
     # The premise: it really did hang, so this measures the guard and not a fast path.
-    (( elapsed_ms >= 9000 ))
+    (( elapsed_ms >= 9000 )) || return 1
     # THE ASSERTION. The plugin stopped itself before the harness could, with a stated margin.
     # 5 s, not "under the budget": finishing at 19.5 s would satisfy the letter of the
     # invariant on an idle box and still lose the race on a loaded one.
-    (( elapsed_ms < budget * 1000 ))
-    (( margin_ms >= 5000 ))
+    (( elapsed_ms < budget * 1000 )) || return 1
+    (( margin_ms >= 5000 )) || return 1
     # And the customer was told. A guard that wins the race and says nothing is the silent
     # loss wearing a different hat.
-    [[ "$out" == *'NOT applied to this turn'* ]]
-    [[ "$out" == *'exceeded'* ]]
+    [[ "$out" == *'NOT applied to this turn'* ]] || return 1
+    [[ "$out" == *'exceeded'* ]] || return 1
     echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
 
@@ -351,7 +350,7 @@ SHIMEOF
     # than asserting them structurally and saying so.
     local handler block
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # The watchdog subshell: from its `while` to the kill that ends it.
     block="$(sed -n '/^        while /,/kill -TERM/p' "$handler")"
@@ -398,7 +397,7 @@ SHIMEOF
     # this handler now uses.
     local handler body
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # Comments in this file discuss the idioms by name, so strip them before matching or the
     # test fails on its own explanation.
@@ -448,10 +447,10 @@ SHIMEOF
 ' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()' | head -1 | cut -d: -f1)"
     worker_line="$(printf '%s
 ' "$body" | grep -n '^ *MMRY_FOUNDATION_WORKER=1 ' | head -1 | cut -d: -f1)"
-    [[ "$def_line" =~ ^[0-9]+$ ]]
-    [[ "$src_line" =~ ^[0-9]+$ ]]
-    [[ "$off_line" =~ ^[0-9]+$ ]]
-    [[ "$worker_line" =~ ^[0-9]+$ ]]
+    [[ "$def_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$src_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$off_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$worker_line" =~ ^[0-9]+$ ]] || return 1
     # The supervisor must not carry its own copy of the definition any more; one answer only.
     #
     # Written as an if rather than `! cmd ...`, because a negated command is EXEMPT from
@@ -468,7 +467,7 @@ SHIMEOF
     printf '%s
 ' "$body" | sed -n "${off_line}p" | grep -q 'if _mmry_reinject_is_off_here'
     # Sourced before it is called, and both before anything is spawned.
-    (( src_line < off_line ))
+    (( src_line < off_line )) || return 1
     (( off_line < worker_line ))
 }
 
@@ -482,14 +481,13 @@ SHIMEOF
 
 @test "hook-budgets: #31411 a set thirty times the largest ever measured is delivered in full, inside the budget" {
     _write_config
-    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
-        | head -n 12000 > "$TEST_TMPDIR/mmry-foundation.md"
+    awk -v n=12000 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
     local bytes; bytes="$(wc -c < "$TEST_TMPDIR/mmry-foundation.md" | tr -d ' ')"
     # About 1 MB. Sized so the OLD code could not pass: at 400 KB its two whole-set scans took
     # 17 s, which is still inside a 20 s budget, so a smaller fixture would have gone green
     # against exactly the regression this exists to catch.
-    (( bytes > 1000000 ))
+    (( bytes > 1000000 )) || return 1
 
     # WHOLE SECONDS, ROUNDED AGAINST OURSELVES (#31411 QA round 2, on a real Mac). This used
     # date +%s%N, which BSD date does not support: it prints the seconds followed by a literal
@@ -509,7 +507,7 @@ SHIMEOF
     [ "$status" -eq 0 ]
     # In full: every directive is there, and nothing reported a failure.
     [ "$(printf '%s' "$output" | grep -o 'every claim backed by something you ran' | wc -l | tr -d ' ')" -eq 12000 ]
-    [[ "$output" != *systemMessage* ]]
+    [[ "$output" != *systemMessage* ]] || return 1
     (( secs < budget ))
 }
 
@@ -517,16 +515,15 @@ SHIMEOF
     _write_config
     # Large enough that the escape cannot finish inside a one-second deadline on any machine
     # this suite runs on, so the watchdog has to act.
-    yes -- '- Directive: keep every sentence short and every claim backed by something you ran.' \
-        | head -n 50000 > "$TEST_TMPDIR/mmry-foundation.md"
+    awk -v n=50000 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
 
     MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
     # Not silent: the customer channel carries a notice, and it says the set was NOT applied.
     [ -n "$output" ]
-    [[ "$output" == *systemMessage* ]]
-    [[ "$output" == *'NOT applied'* ]]
+    [[ "$output" == *systemMessage* ]] || return 1
+    [[ "$output" == *'NOT applied'* ]] || return 1
     # And no partial set was passed off as the account guidance.
     [[ "$output" != *'every claim backed by something you ran'* ]]
 }

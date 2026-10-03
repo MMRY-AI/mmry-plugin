@@ -84,19 +84,20 @@ _big_response() {
     # under test.
     printf '%s' "$emitted" > "$TEST_TMPDIR/emitted.json"
 
-    run python -c "
-import io,json,sys
-raw = io.open(sys.argv[1],'rb').read().decode('utf-8')
-ctx = json.loads(raw)['hookSpecificOutput']['additionalContext']
-stored = io.open(sys.argv[2],'rb').read().decode('utf-8')
-# The handler reads the cache with \$(<file), which strips trailing newlines, and prefixes its
-# framing. So the delivered text must END with exactly the stored set.
-if ctx.endswith(stored.rstrip('\n').rstrip('\r\n')) or ctx.endswith(stored.rstrip()):
-    print('MATCH')
-else:
-    print('DIFFER: ctx tail %r vs stored tail %r' % (ctx[-60:], stored.rstrip()[-60:]))
-" "$(cygpath -w "$TEST_TMPDIR/emitted.json" 2>/dev/null || echo "$TEST_TMPDIR/emitted.json")" "$(cygpath -w "$CACHE" 2>/dev/null || echo "$CACHE")"
-    [ "$output" = "MATCH" ]
+    # NO INTERPRETER (#31411 QA round 2, on a real Mac). This used `python -c`, and macOS has had no
+    # bare `python` since 12.3, so on a Mac the comparison never ran. jq decodes the JSON instead,
+    # with -b so a native Windows jq writes the bytes as they are rather than turning every newline
+    # into CRLF (measured: without -b, a two-line value came out with a CR before each LF). The cache is read with
+    # $(<file), exactly as the handler reads it, which strips trailing newlines on both sides.
+    jq -b -j '.hookSpecificOutput.additionalContext' "$TEST_TMPDIR/emitted.json" > "$TEST_TMPDIR/ctx.txt" || {
+        echo "jq could not decode what the hook emitted"; return 1; }
+    local ctx stored
+    ctx="$(<"$TEST_TMPDIR/ctx.txt")"
+    stored="$(<"$CACHE")"
+    [ -n "$stored" ] || { echo "the cache was empty, so a suffix match would prove nothing"; return 1; }
+    # The delivered text must END with exactly the stored set; the handler prefixes its framing.
+    [[ "$ctx" == *"$stored" ]] || {
+        echo "DIFFER: delivered tail [${ctx: -60}] vs stored tail [${stored: -60}]"; return 1; }
 }
 
 @test "#31411 TC5: every directive session-start stored arrives, first to last" {
@@ -112,8 +113,8 @@ else:
     for i in $(seq 1 9); do
         [[ "$output" == *"Directive $i"* ]] || { echo "lost Directive $i"; return 1; }
     done
-    [[ "$output" == *'Values'* ]]
-    [[ "$output" == *'Service'* ]]
+    [[ "$output" == *'Values'* ]] || return 1
+    [[ "$output" == *'Service'* ]] || return 1
     # And the tier filter held on the way through.
     [[ "$output" != *'not foundation'* ]]
 }
@@ -146,8 +147,8 @@ else:
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Directive 9'* ]]
-    [[ "$output" != *'truncated'* ]]
+    [[ "$output" == *'Directive 9'* ]] || return 1
+    [[ "$output" != *'truncated'* ]] || return 1
     [ ${#output} -gt 7000 ]
 }
 
@@ -213,6 +214,6 @@ else:
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" != *'PREVIOUS turn'* ]]
+    [[ "$output" != *'PREVIOUS turn'* ]] || return 1
     [[ "$output" != *'previous turn'* ]]
 }

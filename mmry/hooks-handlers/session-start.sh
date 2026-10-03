@@ -122,8 +122,14 @@ After setup completes, tell the user: "You are all set. Restart Claude Code and 
 
 If the user does not have an account yet, direct them to https://mmryai.com to sign up first, then run setup again.'
 
-    # Escape for JSON output
-    SETUP_MSG_ESCAPED="$(printf '%s' "$SETUP_MSG" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+    # Escape for JSON output with the client's escaper, not sed (#31583 / #31411 QA round 2, on a
+    # real Mac). The third sed here was the GNU-only label-and-branch form ':a;N;$!ba'. BSD sed on
+    # macOS rejects it with "unused label", EXITS 0, and passes the text through unchanged, so the
+    # newlines were never escaped and this hook handed Claude Code invalid JSON: 14 raw newlines,
+    # jq "control characters ... must be escaped". That is the no-credential path, the first thing a
+    # new Mac user ever sees from MMRY. The same defect was fixed once before for the fault note
+    # and this line was missed. No process, and the same escaper every other caller uses.
+    SETUP_MSG_ESCAPED="$(_mmry_json_escape "$SETUP_MSG")"
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' "$SETUP_MSG_ESCAPED"
     exit 0
 fi

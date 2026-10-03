@@ -20,7 +20,7 @@ now_ms() { perl -MTime::HiRes=time -e 'printf "%d", time*1000'; }
 line='- Directive: keep every sentence short and every claim backed by something you ran.'
 make_set() { # $1 = lines
     local d s b; d="$(mktemp -d)"; mkdir -p "$d/home"; printf 'sess-lat' > "$d/mmry-foundation.session"
-    yes -- "$line" | head -n "$1" > "$d/mmry-foundation.md"
+    awk -v n="$1" -v l="$line" 'BEGIN { for (i = 0; i < n; i++) print l }' > "$d/mmry-foundation.md"
     read -r s b < <(cksum < "$d/mmry-foundation.md")
     printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "$1" "$b" "$s" > "$d/mmry-foundation.md.manifest"
     printf '%s' "$d"; }

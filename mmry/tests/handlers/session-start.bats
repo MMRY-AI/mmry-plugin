@@ -16,14 +16,14 @@ setup() {
 
 @test "session-start: outputs hookSpecificOutput JSON on success" {
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *'"hookSpecificOutput"'* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *'"hookSpecificOutput"'* ]] || return 1
     [[ "$output" == *'"hookEventName":"SessionStart"'* ]]
 }
 
 @test "session-start: includes memory count in output" {
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     # Mock returns 1 memory, so count should be 1
     [[ "$output" == *'1 memories'* ]] || [[ "$output" == *'1 memor'* ]]
 }
@@ -39,7 +39,7 @@ setup() {
     export MOCK_CURL_RESPONSE='[]'
     export MOCK_CURL_HTTP_CODE="200"
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *'Welcome to MMRY AI'* ]] || [[ "$output" == *'fresh start'* ]]
 }
 
@@ -47,7 +47,7 @@ setup() {
     export MOCK_CURL_HTTP_CODE="500"
     export MOCK_CURL_RESPONSE='{"error":"server down"}'
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *'"error"'* ]] || [[ "$output" == *'session-start failed'* ]]
 }
 
@@ -55,7 +55,7 @@ setup() {
     export MOCK_CURL_HTTP_CODE="403"
     export MOCK_CURL_RESPONSE='{"error":"trial expired"}'
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *'trial'* ]]
 }
 
@@ -68,11 +68,11 @@ setup() {
     export MOCK_CURL_HTTP_CODE="403"
     export MOCK_CURL_RESPONSE='{"error":"forbidden"}'
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     # The trial stays named. It IS the most common cause and the message is more useful for saying
     # so. What changes is that it is no longer the only explanation on offer.
-    [[ "$output" == *'trial'* ]]
-    [[ "$output" == *'subscription'* ]]
+    [[ "$output" == *'trial'* ]] || return 1
+    [[ "$output" == *'subscription'* ]] || return 1
     [[ "$output" != *'their free trial has ended'* ]]
 }
 
@@ -82,8 +82,8 @@ setup() {
     # Also clear the env var
     export MMRY_API_KEY=""
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *'hookSpecificOutput'* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *'hookSpecificOutput'* ]] || return 1
     [[ "$output" == *'setup'* ]] || [[ "$output" == *'Setup'* ]] || [[ "$output" == *'MMRY AI'* ]]
 }
 
@@ -91,8 +91,8 @@ setup() {
     export MOCK_CURL_HTTP_CODE="402"
     export MOCK_CURL_RESPONSE='{"error":"no credits"}'
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *'credits'* ]] || [[ "$output" == *'Credits'* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *'credits'* ]] || [[ "$output" == *'Credits'* ]] || return 1
     [[ "$output" != *'/mmry:setup'* ]]
 }
 
@@ -100,11 +100,11 @@ setup() {
     export MOCK_CURL_HTTP_CODE="401"
     export MOCK_CURL_RESPONSE='{"error":"unauthorized"}'
     run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *'hookSpecificOutput'* ]]
-    [[ "$output" == *'invalid or expired'* ]]
-    [[ "$output" == *'may not be saved or loaded'* ]]
-    [[ "$output" == *'/mmry:setup'* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *'hookSpecificOutput'* ]] || return 1
+    [[ "$output" == *'invalid or expired'* ]] || return 1
+    [[ "$output" == *'may not be saved or loaded'* ]] || return 1
+    [[ "$output" == *'/mmry:setup'* ]] || return 1
     [[ "$output" != *'session-start failed'* ]]
 }
 
@@ -131,7 +131,7 @@ setup() {
 
     run bash -c "bash '$FAILING_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'"hookEventName":"SessionStart"'* ]]
+    [[ "$output" == *'"hookEventName":"SessionStart"'* ]] || return 1
     [[ "$output" == *'memor'* ]]
 }
 
@@ -140,8 +140,8 @@ setup() {
 
     run bash -c "bash '$FAILING_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Foundation directives could not be stored'* ]]
-    [[ "$output" == *'NOT be applied'* ]]
+    [[ "$output" == *'Foundation directives could not be stored'* ]] || return 1
+    [[ "$output" == *'NOT be applied'* ]] || return 1
     [[ "$output" == *'mmry:load-memories'* ]]
 }
 

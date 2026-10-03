@@ -32,8 +32,8 @@ manifest_now() {
 
     run bash "$STATUS_CMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'VERIFIED'* ]]
-    [[ "$output" == *'2 directives'* ]]
+    [[ "$output" == *'VERIFIED'* ]] || return 1
+    [[ "$output" == *'2 directives'* ]] || return 1
     [[ "$output" == *'Re-injection: ON'* ]]
 }
 
@@ -46,8 +46,8 @@ manifest_now() {
 
     run bash "$STATUS_CMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'DAMAGED'* ]]
-    [[ "$output" == *'REFUSED'* ]]
+    [[ "$output" == *'DAMAGED'* ]] || return 1
+    [[ "$output" == *'REFUSED'* ]] || return 1
     run grep -c 'VERIFIED' <<<"$output"
     [ "$output" = "0" ]
 }
@@ -61,7 +61,7 @@ manifest_now() {
 
     run bash "$STATUS_CMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]]
+    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]] || return 1
     [[ "$output" == *'not used'* ]]
 }
 
@@ -87,7 +87,7 @@ manifest_now() {
     # What the handler does with it, measured here rather than assumed.
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'could not verify'* ]] || return 1
 
     # What the customer is told when they ask.
     run bash "$STATUS_CMD"
@@ -108,8 +108,8 @@ manifest_now() {
 
     run bash "$STATUS_CMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'REFUSED'* ]]
-    [[ "$output" == *'no readable text'* ]]
+    [[ "$output" == *'REFUSED'* ]] || return 1
+    [[ "$output" == *'no readable text'* ]] || return 1
     run grep -c 'VERIFIED' <<<"$output"
     [ "$output" = "0" ]
     run grep -c 'IN FULL' <<<"$output"
@@ -125,7 +125,7 @@ manifest_now() {
 
     run bash "$STATUS_CMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'TURNED OFF'* ]]
+    [[ "$output" == *'TURNED OFF'* ]] || return 1
     run grep -c 'Re-injection: ON' <<<"$output"
     [ "$output" = "0" ]
 }
@@ -153,8 +153,8 @@ manifest_now() {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     rm -f "${CACHE}.manifest"
     run bash "$STATUS_CMD"
-    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]]
-    [[ "$output" != *'PRESENT BUT UNVERIFIABLE'* ]]
+    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]] || return 1
+    [[ "$output" != *'PRESENT BUT UNVERIFIABLE'* ]] || return 1
     run grep -c 'REFUSED -' <<<"$output"
     [ "$output" = "0" ]
 }
@@ -188,7 +188,7 @@ manifest_now() {
     manifest_now
     printf -- '- Identity: Eric builds MMRY, and rather more besides.\n' > "$CACHE"
     run bash "$STATUS_CMD"
-    [[ "$output" == *'DAMAGED'* ]]
+    [[ "$output" == *'DAMAGED'* ]] || return 1
     # BOTH numbers, which is what this test is named for (#31583 QA round 4). It asserted
     # only the actual size, so the regression it exists to catch - printing that 28 bytes
     # does not match 28 bytes, because the size and checksum cases once shared one branch -
@@ -199,7 +199,7 @@ manifest_now() {
     _recorded="$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^bytes=/) { sub(/^bytes=/, "", $i); print $i } }' "${CACHE}.manifest")"
     [ -n "$_recorded" ]
     [ "$_actual" != "$_recorded" ]
-    [[ "$output" == *"$_actual"* ]]
+    [[ "$output" == *"$_actual"* ]] || return 1
     [[ "$output" == *"$_recorded"* ]]
 }
 
@@ -209,7 +209,7 @@ manifest_now() {
     local n; n="$(wc -c < "$CACHE" | tr -d ' ')"
     head -c "$n" /dev/zero | tr '\0' 'z' > "$CACHE"
     run bash "$STATUS_CMD"
-    [[ "$output" == *'DAMAGED'* ]]
+    [[ "$output" == *'DAMAGED'* ]] || return 1
     [[ "$output" == *'right length'* ]]
 }
 

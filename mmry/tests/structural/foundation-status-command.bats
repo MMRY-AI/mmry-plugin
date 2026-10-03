@@ -76,9 +76,9 @@ _flat() { tr -d '' < "$1" | tr '
     # "applied". A per-line grep over prose asserts the reflow, not the sentence.
     local doc="$CMDS/foundation-status.md" text
     text="$(_flat "$doc")"
-    [[ "$text" == *'/mmry:load-memories'* ]]
-    [[ "$text" == *'not being applied'* ]]
-    [[ "$text" == *'DAMAGED'* ]]
+    [[ "$text" == *'/mmry:load-memories'* ]] || return 1
+    [[ "$text" == *'not being applied'* ]] || return 1
+    [[ "$text" == *'DAMAGED'* ]] || return 1
 }
 
 @test "docs: the README does not still promise the truncation #31411 removed" {
@@ -101,9 +101,9 @@ _flat() { tr -d '' < "$1" | tr '
     local readme text
     readme="$PLUGIN_ROOT/README.md"
     text="$(_flat "$readme")"
-    [[ "$text" == *'mmry:foundation-status'* ]]
-    [[ "$text" == *'refused'* ]]
-    [[ "$text" == *'mmry:load-memories'* ]]
+    [[ "$text" == *'mmry:foundation-status'* ]] || return 1
+    [[ "$text" == *'refused'* ]] || return 1
+    [[ "$text" == *'mmry:load-memories'* ]] || return 1
 }
 
 @test "docs: the shipped example config does not seed a setting that does nothing (#31411)" {

@@ -43,7 +43,7 @@ _state()  { printf '%s' "${1%%|*}"; }
 
     run mmry_verify_foundation_cache "$CACHE"
     [ "$status" -eq 0 ]
-    [[ "$output" == "ok 1 "* ]]
+    [[ "$output" == "ok 1 "* ]] || return 1
     # The byte count is the file's, not an echo of the manifest's claim.
     [[ "$output" == *" $(wc -c < "$CACHE" | tr -d ' ')" ]]
 }

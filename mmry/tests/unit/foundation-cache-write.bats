@@ -104,8 +104,8 @@ JSON
 
     # PRESENCE of the right numbers, not merely that a manifest exists. A manifest holding
     # zeroes would satisfy "a manifest was written" and protect nothing.
-    [[ "$man" == *"bytes=$count"* ]]
-    [[ "$man" == *"cksum=$sum"* ]]
+    [[ "$man" == *"bytes=$count"* ]] || return 1
+    [[ "$man" == *"cksum=$sum"* ]] || return 1
     [[ "$man" == mmry-foundation\ v1\ * ]]
 }
 
@@ -145,11 +145,11 @@ JSON
 
 @test "write_foundation_cache: leaves no temporary file behind, on success or on failure" {
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md.new.* 2>/dev/null | wc -l"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 
     mmry_write_foundation_cache 'not json' "$CACHE" || true
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md.new.* 2>/dev/null | wc -l"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 }
 
@@ -184,9 +184,9 @@ JSON
     # Now read it back through the handler the customer actually gets.
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Huge'* ]]
-    [[ "$output" == *'tail marker intact'* ]]
-    [[ "$output" != *'truncated'* ]]
+    [[ "$output" == *'Huge'* ]] || return 1
+    [[ "$output" == *'tail marker intact'* ]] || return 1
+    [[ "$output" != *'truncated'* ]] || return 1
     [[ "$output" != *'could not verify'* ]]
 }
 
@@ -195,7 +195,7 @@ JSON
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Eric builds MMRY.'* ]]
+    [[ "$output" == *'Eric builds MMRY.'* ]] || return 1
     [[ "$output" != *'could not verify'* ]]
 }
 
@@ -214,10 +214,10 @@ JSON
 
 @test "write_foundation_cache: no temp files survive, manifest or cache, on success or failure" {
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 
     mmry_write_foundation_cache 'not json' "$CACHE" || true
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 }
