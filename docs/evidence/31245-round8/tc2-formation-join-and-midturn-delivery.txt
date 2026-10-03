@@ -1,0 +1,17 @@
+== TC2: a Codex session on the stock PATH, Claude session variables unset, joins formation 35 through the plugin skill; it is resumed on a task of three 25-second commands, and the lead sends the token at 2026-10-03T01:51:10Z, after the first command has started. Self-update held off; installed handlers identical to the branch after both runs.
+codex cli_version: 0.154.0
+rollout file: rollout-2026-10-02T18-49-19-01a0ff73-92c2-76e0-a7b7-610dd665fb77.jsonl
+  2026-10-03T01:49:25.347Z  developer (hook) : MMRY AI loaded 14 memories. Read them now: C:\Users\<user>\AppData\Local\Temp\mmry-memories.md
+  2026-10-03T01:49:27.952Z  user             : Join MMRY formation 35. Then reply with one line saying whether the join succeeded.
+  2026-10-03T01:49:27.975Z  developer (hook) : The following are the account's FOUNDATION memories - author ... [Foundation memory contents removed]
+  2026-10-03T01:49:30.542Z  assistant        : I’m using the MMRY memory-system skill to join formation 35 and verify the result. 
+  2026-10-03T01:50:22.525Z  developer (hook) : FORMATION TRANSMISSION (5 new, formation 35)    [Lead ?] Lead to the Codex member: PROOF-TOKEN-R8-1790991468   [Lead ?] Lead to the Codex member, sent while you are working: MIDTURN-TOKEN-R8-1790991652   [Lead ?] Repro: REPRO-TOKEN-R8-1790991851   [Lead ?] Rep
+  2026-10-03T01:50:28.735Z  assistant        : 2026-10-03 01:50:17 UTC: Join succeeded, MMRY confirmed “Joined formation 35.”
+  2026-10-03T01:50:56.732Z  developer (hook) : MMRY AI loaded 14 memories. Read them now: C:\Users\<user>\AppData\Local\Temp\mmry-memories.md
+  2026-10-03T01:51:00.585Z  user             : Run the PowerShell command Start-Sleep -Seconds 25 three times, as three separate commands, one after another. Then tell me the total time slept, and anything else you think I should know.
+  2026-10-03T01:51:00.869Z  developer (hook) : The following are the account's FOUNDATION memories - author ... [Foundation memory contents removed]
+  2026-10-03T01:51:06.109Z  assistant        : I’ll run sleep 1, sleep 2, then sleep 3 as separate PowerShell commands, and check each completes before starting the next. 
+  2026-10-03T01:51:48.963Z  developer (hook) : FORMATION TRANSMISSION (1 new, formation 35)    [Lead ?] Lead to the Codex member, sent while you are working: MIDTURN-TOKEN-R8B-1790992270  These are other assistants working the same job right now. Act on anything that affects what you are doing, especially 
+  2026-10-03T01:52:32.019Z  assistant        : The first two sleeps completed successfully. A formation 35 message arrived during the work: `MIDTURN-TOKEN-R8B-1790992270`; I’m running the third sleep now. 
+  2026-10-03T01:53:16.298Z  assistant        : 2026-10-03 01:53:06 UTC: All three separate, sequential sleeps succeeded: 75 seconds requested, 75.42 seconds measured command runtime (all exit codes 0).  During execution, formation 35 delivered: `MIDTURN-TOKEN-R8B-1790992270`.
+  occurrences of MIDTURN-TOKEN-R8B-1790992270 in the rollout: 6

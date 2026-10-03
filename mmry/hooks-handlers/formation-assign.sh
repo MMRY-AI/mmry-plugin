@@ -34,7 +34,7 @@ assignment="${2:-}"
 role="${3:-}"
 
 if [[ -z "$member_id" ]]; then
-    echo "Which member? Usage: /mmry:formation assign <memberId> \"what they should work on\". Run /mmry:formation roster to see the ids."
+    echo "Which member? Usage: $(mmry_host_formation_ref assign '<memberId> "what they should work on"'). Run $(mmry_host_formation_ref roster) to see the ids."
     exit 1
 fi
 
@@ -42,7 +42,7 @@ fi
 # us: whether the caller meant to name anybody at all. A non-numeric value is a mistake at the
 # keyboard, and refusing it here means the mistake is named rather than turned into a round trip.
 if ! [[ "$member_id" =~ ^[1-9][0-9]*$ ]]; then
-    echo "A member id is a positive whole number from /mmry:formation roster. Nothing was changed."
+    echo "A member id is a positive whole number from $(mmry_host_formation_ref roster). Nothing was changed."
     exit 1
 fi
 
@@ -56,7 +56,7 @@ if [[ -n "$role" ]] && ! [[ "$role" =~ ^([Ll]ead|[Ww]ingman)$ ]]; then
     exit 1
 fi
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is no formation to act in. This needs to run inside a session."
     exit 1
@@ -64,13 +64,13 @@ fi
 
 state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -z "$state" ]]; then
-    echo "This session is not in a formation, so there is nobody to assign. Run /mmry:formation list to see what is active, then /mmry:formation join <id>."
+    echo "This session is not in a formation, so there is nobody to assign. Run $(mmry_host_formation_ref list) to see what is active, then $(mmry_host_formation_ref join '<id>')."
     exit 1
 fi
 
 formation_id="${state%% *}"
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The local formation state is not a number, so it cannot be trusted. Run /mmry:formation leave and join again."
+    echo "The local formation state is not a number, so it cannot be trusted. Run $(mmry_host_formation_ref leave) and join again."
     exit 1
 fi
 
@@ -101,11 +101,11 @@ if ! mmry_update_formation_member "$formation_id" "$member_id" "$role" "$assignm
         # formation, a member who has left, a bad role, and nothing named to change - so this
         # prints the server's own reason rather than guessing which one it was.
         400) echo "The server refused the change, and nothing was changed. ${server_said}" ;;
-        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run $(mmry_host_formation_ref leave)." ;;
         # The gateway family. Not a refusal, and it carries no information about the roster or
         # about standing, so this stays clear of both words. It does not claim the change was
         # discarded either: a 502 can be raised after the row was written.
-        502|503|504) echo "The server failed while handling the change (HTTP ${code}) and did not confirm it, so treat it as not applied. This is a fault on the server side, not something about formation ${formation_id} or your standing in it. Check /mmry:formation roster before trying again." ;;
+        502|503|504) echo "The server failed while handling the change (HTTP ${code}) and did not confirm it, so treat it as not applied. This is a fault on the server side, not something about formation ${formation_id} or your standing in it. Check $(mmry_host_formation_ref roster) before trying again." ;;
         *)   echo "Could not change member ${member_id} in formation ${formation_id} (HTTP ${code}). The server did not confirm it, so treat it as not applied." ;;
     esac
     # NO AUTOMATIC RETRY. The update is idempotent in its effect, but a retry after an unconfirmed
@@ -128,7 +128,7 @@ fi
 if [[ -z "$applied_role" ]]; then
     # No jq, or a body that could not be read. Say what is actually known rather than inventing a
     # confirmation: the server accepted it, and what it now holds was not readable from here.
-    echo "The server accepted the change for member ${member_id} in formation ${formation_id}. Run /mmry:formation roster to see what it now holds."
+    echo "The server accepted the change for member ${member_id} in formation ${formation_id}. Run $(mmry_host_formation_ref roster) to see what it now holds."
     exit 0
 fi
 

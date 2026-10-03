@@ -32,21 +32,21 @@ source "${HANDLER_DIR}/mmry-client.sh"
 formation_id="${1:-}"
 
 if [[ -z "$formation_id" ]]; then
-    session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # #31143
+    session_id="$(mmry_session_id)"  # #31143
     if [[ -z "$session_id" ]]; then
         echo "No session id is available and no formation id was given, so there is no record to show."
         exit 1
     fi
     state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
     if [[ -z "$state" ]]; then
-        echo "This session is not in a formation. Give the id instead: /mmry:formation report <formationId>. The record is readable by anybody on the account, including somebody who was never a member."
+        echo "This session is not in a formation. Give the id instead: $(mmry_host_formation_ref report '<formationId>'). The record is readable by anybody on the account, including somebody who was never a member."
         exit 1
     fi
     formation_id="${state%% *}"
 fi
 
 if ! [[ "$formation_id" =~ ^[1-9][0-9]*$ ]]; then
-    echo "A formation id is a positive whole number. Run /mmry:formation list to see what is active."
+    echo "A formation id is a positive whole number. Run $(mmry_host_formation_ref list) to see what is active."
     exit 1
 fi
 

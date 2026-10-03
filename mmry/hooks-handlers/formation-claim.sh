@@ -37,7 +37,7 @@ case "$arg1" in
     --release) mode="release"; shift || true ;;
 esac
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is no area to declare. This needs to run inside a session."
     exit 1
@@ -45,13 +45,13 @@ fi
 
 state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -z "$state" ]]; then
-    echo "This session is not in a formation, so there is nobody to deconflict with. Run /mmry:formation list to see what is active, then /mmry:formation join <id>."
+    echo "This session is not in a formation, so there is nobody to deconflict with. Run $(mmry_host_formation_ref list) to see what is active, then $(mmry_host_formation_ref join '<id>')."
     exit 1
 fi
 
 formation_id="${state%% *}"
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The local formation state is not a number, so it cannot be trusted. Run /mmry:formation leave and join again."
+    echo "The local formation state is not a number, so it cannot be trusted. Run $(mmry_host_formation_ref leave) and join again."
     exit 1
 fi
 
@@ -92,7 +92,7 @@ if [[ "$mode" == "list" ]]; then
               + "  member " + (.memberId | tostring)
               + "  " + (.repository // "?")
               + " :: " + (.pathPrefix // "?")' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
-    printf '\nRelease one of your own with /mmry:formation claim --release <id>. Leaving the formation\n'
+    printf '\nRelease one of your own with %s. Leaving the formation\n' "$(mmry_host_formation_ref claim '--release <id>')"
     printf 'releases all of yours on its own.\n'
     exit 0
 fi
@@ -101,7 +101,7 @@ fi
 if [[ "$mode" == "release" ]]; then
     claim_id="${1:-}"
     if ! [[ "$claim_id" =~ ^[1-9][0-9]*$ ]]; then
-        echo "Which area? A claim id is a positive whole number from /mmry:formation claim --list. Nothing was released."
+        echo "Which area? A claim id is a positive whole number from $(mmry_host_formation_ref claim --list). Nothing was released."
         exit 1
     fi
 
@@ -115,7 +115,7 @@ if [[ "$mode" == "release" ]]; then
             # One answer covers an id that does not exist, one belonging to another member, one in
             # another formation and one already released. The server does not distinguish them on
             # purpose, so this does not invent a distinction either.
-            400) echo "Nothing was released. ${server_said:-This session holds no such live area. Run /mmry:formation claim --list.}" ;;
+            400) echo "Nothing was released. ${server_said:-This session holds no such live area. Run $(mmry_host_formation_ref claim --list).}" ;;
             403) echo "Refused, and nothing was released. This session is not a current member of formation ${formation_id}, or the formation has been closed out." ;;
             *)   echo "Could not release area ${claim_id} (HTTP ${code}). The server did not confirm it, so treat it as still held." ;;
         esac
@@ -131,7 +131,7 @@ path_prefix="${1:-}"
 repository="${2:-}"
 
 if [[ -z "$path_prefix" ]]; then
-    echo "Which area? Usage: /mmry:formation claim \"src/Billing\". Use . for the whole repository if that is really what you mean."
+    echo "Which area? Usage: $(mmry_host_formation_ref claim '"src/Billing"'). Use . for the whole repository if that is really what you mean."
     exit 1
 fi
 
@@ -145,7 +145,7 @@ if [[ -z "$repository" ]]; then
 fi
 
 if [[ -z "$repository" ]]; then
-    echo "Could not work out which repository this is, and an area needs one: the same path in two different repositories is not a collision. Pass it: /mmry:formation claim \"<path>\" \"<repository>\"."
+    echo "Could not work out which repository this is, and an area needs one: the same path in two different repositories is not a collision. Pass it: $(mmry_host_formation_ref claim '"<path>" "<repository>"')."
     exit 1
 fi
 
@@ -160,8 +160,8 @@ if ! mmry_add_formation_claim "$formation_id" "$session_id" "$repository" "$path
         # this passes it through rather than guessing: #31195 is the record of what a wrong
         # explanation costs the person reading it.
         400) echo "The server refused the area, and nothing was declared. ${server_said}" ;;
-        403) echo "Refused, and nothing was declared. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run /mmry:formation join ${formation_id} from this window." ;;
-        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        403) echo "Refused, and nothing was declared. This session is not a current member of formation ${formation_id}, or the formation has been closed out. Run $(mmry_host_formation_ref join "${formation_id}") from this window." ;;
+        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run $(mmry_host_formation_ref leave)." ;;
         502|503|504) echo "The server failed while handling the area (HTTP ${code}) and did not confirm it, so treat it as not declared. This is a fault on the server side, not something about formation ${formation_id} or your standing in it." ;;
         *)   echo "Could not declare that area in formation ${formation_id} (HTTP ${code}). The server did not confirm it, so treat it as not declared." ;;
     esac

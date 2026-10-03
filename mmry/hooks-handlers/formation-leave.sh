@@ -20,7 +20,7 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is nothing to release. This needs to run inside a session."
     exit 1

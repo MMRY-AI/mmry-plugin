@@ -24,10 +24,20 @@ REPO_ARCHIVE_URL="https://github.com/MMRY-AI/mmry-plugin/archive/refs/heads/mast
 
 # Resolve jq (system or bundled) for version parsing. #30624. Tolerate a missing
 # resolver on a partial install rather than crash this best-effort background check.
+#
+# MMRY_ALLOW_NO_CREDENTIAL, set here and unset immediately afterwards (#31245 QA round 3).
+# lib-jq.sh refuses - by exiting 1 - when a Codex install has no credential of its own, so that
+# the client cannot walk on to the other product's account. This program never asks for an
+# account: it fetches a public marketplace.json and a public archive, and an update check has no
+# business failing because the customer has not signed in yet. It is a plain shell variable, not
+# an export, so nothing this script spawns inherits a credential-check override for the rest of
+# its life - which was a QA finding in its own right.
+MMRY_ALLOW_NO_CREDENTIAL=1
 if ! source "$(cd "$(dirname "$0")" && pwd)/lib-jq.sh" 2>/dev/null; then
     echo "mmry self-update: jq resolver unavailable; skipping update check" >&2
     exit 0
 fi
+unset MMRY_ALLOW_NO_CREDENTIAL
 
 TMPDIR="${TMPDIR:-/tmp}"
 UPDATE_MARKER="${TMPDIR}/.mmry-update-checked"
@@ -140,8 +150,22 @@ cp -r "${extracted_dir}/mmry/"* "${PLUGIN_ROOT}/" 2>/dev/null || {
 }
 shopt -u dotglob
 
-# Also update the installed copy if it exists at ~/.claude/mmry/.
-INSTALLED_DIR="${HOME}/.claude/mmry"
+# Also update the installed copy, IN THE STATE DIRECTORY OF THE HOST THIS SESSION BELONGS TO.
+#
+# #31245 QA round 3: this was spelled ${HOME}/.claude/mmry, and self-update.sh runs from
+# session-start.sh on EVERY host. On a Codex session it therefore reached across and overwrote the
+# OTHER product's installed handlers - a reviewer watched it rewrite a plugin root mid-run - while
+# the Codex copy under ~/.codex/mmry was never updated at all, so Codex customers would have sat
+# on whatever version they first installed.
+#
+# mmry_host_state_dir() answers "${HOME}/.claude/mmry" for every Claude Code install, which is the
+# literal this line used to carry, so nothing changes there. The fallback covers a partial install
+# where lib-host.sh could not be sourced: same literal again, and no worse than before.
+if declare -F mmry_host_state_dir >/dev/null 2>&1; then
+    INSTALLED_DIR="$(mmry_host_state_dir)"
+else
+    INSTALLED_DIR="${HOME}/.claude/mmry"
+fi
 if [[ -d "$INSTALLED_DIR" && "$PLUGIN_ROOT" != "$INSTALLED_DIR" ]]; then
     shopt -s dotglob
     cp -r "${extracted_dir}/mmry/"* "${INSTALLED_DIR}/" 2>/dev/null || true

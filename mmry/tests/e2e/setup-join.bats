@@ -27,10 +27,19 @@ setup() {
     chmod +x "$HOME/.claude/mmry/setup/mmry-setup.sh"
     SETUP_SCRIPT="$HOME/.claude/mmry/setup/mmry-setup.sh"
 
-    # mmry-setup.sh resolves jq via hooks-handlers/lib-jq.sh (#30624); mirror it into
-    # the isolated plugin and point the resolver at the real vendored jq binaries.
+    # mmry-setup.sh resolves jq via hooks-handlers/lib-jq.sh (#30624) and its host via
+    # hooks-handlers/lib-host.sh (#31245); mirror both into the isolated plugin and point the
+    # resolver at the real vendored jq binaries.
+    #
+    # WHY THIS LIST IS ITSELF CHECKED. The tree here is a curated copy, not the whole plugin, so a
+    # new dependency in mmry-setup.sh is invisible to it until the script dies on a missing file.
+    # That is precisely what happened when lib-host.sh was introduced: all 31 tests in this file
+    # failed at once with "No such file or directory". structural/codex-manifest.bats asserts that
+    # every hooks-handlers library mmry-setup.sh sources is copied here, so the next addition fails
+    # on a sentence that explains itself rather than on a path.
     mkdir -p "$HOME/.claude/mmry/hooks-handlers"
     cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$HOME/.claude/mmry/hooks-handlers/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$HOME/.claude/mmry/hooks-handlers/"
     export MMRY_JQ_VENDOR_DIR="$PLUGIN_ROOT/vendor/jq"
 
     # Mock sleep (no-op) to prevent polling delays in device auth tests

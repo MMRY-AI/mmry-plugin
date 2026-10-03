@@ -61,13 +61,13 @@ EOF
 }
 
 @test "hook-budgets: the file under test is the repo's shipped hooks.json, not an installed copy" {
-    [[ -f "$HOOKS_FILE" ]]
+    [[ -f "$HOOKS_FILE" ]] || return 1
     # An installed plugin lives under .../plugins/cache/... or .../plugins/marketplaces/...
     # Reading either would make every assertion below meaningless.
-    [[ "$HOOKS_FILE" != */plugins/cache/* ]]
-    [[ "$HOOKS_FILE" != */plugins/marketplaces/* ]]
+    [[ "$HOOKS_FILE" != */plugins/cache/* ]] || return 1
+    [[ "$HOOKS_FILE" != */plugins/marketplaces/* ]] || return 1
     # And it must be the copy git tracks, in a repository that contains this test.
-    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]]
+    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]] || return 1
     [[ -d "$PLUGIN_ROOT/tests" ]]
 }
 
@@ -79,7 +79,7 @@ EOF
     # every "no hook is below its cost" assertion below would pass vacuously.
     (( count >= 9 ))
     for t in $timeouts; do
-        [[ "$t" =~ ^[0-9]+$ ]]
+        [[ "$t" =~ ^[0-9]+$ ]] || return 1
         (( t > 0 ))
     done
 }
@@ -88,7 +88,7 @@ EOF
     local mine others min_other
     mine="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
                    | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
-    [[ "$mine" =~ ^[0-9]+$ ]]
+    [[ "$mine" =~ ^[0-9]+$ ]] || return 1
 
     others="$(jq -r '[.hooks[][].hooks[] | select((.command | test("userpromptsubmit-foundation")) | not) | .timeout]
                      | .[]' "$HOOKS_FILE" | tr -d '\r')"
@@ -127,9 +127,9 @@ EOF
     local probe_rc=0 probe_out
     probe_out="$(bash "$handler" 2>/dev/null </dev/null)" || probe_rc=$?
     (( probe_rc == 0 ))
-    [[ -n "$probe_out" ]]
+    [[ -n "$probe_out" ]] || return 1
     printf '%s' "$probe_out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-    [[ "$probe_out" == *'Truthfulness: never overstate evidence'* ]]
+    [[ "$probe_out" == *'Truthfulness: never overstate evidence'* ]] || return 1
     # Headroom of at least 5x. At the 5 s budget this refuses for any cost above 1000 ms,
     # which is exactly the range that was measured in the field.
     #
@@ -148,7 +148,7 @@ EOF
     # leave the operative limit unmeasured.
     local deadline
     deadline="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*'         "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" | head -1 | sed 's/.*:-//')"
-    [[ "$deadline" =~ ^[0-9]+$ ]]
+    [[ "$deadline" =~ ^[0-9]+$ ]] || return 1
     echo "measured cost: ${cost} ms; shipped deadline: ${deadline} s" >&3
     # A 3x BAR, WHICH IS NOT THE SAME THING AS A 3x MARGIN - and the difference was reported
     # the wrong way round, so it is stated correctly here (#31434 QA round 2).
@@ -191,7 +191,7 @@ EOF
     # ships.
     local handler default fallback budget documented
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # The `:-N` default, and the N the handler falls back to when the env override is not a
     # positive integer. Both are shipped constants and a disagreement between them is its own
@@ -205,11 +205,11 @@ EOF
 
     # SAMPLE SIZE, in the form this file uses everywhere else: an extraction that found
     # nothing must fail loudly, not silently pass a comparison against an empty string.
-    [[ "$default" =~ ^[0-9]+$ ]]
-    [[ "$fallback" =~ ^[0-9]+$ ]]
-    [[ "$budget" =~ ^[0-9]+$ ]]
+    [[ "$default" =~ ^[0-9]+$ ]] || return 1
+    [[ "$fallback" =~ ^[0-9]+$ ]] || return 1
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
     (( default > 0 ))
-    [[ "$default" == "$fallback" ]]
+    [[ "$default" == "$fallback" ]] || return 1
 
     # The plugin must stop ITSELF before the harness stops it, with room left over to write
     # the JSON that tells the customer what happened. Without that margin the whole supervisor
@@ -221,7 +221,7 @@ EOF
     # promising a 15 s stop against a handler that waits 900 is the same defect wearing
     # a different hat.
     documented="$(grep -o 'stops itself after [0-9][0-9]* seconds' "$PLUGIN_ROOT/README.md" | head -1 | sed 's/[^0-9]//g')"
-    [[ "$documented" =~ ^[0-9]+$ ]]
+    [[ "$documented" =~ ^[0-9]+$ ]] || return 1
     [[ "$documented" == "$default" ]]
 }
 
@@ -241,7 +241,7 @@ EOF
     # client's API, so that is what is asserted.
     local sourced
     sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'         && declare -F mmry_load_config >/dev/null         && declare -F mmry_get_startup_memories >/dev/null         && printf SOURCED" 2>/dev/null)"
-    [[ "$sourced" == "SOURCED" ]]
+    [[ "$sourced" == "SOURCED" ]] || return 1
 
     timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$HOOKS_FILE" | tr -d '\r')"
     count=0
@@ -292,7 +292,7 @@ SHIMEOF
     # `tr -d` with a LITERAL CR in the source, which git's CRLF normalisation turned
     # into a line break on checkout and silently broke this extraction (#31434 QA).
     budget="${budget%%[![:digit:]]*}"
-    [[ "$budget" =~ ^[0-9]+$ ]]
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
 
     start="$(date +%s)"
     out="$(MMRY_JQ="$shim" bash "$handler" 2>/dev/null)"
@@ -309,8 +309,8 @@ SHIMEOF
     (( margin_ms >= 5000 ))
     # And the customer was told. A guard that wins the race and says nothing is the silent
     # loss wearing a different hat.
-    [[ "$out" == *'NOT applied to this turn'* ]]
-    [[ "$out" == *'exceeded'* ]]
+    [[ "$out" == *'NOT applied to this turn'* ]] || return 1
+    [[ "$out" == *'exceeded'* ]] || return 1
     echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
 
@@ -334,7 +334,7 @@ SHIMEOF
     # than asserting them structurally and saying so.
     local handler block
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # The watchdog subshell: from its `while` to the kill that ends it.
     block="$(sed -n '/^        while /,/kill -TERM/p' "$handler")"
@@ -381,7 +381,7 @@ SHIMEOF
     # this handler now uses.
     local handler body
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # Comments in this file discuss the idioms by name, so strip them before matching or the
     # test fails on its own explanation.
@@ -420,12 +420,318 @@ SHIMEOF
 ' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()'                 | head -1 | cut -d: -f1)"
     worker_line="$(printf '%s
 ' "$body" | grep -n 'MMRY_FOUNDATION_WORKER=1 bash' | head -1 | cut -d: -f1)"
-    [[ "$def_line" =~ ^[0-9]+$ ]]
-    [[ "$off_line" =~ ^[0-9]+$ ]]
-    [[ "$worker_line" =~ ^[0-9]+$ ]]
+    [[ "$def_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$off_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$worker_line" =~ ^[0-9]+$ ]] || return 1
     # The line this check is about must be a CALL, not the definition it used to find.
     (( off_line != def_line ))
     printf '%s
 ' "$body" | sed -n "${off_line}p" | grep -q 'if _mmry_reinject_is_off_here'
     (( off_line < worker_line ))
+}
+
+# =============================================================================================
+# THE SECOND HOST'S REGISTRATION, WHICH DRIFTED FROM THE FIRST (#31245 QA round 4).
+#
+# codex-hooks.json registered the Foundation hook at timeout 5 - the exact number #31434 raised
+# to 20 on hooks.json, and for the exact reason it was raised: the handler now enforces its own
+# 10 s deadline and was measured at 5.0 to 9.5 s, mean 6.45 over five runs. At 5 s Codex kills
+# it and DISCARDS its output on most turns, so the new platform would have shipped carrying the
+# defect Claude Code had just finished fixing.
+#
+# Nothing could have caught that, because every assertion in this file above reads $HOOKS_FILE
+# and there was no second file under test. These close that: the Codex registration is held to
+# the same floor, and the two Foundation budgets are asserted EQUAL so they cannot drift apart
+# again without a test going red.
+
+CODEX_HOOKS_FILE=""
+
+_codex_setup() {
+    CODEX_HOOKS_FILE="$PLUGIN_ROOT/hooks/codex-hooks.json"
+}
+
+_codex_foundation_timeout() {
+    jq -r '.hooks.UserPromptSubmit[].hooks[]
+           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
+        "$CODEX_HOOKS_FILE" | tr -d '\r'
+}
+
+_claude_foundation_timeout() {
+    jq -r '.hooks.UserPromptSubmit[].hooks[]
+           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
+        "$HOOKS_FILE" | tr -d '\r'
+}
+
+# ---------------------------------------------------------------------------------------------
+# THE PER-TOOL-CALL PATH, AND WHY IT NEEDS ITS OWN GUARD (#31245 QA round 6).
+#
+# userpromptsubmit-foundation.sh has the two tests above because it runs on every prompt. The
+# LIBRARIES have had nothing, and #31245 put a new one - lib-host.sh - underneath every handler in
+# the plugin by way of lib-jq.sh, which mmry-client.sh sources as its first executable line.
+#
+# That produced two latency regressions on the Claude Code path in two consecutive rounds:
+#
+#   round 4  hook-guard.sh resolved its own directory with `$(cd "$(dirname ...)" && pwd)`.
+#            Fixed in 7ae2464.
+#   round 5  lib-jq.sh reintroduced the identical idiom, IN THE SAME COMMIT THAT REMOVED IT
+#            from hook-guard.sh, and lib-host.sh's host detection called cygpath - a fork - for
+#            any path with a backslash or a drive letter, which on Windows is every path a hook
+#            is invoked with. Measured: 0.65 ms per source on develop against 141.72 ms.
+#
+# Two rounds, same shape, found both times by a reviewer with a stopwatch. The two tests below are
+# what makes a third one fail here instead.
+#
+# ONE IS STRUCTURAL AND ONE IS MEASURED, deliberately, for the reason the per-prompt pair above
+# gives: a wall-clock bar only bites on a slow machine, and a pattern check only catches the
+# idioms somebody thought of. The measured one is written as a RATIO against a control rather than
+# an absolute, so it means the same thing on a fast box and a loaded one.
+
+@test "hook-budgets: no library on the per-tool-call path resolves its own directory with a fork" {
+    # The libraries every handler pulls in, and hook-guard.sh, which is registered on three events
+    # including PostToolUse. formation-check.sh is on PostToolUse WITH NO MATCHER - after every
+    # single tool call - and reaches all four of these.
+    # THE ONE OCCURRENCE THAT IS ALLOWED, AND WHY. _mmry_jq_vendor_dir's third fallback builds a
+    # path to the BUNDLED jq. It is on develop unchanged, it is inside a function rather than at
+    # module level so it costs nothing at source time, and it is reached only when neither
+    # MMRY_JQ_VENDOR_DIR nor CLAUDE_PLUGIN_ROOT/vendor/jq is available - i.e. when a bundled
+    # binary has to be located, not on every source. Matched by its whole text, so a NEW fork on
+    # the same line number or in the same function does not inherit the exception.
+    local allowed='printf '"'"'%s'"'"' "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vendor/jq"'
+
+    local f body offenders="" hits line trimmed
+    for f in lib-host.sh lib-jq.sh hook-guard.sh lib-hookread.sh; do
+        local path="$PLUGIN_ROOT/hooks-handlers/$f"
+        [[ -f "$path" ]] || { offenders="${offenders} ${f}(missing)"; continue; }
+        # Comments in these files discuss the idiom by name - one of them at length - so strip
+        # them before matching, or the test fails on its own explanation.
+        body="$(grep -v '^[[:space:]]*#' "$path")"
+        # SAMPLE SIZE: the strip must leave a file behind, not an empty string. Without this a
+        # mangled path reads as a clean bill of health. hook-guard.sh is the shortest of the four
+        # at 17 non-comment lines, so the floor is set below that rather than above it.
+        (( $(printf '%s\n' "$body" | grep -c .) >= 10 )) || { offenders="${offenders} ${f}(empty-after-strip)"; continue; }
+        # Counted rather than `! grep -q`: a `!`-negated command cannot fail a bats test, which
+        # is the note the per-prompt test above carries for the same reason.
+        hits="$(printf '%s\n' "$body" | grep 'cd "\$(dirname' || true)"
+        [[ -n "$hits" ]] || continue
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            trimmed="${line#"${line%%[![:space:]]*}"}"
+            [[ "$trimmed" == "$allowed" ]] || offenders="${offenders} ${f}:[${trimmed}]"
+        done <<< "$hits"
+    done
+    [ -z "$offenders" ] || {
+        echo "these lines on the per-tool-call path fork to resolve a directory:${offenders}" >&2
+        echo "Use \${BASH_SOURCE[0]%/*}; see the block in hook-guard.sh for why." >&2
+        return 1
+    }
+}
+
+@test "hook-budgets: and that exception is still a real line, not a permission granted to nothing" {
+    # An exception whose line no longer exists waves through the next occurrence of the same text.
+    # Same failure as a stale mutation pattern, and this round had five of those.
+    grep -Fq 'printf '"'"'%s'"'"' "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vendor/jq"' \
+        "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh"
+}
+
+# ---------------------------------------------------------------------------------------------
+# COUNTING THE PROCESS, NOT TIMING IT (#31245 QA round 6).
+#
+# The first version of these was a wall-clock bar: sourcing lib-host.sh had to cost no more than
+# 8x an empty file. It caught the regression in isolation and then FAILED ON A HEALTHY TREE during
+# a full-suite run - 11.7x, because the suite loads the box - while the same regression measured
+# 9.5x on another loaded run. The healthy and broken ranges OVERLAP under load, so a timed bar
+# here cannot separate them, and a guard that cries wolf is one people learn to re-run until it
+# passes. (The figures are still worth having and are recorded in the commit message; what they
+# are not is a gate.)
+#
+# So these count the thing itself. The regression was a call to cygpath, taken for any path with a
+# backslash or a drive letter; a shim earlier on PATH records every invocation. Zero or some: no
+# threshold, no timing, no flap, and it means the same on a loaded box as on an idle one.
+#
+# THE SHIM IS PROVEN BEFORE IT IS TRUSTED, THROUGH THE IDENTICAL INVOCATION FORM. A shim that is
+# not reachable records nothing, which is indistinguishable from a clean result - a check that
+# cannot fail, which is the defect this whole round is about. An earlier cut of this proved the
+# shim with a bare `cygpath` call in the test's own shell and then measured through
+# `env ... bash -c`, which is not the same thing at all.
+
+# Build a cygpath shim that records every call and then does the real job, and return its
+# directory. Echoes the directory; writes the log to $2.
+_mmry_cygpath_shim() {
+    local dir="$1" log="$2" real
+    real="$(command -v cygpath)"
+    mkdir -p "$dir"
+    : > "$log"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'printf "%%s\n" "$*" >> "%s"\n' "$log"
+        printf 'exec "%s" "$@"\n' "$real"
+    } > "$dir/cygpath"
+    chmod +x "$dir/cygpath"
+}
+
+# Source a library through `env ... bash -c` with the shim on PATH, and echo how many times
+# cygpath was called. The probe runs in the SAME form, so a shim that cannot be reached fails
+# loudly instead of reporting zero.
+#   Usage: _mmry_count_cygpath <log> <shimdir> <lib-to-source> [VAR=value ...]
+_mmry_count_cygpath() {
+    local log="$1" shimdir="$2" lib="$3"; shift 3
+
+    : > "$log"
+    PATH="${shimdir}:$PATH" env -u MMRY_HOST -u MMRY_CONFIG_FILE \
+        bash -c 'cygpath -u "C:\probe" >/dev/null 2>&1' || true
+    if (( $(grep -c . "$log" || true) < 1 )); then
+        echo "the cygpath shim is not reachable in the form this test measures with, so the" >&2
+        echo "measurement below would report zero for any tree. Refusing to report it." >&2
+        return 1
+    fi
+
+    : > "$log"
+    PATH="${shimdir}:$PATH" env -u MMRY_HOST -u MMRY_CONFIG_FILE "$@" \
+        bash -c "source '$lib' >/dev/null 2>&1" || true
+    grep -c . "$log" || true
+}
+
+@test "hook-budgets: resolving the host spawns NO process, counted rather than timed" {
+    # THE SPELLING MATTERS AS MUCH AS THE COUNT. It sources through the WINDOWS path, because the
+    # cygpath branch is only reachable for a drive-lettered one - an earlier cut of this test used
+    # the POSIX path and passed with the regression restored underneath it.
+    command -v cygpath >/dev/null 2>&1 || \
+        skip "not a Windows shell: the drive-letter path this guards against cannot arise here"
+
+    local lib winlib shimdir log calls
+    lib="$PLUGIN_ROOT/hooks-handlers/lib-host.sh"
+    [[ -f "$lib" ]] || return 1
+    winlib="$(cygpath -w "$lib")"
+    [[ "$winlib" == *'\'* ]] || return 1
+    [[ "$winlib" =~ ^[A-Za-z]: ]] || return 1
+
+    shimdir="$BATS_TEST_TMPDIR/shim"
+    log="$BATS_TEST_TMPDIR/cygpath-calls.log"
+    _mmry_cygpath_shim "$shimdir" "$log"
+
+    # CODEX_HOME is explicitly absent: this is an ordinary Claude Code machine, which is the one
+    # that was paying for a second host it does not have.
+    calls="$(_mmry_count_cygpath "$log" "$shimdir" "$winlib" --unset=CODEX_HOME)"
+    echo "cygpath invocations while resolving the host from the Windows spelling: ${calls}" >&3
+    (( calls == 0 )) || {
+        echo "resolving the host spawned cygpath ${calls} time(s):" >&2
+        sed 's/^/    /' "$log" >&2
+        echo "It is on the path of EVERY tool call through lib-jq.sh -> mmry-client.sh ->" >&2
+        echo "formation-check.sh (PostToolUse, no matcher), and on Windows every hook is" >&2
+        echo "invoked with a drive-lettered path, so this is paid every time." >&2
+        echo "cygpath is only needed to COMPARE two paths; defer it to the CODEX_HOME branch." >&2
+        return 1
+    }
+}
+
+@test "hook-budgets: and a Codex home that must be compared still gets its cygpath" {
+    # The other direction, without which the test above is satisfied by deleting the call
+    # outright - which would break the relocated-home customer the whole feature exists for.
+    command -v cygpath >/dev/null 2>&1 || skip "not a Windows shell"
+
+    local lib winlib shimdir log calls
+    lib="$PLUGIN_ROOT/hooks-handlers/lib-host.sh"
+    winlib="$(cygpath -w "$lib")"
+    shimdir="$BATS_TEST_TMPDIR/shim2"
+    log="$BATS_TEST_TMPDIR/cygpath-calls2.log"
+    _mmry_cygpath_shim "$shimdir" "$log"
+
+    # A CODEX_HOME in the Windows spelling is exactly the case that needs the mount table.
+    calls="$(_mmry_count_cygpath "$log" "$shimdir" "$winlib" \
+        'CODEX_HOME=C:\Users\somebody\relocated-codex')"
+    echo "cygpath invocations when CODEX_HOME must be compared: ${calls}" >&3
+    (( calls >= 1 )) || {
+        echo "the CODEX_HOME comparison no longer normalises through cygpath." >&2
+        echo "Under Git Bash C:\Users\x\AppData\Local\Temp\t and /tmp/t are the same" >&2
+        echo "directory and no string surgery makes them match, so a customer who relocated" >&2
+        echo "their Codex home stops being recognised." >&2
+        return 1
+    }
+}
+
+@test "hook-budgets codex: the file under test is the repo's shipped codex-hooks.json" {
+    _codex_setup
+    [[ -f "$CODEX_HOOKS_FILE" ]] || return 1
+    [[ "$CODEX_HOOKS_FILE" != */plugins/cache/* ]] || return 1
+    [[ "$CODEX_HOOKS_FILE" != */plugins/marketplaces/* ]] || return 1
+    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]] || return 1
+    [[ -d "$PLUGIN_ROOT/tests" ]]
+}
+
+@test "hook-budgets codex: every registered Codex hook declares a positive integer timeout" {
+    _codex_setup
+    local timeouts count t
+    timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$CODEX_HOOKS_FILE" | tr -d '\r')"
+    count="$(printf '%s\n' "$timeouts" | grep -c '[0-9]')"
+    # SAMPLE SIZE. The Codex manifest registers six hooks today; if a refactor drops them all,
+    # every assertion below would pass vacuously.
+    echo "codex hooks found: ${count}" >&3
+    (( count >= 6 ))
+    for t in $timeouts; do
+        [[ "$t" =~ ^[0-9]+$ ]] || return 1
+        (( t > 0 ))
+    done
+}
+
+@test "hook-budgets codex: the two hosts register the SAME Foundation budget (#31245 QA round 4)" {
+    # THE ANTI-DRIFT ASSERTION, and the reason this block exists. One handler, one enforced
+    # deadline, therefore one budget. If a future change raises hooks.json and forgets
+    # codex-hooks.json - which is precisely what happened - this goes red naming both numbers.
+    _codex_setup
+    local codex claude
+    codex="$(_codex_foundation_timeout)"
+    claude="$(_claude_foundation_timeout)"
+
+    echo "Foundation budget - claude: ${claude}s, codex: ${codex}s" >&3
+
+    # SAMPLE SIZE: an extraction that found nothing must fail, not compare two empty strings.
+    [[ "$codex" =~ ^[0-9]+$ ]] || return 1
+    [[ "$claude" =~ ^[0-9]+$ ]] || return 1
+    [[ "$codex" == "$claude" ]]
+}
+
+@test "hook-budgets codex: the SHIPPED deadline sits below the Codex budget too (#31245 QA round 4)" {
+    # The same invariant the Claude registration is held to. Read from the SHIPPED handler,
+    # because a value a test supplies proves nothing about what customers run.
+    _codex_setup
+    local handler default budget
+    handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [[ -f "$handler" ]] || return 1
+    default="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*' "$handler" | head -1 | sed 's/.*:-//')"
+    budget="$(_codex_foundation_timeout)"
+
+    echo "shipped deadline ${default}s against codex budget ${budget}s" >&3
+
+    [[ "$default" =~ ^[0-9]+$ ]] || return 1
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
+    (( default > 0 ))
+    # The plugin must stop ITSELF before Codex stops it, with room to write the JSON that tells
+    # the customer what happened. Without that margin the supervisor is decoration.
+    (( default < budget ))
+    (( default + 3 <= budget ))
+}
+
+@test "hook-budgets codex: no Codex hook is budgeted below the startup cost every handler pays" {
+    _codex_setup
+    _write_config
+
+    local floor t timeouts count sourced
+    floor="$(_avg_ms 5 bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'")"
+    echo "shared startup floor: ${floor} ms over 5 runs" >&3
+
+    # THE PREMISE, by observation rather than by the clock - _avg_ms rounds up by a whole
+    # second, so a floor above zero proves nothing on its own.
+    sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh' \
+        && declare -F mmry_load_config >/dev/null \
+        && printf SOURCED" 2>/dev/null)"
+    [[ "$sourced" == "SOURCED" ]] || return 1
+
+    timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$CODEX_HOOKS_FILE" | tr -d '\r')"
+    count=0
+    for t in $timeouts; do
+        (( t * 1000 >= floor * 5 ))
+        count=$(( count + 1 ))
+    done
+    echo "codex hooks checked against the floor: ${count}" >&3
+    (( count >= 6 ))
 }
