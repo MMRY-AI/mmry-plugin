@@ -373,7 +373,11 @@ desc_m20="#31583 the status command is no longer advertised anywhere a customer 
 # copy and checking the copy lacked it, which could not fail (#31583 QA round 5).
 mutate_m21() {
     local f="$1/$STATUS_REL" t="$1/$STATUS_REL.m21"
-    grep -v 'echo "Last sent:' "$f" > "$t" && mv "$t" "$f"
+    # Each "Last sent" line becomes a no-op rather than being deleted (#31583 QA round 6). Deleting
+    # them left if-branches with nothing in them, which bash refuses to parse, so the mutant failed
+    # every test for a syntax error and its REFUSED verdict said nothing about the line it removed.
+    awk '/echo "Last sent:/ { sub(/echo "Last sent:.*/, ":") } { print }' "$f" > "$t" && mv "$t" "$f"
+    bash -n "$f" || { echo "m21: the mutant does not parse; fix the mutation, not the code" >&2; return 1; }
 }
 file_m21="$STATUS_REL"
 targets_m21="$CROSS_TESTS"
