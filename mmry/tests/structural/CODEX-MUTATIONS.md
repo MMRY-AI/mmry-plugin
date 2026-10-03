@@ -455,3 +455,79 @@ written down in two places is one that will eventually disagree with itself.
 The per-experiment table for the full 69-of-69 round-4 run is NOT recorded here. A full run is
 upwards of two hours and would describe a tree still under review; it goes in once this branch
 settles. The three experiments above are complete and were run to completion.
+
+## QA round 8 (2026-10-02/03): a complete run, and what it found
+
+### The full run: 104 experiments at 68302b1, 103 refused, 1 survived, 0 not performed
+
+Run with `bash mmry/tests/structural/run-codex-mutations.sh` in a clean detached worktree of
+68302b1, Windows 11, Git Bash, CPython 3.12.7, the vendored bats. Before it, a dry run
+(`MMRY_MUTATION_DRYRUN=1`) reported 4 of 104 NOT APPLIED; those were repaired first (below), and
+the dry run then reported 104 of 104 applying. The harness now counts its own total from this
+file instead of a typed-in number, which had drifted.
+
+The experiments new or changed this round, with their outcome in that run:
+
+| # | experiment | outcome |
+|---|---|---|
+| 1 | claude config dir drifts (pattern repaired) | REFUSED |
+| 5 | CODEX_HOME ignored (pattern repaired) | REFUSED |
+| 10 | shim passes a handler failure through to Codex again (replaces "shim swallows the handler exit code", whose premise was reversed on purpose) | REFUSED |
+| 11 | PreCompact gets registered (pattern repaired) | REFUSED |
+| 14 | a handler loses commandWindows | REFUSED |
+| 18 | commandWindows reverts to the quoted form PowerShell prints instead of running | REFUSED |
+| 99 | the Claude Code save prompt goes quiet after a save again | REFUSED |
+| 100 | formation-check reverts to the Claude-first session chain | REFUSED |
+| 101 | the Windows launcher echoes its commands into the model's context | REFUSED |
+| 102 | the Windows launcher stops finding Git from the git.exe on PATH | **SURVIVED** |
+| 103 | the README comparison table promises Codex a save prompt at session end | REFUSED |
+| 104 | the customer page promises Codex a save before the session ends | REFUSED |
+
+Retired, not silently dropped: "Windows command uses POSIX expansion" looked for
+`%CLAUDE_PLUGIN_ROOT%`, which no registration has carried since 1a5560d, and "session-init stops
+copying the Windows entry point" looked for a copy session-init has never needed, because the
+launcher runs from the plugin root.
+
+### The survivor, and the fix
+
+Disabling the launcher's first lookup, the `git.exe` on PATH, left the suite green: the registry
+and standard-folder fallbacks find Git on any machine where its installer ran, so the PowerShell
+behaviour test could not tell which lookup had worked. `codex-manifest.bats` now has a test that
+puts a fake Git first on PATH, whose `bin\bash.exe` is a copy of the vendored jq (chosen only for
+its recognisable output), and requires that one to be run. Experiment 102 now names that test, and
+the same mutation, applied by hand at 47c7360, fails it.
+
+### After the run
+
+Two experiments were added at 3c0496e with the jq fix, and are not in the 104 above. Run filtered
+at 47c7360 (the final code head), in a clean detached worktree:
+
+| filter | experiments | outcome |
+|---|---|---|
+| `session-init` | installs into the Claude directory on every host; loses the pipefail guard on the plugin-root search; writes no host marker; copies handlers even when the marker could not be written; stops copying the bundled jq beside the installed handlers; copies the bundled jq on Claude Code too | 6 refused, 0 survived |
+| `git.exe on PATH` | the Windows launcher stops finding Git from the git.exe on PATH (re-pointed at the new priority test) | 1 refused, 0 survived |
+
+### The suite at the final code head
+
+`bash mmry/tests/run-tests.sh` (offline: structural, unit, handlers, e2e) at 47c7360, Windows 11,
+Git Bash: 1..880, 880 ok, 0 not ok, exit 0. Three tests skip on this machine for stated reasons: no
+live formation to produce a roster footer, a worker that did not crash on cue, and a filesystem
+with no POSIX modes. An earlier run at 68302b1 failed one e2e test with "MEM_COMMIT failed, Win32
+error 1455" while three suites shared the machine; that is a fork failure, not a test result, and
+the rerun above is the one that counts.
+
+### Hand-run mutations this round, outside the harness
+
+Each was applied, its test file run, and the file restored:
+
+- `formation-check.sh`: the `mmry_session_id` line replaced with a no-op. The two Codex identity
+  tests in `formation-check-identity.bats` fail; the Claude mirror stays green, as it should.
+- The documentation sweep, six re-introductions, each refused: QA's exact table mutation, a second
+  table wording, a plugin README bullet, the storefront listing, a brand-new document naming Codex,
+  and the Codex commands README.
+- The settings test: a doc row for MMRY_BASH is refused, and still refused when the only mention
+  of MMRY_BASH in shipped code is a comment.
+- The bash 3.2 guard: re-adding a mapfile line to `codex-docs-and-eol.bats` is refused.
+- The test-file size guard: a 65545-byte copy of `formation-delivery.bats` is refused.
+- `stop-check.bats`'s new Claude control passes against master's `stop-check.sh` and fails against
+  9e3caba's, which is the defect QA measured.
