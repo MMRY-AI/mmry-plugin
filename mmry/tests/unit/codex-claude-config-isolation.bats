@@ -97,10 +97,10 @@ _no_claude_value() {
     _no_claude_value
 }
 
-@test "TC6: the host is resolved from the install, not only from MMRY_HOST" {
+@test "TC6: a command the model runs, with no MMRY_HOST in its environment, is guarded too" {
     # A command the model runs from the skill carries no MMRY_HOST; lib-host.sh resolves Codex
-    # from the .mmry-host marker session-init writes. Guarding on the environment variable alone
-    # would leave exactly that path open.
+    # from the .mmry-host marker session-init writes, and sets MMRY_HOST in the shell as it does.
+    # This is the route a guard on the inherited environment alone would have missed.
     local root="$TEST_TMPDIR/staged"
     mkdir -p "$root/mmry/hooks-handlers"
     cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$root/mmry/hooks-handlers/"
