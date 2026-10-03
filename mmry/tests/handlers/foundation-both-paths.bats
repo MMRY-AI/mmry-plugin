@@ -175,22 +175,32 @@ else:
     # itself, which is the thing that has to hold.
     local f="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
 
-    # The region after the worker has been waited on. Every clear of the marker in it must
-    # come after an emit, because everything between the two is unreported otherwise: the
-    # watchdog kills only the worker, and the JSON escape runs in the emit.
-    local first_clear first_emit
-    first_clear="$(grep -n 'rm -f "\$_INFLIGHT"' "$f" | head -1 | cut -d: -f1)"
-    first_emit="$(grep -n '_mmry_emit ' "$f" | grep -v '^[0-9]*:_mmry_emit()' | head -1 | cut -d: -f1)"
-
-    [ -n "$first_clear" ]
-    [ -n "$first_emit" ]
-    # The premise: both were actually found, and the marker is written somewhere too.
+    # EVERY EXIT PATH, NOT JUST THE FIRST (#31411 split). This used to compare only the first
+    # clear with the first emit. That held by accident of layout: the split added a path that
+    # clears the marker and emits nothing, placed first, and the old check went red for a reason
+    # that was not a defect, while a second clear moved above its emit lower down would have
+    # passed it. Now each clear is walked back to the end of the previous exit path: it must
+    # meet an emit first, or the path must say, in a comment, that it never emits.
     grep -q ': > "\$_INFLIGHT"' "$f"
-
-    [ "$first_clear" -gt "$first_emit" ] || {
-        echo "marker cleared at line $first_clear, before the first emit at line $first_emit"
-        return 1
-    }
+    local report
+    report="$(awk '
+        /: > "\$_INFLIGHT"/                          { inpath = 1; emitted = 0; noemit = 0; next }
+        !inpath                                        { next }
+        /^[[:space:]]*exit 0[[:space:]]*$/             { emitted = 0; noemit = 0; next }
+        /_mmry_emit(_escaped)? "/                      { emitted = 1 }
+        /# NO EMIT ON THIS PATH/                       { noemit = 1 }
+        /rm -f "\$_INFLIGHT"/ {
+            clears++
+            if (!emitted && !noemit) { bad = bad " " NR }
+        }
+        END { printf "clears=%d bad=%s", clears, bad }
+    ' "$f")"
+    echo "$report"
+    # The premise: the supervisor really does clear the marker on several paths.
+    [[ "$report" =~ clears=([0-9]+) ]] && (( BASH_REMATCH[1] >= 4 )) || {
+        echo "found too few marker clears for this check to mean anything: $report"; return 1; }
+    [[ "$report" == *"bad="* && "${report#*bad=}" == "" ]] || {
+        echo "marker cleared before any emit on a path that emits, at line(s):${report#*bad=}"; return 1; }
 }
 
 @test "#31411 a clean firing clears the marker, so the next turn does NOT cry wolf" {

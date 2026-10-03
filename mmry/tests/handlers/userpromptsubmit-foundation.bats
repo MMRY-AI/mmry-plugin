@@ -403,8 +403,7 @@ EOF
 _registered_timeout() {
     # The SHIPPED budget for this hook, read from the repo's hooks.json — not from an
     # installed cache and not from a hand-edited copy.
-    jq -r '.hooks.UserPromptSubmit[].hooks[]
-           | select(.command | test("userpromptsubmit-foundation")) | .timeout' \
+    jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' \
         "$PLUGIN_ROOT/hooks/hooks.json"
 }
 

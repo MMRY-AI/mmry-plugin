@@ -90,6 +90,24 @@ _SFX=""
 (( MMRY_FND_PART > 1 )) && _SFX=".${MMRY_FND_PART}"
 _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 
+# A PART THE SET CANNOT REACH LEAVES AT ONCE, HERE, BEFORE ANYTHING ELSE IS READ. Every part but
+# the last is at least half a part long (see _mmry_fnd_parts), and characters never outnumber
+# bytes, so a set of B bytes has fewer than k parts whenever B < (k-1) * cap/2. That is decided
+# from the manifest's own byte count with one read and no process, before anything else in the file
+# runs. With no verifiable manifest at all, part 1 owns every report about it.
+#
+# What an unused part costs is the process start, not this script: moving this check up from inside
+# the supervisor block was measured over 15 interleaved runs on Windows and made no difference
+# (five unused parts 280 ms here, 273 ms there, against 210 ms for five bare bash starts). That cost
+# is what sets K; see hooks.json and the latency notes in #31411.
+if (( MMRY_FND_PART > 1 )); then
+    _fnd_m="${_FOUND_TMPDIR}/mmry-foundation.md.manifest"
+    _fnd_mb=""
+    [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
+    [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] || exit 0
+    (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2) )) && exit 0
+fi
+
 # Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
 # text (may be empty). additionalContext must be nested under hookSpecificOutput or
 # Claude Code silently ignores it; systemMessage is the user-facing channel.
@@ -189,9 +207,11 @@ _mmry_emit_escaped() {
 _mmry_outcome() {
     local tok="" f="${_FOUND_TMPDIR}/mmry-foundation.session"
     [[ -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
-    local out="${_FOUND_TMPDIR}/mmry-foundation.outcome${_SFX}"
-    printf '%s %s' "$tok" "$1" > "${out}.$$" 2>/dev/null && mv -f "${out}.$$" "$out" 2>/dev/null
-    rm -f "${out}.$$" 2>/dev/null
+    # One redirect, no process (#31411 QA round 2, latency). The first version wrote a temp file and
+    # renamed it into place, which cost two process starts, mv and rm, on every prompt: measured on
+    # Windows, part 1 alone ran 975 ms against 797 ms for the hook before it. The line is a few dozen
+    # bytes and is read only by /mmry:foundation-status, on a later prompt, never during this one.
+    printf '%s %s' "$tok" "$1" > "${_FOUND_TMPDIR}/mmry-foundation.outcome${_SFX}" 2>/dev/null
     return 0
 }
 
@@ -277,18 +297,6 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # margin is the point - a guard that only wins the race against the harness on a quiet
     # machine is not a guard. The enforced figure is asserted, not assumed: see
     # "the ENFORCED wall clock" test in tests/structural/hook-budgets.bats.
-    # A PART THE SET CANNOT REACH LEAVES AT ONCE. Every part but the last is at least half a part
-    # long (see _mmry_fnd_parts), and characters never outnumber bytes, so a set of B bytes has
-    # fewer than k parts whenever B < (k-1) * cap/2. That is decided from the manifest's own byte
-    # count with one read and no process, so on an ordinary set parts 2..K cost a bash start and
-    # nothing more. With no verifiable manifest at all, part 1 owns every report about it.
-    if (( MMRY_FND_PART > 1 )); then
-        _fnd_m="${_FOUND_TMPDIR}/mmry-foundation.md.manifest" _fnd_mb=""
-        [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
-        [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] || exit 0
-        (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2) )) && exit 0
-    fi
-
     DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-10}"
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=10
 
@@ -437,6 +445,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # The worker puts the specific reason on stdout; it is repeated verbatim to both
     # audiences so the assistant and the customer are told the same thing.
     if (( WORKER_RC == 3 && MMRY_FND_PART > 1 )); then
+        # NO EMIT ON THIS PATH: a refusal is about the whole set and part 1 reports it.
         _mmry_outcome "failed the stored copy was refused"
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
@@ -539,6 +548,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # watchdog had already let the worker go, so on a large set it alone could carry the turn
     # past the hook budget, where the harness discards the output and nothing is said.
     if [[ ! "$BODY" =~ [^[:space:]] ]]; then
+        # NO EMIT ON THIS PATH: there is nothing to send, so nothing can go missing.
         # Nothing to send, so nothing can go missing in the sending. A verified-empty record
         # is a true answer and is promoted; for toggle-off or no-cache there is no pending
         # record and this is a no-op.

@@ -100,8 +100,7 @@ EOF
 
 @test "hook-budgets: the Foundation hook's budget is not the outlier it was" {
     local mine others min_other
-    mine="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
-                   | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
+    mine="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
     [[ "$mine" =~ ^[0-9]+$ ]]
 
     others="$(jq -r '[.hooks[][].hooks[] | select((.command | test("userpromptsubmit-foundation")) | not) | .timeout]
@@ -127,8 +126,7 @@ EOF
     local handler cost budget
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     cost="$(_avg_ms 5 bash "$handler")"
-    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
-                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
+    budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
 
     echo "measured cost: ${cost} ms over 5 runs; registered budget: ${budget} s" >&3
 
@@ -218,8 +216,7 @@ EOF
     # bug, so both are extracted and compared rather than trusting either alone.
     default="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*' "$handler" | head -1 | sed 's/.*:-//')"
     fallback="$(grep -o '^[[:space:]]*.*|| DEADLINE=[0-9][0-9]*' "$handler" | head -1 | sed 's/.*DEADLINE=//')"
-    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
-                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
+    budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
 
     echo "shipped default deadline: ${default}s (fallback ${fallback}s); registered budget: ${budget}s" >&3
 
@@ -306,8 +303,7 @@ SHIMEOF
 
     local handler budget start elapsed_ms out margin_ms
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
-                     | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" )"
+    budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" )"
     # Trim anything that is not a digit, rather than naming a carriage return: jq.exe
     # opens stdout in text mode on Windows and appends one. An earlier form used
     # `tr -d` with a LITERAL CR in the source, which git's CRLF normalisation turned
@@ -501,7 +497,7 @@ SHIMEOF
     # fail. Whole seconds plus one, the method _avg_ms above already uses, works on both, and the
     # premise check refuses any reading that is not a plain number.
     local budget t0 t1 secs
-    budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
+    budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
     t0="$(date +%s)"
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     t1="$(date +%s)"
