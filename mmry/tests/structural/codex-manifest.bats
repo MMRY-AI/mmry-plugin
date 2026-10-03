@@ -353,6 +353,43 @@ setup() {
     [[ "$status" -ne 0 ]] || { echo "a failing handler was reported as success: $output"; return 1; }
 }
 
+@test "codex hooks: on Windows the launcher prefers the Git whose git.exe is on PATH over the registry" {
+    # Pins the FIRST of the launcher's three lookups. The test above passes on any machine with Git
+    # installed, because the registry and standard-folder fallbacks find it too, and the mutation
+    # harness showed exactly that: disabling the git.exe lookup survived. The order matters to a
+    # customer with two Gits: the one on their PATH is the one they chose.
+    #
+    # A fake Git install is put first on PATH. Its bin\bash.exe is a copy of the vendored jq, used
+    # only because it is an executable this repository already ships whose output is recognisable:
+    # handed the launcher's arguments it fails with "jq: error". If that text appears, the fake was
+    # chosen; if the stand-in handler's REACHED appears, the launcher went past PATH to the real Git.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+
+    local root="$BATS_TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED the real Git"\n' > "$root/hooks-handlers/codex-hook.sh"
+
+    local fake="$BATS_TEST_TMPDIR/fake git"
+    mkdir -p "$fake/cmd" "$fake/bin"
+    cp "$jq" "$fake/cmd/git.exe"
+    cp "$jq" "$fake/bin/bash.exe"
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS")"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+    local sysroot; sysroot="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")"
+    local stock="$fake/cmd:$sysroot/System32:$sysroot:$sysroot/System32/WindowsPowerShell/v1.0"
+
+    run env PATH="$stock" powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    [[ "$output" == *"jq: error"* ]] || { echo "the Git on PATH was not the one used: $output"; return 1; }
+    [[ "$output" != *"REACHED the real Git"* ]] || { echo "the launcher skipped the Git on PATH: $output"; return 1; }
+}
+
 @test "codex hooks: every command uses Codex own PLUGIN_ROOT token, not the other product alias" {
     # ${PLUGIN_ROOT} is expanded by Codex itself, on every platform, and was measured working:
     # the same token emitter referenced this way delivered its payload 4 times.
