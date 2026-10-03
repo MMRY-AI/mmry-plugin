@@ -245,9 +245,7 @@ if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then
 fi
 
 # ---- lib-host.sh: the requirement-4 literals -------------------------------------------------
-mutate "claude config dir drifts" hooks-handlers/lib-host.sh \
-  "s = s.replace('\"\${HOME}/.claude\"', '\"\${HOME}/.claude-v2\"')" \
-  unit/lib-host.bats "Claude config dir"
+mutate "claude config dir drifts" hooks-handlers/lib-host.sh   's = s.replace("_MMRY_HOST_DIR_V=" + chr(34) + "$(mmry_home)/.claude" + chr(34), "_MMRY_HOST_DIR_V=" + chr(34) + "$(mmry_home)/.claude-v2" + chr(34), 1)'   unit/lib-host.bats "Claude config dir"
 
 # REPAIRED (#31245 QA round 6). The literal moved: the accessors were rewritten in round 4 to
 # print a cached variable rather than a constant, so `printf 'claude-code'` is not in the file any
@@ -264,9 +262,7 @@ mutate "default host becomes codex" hooks-handlers/lib-host.sh \
   's = s.replace("        *)     _MMRY_HOST_V=" + chr(34) + "claude" + chr(34) + " ;;", "        *)     _MMRY_HOST_V=" + chr(34) + "codex" + chr(34) + " ;;", 1)' \
   unit/lib-host.bats "MMRY_HOST unset"
 
-mutate "CODEX_HOME ignored" hooks-handlers/lib-host.sh \
-  "s = s.replace('\"\${CODEX_HOME:-\${HOME}/.codex}\"', '\"\${HOME}/.codex\"')" \
-  unit/lib-host.bats "CODEX_HOME wins"
+mutate "CODEX_HOME ignored" hooks-handlers/lib-host.sh   's = s.replace(chr(34) + "${CODEX_HOME:-$(mmry_home)/.codex}" + chr(34), chr(34) + "$(mmry_home)/.codex" + chr(34), 1)'   unit/lib-host.bats "CODEX_HOME wins"
 
 # REPAIRED (#31245 QA round 6). mmry_host_script_ref stopped calling $(mmry_host_state_dir) in
 # round 4 - the whole point of that change was to remove a nested command substitution from a hot
@@ -286,7 +282,11 @@ mutate "shim drops the path-separator guard" hooks-handlers/codex-hook.sh \
   "s = s.replace('    *[/\\\\\\\\]*|.*|\"\") exit 0 ;;', '    \"\") exit 0 ;;')" \
   handlers/codex-hook.bats "path separator"
 
-mutate "shim swallows the handler exit code" hooks-handlers/codex-hook.sh   's = s.replace("exec bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34), "bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34) + " || true", 1)'   handlers/codex-hook.bats "exit code is passed through"
+# "shim swallows the handler exit code" is retired, not lost (#31245 QA round 8): its premise was
+# reversed on purpose. codex-hook.sh now DISCARDS the handler's exit code, because on Codex any
+# non-zero exit is shown to the customer as "Hook failed" and delivers nothing. The experiment
+# below breaks the new contract instead: the shim passes a failure through again.
+mutate "shim passes a handler failure through to Codex again" hooks-handlers/codex-hook.sh   's = s.replace("bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(34) + chr(10) + "set -e" + chr(10) + "exit 0", "bash " + chr(34) + "$TARGET" + chr(34) + " " + chr(34) + "$@" + chr(10) + "exit $?", 1)'   handlers/codex-hook.bats "non-zero exit is NOT passed through"
 
 # NOTE: there is no "shim stops setting MMRY_CONFIG_FILE" mutation any more. The shim used to
 # repeat that export and the repetition was deleted precisely because this harness showed it could
@@ -294,9 +294,7 @@ mutate "shim swallows the handler exit code" hooks-handlers/codex-hook.sh   's =
 # MMRY_CONFIG_FILE" further down, which does refuse.
 
 # ---- codex-hooks.json ------------------------------------------------------------------------
-mutate "PreCompact gets registered" hooks/codex-hooks.json \
-  "s = s.replace('    \"Stop\": [', '    \"PreCompact\": [{\"hooks\":[{\"type\":\"command\",\"command\":\"bash x\",\"commandWindows\":\"x\",\"timeout\":5}]}],\n    \"Stop\": [')" \
-  structural/codex-manifest.bats "PreCompact is NOT registered"
+mutate "PreCompact gets registered" hooks/codex-hooks.json   's = s.replace("    " + chr(34) + "PostToolUse" + chr(34) + ": [", "    " + chr(34) + "PreCompact" + chr(34) + ": [{" + chr(34) + "hooks" + chr(34) + ":[{" + chr(34) + "type" + chr(34) + ":" + chr(34) + "command" + chr(34) + "," + chr(34) + "command" + chr(34) + ":" + chr(34) + "sh x" + chr(34) + "," + chr(34) + "timeout" + chr(34) + ":5}]}]," + chr(10) + "    " + chr(34) + "PostToolUse" + chr(34) + ": [", 1)'   structural/codex-manifest.bats "PreCompact is NOT registered"
 
 mutate "a handler gains asyncRewake" hooks/codex-hooks.json \
   "s = s.replace('\"timeout\": 10', '\"asyncRewake\": true, \"timeout\": 10', 1)" \
