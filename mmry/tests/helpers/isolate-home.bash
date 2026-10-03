@@ -96,6 +96,17 @@ mmry_isolate_home() {
     # or not. Emptying HOME while leaving this set would be isolation in name only. Empty is
     # treated exactly like unset, because the discovery branch requires the file to exist.
     export MMRY_CONFIG_FILE=""
+
+    # THE SESSION THAT STARTED THE RUN IS NOT THE SESSION UNDER TEST (#31411 QA round 2).
+    #
+    # Started from inside Claude Code, the suite inherits that live session's id. The Foundation
+    # status command files its records by CLAUDE_CODE_SESSION_ID, so a test that fired the hook
+    # with no payload and then asked the status read the LIVE session's records, not the test's,
+    # and got "nothing yet". The same test passed from a plain terminal: the result depended on
+    # where the suite was started. The formation handlers key their state the same way, so an
+    # inherited id could also point a test at a real formation membership. Tests that need a
+    # session id set their own, after this runs.
+    unset CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID
 }
 
 mmry_release_home() {

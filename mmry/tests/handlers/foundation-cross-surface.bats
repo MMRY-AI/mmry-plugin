@@ -251,18 +251,26 @@ _assert_agree() {
 # #31583 QA round 5, 4e. The command printed "Delivered: IN FULL" whenever the copy verified,
 # without reading the evidence the hook writes when a prompt fails. Straight after a prompt the
 # hook's own log recorded as FAILED, a customer who asked was told IN FULL.
-_seed_big_cache() {
-    # Two MB: loads in about 3 s here, so a 1 s deadline really does stop it, while a normal
-    # deadline lets it through. Sized for the deadline, not for realism.
-    awk -v n=25000 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$CACHE"
-    local s b
-    read -r s b < <(cksum < "$CACHE")
-    printf 'mmry-foundation v1 entries=25000 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+#
+# SLOWED, NOT ENLARGED (#31411 split). This used a 2 MB set that took about 3 s to load, so a 1 s
+# deadline stopped it. Since the split a set that size goes by reference in a few hundred
+# milliseconds and the deadline never acts, so the fixture no longer produced the failure it was
+# there to produce. A jq that sleeps on every real parse is what a loaded machine looks like, and it
+# stops a small set at the deadline on any machine. The shim answers --version at once, because the
+# resolver probes it.
+_slow_jq() {
+    local shim="$TEST_TMPDIR/slow-jq.sh"
+    printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$shim"
+    chmod +x "$shim"
+    printf '%s' "$shim"
 }
 
+# No sleeps between the steps, on purpose: the failure lands in the same second as the delivery
+# before it and the recovery after it, which is the case the old file-time ordering got wrong.
 @test "cross-surface: #31583 4e a prompt that fails after a delivery is reported as NOT delivered, then recovers" {
     printf '{"foundationReinject": true}\n' > "$CFG"
-    _seed_big_cache
+    _seed_valid_cache
+    local shim; shim="$(_slow_jq)"
 
     # CONTROL: a prompt that succeeds is reported as delivered.
     bash "$HOOK" >/dev/null 2>&1
@@ -270,8 +278,7 @@ _seed_big_cache() {
     [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]] || return 1
 
     # The failure: the same set, stopped at a one-second deadline. The hook says so on the turn.
-    sleep 1
-    MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$HOOK"
+    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$HOOK"
     [[ "$output" == *'NOT applied'* ]] || return 1
 
     # And now the command says so too, instead of IN FULL.
@@ -282,7 +289,6 @@ _seed_big_cache() {
 
     # CONTROL on the other side: the next prompt succeeds and the report recovers, so the
     # assertion above cannot be satisfied by a command that always says NOT.
-    sleep 1
     bash "$HOOK" >/dev/null 2>&1
     run bash "$STATUSCMD"
     [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]]

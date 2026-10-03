@@ -477,53 +477,108 @@ SHIMEOF
 # Before this, the whole-set escape ran in the supervisor after the watchdog had released the
 # worker, so nothing bounded it: measured at 17 s for 400 KB and 28 s for 2 MB, past the 20 s
 # hook budget, where Claude Code discards the output and neither channel says anything. The
-# escape now runs inside the worker's deadline. These two pin both halves of that.
+# escape now runs inside the worker's deadline.
+#
+# SINCE THE SPLIT (#31411 QA round 2). Claude Code shows a hook at most 10,000 characters, so the
+# set now travels as up to six labelled parts, one per registered hook, and a set too large for six
+# goes by reference. These three pin the budget for each shape: the most six parts can carry,
+# delivered in full; a set thirty times the largest ever measured, by reference; and a part that
+# runs out of time, reported with its number. The six firings run at the same time here, as Claude
+# Code runs them, so the wall clock includes the contention between them.
 
-@test "hook-budgets: #31411 a set thirty times the largest ever measured is delivered in full, inside the budget" {
+# Fire all six parts at once with no payload; each writes $TEST_TMPDIR/budget-part<k>.json. Sets
+# SECS to the whole seconds the six took together plus one, rounded against ourselves: date +%s%N
+# is not portable to BSD date (#31411 QA round 2, on a real Mac).
+_fire_six_concurrently() {
+    local t0 t1 k
+    t0="$(date +%s)"
+    for k in 1 2 3 4 5 6; do
+        bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part "$k" < /dev/null \
+            > "$TEST_TMPDIR/budget-part$k.json" 2>/dev/null &
+    done
+    wait
+    t1="$(date +%s)"
+    [[ "$t0" =~ ^[0-9]+$ && "$t1" =~ ^[0-9]+$ ]] || { echo "a clock reading was not a number: t0=[$t0] t1=[$t1]"; return 1; }
+    SECS=$(( t1 - t0 + 1 ))
+}
+
+# The shipped budget of the six Foundation entries, or DISAGREE if they differ.
+_foundation_budget() {
+    jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r'
+}
+
+@test "hook-budgets: #31411 the most six parts can carry arrives in full, all six inside the budget" {
+    _write_config
+    # 600 directives of 89 bytes: 53,400 bytes, which cuts into exactly six parts.
+    awk -v n=600 'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: keep every sentence short and every claim backed by something you ran.\n", i }' > "$TEST_TMPDIR/mmry-foundation.md"
+    _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
+    local budget; budget="$(_foundation_budget)"
+    [[ "$budget" =~ ^[0-9]+$ ]] || { echo "budget=[$budget]"; return 1; }
+
+    _fire_six_concurrently || return 1
+    echo "six parts of a 53,400-byte set in at most ${SECS} s against a ${budget} s budget" >&3
+
+    local k ctx joined="" stored
+    for k in 1 2 3 4 5 6; do
+        # Trailing newlines kept: a part cut after a newline ends in one, and $( ) would drop it.
+        ctx="$(jq -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/budget-part$k.json" | tr -d '\r' && printf '.')"
+        ctx="${ctx%.}"
+        [[ "$ctx" == *"This is PART $k OF 6 of the set."* ]] || { echo "part $k is missing or not labelled $k of 6"; return 1; }
+        joined="${joined}${ctx#*$'\n\n'}"
+        if grep -q systemMessage "$TEST_TMPDIR/budget-part$k.json"; then echo "part $k reported a problem"; return 1; fi
+    done
+    stored="$(<"$TEST_TMPDIR/mmry-foundation.md")"
+    [ "$joined" = "$stored" ] || { echo "the six parts do not rejoin to the stored set"; return 1; }
+    (( SECS < budget ))
+}
+
+@test "hook-budgets: #31411 a set thirty times the largest ever measured goes by reference, inside the budget, and says so" {
     _write_config
     awk -v n=12000 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
     local bytes; bytes="$(wc -c < "$TEST_TMPDIR/mmry-foundation.md" | tr -d ' ')"
-    # About 1 MB. Sized so the OLD code could not pass: at 400 KB its two whole-set scans took
-    # 17 s, which is still inside a 20 s budget, so a smaller fixture would have gone green
-    # against exactly the regression this exists to catch.
+    # About 1 MB, as before the split, so the escape regression this file was written for would
+    # still show here if it came back.
     (( bytes > 1000000 )) || return 1
+    local budget; budget="$(_foundation_budget)"
+    [[ "$budget" =~ ^[0-9]+$ ]] || { echo "budget=[$budget]"; return 1; }
 
-    # WHOLE SECONDS, ROUNDED AGAINST OURSELVES (#31411 QA round 2, on a real Mac). This used
-    # date +%s%N, which BSD date does not support: it prints the seconds followed by a literal
-    # N, so on macOS the arithmetic below measured nothing and the budget assertion could not
-    # fail. Whole seconds plus one, the method _avg_ms above already uses, works on both, and the
-    # premise check refuses any reading that is not a plain number.
-    local budget t0 t1 secs
-    budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
-    t0="$(date +%s)"
-    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    t1="$(date +%s)"
-    [[ "$t0" =~ ^[0-9]+$ && "$t1" =~ ^[0-9]+$ && "$budget" =~ ^[0-9]+$ ]] || {
-        echo "a clock or budget reading was not a number: t0=[$t0] t1=[$t1] budget=[$budget]"; return 1; }
-    secs=$(( t1 - t0 + 1 ))
-    echo "${bytes} bytes delivered in at most ${secs} s against a ${budget} s budget" >&3
+    _fire_six_concurrently || return 1
+    echo "${bytes} bytes referenced in at most ${SECS} s against a ${budget} s budget" >&3
 
-    [ "$status" -eq 0 ]
-    # In full: every directive is there, and nothing reported a failure.
-    [ "$(printf '%s' "$output" | grep -o 'every claim backed by something you ran' | wc -l | tr -d ' ')" -eq 12000 ]
-    [[ "$output" != *systemMessage* ]] || return 1
-    (( secs < budget ))
+    # The assistant is pointed at the verified file and told to read it before answering.
+    local ctx; ctx="$(jq -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/budget-part1.json" | tr -d '\r')"
+    [[ "$ctx" == *"BEFORE YOU ANSWER, read this file in full"* ]] || { echo "part 1: ${ctx:0:300}"; return 1; }
+    [[ "$ctx" != *'every claim backed by something you ran'* ]] || { echo "part 1 passed off part of the set as the whole"; return 1; }
+    # The customer is told, and is not told it failed.
+    jq -e '.systemMessage | test("larger than Claude Code lets a plugin show")' "$TEST_TMPDIR/budget-part1.json" >/dev/null || { echo "the customer was not told"; return 1; }
+    if grep -q 'NOT applied' "$TEST_TMPDIR/budget-part1.json"; then echo "a by-reference delivery was reported as a failure"; return 1; fi
+    local k
+    for k in 2 3 4 5 6; do
+        [ ! -s "$TEST_TMPDIR/budget-part$k.json" ] || { echo "part $k spoke on a by-reference set"; return 1; }
+    done
+    (( SECS < budget ))
 }
 
-@test "hook-budgets: #31411 a set too large to escape before the deadline is REPORTED, never dropped in silence" {
+# A deadline is a deadline whatever caused it. Before the split the cause here was size: a 4 MB set
+# could not be escaped inside one second. Each part now escapes at most 9,500 bytes and a large set
+# goes by reference in well under a second, so size no longer reliably reaches the deadline. A jq
+# that sleeps on every real parse does, on any machine, and is what a loaded machine looks like.
+@test "hook-budgets: #31411 a part that runs out of time is REPORTED with its number, never dropped in silence" {
     _write_config
-    # Large enough that the escape cannot finish inside a one-second deadline on any machine
-    # this suite runs on, so the watchdog has to act.
-    awk -v n=50000 'BEGIN { for (i = 0; i < n; i++) print "- Directive: keep every sentence short and every claim backed by something you ran." }' > "$TEST_TMPDIR/mmry-foundation.md"
+    awk -v n=380 'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: keep every sentence short and every claim backed by something you ran.\n", i }' > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
+    local slow="$TEST_TMPDIR/slow-jq.sh"
+    printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
+    chmod +x "$slow"
 
-    MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 3
     [ "$status" -eq 0 ]
-    # Not silent: the customer channel carries a notice, and it says the set was NOT applied.
-    [ -n "$output" ]
+    # Not silent: the customer channel carries a notice naming the part that was lost.
     [[ "$output" == *systemMessage* ]] || return 1
-    [[ "$output" == *'NOT applied'* ]] || return 1
+    [[ "$output" == *'part 3 of your Foundation directives was NOT applied'* ]] || return 1
+    # The assistant is told as well, and which part.
+    [[ "$output" == *'[Foundation part 3]'* ]] || return 1
     # And no partial set was passed off as the account guidance.
     [[ "$output" != *'every claim backed by something you ran'* ]]
 }
