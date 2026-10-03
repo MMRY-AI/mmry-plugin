@@ -599,6 +599,8 @@ mutate "the Windows launcher echoes its commands into the model's context" hooks
 mutate "the Windows launcher stops finding Git from the git.exe on PATH" hooks-handlers/codex-hook.cmd   's = s.replace("where git.exe", "where no-such-git.exe", 1)'   structural/codex-manifest.bats "runs through PowerShell"
 mutate "the README comparison table promises Codex a save prompt at session end" ../README.md   's = s.replace("| on your next message, when something is unsaved |", "| at session end |", 1)'   structural/codex-docs-and-eol.bats "no customer surface promises"
 mutate "the customer page promises Codex a save before the session ends" ../docs/codex.md   's = s + chr(10) + "On Codex, MMRY prompts you to save before the session ends." + chr(10)'   structural/codex-docs-and-eol.bats "no customer surface promises"
+mutate "session-init stops copying the bundled jq beside the installed handlers" hooks-handlers/session-init.sh   's = s.replace("if [[ " + chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " && -f " + chr(34) + "$P/vendor/jq/CHECKSUMS.txt" + chr(34) + " ]]; then", "if false; then", 1)'   handlers/codex-session.bats "bundled jq where"
+mutate "session-init copies the bundled jq on Claude Code too" hooks-handlers/session-init.sh   's = s.replace("if [[ " + chr(34) + "$(mmry_host)" + chr(34) + " == " + chr(34) + "codex" + chr(34) + " && -f " + chr(34) + "$P/vendor/jq/CHECKSUMS.txt" + chr(34) + " ]]; then", "if [[ -f " + chr(34) + "$P/vendor/jq/CHECKSUMS.txt" + chr(34) + " ]]; then", 1)'   handlers/codex-session.bats "copies no vendor directory"
 
 echo
 if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then

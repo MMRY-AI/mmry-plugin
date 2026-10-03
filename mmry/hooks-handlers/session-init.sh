@@ -114,5 +114,27 @@ cp "$P"/setup/*.sh "${MMRY_STATE_DIR}/setup/"
 cp "$P"/setup/*.bat "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
 cp "$P"/setup/*.ps1 "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
 
+# THE BUNDLED jq, BESIDE THE INSTALLED HANDLERS, ON CODEX (#31245 QA round 8).
+#
+# The skill sends the model to run handlers from this state directory (join, save, search), and
+# lib-jq.sh looks for the bundled jq at ../vendor/jq beside whichever copy is running, or at
+# ${CLAUDE_PLUGIN_ROOT}/vendor/jq. Codex exports that variable to hook processes only, not to the
+# commands the model runs, so on Codex the lookup landed on a vendor directory nobody had copied.
+# On a machine with a jq on PATH nobody noticed. On a stock Windows machine there is none, so
+# every handler the model ran failed to read the credential: measured live, a Codex session asked
+# to join a formation got "Could not join formation 35 (HTTP 000)" while its own hooks, which run
+# from the plugin root where vendor/jq does exist, loaded memories normally.
+#
+# Copied only when the checksum list differs, so once per plugin version rather than per session.
+# Codex only: on Claude Code the model's commands carry CLAUDE_PLUGIN_ROOT and resolve the plugin's
+# own copy, and test case 4 forbids changing what this file does there.
+if [[ "$(mmry_host)" == "codex" && -f "$P/vendor/jq/CHECKSUMS.txt" ]]; then
+    if ! cmp -s "$P/vendor/jq/CHECKSUMS.txt" "${MMRY_STATE_DIR}/vendor/jq/CHECKSUMS.txt" 2>/dev/null; then
+        mkdir -p "${MMRY_STATE_DIR}/vendor/jq" 2>/dev/null \
+            && cp "$P"/vendor/jq/* "${MMRY_STATE_DIR}/vendor/jq/" 2>/dev/null \
+            && chmod +x "${MMRY_STATE_DIR}"/vendor/jq/jq-* 2>/dev/null || true
+    fi
+fi
+
 # Delegate to the main session-start logic
 bash "$P/hooks-handlers/session-start.sh"

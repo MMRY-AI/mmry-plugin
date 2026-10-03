@@ -59,10 +59,9 @@ _fake_plugin_root() {
 }
 
 @test "codex: session-init stages the handlers, and no longer stages a wrapper nothing runs" {
-    # This used to assert that session-init copied codex-hook.cmd, on the grounds that it was the
-    # whole Codex hot path on Windows. That stopped being true when the registrations moved to
-    # `sh`, and the file was deleted in #31245 QA round 7. What matters now is that the SHELL
-    # handlers are staged, because those are what the registrations actually launch.
+    # session-init stages the SHELL handlers the model runs. It does not stage codex-hook.cmd: the
+    # Windows launcher (back since #31245 QA round 8) is run by commandWindows from the PLUGIN ROOT,
+    # beside the codex-hook.sh it starts, so a copy here would be a second file nothing launches.
     local root; root="$(_fake_plugin_root)"
     run env MMRY_HOST=codex HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root"         bash "$root/hooks-handlers/session-init.sh"
     assert_success
@@ -411,4 +410,52 @@ _fake_plugin_root() {
 
     # And it is still the fault note, not an empty object that happens to parse.
     assert_output --partial "carried no 'session_id' field"
+}
+
+# ---------------------------------------------------------------------------------------------
+# The bundled jq beside the installed handlers (#31245 QA round 8)
+# ---------------------------------------------------------------------------------------------
+#
+# The model runs handlers from ~/.codex/mmry/hooks-handlers, and on Codex nothing in its command
+# environment points back at the plugin root, so lib-jq.sh finds the bundled jq only if it sits at
+# ../vendor/jq beside that copy. Measured live on a stock Windows machine before this: a model-run
+# formation join failed with HTTP 000 because the credential could not be read without jq.
+
+_resolve_installed_jq() {
+    # Resolve jq exactly as a model-run handler does: from the installed copy, no system jq, and no
+    # CLAUDE_PLUGIN_ROOT, which Codex does not give the model's commands.
+    env -u CLAUDE_PLUGIN_ROOT -u MMRY_CONFIG_FILE -u CODEX_HOME MMRY_HOST=codex HOME="$HOME" MMRY_JQ= MMRY_JQ_SKIP_SYSTEM=1 \
+        bash -c 'source "$HOME/.codex/mmry/hooks-handlers/lib-jq.sh" && mmry_resolve_jq && printf "%s" "$MMRY_JQ"'
+}
+
+@test "codex: session-init puts the bundled jq where the model's own commands look for it" {
+    local root; root="$(_fake_plugin_root)"
+    cp -R "$PLUGIN_ROOT/vendor" "$root/vendor"
+    mkdir -p "$HOME/.codex"
+    printf '{"apiUrl":"http://fake.invalid","authMethod":"apikey","apiKey":"fake-key"}' > "$HOME/.codex/mmry-config.json"
+
+    # Control first: with the handlers installed but no vendor copy, the resolution must FAIL, or
+    # the assertion below is satisfied by something other than the copy.
+    mkdir -p "$HOME/.codex/mmry/hooks-handlers"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$HOME/.codex/mmry/hooks-handlers/"
+    run _resolve_installed_jq
+    [[ "$status" -ne 0 || -z "$output" ]] || { echo "jq resolved before the copy, from: $output"; return 1; }
+    [[ "$output" != *credential* ]] || { echo "the control failed on the credential, not on jq: $output"; return 1; }
+
+    run env MMRY_HOST=codex HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks-handlers/session-init.sh"
+    assert_success
+    [ -f "$HOME/.codex/mmry/vendor/jq/CHECKSUMS.txt" ]
+
+    run _resolve_installed_jq
+    assert_success
+    [[ "$output" == "$HOME/.codex/mmry/vendor/jq/"* ]] || { echo "resolved to: $output"; return 1; }
+}
+
+@test "req4: on Claude Code session-init copies no vendor directory" {
+    local root; root="$(_fake_plugin_root)"
+    cp -R "$PLUGIN_ROOT/vendor" "$root/vendor"
+    run env -u MMRY_HOST HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks-handlers/session-init.sh"
+    assert_success
+    [ -f "$HOME/.claude/mmry/hooks-handlers/save-memory.sh" ]
+    [ ! -e "$HOME/.claude/mmry/vendor" ] || { echo "Claude Code gained a vendor copy it never had"; return 1; }
 }
