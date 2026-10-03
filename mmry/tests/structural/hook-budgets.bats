@@ -495,19 +495,26 @@ SHIMEOF
     # against exactly the regression this exists to catch.
     (( bytes > 1000000 ))
 
-    local budget t0 t1 ms
+    # WHOLE SECONDS, ROUNDED AGAINST OURSELVES (#31411 QA round 2, on a real Mac). This used
+    # date +%s%N, which BSD date does not support: it prints the seconds followed by a literal
+    # N, so on macOS the arithmetic below measured nothing and the budget assertion could not
+    # fail. Whole seconds plus one, the method _avg_ms above already uses, works on both, and the
+    # premise check refuses any reading that is not a plain number.
+    local budget t0 t1 secs
     budget="$(jq -r '.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
-    t0="$(date +%s%N)"
+    t0="$(date +%s)"
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    t1="$(date +%s%N)"
-    ms=$(( (t1 - t0) / 1000000 ))
-    echo "${bytes} bytes delivered in ${ms} ms against a ${budget} s budget" >&3
+    t1="$(date +%s)"
+    [[ "$t0" =~ ^[0-9]+$ && "$t1" =~ ^[0-9]+$ && "$budget" =~ ^[0-9]+$ ]] || {
+        echo "a clock or budget reading was not a number: t0=[$t0] t1=[$t1] budget=[$budget]"; return 1; }
+    secs=$(( t1 - t0 + 1 ))
+    echo "${bytes} bytes delivered in at most ${secs} s against a ${budget} s budget" >&3
 
     [ "$status" -eq 0 ]
     # In full: every directive is there, and nothing reported a failure.
     [ "$(printf '%s' "$output" | grep -o 'every claim backed by something you ran' | wc -l | tr -d ' ')" -eq 12000 ]
     [[ "$output" != *systemMessage* ]]
-    (( ms < budget * 1000 ))
+    (( secs < budget ))
 }
 
 @test "hook-budgets: #31411 a set too large to escape before the deadline is REPORTED, never dropped in silence" {

@@ -159,36 +159,82 @@ echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_act_bytes} bytes, 
 # and, for a failure, newer than the last successful delivery. Older lines belong to a turn the
 # customer has already moved past, or to an earlier session in the same temp directory.
 _session_file="${MMRY_TMPDIR}/mmry-foundation.session"
-_inflight="${MMRY_TMPDIR}/.mmry-foundation-inflight"
-_log="${MMRY_TMPDIR}/mmry-foundation.log"
+_tok="$(mmry_foundation_session_token "$MMRY_TMPDIR")"
+_parts_max="${MMRY_FOUNDATION_PARTS_MAX:-6}"
+[[ "$_parts_max" =~ ^[1-9][0-9]*$ ]] || _parts_max=6
+
+# READ WHAT EACH PART REPORTED, NOT WHAT FILE TIMES IMPLY (#31583 QA round 6, #31411 split).
+#
+# This used to infer "was the latest prompt delivered" by comparing the modification times of the
+# delivery record and the failure log with -nt, which counts whole seconds here, so a failure in the
+# same second as a delivery read as IN FULL. Each hook firing now writes its own outcome line,
+# stamped with the session, replaced atomically, last write wins: "ok part k of n",
+# "ok by-reference n", "failed <why>" or "none". Part 1's file has no suffix, part k's ends ".k".
+# An outcome stamped with another session's token is not this session's and is not read.
+_outcome() {
+    local f="${MMRY_TMPDIR}/mmry-foundation.outcome$1" l=""
+    [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
+    [[ -n "$_tok" && "${l%% *}" == "$_tok" ]] || return 1
+    printf '%s' "${l#* }"
+}
+# A firing killed before it finished leaves its in-flight marker behind. Markers older than this
+# session's start belong to an earlier session in the same temp directory and are not read.
+_cut_short() {
+    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight$1"
+    [[ -f "$f" ]] || return 1
+    [[ ! -f "$_session_file" ]] || [[ "$f" -nt "$_session_file" ]]
+}
+_sfx() { (( $1 > 1 )) && printf '.%s' "$1"; }
 
 _delivered=0
 mmry_foundation_delivered_this_session "$MMRY_TMPDIR" && _delivered=1
 
 _failed_why=""
-if [[ -f "$_inflight" ]] && { [[ ! -f "$_session_file" ]] || [[ "$_inflight" -nt "$_session_file" ]]; }; then
+_partly=""
+_byref=""
+_o1="$(_outcome "")"
+if _cut_short ""; then
     _failed_why="the last prompt was stopped before it finished loading them"
-fi
-if [[ -z "$_failed_why" && -f "$_log" ]]    && { [[ ! -f "$_session_file" ]] || [[ "$_log" -nt "$_session_file" ]]; }    && { (( _delivered == 0 )) || [[ "$_log" -nt "$STATUS" ]]; }; then
-    _last_line="$(tail -n 1 "$_log" 2>/dev/null)"
-    case "$_last_line" in
-        *"reinjection FAILED: deadline exceeded ("*)
-            # The log line is for whoever investigates; the customer gets plain words.
-            _secs="${_last_line#*deadline exceeded (}"; _secs="${_secs%%)*}"
-            _failed_why="loading them took longer than the ${_secs} limit and was stopped" ;;
-        *"reinjection FAILED: worker exited "*)
-            _failed_why="the loader failed before it finished" ;;
-        *"reinjection FAILED: "*)  _failed_why="${_last_line#*reinjection FAILED: }" ;;
-        *"reinjection REFUSED: "*) _failed_why="the stored copy was refused: ${_last_line#*reinjection REFUSED: }" ;;
-    esac
+elif [[ "$_o1" == failed* ]]; then
+    _failed_why="${_o1#failed }"
+elif [[ "$_o1" == "ok by-reference "* ]]; then
+    _byref=1
+elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([0-9]+)$ ]]; then
+    _n="${BASH_REMATCH[1]}"
+    _got=1
+    _missing=""
+    for (( _k = 2; _k <= _n; _k++ )); do
+        _ok="$(_outcome "$(_sfx "$_k")")"
+        if _cut_short "$(_sfx "$_k")"; then
+            _missing="${_missing}; part ${_k} was stopped before it finished"
+        elif [[ "$_ok" == "ok part ${_k} of ${_n}" ]]; then
+            _got=$(( _got + 1 ))
+        elif [[ "$_ok" == failed* ]]; then
+            _missing="${_missing}; part ${_k}: ${_ok#failed }"
+        else
+            _missing="${_missing}; part ${_k} has no record of arriving"
+        fi
+    done
+    (( _got < _n )) && _partly="${_got} of ${_n} parts arrived${_missing}"
 fi
 
 if [[ -n "$_failed_why" ]]; then
     echo "Delivered:    NOT on the most recent prompt - ${_failed_why}."
     echo "              That prompt ran without your Foundation directives."
     echo "Action:       re-send the prompt. If it keeps happening, run /mmry:load-memories."
-elif (( _delivered )); then
-    echo "Delivered:    IN FULL on the most recent prompt. There is no size limit; nothing is trimmed or cut."
+elif [[ -n "$_partly" ]]; then
+    echo "Delivered:    PARTLY on the most recent prompt - ${_partly}."
+    echo "              That prompt ran without part of your Foundation directives."
+    echo "Action:       re-send the prompt. If it keeps happening, run /mmry:load-memories."
+elif [[ -n "$_byref" ]]; then
+    echo "Delivered:    BY REFERENCE on the most recent prompt. Your set is larger than Claude Code lets"
+    echo "              a plugin show on each prompt (${_parts_max} parts of under 10,000 characters), so"
+    echo "              your assistant was pointed to the full copy and asked to read it. That relies on"
+    echo "              the assistant opening the file."
+elif [[ -n "${_n:-}" ]] && (( _n > 1 )); then
+    echo "Delivered:    IN FULL on the most recent prompt, in ${_n} parts. Nothing is trimmed or cut."
+elif [[ -n "$_o1" ]]; then
+    echo "Delivered:    IN FULL on the most recent prompt. Nothing is trimmed or cut."
 else
     echo "Delivered:    nothing yet in this session."
 fi

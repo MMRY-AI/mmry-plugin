@@ -63,7 +63,32 @@ _FOUND_TMPDIR="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
 # measured, telling the assistant to distrust a turn that went fine. Fixing it
 # properly means session-scoping the whole Foundation cache, which is a bigger change than
 # this ticket and would be smuggled in here.
-_INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight"
+# WHICH PART OF THE SET THIS FIRING DELIVERS (#31411 QA round 2, decided by the formation lead
+# with Eric's approval).
+#
+# Claude Code caps a hook's additionalContext at 10,000 characters, with no setting to raise it,
+# and over the cap it substitutes a 2,000-character preview and a file path the model is not told
+# to read (code.claude.com/docs/en/hooks, and measured here: an 11,000-character hook arrived as
+# characters 1 to 2,000 only). The cap is applied to each hook on its own, measured too: two hooks
+# of 9,000 characters each arrived inline in full in the same prompt. It counts DECODED characters
+# (9,900 characters containing 707 newlines, 10,607 once escaped, arrived whole).
+#
+# So hooks.json registers this script MMRY_FND_PARTS_MAX times, as --part 1 .. --part K. Every
+# firing reads and verifies the same set, cuts it the same way, and sends only its own part,
+# labelled "part k of n". Claude Code starts them together and they land in any order, so the
+# labels, not the arrival order, carry the sequence. Part 1 alone owns everything said about the
+# set as a whole: refusals, disappearance, rebuilds, and the by-reference fallback for a set too
+# large for K parts. Parts 2..K only ever speak about their own part.
+MMRY_FND_PART=1
+if [[ "${1:-}" == "--part" && "${2:-}" =~ ^[1-9][0-9]*$ ]]; then MMRY_FND_PART="$2"; fi
+MMRY_FND_PARTS_MAX="${MMRY_FOUNDATION_PARTS_MAX:-6}"
+[[ "$MMRY_FND_PARTS_MAX" =~ ^[1-9][0-9]*$ ]] || MMRY_FND_PARTS_MAX=6
+# Characters of the SET per part, counted in bytes (see _mmry_fnd_parts). Leaves room for the part
+# header inside 9,900, under the 10,000 cap.
+MMRY_FND_PART_CAP=9500
+_SFX=""
+(( MMRY_FND_PART > 1 )) && _SFX=".${MMRY_FND_PART}"
+_INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 
 # Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
 # text (may be empty). additionalContext must be nested under hookSpecificOutput or
@@ -149,6 +174,27 @@ _mmry_emit_escaped() {
     printf '}'
 }
 
+# THE OUTCOME OF THE MOST RECENT FIRING, one line, last write wins (#31583 QA round 6).
+#
+# /mmry:foundation-status used to decide "was the latest prompt delivered" by comparing the
+# modification times of the delivery record and the failure log with -nt. Those are whole seconds
+# on the bash and filesystems this runs on, so a failure logged in the same second as a delivery
+# was reported as IN FULL, and QA proved it with a paired control. Ordering by file time cannot be
+# fixed by being more careful with file times. So the supervisor now states the outcome of every
+# firing it completes, in one file it replaces atomically, and the command reads that instead of
+# inferring an order. The failure log stays, for whoever investigates.
+#
+# Stamped with the session token like the delivery record, so another session's outcome is never
+# read as this one's. Read without sourcing the client: the supervisor stays process-free.
+_mmry_outcome() {
+    local tok="" f="${_FOUND_TMPDIR}/mmry-foundation.session"
+    [[ -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
+    local out="${_FOUND_TMPDIR}/mmry-foundation.outcome${_SFX}"
+    printf '%s %s' "$tok" "$1" > "${out}.$$" 2>/dev/null && mv -f "${out}.$$" "$out" 2>/dev/null
+    rm -f "${out}.$$" 2>/dev/null
+    return 0
+}
+
 _mmry_emit() {
     local ctx="$1" msg="$2"
     [[ -z "$ctx" && -z "$msg" ]] && return 0
@@ -231,6 +277,18 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # margin is the point - a guard that only wins the race against the harness on a quiet
     # machine is not a guard. The enforced figure is asserted, not assumed: see
     # "the ENFORCED wall clock" test in tests/structural/hook-budgets.bats.
+    # A PART THE SET CANNOT REACH LEAVES AT ONCE. Every part but the last is at least half a part
+    # long (see _mmry_fnd_parts), and characters never outnumber bytes, so a set of B bytes has
+    # fewer than k parts whenever B < (k-1) * cap/2. That is decided from the manifest's own byte
+    # count with one read and no process, so on an ordinary set parts 2..K cost a bash start and
+    # nothing more. With no verifiable manifest at all, part 1 owns every report about it.
+    if (( MMRY_FND_PART > 1 )); then
+        _fnd_m="${_FOUND_TMPDIR}/mmry-foundation.md.manifest" _fnd_mb=""
+        [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
+        [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] || exit 0
+        (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2) )) && exit 0
+    fi
+
     DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-10}"
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=10
 
@@ -284,7 +342,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     _PENDING="${_STATUS}.pending.$$"
     rm -f "$_PENDING" 2>/dev/null || true
     MMRY_FOUNDATION_WORKER=1 MMRY_FOUNDATION_PENDING="$_PENDING" \
-        bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" \
+        bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" --part "$MMRY_FND_PART" \
         > "$OUTFILE" 2>>"$_FOUND_ERR" &
     WORKER_PID=$!
 
@@ -335,11 +393,19 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 
     # Read the marker BEFORE deleting anything, then clean up whatever this firing created.
     HIT_DEADLINE=0
+    # What the worker says it is sending, on its first characters: @@MMRY-PART k n@@,
+    # @@MMRY-BYREF n@@ or @@MMRY-NONE k n@@. Stripped here, before anything else reads BODY, and
+    # kept for the outcome record so /mmry:foundation-status can count delivered parts.
+    _FND_KIND=""
     [[ -f "$DEADLINE_MARK" ]] && HIT_DEADLINE=1
 
     BODY=""
     # `$(<file)`, not `$(cat file)` - one fewer process on every prompt (#31434 QA).
     [[ -s "$OUTFILE" ]] && BODY="$(<"$OUTFILE")"
+    if [[ "$BODY" =~ ^@@MMRY-(PART|BYREF|NONE)([^@]*)@@ ]]; then
+        _FND_KIND="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+        BODY="${BODY#@@MMRY-*@@}"
+    fi
     rm -f "$OUTFILE" 2>/dev/null || true
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
     # THE IN-FLIGHT MARKER IS NOT CLEARED HERE. It is cleared immediately before each exit,
@@ -370,6 +436,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # customer hears about it instead of being handed a stub described as authoritative.
     # The worker puts the specific reason on stdout; it is repeated verbatim to both
     # audiences so the assistant and the customer are told the same thing.
+    if (( WORKER_RC == 3 && MMRY_FND_PART > 1 )); then
+        _mmry_outcome "failed the stored copy was refused"
+        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
+        exit 0
+    fi
     if (( WORKER_RC == 3 )); then
         # THE REMEDY HAS TO MATCH THE CAUSE (#31583 QA round 4).
         #
@@ -420,6 +491,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
+        if (( ${_UPGRADE:-0} )); then
+            _mmry_outcome "failed it was stored by an earlier plugin version and is being fetched again"
+        else
+            _mmry_outcome "failed the stored copy was refused: ${REASON}"
+        fi
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
@@ -433,6 +509,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
             USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run /mmry:load-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
             _FOUND_EVENT="deadline exceeded (${DEADLINE}s), worker killed"
+            _FOUND_OUTCOME="loading them took longer than the ${DEADLINE}s limit and was stopped"
         else
             # NOT a timeout. Saying "it took too long" here would be three lies at once: a
             # false cause, an invented duration, and a remedy (re-send the prompt) that cannot
@@ -440,10 +517,16 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: the loader failed with exit code ${WORKER_RC}. This was a failure, not a slow turn. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
             USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run /mmry:load-memories to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
+            _FOUND_OUTCOME="the loader failed before it finished"
         fi
         printf '%s foundation reinjection FAILED: %s\n' \
             "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
+        if (( MMRY_FND_PART > 1 )); then
+            NOTICE="[Foundation part ${MMRY_FND_PART}] ${NOTICE}"
+            USERMSG="${USERMSG/MMRY AI: your Foundation directives were NOT applied/MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was NOT applied}"
+        fi
         _mmry_emit "$NOTICE" "$USERMSG"
+        _mmry_outcome "failed ${_FOUND_OUTCOME}"
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
@@ -459,7 +542,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # Nothing to send, so nothing can go missing in the sending. A verified-empty record
         # is a true answer and is promoted; for toggle-off or no-cache there is no pending
         # record and this is a no-op.
-        [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+        [[ -e "$_PENDING" ]] && { mv -f "$_PENDING" "$_STATUS" 2>/dev/null; _mmry_outcome "ok part 1 of 1"; }
+        # A part beyond the end of the set: nothing to send, and that is the right answer.
+        [[ "$_FND_KIND" == NONE* ]] && _mmry_outcome "none"
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
@@ -470,6 +555,19 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # blank line between them is written as its escaped form.
         BODY="$(_mmry_fnd_json_escape "NOTE: on the PREVIOUS turn these directives were not applied - loading them was cut short and its output discarded. Treat that turn's response as having been produced without them.")\n\n${BODY}"
         USERMSG="MMRY AI: your Foundation directives were not applied to the previous turn (the hook was cut short). They are applied again now."
+        (( MMRY_FND_PART > 1 )) && USERMSG="MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was not applied to the previous turn (the hook was cut short). It is applied again now."
+    fi
+
+    # BY REFERENCE: the customer is told once per session, not on every prompt. The assistant is
+    # told on every prompt, because it needs the instruction every time.
+    if [[ "$_FND_KIND" == BYREF* ]]; then
+        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""
+        [[ -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
+        [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
+        if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
+            USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to the full copy and asked to read it before answering. That works, but it relies on the assistant opening the file. To have the set applied directly, keep it under about $(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )) characters. ${USERMSG}"
+            printf '%s' "$_tok" > "$_told" 2>/dev/null || true
+        fi
     fi
 
     # Promoted only if the emit itself succeeded. If this process is killed inside the emit,
@@ -477,6 +575,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # which stays true.
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+        case "$_FND_KIND" in
+            "PART "*)  _fk="${_FND_KIND#PART }"; _mmry_outcome "ok part ${_fk% *} of ${_fk#* }" ;;
+            "BYREF "*) _mmry_outcome "ok by-reference ${_FND_KIND#BYREF }" ;;
+            *)         _mmry_outcome "ok part 1 of 1" ;;
+        esac
     fi
     rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
     exit 0
@@ -527,7 +630,8 @@ MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && exi
 # the refreshed cache is picked up on the next prompt. A lock file (touched on each attempt)
 # bounds this to one refresh per window per session even when a fetch fails. Default daily;
 # users can force an immediate refresh with /mmry:load-memories or by restarting.
-if [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_API_KEY:-}" ]]; then
+# Part 1 only (#31411 split): six firings asking for one refresh is five too many.
+if (( MMRY_FND_PART == 1 )) && [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_API_KEY:-}" ]]; then
     _now="$(date +%s 2>/dev/null || echo 0)"
     _lock="${MMRY_TMPDIR}/.mmry-foundation-refresh"
     _cache_age=$(( _now - $(_mmry_mtime "$CACHE") ))
@@ -564,7 +668,7 @@ fi
 # upgrading customer recovers within a prompt or two, long enough that a rebuild which keeps
 # failing - offline, dead key - does not make one API call per prompt.
 REBUILD_RETRY_SECS="${MMRY_FOUNDATION_REBUILD_RETRY_SECONDS:-60}"
-if [[ -e "$CACHE" && ! -e "${CACHE}.manifest" && -n "${MMRY_API_KEY:-}" ]]; then
+if (( MMRY_FND_PART == 1 )) && [[ -e "$CACHE" && ! -e "${CACHE}.manifest" && -n "${MMRY_API_KEY:-}" ]]; then
     _rebuild_lock="${MMRY_TMPDIR}/.mmry-foundation-rebuild"
     _rb_now="$(date +%s 2>/dev/null || echo 0)"
     if (( _rb_now - $(_mmry_mtime "$_rebuild_lock") >= REBUILD_RETRY_SECS )); then
@@ -601,6 +705,8 @@ STATUS="${MMRY_TMPDIR}/mmry-foundation.status"
 # supervisor promotes after a successful emit; run on its own, as the unit tests do, the
 # worker has no supervisor and writes the record directly.
 STATUS_OUT="${MMRY_FOUNDATION_PENDING:-$STATUS}"
+# The delivery record describes the set and is part 1's to write (#31411 split).
+(( MMRY_FND_PART > 1 )) && STATUS_OUT=""
 
 # THROUGH THE SHARED VERIFIER (#31583 QA). This block used to carry its own copy of the
 # manifest regex, the entries=0 check, the checksum comparison and the whitespace check, and
@@ -644,7 +750,7 @@ if (( _verdict == 1 )); then
     fi
     # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
     # so it goes on the record the status command reads.
-    printf '%s ok entries=0 bytes=0
+    [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=0 bytes=0
 ' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "$STATUS_OUT" 2>/dev/null || true
     exit 0
 fi
@@ -687,21 +793,85 @@ content="$(<"$CACHE")"
 
 # STAMPED WITH THE SESSION THAT WROTE IT (#31583 QA round 4, finding 4c). Without the stamp
 # this record outlives its session and the next one reads it as its own.
-printf '%s ok entries=%s bytes=%s
+[[ -n "$STATUS_OUT" ]] && printf '%s ok entries=%s bytes=%s
 ' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
 
 # ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
 # treats a successful worker's output as already-escaped JSON string content and copies it.
-_payload="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
+# CUT THE SET INTO PARTS, the same way in every firing (#31411 split).
+#
+# Counted in BYTES, with the locale forced to C. Claude Code counts the decoded string's length,
+# and for any text a UTF-8 byte count is never smaller than that, so a part that fits in bytes fits
+# in characters. A part ends after the last newline in the second half of its window, so a
+# directive is not cut mid-line when it does not have to be, and every part but the last is at least
+# half a window long, which is what lets parts 2..K leave at once on a small set. A window with no
+# newline in its second half is cut hard, stepped back off any UTF-8 continuation byte so a
+# character is never split. Stops one part past the maximum: more than that means by reference,
+# and the rest of a very large set does not need cutting to know it.
+_mmry_fnd_parts() {
+    local LC_ALL=C
+    local s="$1" cap="$MMRY_FND_PART_CAP" stop=$(( MMRY_FND_PARTS_MAX + 1 )) w head nxt
+    local cont=$'[\x80-\xbf]'
+    FND_PARTS=()
+    while [[ -n "$s" ]] && (( ${#FND_PARTS[@]} < stop )); do
+        if (( ${#s} <= cap )); then
+            FND_PARTS+=("$s"); s=""; break
+        fi
+        w="${s:0:cap}"
+        head="${w%$'\n'*}"
+        if [[ "$head" != "$w" ]] && (( ${#head} >= cap / 2 )); then
+            w="${head}"$'\n'
+        else
+            nxt="${s:${#w}:1}"
+            while [[ -n "$nxt" && "$nxt" =~ $cont ]] && (( ${#w} > cap / 2 )); do
+                nxt="${w: -1}"
+                w="${w:0:${#w}-1}"
+            done
+        fi
+        FND_PARTS+=("$w")
+        s="${s:${#w}}"
+    done
+    return 0
+}
+
+_mmry_fnd_parts "$content"
+_fnd_n=${#FND_PARTS[@]}
+_fnd_head="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
+
+if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
+    # BY REFERENCE. More than K parts cannot be shown, so part 1 points the assistant at the full,
+    # verified copy and tells it to read it before answering; parts 2..K stay silent.
+    if (( MMRY_FND_PART > 1 )); then
+        printf '@@MMRY-NONE %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
+        exit 0
+    fi
+    _fnd_path="$CACHE"
+    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$CACHE" 2>/dev/null || printf '%s' "$CACHE")"
+    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than Claude Code lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool; it is the complete, verified set: ${_fnd_path}
+If a response would conflict with any directive in it, follow the directive. If you cannot read the file, tell the user plainly that their Foundation directives were not applied to this turn."
+    printf '@@MMRY-BYREF %s@@' "$_fnd_n"
+elif (( MMRY_FND_PART > _fnd_n )); then
+    printf '@@MMRY-NONE %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
+    exit 0
+elif (( _fnd_n == 1 )); then
+    # One part: exactly the payload a single hook always sent.
+    _payload="${_fnd_head}
 
 ${content}"
+    printf '@@MMRY-PART 1 1@@'
+else
+    _payload="${_fnd_head} This is PART ${MMRY_FND_PART} OF ${_fnd_n} of the set. The other parts arrive alongside this one, in any order, and together they are the whole set.
+
+${FND_PARTS[$(( MMRY_FND_PART - 1 ))]}"
+    printf '@@MMRY-PART %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
+fi
+
+# ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
+# treats a successful worker's output as already-escaped JSON string content and copies it.
 printf '%s' "$(_mmry_fnd_json_escape "$_payload")" || {
-    # A FAILED EMIT IS A FAILURE, NOT A DELIVERY (#31411 QA). This exited 0 unconditionally,
-    # so a write to the supervisor's out-file that failed - disk full, file gone - was handed
-    # back as success and the supervisor emitted whatever partial text had landed. Non-zero
-    # takes the supervisor's crash path, which tells the customer, and the pending delivery
-    # record is withdrawn so nothing claims a turn that did not happen.
-    rm -f "$STATUS_OUT" 2>/dev/null
+    # A FAILED EMIT IS A FAILURE, NOT A DELIVERY (#31411 QA). Non-zero takes the supervisor's
+    # crash path, which tells the customer, and the pending delivery record is withdrawn.
+    [[ -n "$STATUS_OUT" ]] && rm -f "$STATUS_OUT" 2>/dev/null
     exit 5
 }
 exit 0
