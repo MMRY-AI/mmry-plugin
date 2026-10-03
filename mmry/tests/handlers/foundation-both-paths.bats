@@ -21,6 +21,7 @@
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
 
 setup() {
     setup_mock_curl
@@ -28,7 +29,7 @@ setup() {
     export CLAUDE_SESSION_ID="tc5-session"
     export HOME="$TEST_TMPDIR/fakehome"
     mkdir -p "$HOME/.claude/mmry/hooks-handlers" "$HOME/.claude/mmry/setup"
-    CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    CACHE="$TEST_TMPDIR/mmry-foundation-set.md"
 }
 
 # A Foundation set big enough that any surviving budget would bite. The old cut was at 6,000
@@ -62,7 +63,7 @@ _big_response() {
 
     # Well past the cut this release removed, so a surviving budget could not hide.
     local stored_bytes
-    stored_bytes="$(wc -c < "$CACHE")"
+    stored_bytes="$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')"
     [ "$stored_bytes" -gt 7000 ]
 
     # What the model actually receives, read off the emitted hook JSON rather than recomputed.
@@ -93,7 +94,7 @@ _big_response() {
         echo "jq could not decode what the hook emitted"; return 1; }
     local ctx stored
     ctx="$(<"$TEST_TMPDIR/ctx.txt")"
-    stored="$(<"$CACHE")"
+    stored="$(fnd_set_body "$CACHE")"
     [ -n "$stored" ] || { echo "the cache was empty, so a suffix match would prove nothing"; return 1; }
     # The delivered text must END with exactly the stored set; the handler prefixes its framing.
     [[ "$ctx" == *"$stored" ]] || {
@@ -127,7 +128,7 @@ _big_response() {
 
     # session-start's writer counts from the API response: ten Foundation memories, one of
     # which has three bulleted lines in its content, so a line count would say twelve.
-    grep -q 'entries=10' "${CACHE}.manifest"
+    [[ "$(fnd_set_record "$CACHE")" == *'entries=10 '* ]] || return 1
 
     bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" >/dev/null
     run cat "$TEST_TMPDIR/mmry-foundation.status"
@@ -142,7 +143,7 @@ _big_response() {
 
     bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
     local stored_bytes
-    stored_bytes="$(wc -c < "$CACHE")"
+    stored_bytes="$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')"
     [ "$stored_bytes" -gt 7000 ]
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
@@ -216,4 +217,52 @@ _big_response() {
     [ "$status" -eq 0 ]
     [[ "$output" != *'PREVIOUS turn'* ]] || return 1
     [[ "$output" != *'previous turn'* ]]
+}
+
+# #31597 test case: "Confirm the directives delivered to the assistant are byte-identical to those
+# the service returned, with no added or lost characters."
+#
+# Compared against what the SERVICE sent, not against the stored file, so a fault in the writer
+# cannot hide behind a reader that faithfully delivers it. The expected text is built here in bash,
+# never through jq, because jq is the thing under suspicion: on Windows a native jq writes in text
+# mode, and before this ticket every newline in the stored set arrived as CR LF. Content with a
+# newline inside it, a tab, a quote, a backslash and non-ASCII text, so each kind of byte that an
+# escape or a line-ending conversion could alter is present.
+@test "#31597 TC: the set the assistant receives is byte-identical to what the service returned" {
+    export MOCK_CURL_RESPONSE='[{"memoryTier":"Foundation","topic":"Identity","content":"Eric builds MMRY."},{"memoryTier":"Foundation","topic":"Values","content":"Our values:\n- Justice\n- Joy\tand \"care\" \\ café"},{"memoryTier":"Strategic","topic":"Ignored","content":"not foundation"}]'
+    export MOCK_CURL_HTTP_CODE="200"
+    local want
+    want="- Identity: Eric builds MMRY."$'\n'"- Values: Our values:"$'\n'"- Justice"$'\n'"- Joy"$'\t'"and \"care\" \\ caf"$'\xc3\xa9'
+
+    bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
+    bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" > "$TEST_TMPDIR/emitted.json"
+    jq -b -j '.hookSpecificOutput.additionalContext' "$TEST_TMPDIR/emitted.json" > "$TEST_TMPDIR/ctx.txt" || {
+        echo "jq could not decode what the hook emitted"; return 1; }
+    local ctx; ctx="$(cat "$TEST_TMPDIR/ctx.txt"; printf .)"; ctx="${ctx%.}"
+    local body="${ctx#*$'\n\n'}"
+    if [[ "$body" != "$want" ]]; then
+        echo "delivered: $(printf '%s' "$body" | od -c | head -6)"
+        echo "expected:  $(printf '%s' "$want" | od -c | head -6)"
+        return 1
+    fi
+    [[ "$body" != *$'\r'* ]]
+}
+
+# #31597 test case: "Remove the stored directives entirely and confirm the customer is told they are
+# missing." With the record inside the set file, deleting the file deletes the record too, so the
+# evidence is the marker SessionStart leaves once it has stored a set. Removed here BEFORE any
+# delivery, the case where nothing else could know a set had ever been there.
+@test "#31597 TC: a set removed after SessionStart stored it, before any delivery, is reported missing" {
+    export MOCK_CURL_RESPONSE="$(_big_response)"
+    export MOCK_CURL_HTTP_CODE="200"
+
+    bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
+    [ -f "$CACHE" ] || { echo "control: session-start did not store the set"; return 1; }
+    rm -f "$CACHE"
+
+    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'records 10 Foundation directives but the cache holding them is missing'* ]] || return 1
+    [[ "$output" == *'systemMessage'* ]] || return 1
+    [[ "$output" != *'Directive 1'* ]]
 }

@@ -15,22 +15,21 @@
 # Windows jq adds when it writes text, never anything the set contained.
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    SET="$TEST_TMPDIR/mmry-foundation-set.md"
     # SessionStart writes this in every real session; see userpromptsubmit-foundation.bats.
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
     HEAD_ONE="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
 }
 
-# Record the manifest for whatever is in the cache, as the writer would.
+# Seal whatever is staged in $CACHE into the set file the hook reads, as the writer would (#31597).
 _seal() {
-    local s b n
-    read -r s b < <(cksum < "$CACHE")
-    n="$(grep -c '^- ' "$CACHE" || true)"
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "${n:-0}" "$b" "$s" > "${CACHE}.manifest"
+    fnd_seal "$CACHE" "" "$SET"
 }
 
 # A set of $1 numbered directives, 89 bytes each. awk, not yes: BSD yes prints "--".
@@ -95,7 +94,7 @@ _stored() { STORED="$(<"$CACHE")"; }
         _ctx "$k"
         [ -n "$PART_TEXT" ] || { echo "part $k is empty"; return 1; }
         (( ${#PART_TEXT} < 10000 )) || { echo "part $k is ${#PART_TEXT} long, over the cap"; return 1; }
-        [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set."* ]] || { echo "part $k is not labelled $k of 4"; return 1; }
+        [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set, version "* ]] || { echo "part $k is not labelled $k of 4"; return 1; }
         joined="${joined}${PART_TEXT#*$'\n\n'}"
     done
     for k in 5 6; do
@@ -137,7 +136,7 @@ _stored() { STORED="$(<"$CACHE")"; }
     _fire_all S1
     _ctx 1
     [[ "$PART_TEXT" == *"BEFORE YOU ANSWER, read this file in full"* ]] || { echo "part 1 does not tell the assistant to read the file"; return 1; }
-    [[ "$PART_TEXT" == *"mmry-foundation.md"* ]] || { echo "part 1 does not name the file"; return 1; }
+    [[ "$PART_TEXT" == *"mmry-foundation-set.md"* ]] || { echo "part 1 does not name the file"; return 1; }
     [[ "$PART_TEXT" != *"Directive 0001"* ]] || { echo "part 1 sent some of the set as well as the reference"; return 1; }
     (( ${#PART_TEXT} < 2000 )) || { echo "the reference is ${#PART_TEXT} long; it must fit a preview"; return 1; }
     jq -e '.systemMessage | test("larger than Claude Code lets a plugin show")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "the customer was not told"; return 1; }
@@ -215,4 +214,58 @@ _stored() { STORED="$(<"$CACHE")"; }
     [[ "$output" == *"Delivered:    nothing yet in this session."* ]] || { echo "SB was shown SA's delivery: $output"; return 1; }
     [[ "$output" == *"Last sent:    nothing yet in this session."* ]] || { echo "SB was shown SA's last send: $output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
+}
+
+# #31597. The parts are separate firings and each reads the set on its own, so a replacement that
+# lands between them can deliver half of one version and half of another. Nothing can stop that
+# between processes Claude Code starts in parallel, but it must not pass as a complete delivery.
+@test "parts: #31597 every part names the version of the set it was cut from, and it is the set's own checksum" {
+    _seed_lines 380
+    local v
+    v="$(fnd_set_record)"; v="${v##*cksum=}"
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "no checksum in the record: $(fnd_set_record)"; return 1; }
+    _fire_all S6
+    local k
+    for k in 1 2 3 4; do
+        _ctx "$k"
+        [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set, version $v."* ]] || { echo "part $k does not name version $v: ${PART_TEXT:0:420}"; return 1; }
+        [ "$(cat "$TEST_TMPDIR/mmry-foundation.outcome.S6$( (( k > 1 )) && printf '.%s' "$k")")" = "S6 ok part $k of 4 set $v" ] || { echo "part $k outcome: $(cat "$TEST_TMPDIR/mmry-foundation.outcome.S6$( (( k > 1 )) && printf '.%s' "$k")")"; return 1; }
+    done
+}
+
+@test "parts: #31597 a prompt whose parts came from two versions of the set is PARTLY, never IN FULL" {
+    _seed_lines 380
+    _fire 1 S7; _fire 2 S7
+    # The set is replaced between firings of the same prompt: a different set of the same shape.
+    awk 'BEGIN { for (i = 1; i <= 380; i++) printf "- Directive %04d: a REPLACED set, every line of it different from the first one.\n", i }' > "$CACHE"
+    _seal
+    _fire 3 S7; _fire 4 S7
+    _ctx 3
+    [[ "$PART_TEXT" == *'REPLACED'* ]] || { echo "control: part 3 did not come from the new set"; return 1; }
+    CLAUDE_CODE_SESSION_ID=S7 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 2 of 4 parts arrived; part 3 came from a different version of the set"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+# The label grew in #31597 to carry the version, so the room it takes is pinned here, measured on
+# the worst case rather than reasoned about: the largest part the cut can make (a set with no
+# newline, so the cut is hard at 9,500 bytes), and the note added when the previous firing of that
+# part was cut short. Claude Code shows a hook at most 10,000 characters and swaps anything longer
+# for a 2,000-character preview. The version is a checksum of up to ten digits; a shorter one here
+# is padded in the arithmetic so the margin holds for every version.
+@test "parts: #31597 the largest part there can be, with the cut-short note, is still under 10,000 characters" {
+    { printf -- '- Pasted: '; awk 'BEGIN { for (i = 0; i < 30000; i++) printf "x" }'; printf '\n'; } > "$CACHE"
+    _seal
+    local v; v="$(fnd_set_record)"; v="${v##*cksum=}"
+    _fire 2 S8
+    _ctx 2
+    local plain=${#PART_TEXT}
+    : > "$TEST_TMPDIR/.mmry-foundation-inflight.S8.2"
+    _fire 2 S8
+    _ctx 2
+    [[ "$PART_TEXT" == *'PREVIOUS turn'* ]] || { echo "control: the cut-short note was not added"; return 1; }
+    local worst=$(( ${#PART_TEXT} + 10 - ${#v} ))
+    echo "part 2: ${plain} characters plain, ${#PART_TEXT} with the note, ${worst} with a ten-digit version" >&3
+    (( plain >= 9500 )) || { echo "control: part 2 was not a full-size part ($plain)"; return 1; }
+    (( worst < 10000 ))
 }

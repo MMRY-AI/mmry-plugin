@@ -43,8 +43,7 @@ source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || {
 set +e +u
 mmry_load_config 2>/dev/null || true
 
-CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
-MANIFEST="${CACHE}.manifest"
+CACHE="${MMRY_TMPDIR}/mmry-foundation-set.md"
 # THIS SESSION, by its own id (#31583 QA round 6, R4(c)). The command runtime provides
 # CLAUDE_CODE_SESSION_ID; the per-prompt hook reads the same id from its payload, so both file this
 # session's records under one name and another session's are never read here. With no id, the old
@@ -103,6 +102,12 @@ if (( _verdict == 1 )); then
             echo "Stored copy:  DISAPPEARED - it was delivered in this session and is now gone."
             echo "              It is being REFUSED, not used."
             echo "Action:       run /mmry:load-memories to rebuild it."
+        elif _stored="$(mmry_foundation_stored_entries "$MMRY_TMPDIR" "$_sid")" && (( _stored > 0 )); then
+            # Stored in this session, never delivered, now gone (#31597): the words the manifest
+            # produced when it was a separate file and outlived the set.
+            echo "Stored copy:  MISSING - the manifest records ${_stored} Foundation directives but the cache holding them is missing."
+            echo "              It is being REFUSED, not used."
+            echo "Action:       run /mmry:load-memories to rebuild it."
         else
             echo "Stored copy:  NOT LOADED YET in this session."
             echo "Action:       run /mmry:load-memories, or start a new session."
@@ -122,23 +127,12 @@ if (( _verdict != 0 )); then
     _state="${_reason%%|*}"
     _prose="${_reason#*|}"
     case "$_state" in
-        no-manifest|bad-manifest) _label="PRESENT BUT UNVERIFIABLE" ;;
+        bad-manifest)             _label="PRESENT BUT UNVERIFIABLE" ;;
         inconsistent)             _label="INCONSISTENT" ;;
-        missing)                  _label="MISSING" ;;
         size|contents|unreadable) _label="DAMAGED" ;;
         blank)                    _label="EMPTY OF TEXT" ;;
         *)                        _label="REFUSED" ;;
     esac
-    # THE UPGRADE STATE SAYS WHAT THE HOOK SAYS (#31583 QA round 5). A copy stored by an earlier
-    # plugin version carries no record to check it against. The hook tells the customer that is
-    # an update and needs no action; this command used to tell them to rebuild it. One answer.
-    if [[ "$_state" == "no-manifest" ]]; then
-        echo "Stored copy:  FROM AN EARLIER PLUGIN VERSION - it has no record to check it against,"
-        echo "              so it is not used. It is fetched again in the new format automatically,"
-        echo "              normally by the next prompt."
-        echo "Action:       none needed. If this persists after a few prompts, run /mmry:load-memories."
-        exit 0
-    fi
     echo "Stored copy:  ${_label} - ${_prose}."
     echo "              It is being REFUSED, not used."
     echo "Action:       run /mmry:load-memories to rebuild it."
@@ -208,9 +202,6 @@ _why_and_action() {
     elif [[ "$code" == "crash" ]]; then
         _WHY="the loader failed before it finished"
         _ACTION="re-sending will not help. Run /mmry:load-memories, and reinstall the plugin if that fails."
-    elif [[ "$code" == "upgrade" ]]; then
-        _WHY="they were stored by an earlier plugin version and are being fetched again"
-        _ACTION="none needed. If this persists after a few prompts, run /mmry:load-memories."
     elif [[ "$code" =~ ^refused($|\ [a-z-]{1,20}$) ]]; then
         _WHY="the stored copy could not be verified, so it was refused rather than used"
         _ACTION="run /mmry:load-memories to rebuild it."
@@ -235,16 +226,25 @@ elif [[ "$_o1" == failed* ]]; then
     _failed_action="$_ACTION"
 elif [[ "$_o1" == "ok by-reference "* ]]; then
     _byref=1
-elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([0-9]+)$ ]]; then
+elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([0-9]+)(\ set\ ([0-9]+))?$ ]]; then
     _n="${BASH_REMATCH[1]}"
+    # THE VERSION EACH PART WAS CUT FROM (#31597). The parts are separate firings that each read the
+    # set, so a replacement landing between them can deliver half of one version and half of
+    # another. A part from a different version than part 1 did not arrive as part of this set.
+    _set1="${BASH_REMATCH[3]}"
     _got=1
     _missing=""
     for (( _k = 2; _k <= _n; _k++ )); do
         _ok="$(_outcome "$(_sfx "$_k")")"
+        _re="^ok part ${_k} of ${_n}( set ([0-9]+))?$"
         if _cut_short "$(_sfx "$_k")"; then
             _missing="${_missing}; part ${_k} was stopped before it finished"
-        elif [[ "$_ok" == "ok part ${_k} of ${_n}" ]]; then
-            _got=$(( _got + 1 ))
+        elif [[ "$_ok" =~ $_re ]]; then
+            if [[ -n "$_set1" && "${BASH_REMATCH[2]}" != "$_set1" ]]; then
+                _missing="${_missing}; part ${_k} came from a different version of the set, which was replaced while it was being sent"
+            else
+                _got=$(( _got + 1 ))
+            fi
         elif [[ "$_ok" == failed* ]]; then
             _why_and_action "${_ok#failed }"
             _missing="${_missing}; part ${_k}: ${_WHY}"

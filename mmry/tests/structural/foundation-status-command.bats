@@ -126,7 +126,7 @@ _flat() { tr -d '' < "$1" | tr '
 # #31583 R4, QA round 3 item 3. Three customer-facing surfaces told the customer that
 # /mmry:foundation-status compares their local copy with what MMRY holds for their account.
 # The command makes no network call at all, so that claim could never be true: the check is
-# local, between the cache and the manifest the writer recorded beside it. A customer reading
+# local, between the set and the record the writer put on its first line. A customer reading
 # any of those three would take a healthy report as confirmation that their portal edits are
 # in force, which it cannot be.
 #

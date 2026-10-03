@@ -99,7 +99,7 @@ rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
 # Records named by session id (#31583 QA round 6) are never cleared by the session that wrote them,
 # because it cannot know it has ended. They are a few dozen bytes each; anything a week old is from
 # a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
-find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*'     -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*'     -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
@@ -192,8 +192,12 @@ count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 
 # Two things are therefore true of the line below. It cannot kill the hook, and it cannot be
 # silent. `if !` is exempt from errexit, and the fault note is the channel this file already
 # uses to put a warning in front of the model before it decides anything about the turn.
-if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"; then
+if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$(mmry_foundation_set_path "$MMRY_TMPDIR")"; then
     MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: your Foundation directives could not be stored for this session, so they will NOT be applied on each prompt. Nothing partial was kept and nothing was guessed at. Tell the user, and ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check. "
+else
+    # Evidence that a set exists for this session, so a set deleted before its first delivery is
+    # reported as missing rather than passed over (#31597). See mmry_foundation_stored_path.
+    mmry_foundation_mark_stored "$MMRY_TMPDIR" "$SESSION_ID" "${MMRY_FND_WRITTEN_ENTRIES:-0}" || true
 fi
 
 # Register session — uses session_id read from hook stdin (see top of file).
