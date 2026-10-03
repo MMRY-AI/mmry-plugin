@@ -233,12 +233,13 @@ _runnable_lines() {
     #    appear inside a findstr pattern anywhere in this file.
     grep -qF 'set "MMRY_CODEX_HOME=%CODEX_HOME%"' "$f"
     grep -qF 'if defined MMRY_CODEX_HOME' "$f"
-    run grep -cF 'findstr /i /l /c:"%CODEX_HOME%"' "$f"
+    # findstr is called by its System32 path since QA round 10, so both spellings are refused.
+    run grep -cE 'findstr(\.exe)? /i /l /c:"%CODEX_HOME%"' "$f"
     assert_output "0"
     # 3. The literal segment. The pattern must not end in a backslash: in a cmd string \" escapes
     #    the quote and findstr then gets a pattern that never matches, which is how the first
     #    version of this guard silently did nothing.
-    run grep -cF 'findstr /i /l /c:"\.codex"' "$f"
+    run grep -cF '\System32\findstr.exe /i /l /c:"\.codex"' "$f"
     assert_output "1"
 }
 
