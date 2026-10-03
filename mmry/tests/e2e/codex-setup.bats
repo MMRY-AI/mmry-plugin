@@ -138,8 +138,8 @@ _stage() {
         bash "$script"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Restart Codex"* ]]
-    [[ "$output" == *"Trust all and continue"* ]]
+    [[ "$output" == *"Restart Codex"* ]] || return 1
+    [[ "$output" == *"Trust all and continue"* ]] || return 1
     [[ "$output" != *"/mmry:help"* ]]
 }
 
@@ -152,7 +152,7 @@ _stage() {
         bash "$script"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Restart Claude Code"* ]]
+    [[ "$output" == *"Restart Claude Code"* ]] || return 1
     [[ "$output" == *"/mmry:help"* ]]
 }
 
@@ -283,9 +283,9 @@ EOF
     write_line="$(grep -n 'MMRY_JQ" -n --arg url' "$f" | head -1 | cut -d: -f1)"
 
     # SAMPLE SIZE: an extraction that found nothing must fail, not compare empty strings.
-    [[ "$create_line" =~ ^[0-9]+$ ]]
-    [[ "$chmod_line" =~ ^[0-9]+$ ]]
-    [[ "$write_line" =~ ^[0-9]+$ ]]
+    [[ "$create_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$chmod_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$write_line" =~ ^[0-9]+$ ]] || return 1
     (( create_line < chmod_line ))
     (( chmod_line < write_line ))
 }

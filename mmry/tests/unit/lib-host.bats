@@ -331,8 +331,8 @@ _eval_installed() {
     run env -u MMRY_HOST -u MMRY_CONFIG_FILE HOME="$TEST_TMPDIR/agree" MMRY_HOST=codex \
         CODEX_HOME="/opt/relocated" bash -c "source '$LIB'; mmry_host_assert_own_credential 2>&1"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"looked for: /opt/relocated/mmry-config.json"* ]]
-    [[ "$output" == *"create it:  bash /opt/relocated/mmry/setup/mmry-setup.sh"* ]]
+    [[ "$output" == *"looked for: /opt/relocated/mmry-config.json"* ]] || return 1
+    [[ "$output" == *"create it:  bash /opt/relocated/mmry/setup/mmry-setup.sh"* ]] || return 1
     # And the hint must not name a directory the "looked for" line did not.
     [[ "$output" != *"~/.codex"* ]]
 }
@@ -380,7 +380,7 @@ _stage_install() {
     win="$(cygpath -w "$posix")"
     # The two spellings really are different, or this test compares a thing with itself.
     [ "$win" != "$posix" ]
-    [[ "$win" == *'\'* ]]
+    [[ "$win" == *'\'* ]] || return 1
 
     # Sourced from a foreign working directory, which is the condition the defect needed.
     out_posix="$(cd / && env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE \
@@ -389,12 +389,12 @@ _stage_install() {
         bash -c "source '$win'; printf '%s|%s' \"\${MMRY_HOST:-unset}\" \"\$(mmry_host_config_dir)\"")"
 
     # Both must say codex. Before the fix the Windows one said "unset" and named ~/.claude.
-    [[ "$out_posix" == codex\|* ]]
-    [[ "$out_win"   == codex\|* ]]
+    [[ "$out_posix" == codex\|* ]] || return 1
+    [[ "$out_win"   == codex\|* ]] || return 1
     # And both must name the staged directory rather than a home this install has nothing to do
     # with. The two spellings of it need not be byte-identical - cygpath's 8.3 forms are real -
     # so the assertion is that neither points at the OTHER product.
-    [[ "$out_posix" != *"/.claude"* ]]
+    [[ "$out_posix" != *"/.claude"* ]] || return 1
     [[ "$out_win"   != *"/.claude"* ]]
 }
 

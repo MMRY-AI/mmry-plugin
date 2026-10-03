@@ -32,7 +32,7 @@ setup() {
             | sed 's|/[^/]*$||' | sort -u)"
 
     for d in $dirs; do
-        [[ -f "$TESTS_DIR/$d/setup_suite.bash" ]]
+        [[ -f "$TESTS_DIR/$d/setup_suite.bash" ]] || return 1
         grep -q 'isolate-home.bash' "$TESTS_DIR/$d/setup_suite.bash"
         grep -q 'mmry_isolate_home' "$TESTS_DIR/$d/setup_suite.bash"
         count=$(( count + 1 ))
@@ -58,12 +58,12 @@ setup() {
 @test "isolation: run-tests.sh isolates HOME before it hands anything to bats" {
     local runner src_line disp_line
     runner="$TESTS_DIR/run-tests.sh"
-    [[ -f "$runner" ]]
+    [[ -f "$runner" ]] || return 1
 
     src_line="$(grep -n 'mmry_isolate_home' "$runner" | head -1 | cut -d: -f1)"
     disp_line="$(grep -n '^case "\$CATEGORY" in' "$runner" | head -1 | cut -d: -f1)"
-    [[ "$src_line" =~ ^[0-9]+$ ]]
-    [[ "$disp_line" =~ ^[0-9]+$ ]]
+    [[ "$src_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$disp_line" =~ ^[0-9]+$ ]] || return 1
     # ORDER, not mere presence. Isolating after the suites have run isolates nothing - and
     # "the call is in the file somewhere" is the shape of assertion this round had to fix
     # three of.
@@ -97,9 +97,9 @@ setup() {
     state="$(printf '%s' "$probe" | cut -d'|' -f2)"
     usable="$(printf '%s' "$probe" | cut -d'|' -f3)"
 
-    [[ -n "$new_home" ]]
-    [[ "$new_home" != "$sentinel" ]]
-    [[ "$state" == "no-config" ]]
+    [[ -n "$new_home" ]] || return 1
+    [[ "$new_home" != "$sentinel" ]] || return 1
+    [[ "$state" == "no-config" ]] || return 1
     # And it must be a usable HOME, not merely a different string: an isolation that pointed
     # HOME at nothing would hide the config and break every handler that writes under it.
     [[ "$usable" == "home-usable" ]]
@@ -125,7 +125,7 @@ setup() {
 
     cat > "$sandbox/probe.bats" <<'PROBE'
 @test "probe: HOME is not the one bats was launched with" {
-    [[ "$HOME" != "$MMRY_SENTINEL_HOME" ]]
+    [[ "$HOME" != "$MMRY_SENTINEL_HOME" ]] || return 1
     [[ ! -f "$HOME/.claude/mmry-config.json" ]]
 }
 PROBE
@@ -166,11 +166,11 @@ PROBE
     echo "release said: ${output}" >&3
 
     # Survived, contents and all.
-    [[ -d "$victim/precious" ]]
-    [[ -f "$victim/precious/file.txt" ]]
+    [[ -d "$victim/precious" ]] || return 1
+    [[ -f "$victim/precious/file.txt" ]] || return 1
     # And it said so rather than failing silently - a quiet refusal is how a broken guard
     # looks from the outside too.
-    [[ "$output" == *"refusing to delete"* ]]
+    [[ "$output" == *"refusing to delete"* ]] || return 1
     [[ "$output" == *"$victim"* ]]
 }
 
@@ -199,9 +199,9 @@ PROBE
     state="$(printf '%s' "$probe" | cut -d'|' -f2)"
 
     # It isolated anyway, ignoring the inherited value instead of trusting it.
-    [[ "$new_home" != "$sentinel" ]]
-    [[ "$new_home" != "$decoy" ]]
-    [[ "$state" == "no-config" ]]
+    [[ "$new_home" != "$sentinel" ]] || return 1
+    [[ "$new_home" != "$decoy" ]] || return 1
+    [[ "$state" == "no-config" ]] || return 1
     # And the decoy is untouched: ignoring it must not mean deleting it either.
     [[ -d "$decoy" ]]
 }
@@ -273,7 +273,7 @@ PROBE
     repo_root="$(cd "$PLUGIN_ROOT/.." && pwd)"
     run git -C "$repo_root" check-ignore -v "$PLUGIN_ROOT/mmry-config.json"
     echo "check-ignore: ${output}" >&3
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     # And the tracked example must NOT be swept up by the rule.
     run git -C "$repo_root" check-ignore -q "$PLUGIN_ROOT/mmry-config.example.json"
     [[ "$status" -ne 0 ]]
@@ -296,8 +296,8 @@ PROBE
 
     cat > "$sandbox/deep/probe.bats" <<'PROBE'
 @test "probe: a recursively collected suite still has an isolated HOME" {
-    [[ "$HOME" != "$MMRY_SENTINEL_HOME" ]]
-    [[ ! -f "$HOME/.claude/mmry-config.json" ]]
+    [[ "$HOME" != "$MMRY_SENTINEL_HOME" ]] || return 1
+    [[ ! -f "$HOME/.claude/mmry-config.json" ]] || return 1
     [[ -z "${MMRY_CONFIG_FILE:-}" ]]
 }
 PROBE
@@ -314,7 +314,7 @@ PROBE
     # Structural companion to the run above: the sandbox proves the mechanism, this proves the
     # real tree has the file the real `bats -r mmry/tests/` invocation looks for, at the exact
     # path bats looks for it.
-    [[ -f "$TESTS_DIR/setup_suite.bash" ]]
+    [[ -f "$TESTS_DIR/setup_suite.bash" ]] || return 1
     grep -q 'isolate-home.bash' "$TESTS_DIR/setup_suite.bash"
     grep -q 'mmry_isolate_home' "$TESTS_DIR/setup_suite.bash"
     # And that lookup rule is bats's, not an assumption of ours - it reads

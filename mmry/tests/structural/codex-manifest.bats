@@ -59,7 +59,7 @@ setup() {
 @test "codex manifest: every declared path uses the ./ form the parser requires" {
     local paths
     paths="$(jq -r '[.hooks, .skills, .commands] | .[] | select(. != null)' "$CODEX_MANIFEST" | tr -d '\r')"
-    [[ -n "$paths" ]]
+    [[ -n "$paths" ]] || return 1
     while IFS= read -r p; do
         [[ "$p" == ./* ]] || { echo "manifest path does not start with ./ : $p"; return 1; }
     done <<< "$paths"
@@ -252,7 +252,7 @@ setup() {
     local n_total n_routed
     n_total="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$CODEX_HOOKS")"
     n_routed="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | select(.command | contains("codex-hook.sh"))] | length' "$CODEX_HOOKS")"
-    [[ "$n_total" -gt 0 ]]
+    [[ "$n_total" -gt 0 ]] || return 1
     [[ "$n_total" == "$n_routed" ]] || { echo "$n_routed of $n_total handlers route through codex-hook.sh"; return 1; }
 }
 

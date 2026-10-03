@@ -85,7 +85,7 @@ FAKECURL
         run env -u MMRY_HOST bash "${HANDLERS}/formation-check.sh"
 
     [ "$status" -eq 2 ]
-    [[ "$output" == *"FormationService.cs"* ]]
+    [[ "$output" == *"FormationService.cs"* ]] || return 1
     [[ "$output" != *"hookSpecificOutput"* ]]
 }
 
@@ -251,7 +251,7 @@ FAKECURL
         run bash "${HANDLERS}/formation-check.sh"
 
     [ "$status" -eq 2 ]
-    [[ "$output" == *"FormationService.cs"* ]]
+    [[ "$output" == *"FormationService.cs"* ]] || return 1
     [[ "$output" != *"hookSpecificOutput"* ]]
 }
 

@@ -356,8 +356,8 @@ _compare_hosts() {
                  MMRY_AUTH_METHOD=none MMRY_API_KEY=""
                  _mmry_get_auth_header >/dev/null 2>&1 || true
                  printf "%s" "$MMRY_RESPONSE"' 2>&1)"
-    [[ "$out" != *"/mmry:"* ]]
-    [[ "$out" == *"bash ${CODEX_DIR}/mmry/setup/mmry-setup.sh"* ]]
+    [[ "$out" != *"/mmry:"* ]] || return 1
+    [[ "$out" == *"bash ${CODEX_DIR}/mmry/setup/mmry-setup.sh"* ]] || return 1
 
     # The Claude control, byte for byte as this message has always read.
     local claude_out
@@ -375,8 +375,8 @@ _compare_hosts() {
         bash -c 'source "'"${HANDLERS}"'/mmry-client.sh" >/dev/null 2>&1
                  MMRY_HTTP_CODE=401 MMRY_RESPONSE=unauthorized
                  _mmry_format_error "save"' 2>&1)"
-    [[ "$out" != *"/mmry:"* ]]
-    [[ "$out" == *"bash ${CODEX_DIR}/mmry/setup/mmry-setup.sh"* ]]
+    [[ "$out" != *"/mmry:"* ]] || return 1
+    [[ "$out" == *"bash ${CODEX_DIR}/mmry/setup/mmry-setup.sh"* ]] || return 1
 
     local claude_out
     claude_out="$(MMRY_API_KEY=k MMRY_API_URL=http://fake.invalid \
@@ -468,8 +468,8 @@ _compare_hosts() {
     # the validation rather than never arriving.
     run env MMRY_HOST_ARG=codx bash "${PLUGIN_ROOT}/setup/mmry-setup.sh" \
         --email a@b.c --password 'Xx1!' --api-url http://127.0.0.1:9
-    [[ "$output" != *"Unrecognised --host value"* ]]
-    [[ "$output" == *"Logging in"* ]]
+    [[ "$output" != *"Unrecognised --host value"* ]] || return 1
+    [[ "$output" == *"Logging in"* ]] || return 1
 
     # And the flag itself still refuses, so the fix did not disarm the validation. This half was
     # always sound: --host IS consumed by the parse loop, so it does reach line 85.

@@ -326,9 +326,9 @@ stop_run() {
     # A BARE non-zero status is not evidence here (#31245 QA round 2): deleting mmry-setup.sh
     # produces exit 127, which is also non-zero, so the assertion passed on a file that no longer
     # existed. The script must exist, must refuse the flag by name, and must say so.
-    [[ -f "$PLUGIN_ROOT/setup/mmry-setup.sh" ]]
+    [[ -f "$PLUGIN_ROOT/setup/mmry-setup.sh" ]] || return 1
     run bash "$PLUGIN_ROOT/setup/mmry-setup.sh" --not-a-real-flag
-    [[ "$status" -eq 1 ]]
+    [[ "$status" -eq 1 ]] || return 1
     assert_output --partial "Unknown argument: --not-a-real-flag"
 }
 
@@ -384,7 +384,7 @@ _resolve_from() {
     cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.codex/mmry/" 2>/dev/null || true
     printf '{"apiUrl":"https://codex.example","authMethod":"apikey","apiKey":"codex-only-key"}' \
         > "$TEST_HOME/.codex/mmry-config.json"
-    [[ ! -f "$TEST_HOME/.claude/mmry-config.json" ]]
+    [[ ! -f "$TEST_HOME/.claude/mmry-config.json" ]] || return 1
     run _resolve_from "$TEST_HOME/.codex/mmry/hooks-handlers"
     assert_output "codex-only-key"
 }
@@ -437,7 +437,7 @@ _install_codex_only_unconfigured() {
 @test "codex: with no Codex credential the client REFUSES rather than resolving the Claude one" {
     _install_codex_only_unconfigured
     run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME"         bash -c "source '$TEST_HOME/.codex/mmry/hooks-handlers/mmry-client.sh' 2>/dev/null; printf 'RESOLVED:%s' \"\$MMRY_API_KEY\""
-    [[ "$status" -ne 0 ]]
+    [[ "$status" -ne 0 ]] || return 1
     refute_output --partial "claude-sentinel"
     refute_output --partial "RESOLVED:"
 }
@@ -458,7 +458,7 @@ _install_codex_only_unconfigured() {
     mkdir -p "$TEST_HOME/.claude/mmry/hooks-handlers"
     cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$TEST_HOME/.claude/mmry/hooks-handlers/"
     cp -r "$PLUGIN_ROOT/vendor" "$TEST_HOME/.claude/mmry/" 2>/dev/null || true
-    [[ ! -f "$TEST_HOME/.claude/mmry-config.json" ]]
+    [[ ! -f "$TEST_HOME/.claude/mmry-config.json" ]] || return 1
     run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u CODEX_HOME HOME="$TEST_HOME"         bash -c "source '$TEST_HOME/.claude/mmry/hooks-handlers/mmry-client.sh' 2>/dev/null; printf 'SOURCED-OK'"
     assert_success
     assert_output --partial "SOURCED-OK"
@@ -501,7 +501,7 @@ _install_codex_only_unconfigured() {
     local dir="$TEST_TMPDIR/nolib"
     mkdir -p "$dir" "$TEST_HOME/.claude/mmry/hooks-handlers"
     cp "$PLUGIN_ROOT/hooks-handlers/hook-guard.sh" "$dir/"
-    [[ ! -f "$dir/lib-host.sh" ]]
+    [[ ! -f "$dir/lib-host.sh" ]] || return 1
     printf '#!/usr/bin/env bash\necho "FALLBACK TARGET"\n' > "$TEST_HOME/.claude/mmry/hooks-handlers/probe.sh"
     run env -u MMRY_HOST HOME="$TEST_HOME" bash "$dir/hook-guard.sh" probe
     assert_success
@@ -512,7 +512,7 @@ _install_codex_only_unconfigured() {
     local dir="$TEST_TMPDIR/nolib2"
     mkdir -p "$dir"
     cp "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" "$dir/"
-    [[ ! -f "$dir/lib-host.sh" ]]
+    [[ ! -f "$dir/lib-host.sh" ]] || return 1
     rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-count" "$TMPDIR/.mmry-last-save"
     run env -u MMRY_HOST HOME="$TEST_HOME" bash -c "bash '$dir/stop-check.sh' 2>&1 >/dev/null"
     assert_output --partial '"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh"'

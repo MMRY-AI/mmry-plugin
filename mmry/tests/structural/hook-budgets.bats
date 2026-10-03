@@ -61,13 +61,13 @@ EOF
 }
 
 @test "hook-budgets: the file under test is the repo's shipped hooks.json, not an installed copy" {
-    [[ -f "$HOOKS_FILE" ]]
+    [[ -f "$HOOKS_FILE" ]] || return 1
     # An installed plugin lives under .../plugins/cache/... or .../plugins/marketplaces/...
     # Reading either would make every assertion below meaningless.
-    [[ "$HOOKS_FILE" != */plugins/cache/* ]]
-    [[ "$HOOKS_FILE" != */plugins/marketplaces/* ]]
+    [[ "$HOOKS_FILE" != */plugins/cache/* ]] || return 1
+    [[ "$HOOKS_FILE" != */plugins/marketplaces/* ]] || return 1
     # And it must be the copy git tracks, in a repository that contains this test.
-    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]]
+    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]] || return 1
     [[ -d "$PLUGIN_ROOT/tests" ]]
 }
 
@@ -79,7 +79,7 @@ EOF
     # every "no hook is below its cost" assertion below would pass vacuously.
     (( count >= 9 ))
     for t in $timeouts; do
-        [[ "$t" =~ ^[0-9]+$ ]]
+        [[ "$t" =~ ^[0-9]+$ ]] || return 1
         (( t > 0 ))
     done
 }
@@ -88,7 +88,7 @@ EOF
     local mine others min_other
     mine="$(jq -r '.hooks.UserPromptSubmit[].hooks[]
                    | select(.command | test("userpromptsubmit-foundation")) | .timeout' "$HOOKS_FILE" | tr -d '\r')"
-    [[ "$mine" =~ ^[0-9]+$ ]]
+    [[ "$mine" =~ ^[0-9]+$ ]] || return 1
 
     others="$(jq -r '[.hooks[][].hooks[] | select((.command | test("userpromptsubmit-foundation")) | not) | .timeout]
                      | .[]' "$HOOKS_FILE" | tr -d '\r')"
@@ -127,9 +127,9 @@ EOF
     local probe_rc=0 probe_out
     probe_out="$(bash "$handler" 2>/dev/null </dev/null)" || probe_rc=$?
     (( probe_rc == 0 ))
-    [[ -n "$probe_out" ]]
+    [[ -n "$probe_out" ]] || return 1
     printf '%s' "$probe_out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-    [[ "$probe_out" == *'Truthfulness: never overstate evidence'* ]]
+    [[ "$probe_out" == *'Truthfulness: never overstate evidence'* ]] || return 1
     # Headroom of at least 5x. At the 5 s budget this refuses for any cost above 1000 ms,
     # which is exactly the range that was measured in the field.
     #
@@ -148,7 +148,7 @@ EOF
     # leave the operative limit unmeasured.
     local deadline
     deadline="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*'         "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" | head -1 | sed 's/.*:-//')"
-    [[ "$deadline" =~ ^[0-9]+$ ]]
+    [[ "$deadline" =~ ^[0-9]+$ ]] || return 1
     echo "measured cost: ${cost} ms; shipped deadline: ${deadline} s" >&3
     # A 3x BAR, WHICH IS NOT THE SAME THING AS A 3x MARGIN - and the difference was reported
     # the wrong way round, so it is stated correctly here (#31434 QA round 2).
@@ -191,7 +191,7 @@ EOF
     # ships.
     local handler default fallback budget documented
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # The `:-N` default, and the N the handler falls back to when the env override is not a
     # positive integer. Both are shipped constants and a disagreement between them is its own
@@ -205,11 +205,11 @@ EOF
 
     # SAMPLE SIZE, in the form this file uses everywhere else: an extraction that found
     # nothing must fail loudly, not silently pass a comparison against an empty string.
-    [[ "$default" =~ ^[0-9]+$ ]]
-    [[ "$fallback" =~ ^[0-9]+$ ]]
-    [[ "$budget" =~ ^[0-9]+$ ]]
+    [[ "$default" =~ ^[0-9]+$ ]] || return 1
+    [[ "$fallback" =~ ^[0-9]+$ ]] || return 1
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
     (( default > 0 ))
-    [[ "$default" == "$fallback" ]]
+    [[ "$default" == "$fallback" ]] || return 1
 
     # The plugin must stop ITSELF before the harness stops it, with room left over to write
     # the JSON that tells the customer what happened. Without that margin the whole supervisor
@@ -221,7 +221,7 @@ EOF
     # promising a 15 s stop against a handler that waits 900 is the same defect wearing
     # a different hat.
     documented="$(grep -o 'stops itself after [0-9][0-9]* seconds' "$PLUGIN_ROOT/README.md" | head -1 | sed 's/[^0-9]//g')"
-    [[ "$documented" =~ ^[0-9]+$ ]]
+    [[ "$documented" =~ ^[0-9]+$ ]] || return 1
     [[ "$documented" == "$default" ]]
 }
 
@@ -241,7 +241,7 @@ EOF
     # client's API, so that is what is asserted.
     local sourced
     sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh'         && declare -F mmry_load_config >/dev/null         && declare -F mmry_get_startup_memories >/dev/null         && printf SOURCED" 2>/dev/null)"
-    [[ "$sourced" == "SOURCED" ]]
+    [[ "$sourced" == "SOURCED" ]] || return 1
 
     timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$HOOKS_FILE" | tr -d '\r')"
     count=0
@@ -292,7 +292,7 @@ SHIMEOF
     # `tr -d` with a LITERAL CR in the source, which git's CRLF normalisation turned
     # into a line break on checkout and silently broke this extraction (#31434 QA).
     budget="${budget%%[![:digit:]]*}"
-    [[ "$budget" =~ ^[0-9]+$ ]]
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
 
     start="$(date +%s)"
     out="$(MMRY_JQ="$shim" bash "$handler" 2>/dev/null)"
@@ -309,8 +309,8 @@ SHIMEOF
     (( margin_ms >= 5000 ))
     # And the customer was told. A guard that wins the race and says nothing is the silent
     # loss wearing a different hat.
-    [[ "$out" == *'NOT applied to this turn'* ]]
-    [[ "$out" == *'exceeded'* ]]
+    [[ "$out" == *'NOT applied to this turn'* ]] || return 1
+    [[ "$out" == *'exceeded'* ]] || return 1
     echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
 
@@ -334,7 +334,7 @@ SHIMEOF
     # than asserting them structurally and saying so.
     local handler block
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # The watchdog subshell: from its `while` to the kill that ends it.
     block="$(sed -n '/^        while /,/kill -TERM/p' "$handler")"
@@ -381,7 +381,7 @@ SHIMEOF
     # this handler now uses.
     local handler body
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
 
     # Comments in this file discuss the idioms by name, so strip them before matching or the
     # test fails on its own explanation.
@@ -420,9 +420,9 @@ SHIMEOF
 ' "$body" | grep -n '_mmry_reinject_is_off_here' | grep -v '_mmry_reinject_is_off_here()'                 | head -1 | cut -d: -f1)"
     worker_line="$(printf '%s
 ' "$body" | grep -n 'MMRY_FOUNDATION_WORKER=1 bash' | head -1 | cut -d: -f1)"
-    [[ "$def_line" =~ ^[0-9]+$ ]]
-    [[ "$off_line" =~ ^[0-9]+$ ]]
-    [[ "$worker_line" =~ ^[0-9]+$ ]]
+    [[ "$def_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$off_line" =~ ^[0-9]+$ ]] || return 1
+    [[ "$worker_line" =~ ^[0-9]+$ ]] || return 1
     # The line this check is about must be a CALL, not the definition it used to find.
     (( off_line != def_line ))
     printf '%s
@@ -600,10 +600,10 @@ _mmry_count_cygpath() {
 
     local lib winlib shimdir log calls
     lib="$PLUGIN_ROOT/hooks-handlers/lib-host.sh"
-    [[ -f "$lib" ]]
+    [[ -f "$lib" ]] || return 1
     winlib="$(cygpath -w "$lib")"
-    [[ "$winlib" == *'\'* ]]
-    [[ "$winlib" =~ ^[A-Za-z]: ]]
+    [[ "$winlib" == *'\'* ]] || return 1
+    [[ "$winlib" =~ ^[A-Za-z]: ]] || return 1
 
     shimdir="$BATS_TEST_TMPDIR/shim"
     log="$BATS_TEST_TMPDIR/cygpath-calls.log"
@@ -651,10 +651,10 @@ _mmry_count_cygpath() {
 
 @test "hook-budgets codex: the file under test is the repo's shipped codex-hooks.json" {
     _codex_setup
-    [[ -f "$CODEX_HOOKS_FILE" ]]
-    [[ "$CODEX_HOOKS_FILE" != */plugins/cache/* ]]
-    [[ "$CODEX_HOOKS_FILE" != */plugins/marketplaces/* ]]
-    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]]
+    [[ -f "$CODEX_HOOKS_FILE" ]] || return 1
+    [[ "$CODEX_HOOKS_FILE" != */plugins/cache/* ]] || return 1
+    [[ "$CODEX_HOOKS_FILE" != */plugins/marketplaces/* ]] || return 1
+    [[ -f "$PLUGIN_ROOT/../.claude-plugin/marketplace.json" ]] || return 1
     [[ -d "$PLUGIN_ROOT/tests" ]]
 }
 
@@ -668,7 +668,7 @@ _mmry_count_cygpath() {
     echo "codex hooks found: ${count}" >&3
     (( count >= 6 ))
     for t in $timeouts; do
-        [[ "$t" =~ ^[0-9]+$ ]]
+        [[ "$t" =~ ^[0-9]+$ ]] || return 1
         (( t > 0 ))
     done
 }
@@ -685,8 +685,8 @@ _mmry_count_cygpath() {
     echo "Foundation budget - claude: ${claude}s, codex: ${codex}s" >&3
 
     # SAMPLE SIZE: an extraction that found nothing must fail, not compare two empty strings.
-    [[ "$codex" =~ ^[0-9]+$ ]]
-    [[ "$claude" =~ ^[0-9]+$ ]]
+    [[ "$codex" =~ ^[0-9]+$ ]] || return 1
+    [[ "$claude" =~ ^[0-9]+$ ]] || return 1
     [[ "$codex" == "$claude" ]]
 }
 
@@ -696,14 +696,14 @@ _mmry_count_cygpath() {
     _codex_setup
     local handler default budget
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [[ -f "$handler" ]]
+    [[ -f "$handler" ]] || return 1
     default="$(grep -o 'MMRY_FOUNDATION_DEADLINE_SECS:-[0-9][0-9]*' "$handler" | head -1 | sed 's/.*:-//')"
     budget="$(_codex_foundation_timeout)"
 
     echo "shipped deadline ${default}s against codex budget ${budget}s" >&3
 
-    [[ "$default" =~ ^[0-9]+$ ]]
-    [[ "$budget" =~ ^[0-9]+$ ]]
+    [[ "$default" =~ ^[0-9]+$ ]] || return 1
+    [[ "$budget" =~ ^[0-9]+$ ]] || return 1
     (( default > 0 ))
     # The plugin must stop ITSELF before Codex stops it, with room to write the JSON that tells
     # the customer what happened. Without that margin the supervisor is decoration.
@@ -724,7 +724,7 @@ _mmry_count_cygpath() {
     sourced="$(bash -c "source '$PLUGIN_ROOT/hooks-handlers/mmry-client.sh' \
         && declare -F mmry_load_config >/dev/null \
         && printf SOURCED" 2>/dev/null)"
-    [[ "$sourced" == "SOURCED" ]]
+    [[ "$sourced" == "SOURCED" ]] || return 1
 
     timeouts="$(jq -r '[.hooks[][].hooks[].timeout] | .[]' "$CODEX_HOOKS_FILE" | tr -d '\r')"
     count=0

@@ -111,7 +111,7 @@ _assert_no_slash_command() {
 @test "join: a Codex customer with no argument is given a command that exists on their machine" {
     _run_codex "${HANDLERS}/formation-join.sh"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"$(_codex_ref join)"* ]]
+    [[ "$output" == *"$(_codex_ref join)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -129,10 +129,10 @@ _assert_no_slash_command() {
 @test "start: a Codex customer with no objective is given a runnable command" {
     _run_codex "${HANDLERS}/formation-start.sh"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"$(_codex_ref start)"* ]]
+    [[ "$output" == *"$(_codex_ref start)"* ]] || return 1
     # The quoted example argument survives the derivation; without it the customer is told to run
     # a script and not what to pass it.
-    [[ "$output" == *'"what the formation is for"'* ]]
+    [[ "$output" == *'"what the formation is for"'* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -147,8 +147,8 @@ _assert_no_slash_command() {
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     _run_codex "${HANDLERS}/formation-start.sh" "coordinate the billing migration"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"already in formation 42"* ]]
-    [[ "$output" == *"$(_codex_ref leave)"* ]]
+    [[ "$output" == *"already in formation 42"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref leave)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -165,8 +165,8 @@ _assert_no_slash_command() {
 @test "say: a Codex customer with no message is given a runnable command" {
     _run_codex "${HANDLERS}/formation-say.sh"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"$(_codex_ref say)"* ]]
-    [[ "$output" == *'"what you want the others to know" [recipientMemberId]'* ]]
+    [[ "$output" == *"$(_codex_ref say)"* ]] || return 1
+    [[ "$output" == *'"what you want the others to know" [recipientMemberId]'* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -182,8 +182,8 @@ _assert_no_slash_command() {
     _run_codex "${HANDLERS}/formation-say.sh" "the validator is yours" "not-a-number"
     [ "$status" -eq 1 ]
     # The refusal itself must survive: nothing was sent, and that is the point of the message.
-    [[ "$output" == *"Nothing was sent"* ]]
-    [[ "$output" == *"$(_codex_ref roster)"* ]]
+    [[ "$output" == *"Nothing was sent"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref roster)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -198,8 +198,8 @@ _assert_no_slash_command() {
 @test "say: a session in no formation is told how to find and join one, runnably" {
     _run_codex "${HANDLERS}/formation-say.sh" "anyone there"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"$(_codex_ref list)"* ]]
-    [[ "$output" == *"$(_codex_ref join)"* ]]
+    [[ "$output" == *"$(_codex_ref list)"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref join)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -215,8 +215,8 @@ _assert_no_slash_command() {
 @test "roster: a session in no formation is given commands it can run" {
     _run_codex "${HANDLERS}/formation-roster.sh"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"$(_codex_ref list)"* ]]
-    [[ "$output" == *"$(_codex_ref join)"* ]]
+    [[ "$output" == *"$(_codex_ref list)"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref join)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -230,8 +230,8 @@ _assert_no_slash_command() {
 @test "roster: a malformed id points a Codex customer at a runnable list" {
     _run_codex "${HANDLERS}/formation-roster.sh" "not-an-id"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"positive whole number"* ]]
-    [[ "$output" == *"$(_codex_ref list)"* ]]
+    [[ "$output" == *"positive whole number"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref list)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
 }
@@ -269,12 +269,12 @@ _ROSTER_JSON='{"formation":{"id":42,"objective":"migrate the billing schema"},"m
 
     [ "$status" -eq 0 ]
     # It is still the roster it was.
-    [[ "$output" == *"migrate the billing schema"* ]]
-    [[ "$output" == *"lead@example.com"* ]]
+    [[ "$output" == *"migrate the billing schema"* ]] || return 1
+    [[ "$output" == *"lead@example.com"* ]] || return 1
     # And every instruction under it is runnable here.
-    [[ "$output" == *"$(_codex_ref say)"* ]]
-    [[ "$output" == *"$(_codex_ref progress)"* ]]
-    [[ "$output" == *"$(_codex_ref report)"* ]]
+    [[ "$output" == *"$(_codex_ref say)"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref progress)"* ]] || return 1
+    [[ "$output" == *"$(_codex_ref report)"* ]] || return 1
     _assert_no_slash_command
     # progress and report have no advertised Codex surface, so this is the assertion that keeps
     # the footer honest rather than merely quiet: the scripts it names are really on disk.

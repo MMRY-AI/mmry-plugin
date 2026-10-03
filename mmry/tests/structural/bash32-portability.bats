@@ -76,3 +76,107 @@ BAD
     [[ "$(grep -c 'mapfile or readarray' <<< "$hits")" -eq 2 ]] || {
         echo "the comment line was counted, or a real use was missed:"; echo "$hits"; return 1; }
 }
+
+# ---------------------------------------------------------------------------------------------
+# Assertions that cannot fail on bash 3.2 (#31245 QA round 9)
+# ---------------------------------------------------------------------------------------------
+#
+# bats fails a test through set -e, and on bash 3.2 set -e does not act on a failing [[ ]]. So a
+# bare [[ ... ]] line that is not the LAST command of a test is an assertion that cannot fail on
+# macOS: the test runs on to its end and passes. QA round 9 listed twelve of them in this
+# branch's files; a scan found 113. Each now ends "|| return 1".
+#
+# The guard covers every test file except the ones below, which came from master with the same
+# pattern already in them (476 sites when this was written). They are named rather than silently
+# exempt, so the debt is visible, and a NEW test file is covered from its first line. Fixing them
+# is a follow-up of its own, not part of #31245.
+_INERT_GRANDFATHERED=(
+    e2e/install-uninstall.bats
+    e2e/setup-join.bats
+    handlers/deactivate-memory.bats
+    handlers/link-memories.bats
+    handlers/list-groups.bats
+    handlers/make-private.bats
+    handlers/plan-accepted.bats
+    handlers/precompact-check.bats
+    handlers/reinforce-memory.bats
+    handlers/save-memory.bats
+    handlers/search-memories.bats
+    handlers/self-update.bats
+    handlers/session-start-macos.bats
+    handlers/session-start.bats
+    handlers/stop-check.bats
+    handlers/userpromptsubmit-foundation.bats
+    handlers/visibility.bats
+    integration/links.bats
+    integration/memory-lifecycle.bats
+    integration/search.bats
+    integration/session-registration.bats
+    structural/cross-platform.bats
+    structural/file-integrity.bats
+    structural/formation-assign.bats
+    structural/formation-claim.bats
+    structural/formation-delivery.bats
+    structural/formation-directed.bats
+    structural/formation-leave.bats
+    structural/formation-list.bats
+    structural/formation-progress.bats
+    structural/formation-report.bats
+    structural/formation-say.bats
+    structural/hooks-guards.bats
+    structural/hooks-json.bats
+    structural/macos-hook-payload.bats
+    structural/marketplace-sync.bats
+    structural/plugin-json.bats
+    unit/auth-header.bats
+    unit/config-loading.bats
+    unit/format-error.bats
+    unit/hook-payload-read.bats
+    unit/http-core.bats
+    unit/lib-jq.bats
+)
+
+_is_grandfathered() {
+    local g
+    for g in "${_INERT_GRANDFATHERED[@]}"; do [[ "$g" == "$1" ]] && return 0; done
+    return 1
+}
+
+# Prints file:line for each bare [[ ]] line that is followed, inside its @test, by another command.
+_inert_assertions() {
+    awk '
+        FNR == 1 { intest = 0; pend = "" }
+        /^@test / { intest = 1; pend = ""; next }
+        intest && $0 == "}" { intest = 0; pend = ""; next }
+        intest {
+            if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) next
+            if (pend != "") { print pend; pend = "" }
+            if ($0 ~ /^[[:space:]]*\[\[ .* \]\][[:space:]]*$/) pend = FILENAME ":" FNR
+        }
+    ' "$@"
+}
+
+@test "portability: no test outside the grandfathered list has an assertion bash 3.2 cannot fail" {
+    local tests_root f rel files=() hits
+    tests_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    while IFS= read -r f; do
+        rel="${f#$tests_root/}"
+        _is_grandfathered "$rel" && continue
+        files[${#files[@]}]="$f"
+    done < <(find "$tests_root" -path "$tests_root/libs" -prune -o -type f -name '*.bats' -print | sort)
+    [[ ${#files[@]} -gt 10 ]] || { echo "only ${#files[@]} files scanned"; return 1; }
+    hits="$(_inert_assertions "${files[@]}")"
+    [[ -z "$hits" ]] || {
+        echo "these bare [[ ]] lines are not a test's last command, so on bash 3.2 they cannot fail it." >&2
+        echo "End each with || return 1:" >&2
+        echo "$hits" >&2
+        return 1
+    }
+}
+
+@test "control: the inert-assertion scan finds a mid-test bare [[ ]] and spares the last one" {
+    local f="${BATS_TEST_TMPDIR}/sample.bats"
+    printf '%s\n' '@test "x" {' '    [[ 1 -eq 2 ]]' '    # a comment' '    [[ 1 -eq 1 ]] || return 1' '    [[ 2 -eq 2 ]]' '}' > "$f"
+    local hits; hits="$(_inert_assertions "$f")"
+    [[ "$hits" == "$f:2" ]] || { echo "expected exactly $f:2, got: $hits"; return 1; }
+}

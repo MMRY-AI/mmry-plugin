@@ -369,10 +369,10 @@ _codex_tree() {
 
 @test "reach: the marketplace description names Codex, not only the other product" {
     local f="$PLUGIN_ROOT/../.claude-plugin/marketplace.json"
-    [[ -f "$f" ]]
+    [[ -f "$f" ]] || return 1
     local desc
     desc="$(jq -r '.plugins[0].description' "$f")"
-    [[ -n "$desc" && "$desc" != "null" ]]
+    [[ -n "$desc" && "$desc" != "null" ]] || return 1
     [[ "$desc" == *"Codex"* ]]
 }
 
@@ -617,7 +617,7 @@ _codex_tree() {
     # cell under it says is true of Claude Code and is not a promise to a Codex customer.
     _is_claude_column() {
         local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-        [[ "$l" == *"claude code"* && "$l" != *codex* ]]
+        [[ "$l" == *"claude code"* && "$l" != *codex* ]] || return 1
     }
 
     # Print a markdown table row as one cell per line, outer pipes dropped. bash 3.2.

@@ -267,8 +267,8 @@ _fake_plugin_root() {
     run env MMRY_HOST=codex HOME="$HOME" CLAUDE_SESSION_ID="s-401-codex" \
         bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
     assert_success
-    [[ "$output" == *"invalid or expired"* ]]
-    [[ "$output" == *"mmry-setup.sh"* ]]
+    [[ "$output" == *"invalid or expired"* ]] || return 1
+    [[ "$output" == *"mmry-setup.sh"* ]] || return 1
     [[ "$output" != *"/mmry:setup"* ]]
 }
 
@@ -278,7 +278,7 @@ _fake_plugin_root() {
     run env -u MMRY_HOST HOME="$HOME" CLAUDE_SESSION_ID="s-401-claude" \
         bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
     assert_success
-    [[ "$output" == *"invalid or expired"* ]]
+    [[ "$output" == *"invalid or expired"* ]] || return 1
     [[ "$output" == *"/mmry:setup"* ]]
 }
 
@@ -350,8 +350,8 @@ _fake_plugin_root() {
 
     # exit 0: a SessionStart hook must not break the customer's session.
     [ "$status" -eq 0 ]
-    [[ "$output" == *"could not write the host marker"* ]]
-    [[ "$output" == *"Handlers were NOT installed"* ]]
+    [[ "$output" == *"could not write the host marker"* ]] || return 1
+    [[ "$output" == *"Handlers were NOT installed"* ]] || return 1
     # And it must not have run the delegate as though everything were fine.
     [[ "$output" != *"DELEGATE RAN"* ]]
 }
