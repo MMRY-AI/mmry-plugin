@@ -1,0 +1,19 @@
+== captured 2026-10-03, fresh node:22-bookworm container, run as a newly created user
+== user: tc3  HOME=/home/tc3  SHELL=/bin/bash  /bin/sh -> /usr/bin/dash  bash 5.2.15(1)-release
+== clean profile: [.bash_logout .bashrc .profile ]
+== codex: codex-cli 0.154.0
+== DEVIATION: --ref 31245/codex-platform, because the branch is not merged
+Added marketplace `mmry-plugin` from https://github.com/MMRY-AI/mmry-plugin.git#31245/codex-platform.
+Installed marketplace root: /home/tc3/.codex/.tmp/marketplaces/mmry-plugin
+Added plugin `mmry` from marketplace `mmry-plugin`.
+Installed plugin root: /home/tc3/.codex/plugins/cache/mmry-plugin/mmry/local
+== installed plugin root: /home/tc3/.codex/plugins/cache/mmry-plugin/mmry/local
+== installed codex-hook.sh mode: -rw-r--r--
+== system jq present: no  (the plugin must not need it)
+== hook SessionStart :: exit 0 :: stdout {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI is installed but needs to be set up. Run the setup script to authenticate via the browser.\n\n## Setup\n\nRun this command using the Bash tool:\n\nbash ~/.codex/mmry/setup/mmry-setup.sh\n\nThis will open a browser win
+== hook SessionStart :: exit 0 :: stdout 
+== hook UserPromptSubmit :: exit 0 :: stdout 
+== hook UserPromptSubmit :: exit 0 :: stdout 
+== hook UserPromptSubmit :: exit 0 :: stdout {"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \"/home/tc3/.codex/mmry/hooks-handlers/save-memory.sh\" with --context for each. If nothing
+== hook PostToolUse :: exit 0 :: stdout 
+== staged by the first session-start: /home/tc3/.codex/mmry/setup/mmry-setup.sh
