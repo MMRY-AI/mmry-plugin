@@ -29,11 +29,23 @@ rem `@echo off` is load-bearing. With echo on, cmd.exe writes each command line 
 rem stdout is what Codex hands the model.
 
 setlocal enableextensions
+rem NEVER RUN A PROGRAM FROM THE CUSTOMER'S PROJECT FOLDER (#31245 QA round 9, security N1).
+rem Codex runs this hook with the customer's project as the current folder, and cmd.exe looks
+rem in the current folder BEFORE PATH. A where.bat, reg.bat or findstr.bat committed to any
+rem repository the customer opens would run silently on every hook. This setting turns that
+rem lookup off for this script and every child it starts, and the three tools are called by
+rem their full System32 path as well, so neither safeguard depends on the other. The Claude
+rem Code harness sets this variable itself, which is why tests launched from it could not see
+rem the hole; the test that plants the fixtures unsets it first.
+set "NoDefaultCurrentDirectoryInExePath=1"
+rem Unquoted inside the for /f commands below on purpose: a for /f command that begins with a
+rem quote has its outer quotes stripped by cmd /c. SystemRoot contains no spaces.
+set "MMRY_SYS32=%SystemRoot%\System32"
 set "MMRY_HANDLER=%~1"
 if "%MMRY_HANDLER%"=="" exit /b 0
 set "MMRY_GIT_BASH="
 
-for /f "delims=" %%G in ('where git.exe 2^>nul') do (
+for /f "delims=" %%G in ('%MMRY_SYS32%\where.exe $PATH:git.exe 2^>nul') do (
     if not defined MMRY_GIT_BASH if exist "%%~dpG..\bin\bash.exe" set "MMRY_GIT_BASH=%%~dpG..\bin\bash.exe"
     if not defined MMRY_GIT_BASH if exist "%%~dpG..\..\bin\bash.exe" set "MMRY_GIT_BASH=%%~dpG..\..\bin\bash.exe"
 )
@@ -52,11 +64,11 @@ if not defined MMRY_GIT_BASH goto :no_git
 exit /b %ERRORLEVEL%
 
 :from_registry
-for /f "tokens=2,*" %%A in ('reg query "%~1\SOFTWARE\GitForWindows" /v InstallPath 2^>nul ^| findstr /i "InstallPath"') do (
+for /f "tokens=2,*" %%A in ('%MMRY_SYS32%\reg.exe query "%~1\SOFTWARE\GitForWindows" /v InstallPath 2^>nul ^| %MMRY_SYS32%\findstr.exe /i "InstallPath"') do (
     if exist "%%B\bin\bash.exe" set "MMRY_GIT_BASH=%%B\bin\bash.exe"
 )
 exit /b 0
 
 :no_git
-if /i "%MMRY_HANDLER%"=="session-init" echo MMRY AI could not start on this Windows machine: Git for Windows was not found. Install it from https://gitforwindows.org with its default options, then start a new session.
+if /i "%MMRY_HANDLER%"=="session-init" echo MMRY AI could not start on this Windows machine: Git for Windows was not found. Tell the user, in these words: MMRY needs Git for Windows. Install it from https://gitforwindows.org with its default options, then start a new session.
 exit /b 0

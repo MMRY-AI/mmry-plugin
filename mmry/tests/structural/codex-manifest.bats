@@ -390,6 +390,58 @@ setup() {
     [[ "$output" != *"REACHED the real Git"* ]] || { echo "the launcher skipped the Git on PATH: $output"; return 1; }
 }
 
+@test "codex hooks: on Windows a where/reg/findstr planted in the project folder never runs (security N1)" {
+    # QA round 9, security N1, HIGH. Codex runs every hook with the customer's project as the
+    # current folder, and cmd.exe looks in the current folder before PATH. The launcher called
+    # where, reg and findstr by bare name, so a where.bat committed to any repository the customer
+    # opened ran silently on every hook. QA reproduced it with a marker file.
+    #
+    # NoDefaultCurrentDirectoryInExePath is UNSET for this test on purpose: the Claude Code harness
+    # sets it, and a test that inherits it cannot see the hole it is meant to guard.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+
+    local root="$BATS_TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+
+    # The customer's project, carrying a planted copy of every tool the launcher names.
+    local project="$BATS_TEST_TMPDIR/customer project"
+    mkdir -p "$project"
+    local winproject; winproject="$(cygpath -w "$project")"
+    local tool ext
+    for tool in where reg findstr; do
+        for ext in bat cmd; do
+            printf '@echo off\r\necho planted> "%s\\PLANTED-%s.%s.ran"\r\n' "$winproject" "$tool" "$ext" > "$project/$tool.$ext"
+        done
+    done
+
+    # Control: the plant is live on this machine. Plain cmd, from that folder, with the variable
+    # unset, runs the planted where.bat. Without this the test below passes on a machine where
+    # the plant could never have fired.
+    (cd "$project" && env -u NoDefaultCurrentDirectoryInExePath cmd //d //c "where git.exe" >/dev/null 2>&1) || true
+    compgen -G "$project/PLANTED-where.*.ran" >/dev/null || skip "planted where did not run under plain cmd here, so this machine cannot show the hole"
+    rm -f "$project"/PLANTED-*.ran
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS")"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+
+    # Git off PATH as well, so the registry lookup (reg, findstr) runs too, not only where.
+    local sysroot; sysroot="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")"
+    local stock="$sysroot/System32:$sysroot:$sysroot/System32/WindowsPowerShell/v1.0"
+    cd "$project"
+    run env -u NoDefaultCurrentDirectoryInExePath PATH="$stock" powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    cd - >/dev/null
+
+    local ran="" f
+    for f in "$project"/PLANTED-*.ran; do [[ -e "$f" ]] && ran="${ran} ${f##*/}"; done
+    [[ -z "$ran" ]] || { echo "planted tools ran from the project folder: $ran"; return 1; }
+    [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "the launcher did not reach the handler: $output"; return 1; }
+}
+
 @test "codex hooks: every command uses Codex own PLUGIN_ROOT token, not the other product alias" {
     # ${PLUGIN_ROOT} is expanded by Codex itself, on every platform, and was measured working:
     # the same token emitter referenced this way delivered its payload 4 times.
