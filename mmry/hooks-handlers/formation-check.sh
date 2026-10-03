@@ -107,6 +107,9 @@ MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
 # hook runs after every tool call in every session, and its governing rule at the top of the file
 # is to fail open and SILENT. So the same question is asked here first and answered with exit 0.
 # shellcheck source=/dev/null
+# [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+# file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+[[ -f "${HANDLER_DIR}/lib-host.sh" ]] || exit 0
 source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
 mmry_host_assert_own_credential 2>/dev/null || exit 0
 

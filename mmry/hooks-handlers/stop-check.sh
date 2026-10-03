@@ -52,7 +52,9 @@ set -euo pipefail
 # always produced, not a dead hook.
 _mmry_sc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-if ! source "${_mmry_sc_dir}/lib-host.sh" 2>/dev/null; then
+# [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+# file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+if ! { [[ -f "${_mmry_sc_dir}/lib-host.sh" ]] && source "${_mmry_sc_dir}/lib-host.sh" 2>/dev/null; }; then
     mmry_host() { printf 'claude'; }
     mmry_host_label() { printf 'Claude Code'; }
     mmry_host_script_ref() { printf '${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' "$1"; }

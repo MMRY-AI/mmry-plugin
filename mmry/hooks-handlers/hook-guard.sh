@@ -39,7 +39,9 @@ fi
 _mmry_guard_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_mmry_guard_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_guard_dir="."
 # shellcheck source=/dev/null
-if source "${_mmry_guard_dir}/lib-host.sh" 2>/dev/null; then
+# [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+# file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+if [[ -f "${_mmry_guard_dir}/lib-host.sh" ]] && source "${_mmry_guard_dir}/lib-host.sh" 2>/dev/null; then
     # The resolved value is read from the variable rather than through $(mmry_host_state_dir),
     # because command substitution is a fork and this is the hottest path the plugin has
     # (#31245 QA round 4). _mmry_host_resolve is idempotent and costs no process; the accessor

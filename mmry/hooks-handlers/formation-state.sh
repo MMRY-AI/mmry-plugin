@@ -40,7 +40,9 @@ MMRY_TMPDIR="${TMPDIR:-/tmp}"
 # the fallback for that case only.
 _MMRY_STATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "${_MMRY_STATE_DIR}/lib-host.sh" 2>/dev/null || true
+# [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+# file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+[[ -f "${_MMRY_STATE_DIR}/lib-host.sh" ]] && { source "${_MMRY_STATE_DIR}/lib-host.sh" 2>/dev/null || true; }
 
 _state_file() {
     local sid="${1:-}"

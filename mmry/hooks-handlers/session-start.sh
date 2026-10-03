@@ -229,9 +229,14 @@ escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
 # silently dropped by the thing going wrong. The path beside it has been escaped since before
 # this ticket; the note never was.
 #
-# Escaped with the same three-step idiom used for $setup_msg above, in ONE place, so both emit
-# sites below are covered by construction rather than by remembering to do it twice.
-MMRY_HOOK_FAULT_NOTE="$(printf '%s' "$MMRY_HOOK_FAULT_NOTE" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+# Escaped in ONE place, so both emit sites below are covered by construction rather than by
+# remembering to do it twice. With _mmry_json_escape from mmry-client.sh, sourced above, and NOT
+# with sed (#31245 QA round 9): the first version joined lines with sed ':a;N;$!ba', which is GNU
+# sed only. BSD sed on macOS rejects it, prints a warning on every session start, and leaves the
+# newlines unescaped, so a multi-line note produced invalid JSON there and was discarded. That is
+# what failed tests 415, 663, 739 and 741 on the macOS CI leg. Parameter expansion behaves the same
+# on bash 3.2 and 5, with no external tool at all.
+MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
 
 # First-session onboarding: detect zero memories
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it

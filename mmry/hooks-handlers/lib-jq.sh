@@ -166,7 +166,9 @@ mmry_jq_unavailable_message() {
         # here, not at the top of the file: this library is pulled in by mmry-client.sh, which is
         # itself sourced by twenty-odd handlers, and this message is the only line in it that needs
         # to know the host. The guard keeps the previous literal if the resolver is unavailable.
-        if source "${BASH_SOURCE[0]%/*}/lib-host.sh" 2>/dev/null; then
+        # [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+        # file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+        if [[ -f "${BASH_SOURCE[0]%/*}/lib-host.sh" ]] && source "${BASH_SOURCE[0]%/*}/lib-host.sh" 2>/dev/null; then
             echo "  $(mmry_host_setup_hint)"
         else
             echo "  bash ~/.claude/mmry/setup/mmry-setup.sh"

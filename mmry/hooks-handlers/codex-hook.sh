@@ -67,6 +67,9 @@ PLUGIN_ROOT="$(cd "${HANDLER_DIR}/.." && pwd)" || exit 0
 export MMRY_HOST="codex"
 
 # shellcheck source=/dev/null
+# [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+# file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+[[ -f "${HANDLER_DIR}/lib-host.sh" ]] || exit 0
 source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
 
 # NO RESOLVABLE HOME MEANS NOTHING BELOW CAN WORK, SO STOP QUIETLY (#31245, 2026-09-20).

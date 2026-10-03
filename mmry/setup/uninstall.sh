@@ -32,7 +32,9 @@ if [[ -n "$_mmry_uninstall_libs" && -f "${_mmry_uninstall_libs}/lib-host.sh" ]];
     # the lifetime of the process - and is inherited by everything this script spawns - was itself a
     # QA finding (#31245 QA round 2).
     # shellcheck source=/dev/null
-    if source "${_mmry_uninstall_libs}/lib-host.sh" 2>/dev/null; then
+    # [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
+    # file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
+    if [[ -f "${_mmry_uninstall_libs}/lib-host.sh" ]] && source "${_mmry_uninstall_libs}/lib-host.sh" 2>/dev/null; then
         MMRY_UNINSTALL_HOST="$(mmry_host)"
     fi
 fi
