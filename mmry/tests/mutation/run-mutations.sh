@@ -269,8 +269,11 @@ desc_m13="#31583 checksum comparison dropped, leaving a length-only check"
 # Refuse the cache but tell only the assistant, not the customer. The directives are still
 # withheld correctly; the person who could rebuild the cache simply never hears. #31583
 # requirement 3 is explicit that the report has to reach "the person who can act on it".
+# REPOINTED (#31583 QA r5 tweaks). The refusal message moved inside an if/else, which re-indented
+# the line this anchored on, and the no-op guard aborted the run on it. Indentation is now matched
+# rather than assumed, and preserved, so the next re-indent cannot silence this mutation.
 mutate_m14() {
-    _sedi 's|^        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - \${REASON}.*|        USERMSG=""|' "$1/$HANDLER_REL"
+    _sedi 's|^\( *\)USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - \${REASON}.*|\1USERMSG=""|' "$1/$HANDLER_REL"
 }
 targets_m14="$HANDLER_TESTS"
 desc_m14="#31583 the refusal is reported to the assistant but never to the customer"
