@@ -139,3 +139,19 @@ setup() {
     [[ "$status" -eq 2 ]]
     [[ "$output" != *'You have skipped'* ]]
 }
+
+# --- #31245 QA (2026-09-22): Claude Code control for the marker-plus-save state ----------------
+
+@test "stop-check: on Claude Code a save recorded after an aged marker still blocks with the directive (#31245 TC4)" {
+    # The Codex prompt goes quiet when a save has landed since it last spoke. That rule was taken
+    # for Codex. On Claude Code master exits 2 and delivers the directive in this exact state, and
+    # until this test every Claude-side case started with no marker, so none of them reached the
+    # branch that changed it. The marker is aged with touch -t rather than touch -d, which BSD touch
+    # on macOS does not have.
+    touch -t 202001010000.00 "$TEST_TMPDIR/.mmry-stop-checked"
+    date +%s > "$TEST_TMPDIR/.mmry-last-save"
+    run env -u MMRY_HOST bash -c 'bash "'"$PLUGIN_ROOT"'/hooks-handlers/stop-check.sh" 2>&1 1>/dev/null'
+    [[ "$status" -eq 2 ]] || { echo "exit $status, expected 2: $output"; return 1; }
+    [[ "$output" == *'Save what is new since the last memory'* ]]
+    [[ "$output" == *'Your last save was under a minute ago'* ]]
+}

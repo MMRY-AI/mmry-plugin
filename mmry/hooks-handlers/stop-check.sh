@@ -40,7 +40,9 @@
 #        prompt is delivered as additionalContext with exit 0, and Eric's decision on 2026-09-20
 #        was that it must stay silent when there is nothing to save. So on Codex it fires at the
 #        START of the customer's next turn, gated on the save marker, and hooks/codex-hooks.json
-#        registers no Stop hook whatsoever. Claude Code is untouched: stderr plus exit 2, on Stop.
+#        registers no Stop hook whatsoever. On Claude Code the delivery is unchanged (stderr plus
+#        exit 2, on Stop), and so is WHEN it fires: the "a save already landed" silence below is
+#        gated to Codex, because on Claude Code it changed the master behaviour.
 
 set -euo pipefail
 
@@ -93,7 +95,14 @@ fi
 #
 # Compares the save sentinel against this hook's own marker rather than against the clock, so a
 # customer who saves once per hour is not nudged an hour later about work they already kept.
-if [[ -f "$MARKER" && -f "$LAST_SAVE" ]]; then
+#
+# CODEX ONLY (#31245 QA, 2026-09-22). The decision was taken for the Codex prompt, which arrives at
+# the start of the customer's next turn and is visible to them. On Claude Code this block changed
+# an existing behaviour: master exits 2 with the directive in this exact state (marker past the
+# debounce, a save recorded after it), and the branch went silent. Test case 4 says any change to
+# Claude Code behaviour is a defect in this task, so Claude Code keeps the master behaviour and
+# stop-check.bats pins it with a control that sets marker and save together.
+if [[ "$(mmry_host)" == "codex" && -f "$MARKER" && -f "$LAST_SAVE" ]]; then
     _sc_marker_at=$(_mmry_mtime "$MARKER")
     _sc_save_at=$(head -1 "$LAST_SAVE" 2>/dev/null | tr -d '[:space:]')
     if [[ "$_sc_save_at" =~ ^[0-9]+$ ]] && (( _sc_save_at >= _sc_marker_at )); then
