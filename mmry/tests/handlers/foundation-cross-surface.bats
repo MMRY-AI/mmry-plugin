@@ -328,3 +328,20 @@ _seed_big_cache() {
     [[ "$output" != *'entries=2'* ]]
     [[ "$output" == *'nothing yet in this session'* ]]
 }
+
+
+# #31583 QA round 5: on an upgraded copy the hook said "No action needed" while this command said
+# "run /mmry:load-memories to rebuild it". The two surfaces now say the same thing.
+@test "cross-surface: #31583 an upgraded copy gets the same answer from the hook and the command" {
+    printf '{"foundationReinject": true}\n' > "$CFG"
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    rm -f "${CACHE}.manifest"
+
+    run bash "$HOOK"
+    [[ "$output" == *'No action needed'* ]]
+
+    run bash "$STATUSCMD"
+    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]]
+    [[ "$output" == *'none needed'* ]]
+    [[ "$output" != *'run /mmry:load-memories to rebuild it'* ]]
+}

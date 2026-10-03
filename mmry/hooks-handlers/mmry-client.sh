@@ -208,9 +208,11 @@ _mmry_mtime() {
 # file was not empty, and four bytes is not empty.
 #
 # The cache lives in a shared temp directory under a fixed name. Anything on the machine can
-# write it, and the plugin had no way to tell its own output from somebody else's. That is
-# what the manifest fixes: the writer records what it wrote, and the reader refuses anything
-# that is not byte-for-byte that.
+# write it, and the plugin could not tell a sound copy from a damaged one. The manifest fixes
+# THAT: the writer records what it wrote, and the reader refuses a copy that is not byte-for-byte
+# what its record describes. It does not prove who wrote it. Both files are plain text in a
+# directory anything can write, so a program that rewrites both is accepted; the claim is mutual
+# consistency, not provenance (corrected after #31583 QA round 5, matching the README).
 #
 # WHAT IS RECORDED, and why each field earns its place:
 #   entries - the number of Foundation memories, counted by jq from the RESPONSE, not by

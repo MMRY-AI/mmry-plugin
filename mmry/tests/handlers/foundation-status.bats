@@ -52,13 +52,17 @@ manifest_now() {
     [ "$output" = "0" ]
 }
 
-@test "foundation-status: a cache with no manifest is reported as unverifiable" {
+# A cache with no manifest is what every earlier plugin version wrote, so since #31583 QA round 5
+# it is reported as an upgrade, matching what the hook tells the customer on the same turn,
+# rather than as damage with a rebuild to run. It is still NOT used.
+@test "foundation-status: a cache with no manifest is reported as from an earlier version, and not used" {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     rm -f "${CACHE}.manifest"
 
     run bash "$STATUS_CMD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'UNVERIFIABLE'* ]]
+    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]]
+    [[ "$output" == *'not used'* ]]
 }
 
 @test "foundation-status: an account with genuinely no Foundation memories is told nothing is withheld" {
@@ -145,11 +149,12 @@ manifest_now() {
 # customer still gets a refusal, and the label is just less useful. Nothing goes red.
 # ============================================================================
 
-@test "foundation-status: state no-manifest maps to PRESENT BUT UNVERIFIABLE" {
+@test "foundation-status: state no-manifest maps to FROM AN EARLIER PLUGIN VERSION" {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     rm -f "${CACHE}.manifest"
     run bash "$STATUS_CMD"
-    [[ "$output" == *'PRESENT BUT UNVERIFIABLE'* ]]
+    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]]
+    [[ "$output" != *'PRESENT BUT UNVERIFIABLE'* ]]
     run grep -c 'REFUSED -' <<<"$output"
     [ "$output" = "0" ]
 }

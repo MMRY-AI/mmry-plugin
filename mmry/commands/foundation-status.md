@@ -37,6 +37,13 @@ bash "$HOOK"
 Show the output to the user as-is. Do not summarise it away: the point of the command is the
 specific numbers.
 
-If it reports the stored copy as DAMAGED, MISSING or UNVERIFIABLE, tell the user to run
-`/mmry:load-memories`, and say plainly that until they do, their directives are not being
-applied.
+If it reports the stored copy as DAMAGED, MISSING, DISAPPEARED, INCONSISTENT, EMPTY OF TEXT or
+UNVERIFIABLE, tell the user to run `/mmry:load-memories`, and say plainly that until they do,
+their directives are not being applied.
+
+If it reports the copy as FROM AN EARLIER PLUGIN VERSION, that is the expected one-off effect of
+updating the plugin. Nothing is needed; it is fetched again automatically, normally by the next
+prompt.
+
+If it says the most recent prompt was NOT delivered, say so plainly: that prompt ran without the
+user's directives, even though the stored copy itself is sound.

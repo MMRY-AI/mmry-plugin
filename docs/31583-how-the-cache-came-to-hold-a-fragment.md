@@ -84,12 +84,12 @@ own and is fixed, but not how this particular content arrived.
 The ticket records that this hypothesis was tested and refused on the grounds that the suite
 writes to an isolated location. Two further pieces of evidence, neither conclusive:
 
-- The literal `- x` appears in three commits repo-wide as of 2026-09-21: 924071c, the test
-  written to reproduce the incident **after** it was filed, plus 41aa1bc and 2d66b2d, which
-  are this document and its evidence scripts. Scoped to `mmry/` it is one, which is the
-  figure this section originally quoted without saying it was scoped. Corrected after QA
-  re-ran it and got three. Nothing in the suite wrote that string before the incident, which
-  is the point that matters and is unchanged.
+- The literal `- x` appears in eight commits repo-wide as of 2026-10-02, six of them under
+  `mmry/` (`git log -S'- x'`). The count has been wrong twice: this section first quoted one,
+  scoped to `mmry/` without saying so, then three, and QA round 5 measured eight. Every one of
+  the eight cites #31583 in its message, so every one was written after the ticket the incident
+  produced was filed. Nothing in the repository wrote that string before the incident, which is
+  the point that matters and is unchanged.
 - `TMPDIR` has been overridden in `tests/helpers/test-helper.bash` since the rebrand commit
   702898c, long predating the incident, and HOME isolation that a suite cannot decline was
   added in b829385 on 2026-09-16, two days before.

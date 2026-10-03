@@ -85,10 +85,15 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
 # session whose fetch did not happen. A clear that only ran on success would leave the exact
 # case it exists for untouched.
 #
-# WHAT THIS DOES NOT FIX, stated rather than implied: the token is one file in a shared temp
-# directory, so two concurrent sessions overwrite each other's and the older one stops
-# recognising its own record. That turns a true disappearance into silence. It is the safer
-# direction of the two and it is the same per-TMPDIR limitation the cache itself carries.
+# WHAT THIS DOES NOT FIX, stated rather than implied, and CORRECTED (#31583 QA round 5): the
+# token is one file in a shared temp directory, so it means "the most recent SessionStart in this
+# temp directory", not "this session". Two concurrent sessions overwrite each other's token, and
+# that errs in BOTH directions. The older session stops recognising its own record, which turns a
+# true disappearance into silence. And a delivery by session A is stamped with session B's token,
+# so B can be told "Last sent: 1 second ago" having sent nothing; three reviewers reproduced that
+# one. An earlier version of this comment claimed only the first, safer direction could happen.
+# Real per-session scoping needs the per-prompt hook to know its own session id, which it does
+# not today; that is its own piece of work.
 printf '%s' "$SESSION_ID" > "${MMRY_TMPDIR}/mmry-foundation.session" 2>/dev/null || true
 rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
 

@@ -124,6 +124,16 @@ if (( _verdict != 0 )); then
         blank)                    _label="EMPTY OF TEXT" ;;
         *)                        _label="REFUSED" ;;
     esac
+    # THE UPGRADE STATE SAYS WHAT THE HOOK SAYS (#31583 QA round 5). A copy stored by an earlier
+    # plugin version carries no record to check it against. The hook tells the customer that is
+    # an update and needs no action; this command used to tell them to rebuild it. One answer.
+    if [[ "$_state" == "no-manifest" ]]; then
+        echo "Stored copy:  FROM AN EARLIER PLUGIN VERSION - it has no record to check it against,"
+        echo "              so it is not used. It is fetched again in the new format automatically,"
+        echo "              normally by the next prompt."
+        echo "Action:       none needed. If this persists after a few prompts, run /mmry:load-memories."
+        exit 0
+    fi
     echo "Stored copy:  ${_label} - ${_prose}."
     echo "              It is being REFUSED, not used."
     echo "Action:       run /mmry:load-memories to rebuild it."

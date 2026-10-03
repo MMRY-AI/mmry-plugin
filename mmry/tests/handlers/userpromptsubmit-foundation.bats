@@ -968,9 +968,17 @@ _plugin_with_working_refresh() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'upgrading the MMRY plugin'* ]]
-    [[ "$output" == *'next prompt will use it'* ]]
+    [[ "$output" == *'just updated the MMRY plugin'* ]]
+    [[ "$output" == *'Normally the next prompt has them'* ]]
     [[ "$output" == *'No action needed'* ]]
+    # The CUSTOMER's message leads with the reassurance and does not talk about caches or
+    # manifests (#31583 QA round 5). The assistant's note still carries the technical reason.
+    local msg
+    msg="$(printf '%s' "$output" | jq -r '.systemMessage')"
+    [[ "$msg" == 'MMRY AI: you have just updated'* ]]
+    [[ "$msg" != *cache* && "$msg" != *manifest* ]]
+    # And it no longer promises a fetch is under way, which is false offline or inside the window.
+    [[ "$msg" != *'already being fetched'* ]]
     # And it must NOT claim a comparison that never happened, nor prescribe a rebuild the
     # customer does not need to run.
     [[ "$output" != *'did not match the record'* ]]
@@ -987,7 +995,7 @@ _plugin_with_working_refresh() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'did not match the record'* ]]
     [[ "$output" == *'load-memories'* ]]
-    [[ "$output" != *'upgrading the MMRY plugin'* ]]
+    [[ "$output" != *'just updated the MMRY plugin'* ]]
 }
 
 
@@ -1037,4 +1045,17 @@ _plugin_with_working_refresh() {
     MMRY_FOUNDATION_WORKER=1 MMRY_FOUNDATION_PENDING="$pending" run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [ -e "$pending" ]
+}
+
+
+# #31583 QA round 5: the refusal sentence "did not match the record MMRY wrote" was used for
+# states where no record could be read and no comparison happened. bad-manifest is one.
+@test "userpromptsubmit-foundation: #31583 an unreadable record is not described as a failed comparison" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    printf 'garbage not a manifest\n' > "${CACHE}.manifest"
+
+    run bash "$HANDLER"
+    [[ "$output" == *'could not verify'* ]]
+    [[ "$output" == *'could not be read'* ]]
+    [[ "$output" != *'did not match the record'* ]]
 }

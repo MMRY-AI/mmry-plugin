@@ -57,8 +57,10 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 _FOUND_TMPDIR="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
 # KNOWN LIMITATION, stated rather than hidden: this marker is per-TMPDIR, not per-session,
 # exactly like the mmry-foundation.md cache it guards. Two Claude Code sessions sharing a
-# TMPDIR can therefore have one session report the other's cut-short turn. The report is
-# still true - directives were lost on some turn - but it may name the wrong one. Fixing it
+# TMPDIR can therefore have one session report the other's cut-short turn. CORRECTED (#31583 QA
+# round 5): this used to say such a report is "still true". It is not: two healthy sessions
+# started close together produced a false "not applied to the previous turn" in 5 of 6 pairs
+# measured, telling the assistant to distrust a turn that went fine. Fixing it
 # properly means session-scoping the whole Foundation cache, which is a bigger change than
 # this ticket and would be smuggled in here.
 _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight"
@@ -383,21 +385,38 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             no-manifest)
                 # Not damage. The manifest is what this release introduced, so every cache
                 # written by an earlier version looks like this once, and the rebuild started
-                # above clears it on the next prompt without the customer doing anything.
-                _WHY="This is the expected one-off effect of upgrading the MMRY plugin: directives stored by the previous version carry no record to check them against, so they cannot be trusted this turn. A fresh copy is already being fetched and the next prompt will use it."
-                _DO="No action needed. If you still see this after a few prompts, run /mmry:load-memories."
+                # above normally clears it by the next prompt without the customer doing anything.
+                # Led with the reassurance and without the words cache or manifest (#31583 QA r5).
+                # It no longer promises "a fresh copy is already being fetched": inside the
+                # rebuild window, or offline, that is not true.
+                _UPGRADE=1
                 ;;
             gone|missing)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy is no longer there to check, so nothing was sent rather than something unverified."
-                _DO="Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+                ;;
+            bad-manifest)
+                # No comparison happened here either, so the generic sentence below would be
+                # false for it (#31583 QA r5): the record could not be read at all.
+                _WHY="Nothing was truncated and nothing was guessed at; the record MMRY keeps to check your directives could not be read, so nothing could be checked and nothing was sent."
+                ;;
+            unreadable)
+                _WHY="Nothing was truncated and nothing was guessed at; the stored copy could not be read, so nothing was sent."
+                ;;
+            blank)
+                _WHY="Nothing was truncated and nothing was guessed at; the stored copy checks out but contains no readable text, so there was nothing to send."
                 ;;
             *)
+                # The states where a comparison really did happen and fail: size, contents,
+                # inconsistent. Only these get the sentence that says so.
                 _WHY="Nothing was truncated and nothing was guessed at; the local copy did not match the record MMRY wrote when it fetched them, so it was refused rather than used."
-                _DO="Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
                 ;;
         esac
         NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_DO}"
+        if (( ${_UPGRADE:-0} )); then
+            USERMSG="MMRY AI: you have just updated the MMRY plugin, so this one turn ran without your Foundation directives while they are fetched again in the new format. Normally the next prompt has them. No action needed; if you still see this after a few prompts, run /mmry:load-memories."
+        else
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+        fi
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
         _mmry_emit "$NOTICE" "$USERMSG"
