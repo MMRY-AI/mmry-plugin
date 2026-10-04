@@ -22,6 +22,7 @@
 #     reported no problem is a failed check reporting success.
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 HOOKS_FILE=""
 
@@ -47,18 +48,15 @@ _avg_ms() {
     echo $(( ( (finish - start + 1) * 1000 ) / runs ))
 }
 
-# Record the manifest for a hand-written Foundation cache (#31583).
+# Seal a hand-written Foundation set into the file the hook reads (#31583, #31597).
 #
-# The re-injection handler no longer trusts a cache merely for existing - it verifies the
-# bytes against what the writer recorded. A fixture written without one is refused, so a
-# budget test using it would be timing the REFUSAL path rather than the injection path and
-# would report a cost that has nothing to do with what a customer pays.
+# The re-injection handler no longer trusts a set merely for existing - it verifies the bytes
+# against the record the writer put on the set file's first line. A fixture without one is
+# refused, so a budget test using it would be timing the REFUSAL path rather than the injection
+# path and would report a cost that has nothing to do with what a customer pays. The fixture is
+# staged in the file named by $1 and sealed into mmry-foundation-set.md beside it.
 _manifest_for() {
-    local c="$1" s b n
-    read -r s b < <(cksum < "$c")
-    n="$(grep -c '^- ' "$c" 2>/dev/null || true)"
-    [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "$n" "$b" "$s" > "${c}.manifest"
+    fnd_seal "$1" "" "$(dirname "$1")/mmry-foundation-set.md"
 }
 
 _write_config() {

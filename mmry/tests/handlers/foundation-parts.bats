@@ -15,22 +15,21 @@
 # Windows jq adds when it writes text, never anything the set contained.
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    SET="$TEST_TMPDIR/mmry-foundation-set.md"
     # SessionStart writes this in every real session; see userpromptsubmit-foundation.bats.
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
     HEAD_ONE="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
 }
 
-# Record the manifest for whatever is in the cache, as the writer would.
+# Seal whatever is staged in $CACHE into the set file the hook reads, as the writer would (#31597).
 _seal() {
-    local s b n
-    read -r s b < <(cksum < "$CACHE")
-    n="$(grep -c '^- ' "$CACHE" || true)"
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "${n:-0}" "$b" "$s" > "${CACHE}.manifest"
+    fnd_seal "$CACHE" "" "$SET"
 }
 
 # A set of $1 numbered directives, 89 bytes each. awk, not yes: BSD yes prints "--".
@@ -177,7 +176,7 @@ _pointed() {
     snap="$(_pointed)"
     [ "$snap" -ef "$TEST_TMPDIR/mmry-foundation.byref.S1.md" ] || { echo "the assistant was pointed at [$snap], not this session's copy"; return 1; }
     [ -f "$snap" ] || { echo "no copy was made for this turn"; return 1; }
-    v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
+    v="$(fnd_set_record)"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
     # The closing line names this version of the set, and the assistant is told to reach it.
     [ "$(tail -n 1 "$snap")" = "END OF FOUNDATION SET $v" ] || { echo "last line: [$(tail -n 1 "$snap")]"; return 1; }
     [[ "$PART_TEXT" == *"Its last line is \"END OF FOUNDATION SET $v\""* ]] || { echo "the assistant is not told the closing line"; return 1; }
@@ -212,20 +211,20 @@ _pointed() {
     cmp -s "$TEST_TMPDIR/mmry-foundation.byref.SA.md" "$TEST_TMPDIR/sa-before" || { echo "session B rewrote session A's copy"; return 1; }
 }
 
-@test "parts: a set replaced while its copy is being made sends nothing, and says to re-send" {
+# #31597: the copy is written from the set this turn verified, so a set replaced at any moment after
+# the read cannot reach it, and there is no longer a copy that can fail to match. What can still fail
+# is the write itself, and then nothing is sent.
+@test "parts: #31597 a by-reference copy that cannot be written sends nothing, and says so" {
     _seed_lines 800
-    # A cp that copies something other than what was verified: the case of a new set landing between
-    # the check and the copy, made deterministic.
-    mkdir -p "$TEST_TMPDIR/shim"
-    # The shim takes its own directory off PATH first, or its cp would find itself and never return.
-    printf '%s\n' '#!/usr/bin/env bash' 'PATH="${PATH#*:}"' 'src="${@: -2:1}"; dst="${@: -1}"' 'cp "$src" "$dst" && printf "%s\n" "- Directive 9999: appended by the shim." >> "$dst"' > "$TEST_TMPDIR/shim/cp"
-    chmod +x "$TEST_TMPDIR/shim/cp"
-    PATH="$TEST_TMPDIR/shim:$PATH" _fire 1 S9
+    # A directory standing where the copy goes, so no file can be put there.
+    mkdir -p "$TEST_TMPDIR/mmry-foundation.byref.S9.md"
+    _fire 1 S9
     _ctx 1
-    [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "it pointed the assistant at a copy that did not match"; return 1; }
-    jq -e '.systemMessage | test("NOT applied") and test("Re-send the prompt")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "$(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
-    if jq -e '.systemMessage | test("load-memories")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "it prescribed a rebuild for a set that was only being replaced"; return 1; fi
-    [ ! -e "$TEST_TMPDIR/mmry-foundation.byref.S9.md" ] || { echo "a mismatched copy was left in place"; return 1; }
+    [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "it pointed the assistant at a copy that was never written"; return 1; }
+    jq -e '.systemMessage | test("NOT applied") and test("could not be written") and test("Re-send the prompt")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "$(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
+    if jq -e '.systemMessage | test("load-memories")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "it prescribed a rebuild for a set that verified"; return 1; fi
+    CLAUDE_CODE_SESSION_ID=S9 run bash "$STATUSCMD"
+    [[ "$output" == *"NOT on the most recent prompt - the copy prepared for your assistant to read could not be written"* ]] || { echo "$output"; return 1; }
 }
 
 @test "parts: the status says IN FULL in four parts only while all four arrived, and PARTLY when one did not" {
@@ -404,8 +403,11 @@ _assert_inline_whole() {
     _fire 2 S8
     _ctx 2
     [[ "$PART_TEXT" == *'PREVIOUS turn'* ]] || { echo "control: the cut-short note was not added"; return 1; }
-    local worst; worst="$(_units "$PART_TEXT")"
-    echo "part 2: ${plain} characters plain, ${worst} with the note" >&3
+    # The label carries the set's version, a checksum of up to ten digits (#31597). A shorter one
+    # here is padded in the arithmetic, so the margin holds for every version.
+    local v; v="$(_version)"
+    local worst; worst="$(( $(_units "$PART_TEXT") + 10 - ${#v} ))"
+    echo "part 2: ${plain} characters plain, ${worst} with the note and a ten-digit version" >&3
     (( plain >= 9500 )) || { echo "control: part 2 was not a full-size part ($plain)"; return 1; }
     (( worst < 10000 ))
 }
@@ -416,13 +418,13 @@ _assert_inline_whole() {
 # say IN FULL when a part did not arrive, or when the parts came from two versions.
 # ============================================================================
 
-_version() { local v; v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; printf '%s' "${v%%[!0-9]*}"; }
+_version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v%%[!0-9]*}"; }
 _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "$( (( $2 > 1 )) && printf '.%s' "$2")"; }
 
 @test "parts: #31583 R4 every part names the version of the set it was cut from, and so does its record" {
     _seed_lines 380
     local v; v="$(_version)"
-    [[ "$v" =~ ^[0-9]+$ ]] || { echo "no checksum in the manifest"; return 1; }
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "no checksum in the record: $(fnd_set_record)"; return 1; }
     _fire_all S6
     local k
     for k in 1 2 3 4; do

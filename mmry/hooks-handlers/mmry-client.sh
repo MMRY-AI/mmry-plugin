@@ -197,66 +197,80 @@ _mmry_mtime() {
     fi
 }
 
-# The manifest that makes the Foundation cache verifiable (#31583).
+# THE FOUNDATION SET IS ONE FILE: A RECORD LINE, THE SET, A TRAILER (#31597).
 #
-# WHY A MANIFEST AND NOT "IS THE FILE NON-EMPTY".
-#
-# On 2026-09-18 this cache held four bytes - the literal "- x" - while the account held
-# twelve Foundation directives. Every turn for roughly six hours was produced by an
-# assistant that had been handed that stub and told it was the account's authoritative
-# guidance. Nothing warned, because the ONLY precondition the reader checked was that the
-# file was not empty, and four bytes is not empty.
-#
-# The cache lives in a shared temp directory under a fixed name. Anything on the machine can
-# write it, and the plugin could not tell a sound copy from a damaged one. The manifest fixes
-# THAT: the writer records what it wrote, and the reader refuses a copy that is not byte-for-byte
-# what its record describes. It does not prove who wrote it. Both files are plain text in a
-# directory anything can write, so a program that rewrites both is accepted; the claim is mutual
+# WHY A RECORD AT ALL (#31583). On 2026-09-18 this cache held four bytes - the literal "- x" - while
+# the account held twelve Foundation directives. Every turn for roughly six hours was produced by an
+# assistant that had been handed that stub and told it was the account's authoritative guidance.
+# Nothing warned, because the only precondition the reader checked was that the file was not empty.
+# The writer now records what it wrote, and the reader refuses a copy that is not byte-for-byte what
+# its record describes. It does not prove who wrote it: the file is plain text in a directory
+# anything can write, so a program that rewrites record and set together is accepted. The claim is
 # consistency, not provenance (corrected after #31583 QA round 5, matching the README).
 #
+# WHY ONE FILE (#31597). The record used to be a second file, the manifest, beside the set. Each
+# landed by its own rename, so a reader between the two renames saw a new record against an old set
+# and refused a healthy one, and that turn ran with no directives and no warning that mattered: QA
+# measured 225 refusals in 2,808 reads during a refresh, 8 percent. Two files cannot be renamed as
+# one act. The record is now the first line of the same file, so one rename replaces both.
+#
+# ONE FILE IS NOT ENOUGH ON ITS OWN. A reader that opens the file more than once during one check
+# can still straddle a replacement, and an attempt measured 46 refusals in 177 reads for exactly that
+# reason. So the reader below takes ONE copy into memory and answers every question, and hands back
+# the set itself, from that copy. The per-prompt hook used to verify the file and then read it again
+# to deliver it, so a replacement between the two delivered bytes that had never been checked.
+#
+# A NEW NAME, mmry-foundation-set.md. Plugin 2.9.1 writes mmry-foundation.md with no record at all.
+# Sharing that name let a 2.9.1 session's daily refresh rewrite the file underneath this version's
+# record, which then refused it as damaged until its own next write. Each version keeps its own file
+# now, so they cannot interfere, and a file written by an earlier version is never read here.
+#
+# THE LAYOUT, exactly:
+#   mmry-foundation v2 entries=<n> bytes=<b> cksum=<c>\n
+#   <the set: b bytes, POSIX cksum c, one "- topic: content" line per memory>
+#   END OF FOUNDATION SET                       (no newline after it)
+# The trailer exists because the single read uses $(<file), which drops trailing newlines; with the
+# trailer last, no byte the check needs is ever at the end.
+#
 # WHAT IS RECORDED, and why each field earns its place:
-#   entries - the number of Foundation memories, counted by jq from the RESPONSE, not by
-#             grepping the file. Content can itself contain lines beginning "- ", so a line
-#             count is not a memory count: measured on the account above, the file holds 15
-#             such lines for 12 memories.
-#   bytes   - the exact byte length of the file as written.
-#   cksum   - POSIX cksum of the file's bytes. Length alone is not validity: a same-length
+#   entries - the number of Foundation memories, counted by jq from the RESPONSE, not by grepping
+#             the file. Content can itself contain lines beginning "- ", so a line count is not a
+#             memory count: measured on the account above, 15 such lines for 12 memories.
+#   bytes   - the exact byte length of the set.
+#   cksum   - POSIX cksum of the set's bytes. Length alone is not validity: a same-length
 #             substitution passes a byte count and fails a customer.
 #
-# COST, measured rather than assumed. The reader spends ONE process to verify, because
-# cksum prints its checksum AND its byte count from a single invocation, so both fields are
-# checked for the price of one. On this Windows Git Bash host, n=10 over the real 6,279-byte
-# cache: cksum 281 ms, sha256sum 116 ms, shasum 295 ms, md5sum 430 ms, and $(<file) 3 ms.
-# cksum is the slower of the portable options and is chosen anyway because it is POSIX and
-# present everywhere this plugin runs - sha256sum is absent on macOS. 281 ms sits against
-# the handler's self-imposed 10 s deadline and its 20 s registered budget (#31434).
-mmry_foundation_manifest_path() {
-    # Usage: mmry_foundation_manifest_path <cache-file>
-    printf '%s' "${1}.manifest"
+# COST, measured. One process to verify: cksum over the set held in memory. cksum is POSIX and
+# present everywhere this plugin runs; sha256sum is absent on macOS.
+MMRY_FND_TRAILER='END OF FOUNDATION SET'
+
+mmry_foundation_set_path() {
+    # Usage: mmry_foundation_set_path [dir]
+    printf '%s/mmry-foundation-set.md' "${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
 }
 
 # ONE verification, used by BOTH readers (#31583 QA round one).
 #
-# The manifest regex, the entries=0 check and the checksum comparison were implemented twice
-# verbatim: once in userpromptsubmit-foundation.sh and once in foundation-status.sh. That
-# duplication produced two customer-facing contradictions in two rounds. First a manifest
-# reading entries=0 beside a full cache, which the hook refused and the status command called
-# "VALID and EMPTY, nothing is being withheld". Then a cache that verifies but holds only
-# whitespace, which the hook refuses and the status command called "VERIFIED, 2 directives,
-# Delivered: IN FULL". In both cases the customer asking the question was told the opposite of
-# what was happening.
+# The record regex, the entries=0 check and the checksum comparison were once implemented twice
+# verbatim, in userpromptsubmit-foundation.sh and foundation-status.sh, and the duplication produced
+# two customer-facing contradictions in two rounds. There is one routine, and both callers format
+# their own words from its verdict.
 #
-# Patching the second branch into the copy would leave the third to be found later. So there
-# is one routine now and both callers format their own words from its verdict.
-#
-# CONTRACT. Echoes a single line and returns:
-#   0  "ok <entries> <bytes> <cksum>"  verified, deliver it; the cksum names this version of the set
-#   1  "absent" or "empty"           nothing to deliver and nothing wrong, say nothing
-#   3  "<state>|<customer prose>"    refuse
+# CONTRACT (#31597). mmry_read_foundation_set reads the file ONCE and sets three globals:
+#   MMRY_FND_VERDICT  one line:
+#                       "ok <entries> <bytes> <cksum>"  rc 0, verified, deliver it; the cksum
+#                                                       names this version of the set
+#                       "absent" or "empty"             rc 1, nothing to deliver, nothing wrong
+#                       "<state>|<customer prose>"      rc 3, refuse
+#   MMRY_FND_SET      on rc 0 only: the verified set, trailing newlines removed as $(<file) would
+#   MMRY_FND_SETID    on rc 0 only: the set's checksum, which names this version of the set
+# Call it directly, never inside $( ): a command substitution is a subshell, and the set would be
+# lost with it. mmry_verify_foundation_cache is the same check for a caller that needs only the
+# verdict, and keeps the echo-and-return contract it always had.
 #
 # The STATE token on a refusal exists so a caller can label the condition without matching on
-# prose. foundation-status.sh prints a one-word state to the customer, and matching that out
-# of a sentence would break the moment the sentence was reworded.
+# prose. foundation-status.sh prints a one-word state to the customer, and matching that out of a
+# sentence would break the moment the sentence was reworded.
 #
 # Exit code 2 is not used, so a caller cannot confuse "refused" with a shell error.
 # WHOSE SESSION DOES THIS TEMP DIRECTORY BELONG TO (#31583 QA round 4, finding 4c).
@@ -344,161 +358,217 @@ mmry_foundation_delivery_detail() {
     printf '%s' "${line#* }"
 }
 
-mmry_verify_foundation_cache() {
+# A SET WAS STORED FOR THIS SESSION (#31597).
+#
+# With two files, a set deleted after it was written left its manifest behind, and the manifest was
+# the evidence that something was missing: the customer was told "the manifest records N Foundation
+# directives but the cache holding them is missing", on the next prompt, whether or not the set had
+# been delivered yet. With the record inside the set file, deleting the file deletes the evidence,
+# and a set removed before its first delivery in a session would have been silent. So SessionStart
+# leaves this marker after it stores a set, holding the number of directives, and a missing set is
+# reported in the words it always was. It is named by the session, like the delivery record, so a
+# marker left by another session never makes this one claim a loss.
+mmry_foundation_stored_path() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" key
+    key="$(mmry_foundation_session_key "$dir" "${2:-}")" || return 1
+    [[ -n "$key" ]] || return 1
+    printf '%s/mmry-foundation.stored.%s' "$dir" "$key"
+}
+
+# Usage: mmry_foundation_mark_stored <dir> <sid> <entries>
+mmry_foundation_mark_stored() {
+    local p
+    p="$(mmry_foundation_stored_path "$1" "$2")" || return 1
+    [[ "$3" =~ ^[0-9]+$ ]] || return 1
+    printf '%s' "$3" > "$p" 2>/dev/null
+}
+
+# Echoes the number of directives stored for this session and returns 0, or returns 1 when no set
+# was stored for it. Only digits are believed: the marker sits in a shared temp directory.
+mmry_foundation_stored_entries() {
+    local p n=""
+    p="$(mmry_foundation_stored_path "$1" "$2")" || return 1
+    [[ -f "$p" && -r "$p" ]] || return 1
+    n="$(<"$p")" 2>/dev/null || return 1
+    [[ "$n" =~ ^[0-9]{1,9}$ ]] || return 1
+    printf '%s' "$n"
+}
+
+mmry_read_foundation_set() {
+    # Usage: mmry_read_foundation_set <set-file>     (call directly, never inside $( ))
+    # Sets MMRY_FND_VERDICT and, on success, MMRY_FND_SET. See the contract above.
     local cache="$1"
-    local manifest="${cache}.manifest"
+    MMRY_FND_VERDICT=""
+    MMRY_FND_SET=""
+    MMRY_FND_SETID=""
 
-    if [[ ! -r "$manifest" ]]; then
-        if [[ -e "$cache" ]]; then
-            printf 'no-manifest|the cache file exists but has no manifest, so it cannot be shown to be the account'"'"'s own directives'
-            return 3
+    # THE ONE READ (#31597). Every answer below comes from this copy and nothing reopens the file,
+    # so a replacement that lands while this runs either happened before the read, and the new set
+    # is checked whole, or after it, and the old set is checked whole. $(<file) rather than
+    # read -d '': measured on this Windows host, read -d '' took 2,226 ms on a 1 MB set because it
+    # reads a byte at a time, and $(<file) took 58 ms. $(<file) drops trailing newlines, which is
+    # why the writer ends the file with a trailer line: nothing the check needs comes last.
+    #
+    # AN OPEN THAT FAILS DURING A REPLACEMENT IS RETRIED (#31597, measured on Windows). Git Bash
+    # replaces a file by rename, and an open that lands inside that rename can fail with "No such
+    # file or directory" even though the file is never absent to an existence test: 1 failed read in
+    # 3,000 against a file being renamed over continuously, 0 of 3,000 existence tests failing. A
+    # failed open is therefore tried again before it means anything. The retry rereads the WHOLE
+    # file, so it is still one copy that every answer below comes from. A file that is really
+    # absent costs three existence tests and no process. Regular files only: a FIFO put in its
+    # place blocked the read, and every prompt with it, until the deadline (#31583 QA round 5).
+    local raw="" _try _got=0
+    for _try in 1 2 3; do
+        if [[ -f "$cache" && -r "$cache" ]] && raw="$(<"$cache")" 2>/dev/null; then
+            _got=1
+            break
         fi
-        printf 'absent'
-        return 1
-    fi
-
-    local man exp_entries exp_bytes exp_cksum
-    man="$(<"$manifest")" 2>/dev/null || man=""
-    if [[ "$man" =~ ^mmry-foundation[[:space:]]+v1[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)[[:space:]]+cksum=([0-9]+) ]]; then
-        exp_entries="${BASH_REMATCH[1]}"; exp_bytes="${BASH_REMATCH[2]}"; exp_cksum="${BASH_REMATCH[3]}"
-    else
-        printf 'bad-manifest|the manifest describing the cached directives is unreadable, so they cannot be shown to be the account'"'"'s own'
+    done
+    if (( _got == 0 )); then
+        if [[ ! -e "$cache" ]]; then
+            MMRY_FND_VERDICT="absent"
+            return 1
+        fi
+        MMRY_FND_VERDICT='unreadable|the cached directives could not be read for verification'
         return 3
     fi
 
-    # A genuinely empty set is valid, and an entries=0 claim is still a claim about the file.
+    # Bytes, not characters, from here on: the record counts bytes, and byte-wise pattern work
+    # avoids the multibyte rescans that cost seconds on large sets (#31411 QA, performance).
+    local LC_ALL=C
+    local re='^mmry-foundation v2 entries=([0-9]+) bytes=([0-9]+) cksum=([0-9]+)$'
+    local header="${raw%%$'\n'*}" body="" exp_entries exp_bytes exp_cksum
+    # THE RECORD IS THE FIRST LINE, AND ITS ABSENCE IS A REFUSAL. The state token and the words
+    # are the ones the separate manifest file had, because to the customer it is the same fault:
+    # what was stored cannot be shown to be the account's own. A file of plain directives with no
+    # record - the four-byte "- x" stub of 2026-09-18 - lands here.
+    if [[ "$header" == "$raw" || ! "$header" =~ $re ]]; then
+        MMRY_FND_VERDICT='bad-manifest|the manifest describing the cached directives is unreadable, so they cannot be shown to be the account'"'"'s own'
+        return 3
+    fi
+    exp_entries="${BASH_REMATCH[1]}"; exp_bytes="${BASH_REMATCH[2]}"; exp_cksum="${BASH_REMATCH[3]}"
+    body="${raw#*$'\n'}"
+    # The trailer is removed when it is there. When it is not, the body is left as read and the
+    # byte count below decides: a set cut short loses its trailer and fails on length.
+    [[ "$body" == *"$MMRY_FND_TRAILER" ]] && body="${body%"$MMRY_FND_TRAILER"}"
+
+    # A genuinely empty set is valid, and an entries=0 claim is still a claim about the set.
     if (( exp_entries == 0 )); then
-        if [[ -s "$cache" ]]; then
-            printf 'inconsistent|the manifest records no directives at all, but the cached file holds directives, so the two do not describe the same set'
+        if [[ -n "$body" ]]; then
+            MMRY_FND_VERDICT='inconsistent|the manifest records no directives at all, but the cached file holds directives, so the two do not describe the same set'
             return 3
         fi
-        printf 'empty'
+        MMRY_FND_VERDICT="empty"
         return 1
     fi
 
-    if [[ ! -r "$cache" ]]; then
-        printf 'missing|the manifest records %s Foundation directives but the cache holding them is missing' "$exp_entries"
+    local act_bytes=${#body}
+    if [[ "$act_bytes" != "$exp_bytes" ]]; then
+        MMRY_FND_VERDICT="$(printf 'size|the cached directives are %s bytes but the manifest records %s, so the file is not the set that was stored' "$act_bytes" "$exp_bytes")"
         return 3
     fi
 
-    local act_cksum act_bytes
-    read -r act_cksum act_bytes < <(cksum < "$cache" 2>/dev/null)
-    if [[ ! "$act_cksum" =~ ^[0-9]+$ || ! "$act_bytes" =~ ^[0-9]+$ ]]; then
-        printf 'unreadable|the cached directives could not be read for verification'
-        return 3
-    fi
-    if [[ "$act_bytes" != "$exp_bytes" ]]; then
-        printf 'size|the cached directives are %s bytes but the manifest records %s, so the file is not the set that was stored' "$act_bytes" "$exp_bytes"
+    local act_cksum act_count
+    read -r act_cksum act_count < <(printf '%s' "$body" | cksum 2>/dev/null)
+    if [[ ! "$act_cksum" =~ ^[0-9]+$ ]]; then
+        MMRY_FND_VERDICT='unreadable|the cached directives could not be read for verification'
         return 3
     fi
     if [[ "$act_cksum" != "$exp_cksum" ]]; then
-        printf 'contents|the cached directives are the right length but their contents do not match the stored set'
+        MMRY_FND_VERDICT='contents|the cached directives are the right length but their contents do not match the stored set'
         return 3
     fi
 
-    # Verified bytes that are nothing but whitespace. The manifest agrees with the file and the
-    # file says nothing, so injecting it would frame a blank as the account's guidance. The
-    # status command missed this branch for a whole round and told customers IN FULL.
-    local content
-    content="$(<"$cache")"
-    # A SEARCH FOR ONE CHARACTER, NOT A REWRITE OF THE WHOLE SET (#31411 QA, performance).
-    # This was `[[ -z "${content//[[:space:]]/}" ]]`, which builds a second copy of the entire
-    # set with every space removed just to ask whether anything is left. Bash does that by
-    # rescanning, so the cost is superlinear: measured at 8,306 ms on 400 KB, and there were two
-    # copies of it on the per-prompt path. The regex stops at the first non-space character and
-    # took 53 ms on the same input; on any real set that character is near the very start.
-    if [[ ! "$content" =~ [^[:space:]] ]]; then
-        printf 'blank|the cached directives verified but contain no readable text'
+    # Verified bytes that are nothing but whitespace. The record agrees with the set and the set
+    # says nothing, so injecting it would frame a blank as the account's guidance. A search for one
+    # character, not a rewrite of the whole set (#31411 QA, performance).
+    if [[ ! "$body" =~ [^[:space:]] ]]; then
+        MMRY_FND_VERDICT='blank|the cached directives verified but contain no readable text'
         return 3
     fi
 
-    printf 'ok %s %s %s' "$exp_entries" "$act_bytes" "$act_cksum"
+    # Delivered exactly as $(<file) delivered the old cache: trailing newlines removed, nothing
+    # else touched. The account page's set-size count relies on that (5 characters of framing per
+    # memory, less the final newline).
+    while [[ "$body" == *$'\n' ]]; do body="${body%$'\n'}"; done
+    MMRY_FND_SET="$body"
+    MMRY_FND_SETID="$exp_cksum"
+    # The checksum is the verdict's fourth field (#31411 QA round 2): the hook names the set's
+    # version in every part and record, and the by-reference copy is checked against it.
+    MMRY_FND_VERDICT="ok ${exp_entries} ${act_bytes} ${exp_cksum}"
     return 0
 }
 
+# The same check for a caller that needs only the verdict, with the contract it always had: echo
+# the verdict line, return 0, 1 or 3. foundation-status.sh uses this.
+mmry_verify_foundation_cache() {
+    mmry_read_foundation_set "$1"
+    local rc=$?
+    printf '%s' "$MMRY_FND_VERDICT"
+    return "$rc"
+}
+
 mmry_write_foundation_cache() {
-    # Usage: mmry_write_foundation_cache <response-json> <cache-file>
-    # Writes Foundation-tier memories (topic + content) to the cache, plus the manifest the
-    # UserPromptSubmit reader verifies it against. The hook applies framing at inject time,
-    # so this holds just the data.
+    # Usage: mmry_write_foundation_cache <response-json> <set-file>
+    # Writes the Foundation-tier memories (topic + content) as ONE file: the record line, the set,
+    # the trailer. The hook applies framing at inject time, so the set holds just the data.
     #
-    # Returns 0 only when both the cache and its manifest were written. On any failure the
-    # EXISTING cache and manifest are left exactly as they were.
+    # Returns 0 only when the new file is in place. On any failure the EXISTING file is left
+    # exactly as it was.
     local resp="$1" cache="$2"
-    local manifest tmp entries sum count
-    manifest="$(mmry_foundation_manifest_path "$cache")"
+    local body tmp entries sum count
 
     [[ -n "${MMRY_JQ:-}" ]] || return 1
 
-    # WRITE TO A TEMPORARY FILE, NEVER STRAIGHT TO THE CACHE.
+    # WRITE TO TEMPORARY FILES, NEVER STRAIGHT TO THE SET (#31583). A redirect at the final name
+    # truncates the customer's good set before jq has said whether it has anything to put there.
     #
-    # The previous form was: printf ... | jq ... > "$cache" 2>/dev/null || true
-    # A shell sets up the redirect BEFORE it runs the command, so that line truncated the
-    # customer's good cache to zero the instant it started, and only then asked jq whether it
-    # had anything to put there. A jq that errored, or was killed, or produced nothing left
-    # the account with no directives, and the trailing || true ensured nobody heard about it.
+    # NUL BYTES ARE DROPPED HERE (#31597). A memory holding \u0000 would put a NUL in the file,
+    # bash cannot hold one in a variable, and the single read would then come up short and refuse
+    # that account's set on every prompt. The old reader dropped NULs too, at delivery, so the
+    # assistant receives exactly what it did before.
+    body="${cache}.body.$$"
     tmp="${cache}.new.$$"
-    if ! printf '%s' "$resp"         | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"'         > "$tmp" 2>/dev/null
+
+    # NO CARRIAGE RETURNS THAT THE SERVICE DID NOT SEND (#31597). A native Windows jq writes in text
+    # mode, so every newline it prints - the one after each memory and every one inside a memory -
+    # arrived in the stored set as CR LF, and the assistant was handed characters the account never
+    # wrote. jq's -b switches that off, but jq 1.6 and earlier on other platforms do not all accept
+    # it, so it is used only when this jq is seen to convert: one probe, here, where the set is
+    # written, never on the per-prompt path.
+    local jqb="" probe
+    probe="$(printf '%s' '"x\ny"' | "$MMRY_JQ" -j . 2>/dev/null)"
+    [[ "$probe" == *$'\r'* ]] && jqb="-b"
+
+    if ! printf '%s' "$resp" \
+        | "$MMRY_JQ" ${jqb:+"$jqb"} -r '[.[] | select(.memoryTier == "Foundation")] | .[] | ("- \(.topic): \(.content)" | explode | map(select(. != 0)) | implode)' \
+        > "$body" 2>/dev/null
     then
-        rm -f "$tmp" 2>/dev/null
+        rm -f "$body" 2>/dev/null
         return 1
     fi
 
-    # Count from the response, not from the file. See the note above.
-    entries="$(printf '%s' "$resp"         | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | length' 2>/dev/null)"
-    [[ "$entries" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
+    # Count from the response, not from the file: content can itself hold lines beginning "- ".
+    entries="$(printf '%s' "$resp" | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | length' 2>/dev/null)"
+    [[ "$entries" =~ ^[0-9]+$ ]] || { rm -f "$body" 2>/dev/null; return 1; }
 
-    read -r sum count < <(cksum < "$tmp" 2>/dev/null)
-    [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
+    read -r sum count < <(cksum < "$body" 2>/dev/null)
+    [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$body" 2>/dev/null; return 1; }
 
-    # ORDER MATTERS AND IT FAILS CLOSED. The manifest is written FIRST and the cache is moved
-    # into place second. If the process dies between the two, the manifest describes bytes
-    # that are not there yet, the reader's check fails, and the customer is TOLD. The other
-    # order would leave a new cache described by a stale manifest - also refused, but that
-    # way a CORRECT cache gets rejected, which is the worse of the two failures to choose.
-    # BOTH FILES LAND BY ATOMIC RENAME, AND BOTH TEMPS ARE PID-SCOPED (#31583 QA).
-    #
-    # The manifest used to be written by redirecting straight at its final, fixed name. Two
-    # consequences, both reported by QA:
-    #
-    #   A reader arriving mid-write saw a partially written manifest. It is one short line so
-    #   the window is small, but it is not zero, and a torn manifest is refused.
-    #
-    #   Worse, the cache temp was PID-scoped and the manifest name was not, so two sessions
-    #   sharing a temp directory could interleave into a permanently inconsistent pair: one
-    #   session's manifest describing another session's cache. Nothing repairs that until the
-    #   next successful write.
-    #
-    # Renaming both from PID-scoped temps makes each file's arrival atomic and stops two
-    # writers clobbering a shared filename MID-WRITE. That is all it does, and an earlier
-    # version of this comment implied more (#31583 QA round 4, architecture). It does NOT stop
-    # two writers interleaving the PAIR: each file still lands by its own rename, so writer A
-    # renaming its manifest, writer B renaming both, then A renaming its cache leaves A's cache
-    # beside B's manifest, which stays inconsistent until the next successful write. That
-    # follows from the order of the four renames rather than from a reproduction; it is the
-    # same two-file gap described below, seen from the writer's side instead of the reader's.
-    #
-    # WHAT THIS DOES NOT FIX, stated rather than implied. There are still TWO files and they
-    # arrive one after the other, so a reader in the gap sees a new manifest against an old
-    # cache and refuses a set that is in fact healthy. QA measured that at 225 of 2,808 reads,
-    # 8 percent, on a live refresh loop. I could not reproduce it myself: both attempts were
-    # timing-fragile and neither contradicts their measurement. This is #31597, scheduled in
-    # the same release. ONE file published by a single rename is necessary and is NOT
-    # sufficient: an attempt here measured 46 refusals in 177 reads, worse than today, because
-    # the reader opened that one file three times during a single check. Reading it once into
-    # memory and answering every question from that copy took it to 0 in 290. Ordering the two
-    # renames differently does not help; it only moves which side of the pair is stale.
-    local mtmp="${manifest}.new.$$"
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s
-'         "$entries" "$count" "$sum" > "$mtmp" 2>/dev/null || {
-            rm -f "$tmp" "$mtmp" 2>/dev/null; return 1; }
+    if ! { printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$entries" "$count" "$sum" \
+           && cat "$body" \
+           && printf '%s' "$MMRY_FND_TRAILER"; } > "$tmp" 2>/dev/null
+    then
+        rm -f "$tmp" "$body" 2>/dev/null
+        return 1
+    fi
+    rm -f "$body" 2>/dev/null
 
-    # Manifest first, as before: if the process dies between the two, the manifest describes
-    # bytes that are not there, the reader refuses and the customer is TOLD. The other order
-    # leaves a correct cache under a stale manifest, which is refused just as loudly but is
-    # the worse of the two to choose deliberately.
-    mv -f "$mtmp" "$manifest" 2>/dev/null || { rm -f "$tmp" "$mtmp" 2>/dev/null; return 1; }
+    # ONE RENAME REPLACES THE RECORD AND THE SET TOGETHER (#31597). The temp name is PID-scoped, so
+    # two writers never share a half-written file, and whichever rename lands last wins whole. There
+    # is no second file to arrive late.
     mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+    MMRY_FND_WRITTEN_ENTRIES="$entries"
     return 0
 }
 

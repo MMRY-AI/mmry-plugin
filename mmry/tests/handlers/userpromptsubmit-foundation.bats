@@ -4,10 +4,12 @@
 # authoritative. It must NEVER block a prompt: any problem -> emit nothing, exit 0.
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    SET="$TEST_TMPDIR/mmry-foundation-set.md"
     # Every real session has one of these: SessionStart writes the session id here and clears
     # the delivery record beside it (#31583 QA round 4, finding 4c). Without it the handler
     # cannot tell its own delivery record from one an earlier session left in a shared temp
@@ -16,25 +18,22 @@ setup() {
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
 }
 
-# Write the manifest that describes whatever is currently in the cache (#31583).
+# Seal whatever is staged in $CACHE into the set file the hook reads (#31583, #31597).
 #
-# The handler no longer believes a cache just because it is not empty - it verifies the
-# bytes against what the writer recorded. Tests that put a cache in place by hand therefore
-# have to record it too, exactly as mmry_write_foundation_cache would, or they are testing
-# the refusal path by accident.
+# The handler no longer believes a set just because it is not empty - it verifies the bytes
+# against the record the writer put on the set file's first line. Tests that put a set in place by
+# hand therefore stage the directives in $CACHE and seal them, exactly as mmry_write_foundation_cache
+# would, or they are testing the refusal path by accident.
+#
+# $CACHE keeps the name plugin 2.9.1 writes, mmry-foundation.md, and since #31597 the hook never
+# reads that name: every test here therefore also shows that a 2.9.1 file sitting beside the set is
+# ignored. A test that means to damage what the hook reads acts on $SET, after sealing.
 #
 # Entry count defaults to the number of lines beginning "- ". That is good enough for
 # fixtures; the production writer counts from the API response instead, because memory
 # CONTENT can also contain such lines.
 manifest_now() {
-    local c="${1:-$CACHE}" n="${2:-}" s b
-    read -r s b < <(cksum < "$c")
-    if [[ -z "$n" ]]; then
-        n="$(grep -c '^- ' "$c" 2>/dev/null || true)"
-        [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    fi
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s
-' "$n" "$b" "$s" > "${c}.manifest"
+    fnd_seal "${1:-$CACHE}" "${2:-}" "$SET"
 }
 
 @test "userpromptsubmit-foundation: reinjects cached Foundation memories inline with authoritative framing" {
@@ -75,7 +74,9 @@ manifest_now() {
 @test "userpromptsubmit-foundation: a stale cache triggers a gated background refresh (lock created)" {
     printf -- '- Foundation fact.\n' > "$CACHE"
     manifest_now
-    touch -t 202001010000 "$CACHE"   # force the cache to look stale
+    # The file the hook reads and ages is the set file, not the staged copy (#31597). Touching the
+    # staged copy left the set file new, so this passed only when a second happened to elapse.
+    touch -t 202001010000 "$SET"   # force the set to look stale
     export MMRY_FOUNDATION_REFRESH_SECONDS=1
     export MMRY_API_KEY="test-key"
     run bash "$HANDLER"
@@ -234,9 +235,9 @@ _big_foundation_set() {
 @test "userpromptsubmit-foundation: #31583 TC1 a four-byte stub is refused, reported, and never presented as guidance" {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
     manifest_now
-    # The exact observed failure, byte for byte.
-    printf -- '- x\n' > "$CACHE"
-    [ "$(wc -c < "$CACHE")" -eq 4 ]
+    # The exact observed failure, byte for byte, in the file the hook reads (#31597).
+    printf -- '- x\n' > "$SET"
+    [ "$(wc -c < "$SET" | tr -d ' ')" -eq 4 ]
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]                      # never blocks the prompt
@@ -249,11 +250,12 @@ _big_foundation_set() {
 @test "userpromptsubmit-foundation: #31583 TC2 the right size with the wrong content is refused" {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
     manifest_now
-    local n
-    n="$(wc -c < "$CACHE")"
-    # Same byte count, different bytes. A check that only measured length would pass this.
-    head -c "$n" /dev/zero | tr '\0' 'z' > "$CACHE"
-    [ "$(wc -c < "$CACHE")" -eq "$n" ]
+    local n rec
+    n="$(wc -c < "$CACHE" | tr -d ' ')"
+    rec="$(fnd_set_record)"
+    # Same record, same byte count, different bytes. A check that only measured length would pass.
+    fnd_set_with "$rec" "$(head -c "$n" /dev/zero | tr '\0' 'z')"
+    [ "$(fnd_set_body | wc -c | tr -d ' ')" -eq "$n" ]
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -265,11 +267,16 @@ _big_foundation_set() {
 @test "userpromptsubmit-foundation: #31583 TC3 a removed cache behaves exactly as a damaged one" {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now
-    rm -f "$CACHE"
+    # What SessionStart leaves once it has stored a set (#31597): the evidence that one existed.
+    # With the record inside the set file, deleting the file deletes the record too, so without
+    # this a set removed before its first delivery would be silent.
+    bash -c 'source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1; mmry_foundation_mark_stored "$2" "" 1' _ "$PLUGIN_ROOT" "$TEST_TMPDIR"
+    rm -f "$SET"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'could not verify'* ]] || return 1
+    [[ "$output" == *'the cache holding them is missing'* ]] || return 1
     [[ "$output" == *'systemMessage'* ]]
 }
 
@@ -296,9 +303,9 @@ _big_foundation_set() {
     [[ "$output" == *'entries=21'* ]]
 }
 
-@test "userpromptsubmit-foundation: #31583 a cache with no manifest cannot be shown to be the account's own, so it is refused" {
-    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
-    rm -f "${CACHE}.manifest"
+@test "userpromptsubmit-foundation: #31597 a set file with no record line cannot be shown to be the account's own, so it is refused" {
+    # Plain directives where the set file should be, the shape of the 2026-09-18 stub.
+    printf -- '- Identity: Eric builds MMRY.\n' > "$SET"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -306,9 +313,8 @@ _big_foundation_set() {
     [[ "$output" != *'Eric builds MMRY'* ]]
 }
 
-@test "userpromptsubmit-foundation: #31583 a manifest that is present but malformed is refused, not ignored" {
-    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
-    printf 'garbage not a manifest\n' > "${CACHE}.manifest"
+@test "userpromptsubmit-foundation: #31583 a record that is present but malformed is refused, not ignored" {
+    fnd_set_with 'mmry-foundation v2 garbage not a record' $'- Identity: Eric builds MMRY.\n'
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -318,7 +324,7 @@ _big_foundation_set() {
 
 @test "userpromptsubmit-foundation: #31583 an account with genuinely NO Foundation memories is silent, not warned" {
     : > "$CACHE"
-    printf 'mmry-foundation v1 entries=0 bytes=0 cksum=4294967295\n' > "${CACHE}.manifest"
+    manifest_now "$CACHE" 0    # a real empty set: record says none, body empty (#31597)
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -326,7 +332,7 @@ _big_foundation_set() {
 }
 
 @test "userpromptsubmit-foundation: #31583 a session that has loaded nothing yet is silent, not warned" {
-    rm -f "$CACHE" "${CACHE}.manifest"
+    rm -f "$CACHE" "$SET"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -351,10 +357,10 @@ _big_foundation_set() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'Eric builds MMRY'* ]] || return 1
 
-    # Both files, exactly as the reviewer did. Not just the cache.
-    rm -f "$CACHE" "${CACHE}.manifest"
+    # The set file, which holds the record too (#31597), and the staged copy.
+    rm -f "$CACHE" "$SET"
     [ ! -e "$CACHE" ]
-    [ ! -e "${CACHE}.manifest" ]
+    [ ! -e "$SET" ]
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -868,130 +874,67 @@ manifest_now
 
 @test "userpromptsubmit-foundation: #31583 a manifest claiming no directives beside a cache full of them is refused, not obeyed" {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
-    manifest_now
-    # Same bytes, same checksum, only the count claims the set is empty.
+    # A record that claims nothing, on a set file that holds two directives (#31597: one file).
     local s b
     read -r s b < <(cksum < "$CACHE")
-    printf 'mmry-foundation v1 entries=0 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+    fnd_set_with "mmry-foundation v2 entries=0 bytes=${b} cksum=${s}" "$(cat "$CACHE")"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]                      # never blocks the prompt
     [[ "$output" == *'could not verify'* ]] || return 1  # the assistant is told
     [[ "$output" == *'systemMessage'* ]] || return 1     # and so is the customer
+    [[ "$output" == *'no directives at all'* ]] || return 1
     # And it must not be quietly forwarded under the authoritative framing either.
     [[ "$output" != *'authoritative directives that take precedence'* ]]
 }
-
 @test "userpromptsubmit-foundation: #31583 the empty-set path still stays silent when the cache really is empty" {
     # The control for the test above: this must not become "warn whenever entries=0".
+    # Sealed for real (#31597): a set file whose record says no directives and whose body is empty.
     : > "$CACHE"
-    printf 'mmry-foundation v1 entries=0 bytes=0 cksum=4294967295\n' > "${CACHE}.manifest"
+    manifest_now "$CACHE" 0
+    [[ "$(fnd_set_record)" == 'mmry-foundation v2 entries=0 bytes=0 '* ]] || return 1
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
 
-# #31583 UPGRADE RECOVERY. Found while verifying TC4, not reported by review.
+# #31597. UPGRADE RECOVERY AND THE UPGRADE NOTICE ARE RETIRED, and these two replace their tests.
 #
-# A cache written by a plugin older than this one has no manifest, because the manifest is
-# what this ticket introduced. Refusing it is correct and must stay correct: writing a
-# manifest for whatever is on disk would bless the four-byte stub the ticket exists to catch.
-# What was wrong is that nothing rebuilt it, so the customer was warned on EVERY prompt for
-# the rest of the session and it never cleared. Measured before the fix on a manifest-less
-# cache: refused three times out of three, 922 characters of notice each time, no manifest
-# ever appearing. The age-gated daily refresh cannot cover it, because an unmanifested cache
-# is typically brand new and its age is zero.
-#
-# The stub below replaces the refresh with one that succeeds, because the point of the test is
-# what the customer experiences on the NEXT prompt, not whether the network works.
-_plugin_with_working_refresh() {
-    RECOVER_ROOT="$TEST_TMPDIR/recover-plugin"
-    cp -R "$PLUGIN_ROOT" "$RECOVER_ROOT"
-    local client="$RECOVER_ROOT/hooks-handlers/mmry-client.sh"
-    awk '{ print } /^mmry_refresh_foundation_cache\(\) \{$/ {
-        print "    printf -- '"'"'- Rebuilt: the set came back.\n'"'"' > \"$2\""
-        # NO manifest helper call here (#31583 QA round 4). The first version of this stub
-        # called mmry_write_foundation_manifest_for, which does not exist: it returned 127
-        # and the fallback below always ran, so the call was decoration that read like logic.
-        print "        local _s _b; read -r _s _b < <(cksum < \"$2\")"
-        print "        printf '"'"'mmry-foundation v1 entries=1 bytes=%s cksum=%s\n'"'"' \"$_b\" \"$_s\" > \"$2.manifest\""
-        print "    }"
-        print "    return 0"
-    }' "$client" > "$client.tmp"
-    mv "$client.tmp" "$client"
-
-    # Anchored to POSITION, the round-2 lesson: assert the line immediately after the header
-    # is the injected one, so a pattern that stops matching cannot leave the real refresh in
-    # place while the test goes green against the healthy path.
-    local after
-    after="$(awk '/^mmry_refresh_foundation_cache\(\) \{$/ { getline; print; exit }' "$client")"
-    case "$after" in
-        *Rebuilt*) : ;;
-        *) echo "injection did not land: line after the header was [$after]"; return 1 ;;
-    esac
-}
-
-@test "userpromptsubmit-foundation: #31583 a cache from an OLDER plugin is refused once, then rebuilt, not warned about forever" {
-    _plugin_with_working_refresh
-
-    # Exactly what an upgrading customer has on disk: good content, no manifest.
-    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
-    [ ! -e "${CACHE}.manifest" ]
-
-    # Prompt 1: refused, correctly, because nothing here can be verified.
-    MMRY_API_KEY=dummy run bash "$RECOVER_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *'could not verify'* ]] || return 1
-
-    # The recovery was ATTEMPTED, which is the whole fix. Before it, nothing happened at all.
-    [ -e "$TEST_TMPDIR/.mmry-foundation-rebuild" ]
-
-    # The background rebuild is detached, so give it a moment to land rather than racing it.
-    local _i=0
-    while [ $_i -lt 50 ] && [ ! -e "${CACHE}.manifest" ]; do _i=$(( _i + 1 )); sleep 0.1; done
-    [ -e "${CACHE}.manifest" ]
-
-    # Prompt 2: the customer is out of it. Delivered, and silent.
-    MMRY_API_KEY=dummy run bash "$RECOVER_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *'Rebuilt'* ]] || return 1
-    [[ "$output" != *'could not verify'* ]] || return 1
-    [[ "$output" != *'systemMessage'* ]]
-}
-
-# #31583 QA round 4. One sentence used to cover every refusal, telling the customer the local
-# copy "did not match the record MMRY wrote". For the states where there IS no record, no
-# comparison happened and the sentence contradicted its own first clause. Six of eight
-# reviewers raised it, and no-manifest is the state EVERY upgrading customer meets.
-@test "userpromptsubmit-foundation: #31583 an upgraded customer is told it is an upgrade, not damage" {
-    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
-    rm -f "${CACHE}.manifest"
+# Plugin 2.9.1 writes mmry-foundation.md with no record. Until #31597 this version read the same
+# name, so the first prompt after an update found a cache with no manifest, refused it, told the
+# customer it was an update and rebuilt it in the background. The set now lives in its own file
+# with its record inside it, so the 2.9.1 file is simply never read: not delivered, not refused,
+# not reported. These pin that.
+@test "userpromptsubmit-foundation: #31597 the file plugin 2.9.1 writes is never read: the set file is delivered, the old file is not" {
+    printf -- '- Identity: the CURRENT set.\n' > "$TEST_TMPDIR/staged-new.md"
+    fnd_seal "$TEST_TMPDIR/staged-new.md" "" "$SET"
+    # What 2.9.1 leaves behind, under the name this version used to read.
+    printf -- '- Identity: the OLD 2.9.1 copy.\n' > "$TEST_TMPDIR/mmry-foundation.md"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'just updated the MMRY plugin'* ]] || return 1
-    [[ "$output" == *'Normally the next prompt has them'* ]] || return 1
-    [[ "$output" == *'No action needed'* ]] || return 1
-    # The CUSTOMER's message leads with the reassurance and does not talk about caches or
-    # manifests (#31583 QA round 5). The assistant's note still carries the technical reason.
-    local msg
-    msg="$(printf '%s' "$output" | jq -r '.systemMessage')"
-    [[ "$msg" == 'MMRY AI: you have just updated'* ]] || return 1
-    [[ "$msg" != *cache* && "$msg" != *manifest* ]] || return 1
-    # And it no longer promises a fetch is under way, which is false offline or inside the window.
-    [[ "$msg" != *'already being fetched'* ]] || return 1
-    # And it must NOT claim a comparison that never happened, nor prescribe a rebuild the
-    # customer does not need to run.
-    [[ "$output" != *'did not match the record'* ]]
+    [[ "$output" == *'the CURRENT set'* ]] || return 1
+    [[ "$output" != *'the OLD 2.9.1 copy'* ]] || return 1
+    [[ "$output" != *'systemMessage'* ]]
+}
+
+@test "userpromptsubmit-foundation: #31597 a 2.9.1 file with no set beside it is neither delivered nor reported as damage or an update" {
+    printf -- '- Identity: the OLD 2.9.1 copy.\n' > "$TEST_TMPDIR/mmry-foundation.md"
+    rm -f "$SET"
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    # Nothing was stored for this session, so there is nothing to say: the same as a session that
+    # has loaded nothing yet.
+    [ -z "$output" ]
 }
 
 @test "userpromptsubmit-foundation: #31583 a genuinely damaged copy still says so and still prescribes the rebuild" {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now
-    # Same length, different bytes: the classic substitution, where a comparison really did
-    # happen and really did fail.
-    printf -- '- Identity: someone elses text!\n' > "$CACHE"
+    # Somebody else's text under this account's record, in the file the hook reads (#31597).
+    fnd_set_with "$(fnd_set_record)" $'- Identity: someone elses text!\n'
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -1053,8 +996,7 @@ _plugin_with_working_refresh() {
 # #31583 QA round 5: the refusal sentence "did not match the record MMRY wrote" was used for
 # states where no record could be read and no comparison happened. bad-manifest is one.
 @test "userpromptsubmit-foundation: #31583 an unreadable record is not described as a failed comparison" {
-    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
-    printf 'garbage not a manifest\n' > "${CACHE}.manifest"
+    fnd_set_with 'garbage not a record' $'- Identity: Eric builds MMRY.\n'
 
     run bash "$HANDLER"
     [[ "$output" == *'could not verify'* ]] || return 1
