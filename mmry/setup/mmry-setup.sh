@@ -222,6 +222,38 @@ print_url_block() {
     echo ""
 }
 
+# A REQUEST THAT REACHES NOTHING IS NAMED, NOT FATAL TO THE SCRIPT (#31245, Mac live run 2026-10-04).
+#
+# Every request below is `VAR=$(curl ...)`, and this script runs under set -euo pipefail, so when
+# curl could not connect the script ended right there with curl's own status, before the HTTP
+# checks that would have said why. Asked to run setup inside the Codex desktop app, whose default
+# sandbox has no network, the customer saw "Requesting authorization..." and an exit status of 6,
+# and nothing else. The same was true on released master.
+#
+# So each request captures curl's status instead, and a failed one ends here: what happened, the
+# likely reason, and the one thing that works, which is running the same command in a terminal
+# where no assistant sandbox applies. Exit 1, like every other setup error. Nothing has been
+# written at any point this can be reached from.
+_mmry_setup_unreachable() {
+    local rc="$1" what="$2" why host="${API_URL#*://}"
+    host="${host%%/*}"
+    case "$rc" in
+        6)  why="the name ${host} could not be resolved" ;;
+        7)  why="the connection was refused" ;;
+        28) why="the connection timed out" ;;
+        35|60|77) why="a secure connection could not be established" ;;
+        *)  why="curl stopped with status ${rc}" ;;
+    esac
+    echo ""
+    echo "Error: could not reach MMRY AI at ${API_URL} while ${what}: ${why}."
+    echo "Nothing was set up and nothing was written."
+    echo ""
+    echo "If an assistant ran this for you, its sandbox may not allow network access."
+    echo "Run the same command yourself in a terminal:"
+    echo "  $(mmry_host_setup_hint)"
+    exit 1
+}
+
 echo ""
 echo "=== MMRY AI Setup ==="
 echo ""
@@ -235,11 +267,13 @@ if [[ -n "$EMAIL" && -n "$PASSWORD" ]]; then
     LOGIN_BODY="{\"email\":\"$(json_escape "$EMAIL")\",\"password\":\"$(json_escape "$PASSWORD")\"}"
 
     LOGIN_TMP="$(mktemp)"
+    _rc=0
     LOGIN_CODE=$(curl -s -o "$LOGIN_TMP" -w '%{http_code}' \
         --connect-timeout 10 --max-time 25 \
         -X POST "${API_URL}/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d "$LOGIN_BODY")
+        -d "$LOGIN_BODY") || _rc=$?
+    if (( _rc != 0 )); then rm -f "$LOGIN_TMP"; _mmry_setup_unreachable "$_rc" "signing in"; fi
 
     LOGIN_RESP="$(cat "$LOGIN_TMP")"
     rm -f "$LOGIN_TMP"
@@ -266,12 +300,14 @@ if [[ -n "$EMAIL" && -n "$PASSWORD" ]]; then
     KEY_BODY="{\"label\":\"${MACHINE_LABEL}\"}"
 
     KEY_TMP="$(mktemp)"
+    _rc=0
     KEY_CODE=$(curl -s -o "$KEY_TMP" -w '%{http_code}' \
         --connect-timeout 10 --max-time 25 \
         -X POST "${API_URL}/api/auth/apikey" \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "$KEY_BODY")
+        -d "$KEY_BODY") || _rc=$?
+    if (( _rc != 0 )); then rm -f "$KEY_TMP"; _mmry_setup_unreachable "$_rc" "creating this machine's API key"; fi
 
     KEY_RESP="$(cat "$KEY_TMP")"
     rm -f "$KEY_TMP"
@@ -302,9 +338,11 @@ else
     # Step 1: Request device code
     echo "Requesting authorization..."
     DEVICE_TMP="$(mktemp)"
+    _rc=0
     DEVICE_CODE_HTTP=$(curl -s -o "$DEVICE_TMP" -w '%{http_code}' \
         --connect-timeout 10 --max-time 25 \
-        -X POST "${API_URL}/api/auth/device")
+        -X POST "${API_URL}/api/auth/device") || _rc=$?
+    if (( _rc != 0 )); then rm -f "$DEVICE_TMP"; _mmry_setup_unreachable "$_rc" "requesting authorization"; fi
 
     DEVICE_RESP="$(cat "$DEVICE_TMP")"
     rm -f "$DEVICE_TMP"
@@ -345,6 +383,7 @@ else
     # Step 3: Poll for authorization
     ELAPSED=0
     NEXT_STATUS_AT=30   # emit a 'still waiting' line every 30 elapsed seconds
+    POLL_FAILURES=0     # consecutive polls that reached nothing (#31245)
     while (( ELAPSED < EXPIRES_IN )); do
         sleep "$POLL_INTERVAL"
         ELAPSED=$(( ELAPSED + POLL_INTERVAL ))
@@ -358,9 +397,18 @@ else
         fi
 
         STATUS_TMP="$(mktemp)"
+        _rc=0
         STATUS_CODE=$(curl -s -o "$STATUS_TMP" -w '%{http_code}' \
             --connect-timeout 10 --max-time 15 \
-            "${API_URL}/api/auth/device/${DEVICE_CODE}/status")
+            "${API_URL}/api/auth/device/${DEVICE_CODE}/status") || _rc=$?
+        if (( _rc != 0 )); then
+            # A customer may be signing in for minutes; one dropped poll should not undo that.
+            rm -f "$STATUS_TMP"
+            POLL_FAILURES=$(( POLL_FAILURES + 1 ))
+            (( POLL_FAILURES < 3 )) && continue
+            _mmry_setup_unreachable "$_rc" "waiting for you to authorize in the browser"
+        fi
+        POLL_FAILURES=0
 
         STATUS_RESP="$(cat "$STATUS_TMP")"
         rm -f "$STATUS_TMP"
