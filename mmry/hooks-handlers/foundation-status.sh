@@ -43,7 +43,7 @@ source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || {
 set +e +u
 mmry_load_config 2>/dev/null || true
 
-CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
+CACHE="${MMRY_TMPDIR}/mmry-foundation-set.md"
 # THIS SESSION, by its own id (#31583 QA round 6, R4(c)). The command runtime provides
 # CLAUDE_CODE_SESSION_ID; the per-prompt hook reads the same id from its payload, so both file this
 # session's records under one name and another session's are never read here. With no id, the old
@@ -118,6 +118,12 @@ if (( _verdict == 1 )); then
             echo "Stored copy:  DISAPPEARED - it was delivered in this session and is now gone."
             echo "              It is being REFUSED, not used."
             echo "Action:       run /mmry:load-memories to rebuild it."
+        elif _stored="$(mmry_foundation_stored_entries "$MMRY_TMPDIR" "$_sid")" && (( _stored > 0 )); then
+            # Stored in this session, never delivered, now gone (#31597): the words the manifest
+            # produced when it was a separate file and outlived the set.
+            echo "Stored copy:  MISSING - the manifest records ${_stored} Foundation directives but the cache holding them is missing."
+            echo "              It is being REFUSED, not used."
+            echo "Action:       run /mmry:load-memories to rebuild it."
         else
             echo "Stored copy:  NOT LOADED YET in this session."
             echo "Action:       run /mmry:load-memories, or start a new session."
@@ -137,23 +143,12 @@ if (( _verdict != 0 )); then
     _state="${_reason%%|*}"
     _prose="${_reason#*|}"
     case "$_state" in
-        no-manifest|bad-manifest) _label="PRESENT BUT UNVERIFIABLE" ;;
+        bad-manifest)             _label="PRESENT BUT UNVERIFIABLE" ;;
         inconsistent)             _label="INCONSISTENT" ;;
-        missing)                  _label="MISSING" ;;
         size|contents|unreadable) _label="DAMAGED" ;;
         blank)                    _label="EMPTY OF TEXT" ;;
         *)                        _label="REFUSED" ;;
     esac
-    # THE UPGRADE STATE SAYS WHAT THE HOOK SAYS (#31583 QA round 5). A copy stored by an earlier
-    # plugin version carries no record to check it against. The hook tells the customer that is
-    # an update and needs no action; this command used to tell them to rebuild it. One answer.
-    if [[ "$_state" == "no-manifest" ]]; then
-        echo "Stored copy:  FROM AN EARLIER PLUGIN VERSION - it has no record to check it against,"
-        echo "              so it is not used. It is fetched again in the new format automatically,"
-        echo "              normally by the next prompt."
-        echo "Action:       none needed. If this persists after a few prompts, run /mmry:load-memories."
-        exit 0
-    fi
     echo "Stored copy:  ${_label} - ${_prose}."
     echo "              It is being REFUSED, not used."
     echo "Action:       run /mmry:load-memories to rebuild it."
@@ -277,21 +272,15 @@ _why_and_action() {
     elif [[ "$code" == "crash" ]]; then
         _WHY="the loader failed before it finished"
         _ACTION="re-sending will not help. Run /mmry:load-memories, and reinstall the plugin if that fails."
-    elif [[ "$code" == "upgrade" ]]; then
-        _WHY="they were stored by an earlier plugin version and are being fetched again"
-        _ACTION="none needed. If this persists after a few prompts, run /mmry:load-memories."
     elif [[ "$code" == "emit" ]]; then
         _WHY="they were prepared but could not be handed to Claude Code"
         _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
     elif [[ "$code" == "unfinished" ]]; then
         _WHY="the loader ended without recording what it sent"
         _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
-    elif [[ "$code" == "refused copy" ]]; then
-        _WHY="the copy your assistant reads them from could not be written, so it was not pointed at one"
-        _ACTION="re-send the prompt. If it keeps happening, check that your temporary folder has free space and can be written to."
-    elif [[ "$code" == "refused changed" ]]; then
-        _WHY="your directives were being replaced as the prompt arrived, so nothing was sent rather than a mix of two versions"
-        _ACTION="re-send the prompt."
+    elif [[ "$code" == "refused unwritable" ]]; then
+        _WHY="the copy prepared for your assistant to read could not be written, so nothing was sent"
+        _ACTION="re-send the prompt. If it keeps happening, check that your temp folder can be written to and has free space."
     elif [[ "$code" =~ ^refused($|\ [a-z-]{1,20}$) ]]; then
         _WHY="the stored copy could not be verified, so it was refused rather than used"
         _ACTION="run /mmry:load-memories to rebuild it."

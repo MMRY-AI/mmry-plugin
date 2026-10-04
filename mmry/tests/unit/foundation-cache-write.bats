@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# foundation-cache-write.bats — mmry_write_foundation_cache (#31583, #31411).
+# foundation-cache-write.bats — mmry_write_foundation_cache (#31583, #31411, #31597).
 #
 # This function had no test of its own, and it is the one that decides what the account's
 # standing directives ARE. Its previous form was a single pipeline:
@@ -12,16 +12,20 @@
 # reader on the other end had no way to tell the result from a stray file with the same name
 # - which is exactly how four bytes came to be served as an account's authoritative guidance
 # on 2026-09-18.
+#
+# #31597: it now writes ONE file, mmry-foundation-set.md - the record line, the set, a trailer -
+# and puts it in place with one rename, so no reader can see a new record beside an old set.
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 setup() {
     export MMRY_API_KEY="test-key"
     export MMRY_AUTH_METHOD="apikey"
     export MMRY_API_URL="http://localhost:5291"
     source "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
-    CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    MANIFEST="$CACHE.manifest"
+    # The path the hook reads, so a set written here is the one it delivers.
+    CACHE="$(mmry_foundation_set_path "$TEST_TMPDIR")"
 }
 
 # Two Foundation memories and one of another tier, so tier filtering is exercised too.
@@ -35,78 +39,87 @@ _resp() {
 JSON
 }
 
-@test "write_foundation_cache: writes the cache and a manifest describing it" {
+# The set the file holds, with any carriage returns a native Windows jq wrote removed, so line
+# assertions compare text rather than line endings.
+_body() { fnd_set_body "$CACHE" | tr -d '\r'; }
+
+@test "write_foundation_cache: writes the set, under its record, in one file" {
     run mmry_write_foundation_cache "$(_resp)" "$CACHE"
     [ "$status" -eq 0 ]
     [ -f "$CACHE" ]
-    [ -f "$MANIFEST" ]
-    grep -q 'Eric builds MMRY.' "$CACHE"
-    grep -q 'Clarity over cleverness.' "$CACHE"
+    [[ "$(fnd_set_record "$CACHE")" == 'mmry-foundation v2 entries=2 '* ]] || return 1
+    _body | grep -q 'Eric builds MMRY.' || return 1
+    _body | grep -q 'Clarity over cleverness.' || return 1
     # Tier filtering still holds.
     #
     # NOT written as `! grep -q ...`. That form bites only while it is the LAST statement in
     # the test, because bash exempts a negated command from errexit everywhere else, so
-    # appending any assertion after it silently turns it off. Measured, rather than taken on
-    # faith, with a three-test probe against this repo's own bats: `! true` as the last
-    # statement -> not ok; `! true` followed by any other statement -> ok. This repo has
-    # found 16 or more assertions disabled that way, so the shape is avoided even where it
-    # currently works.
+    # appending any assertion after it silently turns it off. This repo has found 16 or more
+    # assertions disabled that way, so the shape is avoided even where it currently works.
     run grep -c 'Not a Foundation memory.' "$CACHE"
     [ "$output" = "0" ]
 }
 
-@test "write_foundation_cache: every non-empty file it produces contains a colon-space (#31583 req 1)" {
+@test "write_foundation_cache: #31597 the layout is exactly record line, set, trailer, and nothing else" {
+    mmry_write_foundation_cache "$(_resp)" "$CACHE"
+    local first last
+    first="$(fnd_set_record "$CACHE")"
+    [[ "$first" =~ ^mmry-foundation\ v2\ entries=[0-9]+\ bytes=[0-9]+\ cksum=[0-9]+$ ]] || { echo "record: [$first]"; return 1; }
+    # The trailer is the last thing in the file, with no newline after it: $(<file) drops trailing
+    # newlines, and the trailer is what keeps the set's own last byte from being one of them.
+    last="$(tail -c 21 "$CACHE")"
+    [ "$last" = 'END OF FOUNDATION SET' ] || { echo "ends with: [$last]"; return 1; }
+    # No second file: the manifest the pair used to need is not written.
+    [ ! -e "${CACHE}.manifest" ]
+}
+
+@test "write_foundation_cache: every non-empty set it produces contains a colon-space (#31583 req 1)" {
     # CORRECTED TWICE. Round 2 disproved "every LINE carries a topic and a colon": content
     # containing a newline followed by "- x" produces exactly that as a later line. The
     # replacement asserted it of the FIRST line, and round 3 disproved that too, by the same
     # mechanism one field across: a TOPIC containing a newline puts "- x" on line 1 with no
     # colon on it at all.
     #
-    # Both failures came from making a claim about LINES. The writer does not work in lines,
-    # it works in entries: the filter is "- \(.topic): \(.content)", so the literal colon-space
-    # sits between the two interpolations and appears in every entry it emits, wherever
-    # newlines happen to fall inside either field. So the property that holds is about the
-    # whole file, and it is the weakest one sufficient to settle requirement 1: any non-empty
-    # file the writer produces contains ": " somewhere. The observed artefact, a four-byte file
-    # of "- x" and a newline, contains none, so it cannot be writer output for any input.
-    #
-    # Both counter-examples are fixtures here, so neither round's mistake can recur silently.
+    # The writer works in entries, not lines: the filter is "- \(.topic): \(.content)", so the
+    # literal colon-space appears in every entry it emits, wherever newlines fall inside either
+    # field. So any non-empty set it writes contains ": " somewhere. The observed artefact, a
+    # four-byte "- x" and a newline, contains none, so it cannot be writer output for any input.
     local resp
 
     # Round 2's counter-example: the newline is in the CONTENT.
     resp='[{"memoryTier":"Foundation","topic":"Notes","content":"first line\n- x"}]'
     mmry_write_foundation_cache "$resp" "$CACHE"
-    [ "$(sed -n '2p' "$CACHE")" = "- x" ]          # it really is produced
-    grep -q ': ' "$CACHE"                          # and the file still carries a colon-space
+    [ "$(_body | sed -n '2p')" = "- x" ] || return 1     # it really is produced
+    _body | grep -q ': ' || return 1                       # and the set still carries a colon-space
 
     # Round 3's counter-example: the newline is in the TOPIC, so line 1 has no colon.
     resp='[{"memoryTier":"Foundation","topic":"x\nNotes","content":"hello"}]'
     mmry_write_foundation_cache "$resp" "$CACHE"
-    [ "$(head -1 "$CACHE")" = "- x" ]              # the first-line claim really is false
-    grep -q ': ' "$CACHE"                          # the whole-file claim still holds
+    [ "$(_body | head -1)" = "- x" ] || return 1         # the first-line claim really is false
+    _body | grep -q ': ' || return 1                       # the whole-set claim still holds
 
     # The artefact itself: not producible, on either count.
-    [ "$(wc -c < "$CACHE")" -ne 4 ]
+    [ "$(_body | wc -c | tr -d ' ')" -ne 4 ] || return 1
 
-    # And the case that produces no colon at all produces no bytes at all, so it is not the
+    # And the case that produces no colon at all produces no set at all, so it is not the
     # artefact either. This is the only way out of the claim and it is closed here.
     resp='[]'
     mmry_write_foundation_cache "$resp" "$CACHE"
-    [ "$(wc -c < "$CACHE")" -eq 0 ]
+    [ "$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')" -eq 0 ]
 }
 
-@test "write_foundation_cache: the manifest's byte count and checksum match the file it wrote" {
+@test "write_foundation_cache: the record's byte count and checksum match the set it wrote" {
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
 
-    local sum count man
-    read -r sum count < <(cksum < "$CACHE")
-    man="$(cat "$MANIFEST")"
+    local sum count rec
+    read -r sum count < <(fnd_set_body "$CACHE" | cksum)
+    rec="$(fnd_set_record "$CACHE")"
 
-    # PRESENCE of the right numbers, not merely that a manifest exists. A manifest holding
-    # zeroes would satisfy "a manifest was written" and protect nothing.
-    [[ "$man" == *"bytes=$count"* ]] || return 1
-    [[ "$man" == *"cksum=$sum"* ]] || return 1
-    [[ "$man" == mmry-foundation\ v1\ * ]]
+    # PRESENCE of the right numbers, not merely that a record exists. A record holding zeroes
+    # would satisfy "a record was written" and protect nothing.
+    [[ "$rec" == *"bytes=$count"* ]] || return 1
+    [[ "$rec" == *"cksum=$sum"* ]] || return 1
+    [[ "$rec" == mmry-foundation\ v2\ * ]]
 }
 
 @test "write_foundation_cache: entries are counted from the RESPONSE, not by counting lines" {
@@ -118,23 +131,19 @@ JSON
     run mmry_write_foundation_cache "$resp" "$CACHE"
     [ "$status" -eq 0 ]
 
-    [ "$(grep -c '^- ' "$CACHE")" -eq 4 ]      # what a line count would see
-    grep -q 'entries=1' "$MANIFEST"            # what is actually true
+    [ "$(_body | grep -c '^- ')" -eq 4 ] || return 1          # what a line count would see
+    [[ "$(fnd_set_record "$CACHE")" == *'entries=1 '* ]]      # what is actually true
 }
 
-@test "write_foundation_cache: a jq failure leaves the EXISTING cache and manifest untouched" {
+@test "write_foundation_cache: a jq failure leaves the EXISTING set untouched, byte for byte" {
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
-    local before_cache before_manifest
-    before_cache="$(cat "$CACHE")"
-    before_manifest="$(cat "$MANIFEST")"
-    [ -n "$before_cache" ]
+    cp "$CACHE" "$TEST_TMPDIR/before"
 
     # Not JSON. The old pipeline truncated the cache to zero before discovering that.
     run mmry_write_foundation_cache 'this is not json at all' "$CACHE"
     [ "$status" -ne 0 ]
 
-    [ "$(cat "$CACHE")" = "$before_cache" ]
-    [ "$(cat "$MANIFEST")" = "$before_manifest" ]
+    cmp -s "$CACHE" "$TEST_TMPDIR/before"
 }
 
 @test "write_foundation_cache: a failed write reports failure instead of claiming success" {
@@ -145,11 +154,11 @@ JSON
 
 @test "write_foundation_cache: leaves no temporary file behind, on success or on failure" {
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation-set.md.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 
     mmry_write_foundation_cache 'not json' "$CACHE" || true
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation-set.md.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 }
 
@@ -157,19 +166,26 @@ JSON
     # Distinct from damage, and it must be, or every such account is warned on every prompt.
     run mmry_write_foundation_cache '[{"memoryTier":"Strategic","topic":"T","content":"C"}]' "$CACHE"
     [ "$status" -eq 0 ]
-    grep -q 'entries=0' "$MANIFEST"
-    [ ! -s "$CACHE" ]
+    [[ "$(fnd_set_record "$CACHE")" == 'mmry-foundation v2 entries=0 bytes=0 '* ]] || return 1
+    [ "$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')" -eq 0 ]
+}
+
+@test "write_foundation_cache: #31597 a NUL inside a memory is dropped, so the set still verifies" {
+    # bash cannot hold a NUL in a variable, so a set containing one could never pass the single
+    # read: it would be refused on every prompt for as long as the memory existed. The old reader
+    # dropped NULs at delivery, so the assistant receives what it always did.
+    local resp='[{"memoryTier":"Foundation","topic":"Odd","content":"before\u0000after"}]'
+    run mmry_write_foundation_cache "$resp" "$CACHE"
+    [ "$status" -eq 0 ]
+    mmry_read_foundation_set "$CACHE" || { echo "refused: $MMRY_FND_VERDICT"; return 1; }
+    [[ "$MMRY_FND_SET" == *'beforeafter'* ]]
 }
 
 # ============================================================================
 # #31411 test case 5 - the two paths must agree.
 #
-# The ticket left open whether the session-start path applied the same budget as the
-# per-prompt re-injection. It never did: the cut lived only in the re-injection worker, and
-# session-start.sh writes the cache through this function with no ceiling of any kind
-# (verified by reading both files). This asserts the consequence that matters - what the
-# write path stores and what the read path delivers are the same set, at a size far beyond
-# the budget that used to cut it.
+# What the write path stores and what the read path delivers are the same set, at a size far
+# beyond the budget that used to cut it.
 # ============================================================================
 
 @test "write_foundation_cache: a set far beyond the old cap round-trips whole to the re-injection handler" {
@@ -179,7 +195,7 @@ JSON
 
     run mmry_write_foundation_cache "$resp" "$CACHE"
     [ "$status" -eq 0 ]
-    [ "$(wc -c < "$CACHE")" -gt 7000 ]
+    [ "$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')" -gt 7000 ]
 
     # Now read it back through the handler the customer actually gets.
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
@@ -197,27 +213,4 @@ JSON
     [ "$status" -eq 0 ]
     [[ "$output" == *'Eric builds MMRY.'* ]] || return 1
     [[ "$output" != *'could not verify'* ]]
-}
-
-@test "write_foundation_cache: the manifest lands by rename from a PID-scoped temp (#31583 QA)" {
-    # Two sessions sharing a temp directory could interleave into a permanently inconsistent
-    # pair, because the cache temp was PID-scoped and the manifest name was not: one session's
-    # manifest describing another session's cache, with nothing to repair it until the next
-    # successful write. Both temps are PID-scoped now and both files arrive by rename.
-    grep -q 'local mtmp="${manifest}.new.\$\$"' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
-    grep -q 'mv -f "$mtmp" "$manifest"' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
-
-    # Nothing may write the manifest by redirecting at its final name any more.
-    run grep -c '> "\$manifest"' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
-    [ "$output" = "0" ]
-}
-
-@test "write_foundation_cache: no temp files survive, manifest or cache, on success or failure" {
-    mmry_write_foundation_cache "$(_resp)" "$CACHE"
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
-    [ "$output" = "0" ]
-
-    mmry_write_foundation_cache 'not json' "$CACHE" || true
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation.md*.new.* 2>/dev/null | wc -l | tr -d ' '"
-    [ "$output" = "0" ]
 }
