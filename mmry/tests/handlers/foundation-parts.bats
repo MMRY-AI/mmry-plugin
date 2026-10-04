@@ -525,3 +525,31 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     _ctx 1
     [[ "$PART_TEXT" == *"BEFORE YOU ANSWER"* ]] || { echo "session A's assistant lost the reference"; return 1; }
 }
+
+# QA #2's H7 (#31411 QA round 2, handback 3 of 4). A part k > 1 leaves without reading the set when
+# the set is too small to have a part k. A part cut at a line end can be little over half the cap, so
+# the bound is half a part per part; assuming full parts drops the last parts of such a set silently.
+@test "parts: #31411 a set cut into parts just over half the cap still sends every part" {
+    # Five lines of 4,800 bytes. Each newline is in the second half of its window, so each part is
+    # one line: five parts for 24,000 bytes, where full parts would need three.
+    awk 'BEGIN { for (m = 1; m <= 5; m++) { s = sprintf("- Memory %d:", m); while (length(s) < 4799) s = s " word"; printf "%s\n", substr(s, 1, 4799) } }' > "$CACHE"
+    _seal
+    _assert_inline_whole 5 S18
+    CLAUDE_CODE_SESSION_ID=S18 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    IN FULL on the most recent prompt, in 5 parts."* ]] || { echo "$output"; return 1; }
+}
+
+# QA #2's H9 (#31583 QA round 2, handback 3 of 4). A part 2 to 6 that fails records why, so the status
+# names the part and the cause instead of a part with no record.
+@test "parts: #31583 a part 2-6 that runs out of time records it, and the status names the part and the cause" {
+    _seed_lines 380
+    _fire 1 S17; _fire 2 S17; _fire 4 S17
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
+    local slow="$TEST_TMPDIR/slow-jq.sh"
+    printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
+    chmod +x "$slow"
+    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S17
+    CLAUDE_CODE_SESSION_ID=S17 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: loading them took longer than the 1s limit and was stopped."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"has no record"* ]] || { echo "$output"; return 1; }
+}

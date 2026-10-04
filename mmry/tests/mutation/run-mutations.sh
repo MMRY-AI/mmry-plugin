@@ -476,7 +476,37 @@ mutate_m36() { _mrep "$1/$HANDLER_REL" '        _told="${_FOUND_TMPDIR}/.mmry-fo
 targets_m36="$PARTS_TESTS"
 desc_m36="#31411 the told marker is shared, so a session is told again after another session"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36"
+# QA #2's four survivors at 0961a90 (handback 3 of 4), each kept here so it is seen to be refused.
+
+# H6, bash: every cut made hard, never at a line or sentence end.
+mutate_m37() { _mrep "$1/$HANDLER_REL" '        if [[ "$mode" == "fill" ]]; then' '        if true; then :; elif [[ "$mode" == "fill" ]]; then'; }
+targets_m37="$PARTS_TESTS"
+desc_m37="#31411 QA H6 every cut in the hook is hard, never at a line or sentence end"
+
+# H6, awk: the same in foundation-cut.awk, by making the second half impossible to reach.
+mutate_m38() { _mrep "$1/$CUT_REL" '            half = int(wb / 2); a = -1' '            half = wb + 1; a = -1'; }
+file_m38="$CUT_REL"
+targets_m38="$PARTS_TESTS"
+desc_m38="#31411 QA H6 every cut in foundation-cut.awk is hard, never at a line or sentence end"
+
+# H7: the early-exit bound doubled. A part cut at a line end can be little over half the cap, so
+# the last parts of such a set leave early and are dropped without a word.
+mutate_m39() { _mrep "$1/$HANDLER_REL" '(MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8)' '(MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP - 8)'; }
+targets_m39="$PARTS_TESTS"
+desc_m39="#31411 QA H7 the early exit assumes full parts, so a set of half-full parts loses its last parts"
+
+# H9: parts 2 to 6 stop recording their failures.
+mutate_m40() { _mrep "$1/$HANDLER_REL" '        _mmry_outcome "failed ${_FOUND_OUTCOME}"' '        (( MMRY_FND_PART > 1 )) || _mmry_outcome "failed ${_FOUND_OUTCOME}"'; }
+targets_m40="$PARTS_TESTS"
+desc_m40="#31583 QA H9 a part 2-6 that fails records nothing, so the status cannot say which or why"
+
+# S3: a part with no record counted as arrived.
+mutate_m41() { _mrep "$1/$STATUS_REL" '            _missing="${_missing}; part ${_k} has no record of arriving"' '            _got=$(( _got + 1 ))'; }
+file_m41="$STATUS_REL"
+targets_m41="$PARTS_TESTS"
+desc_m41="#31583 QA S3 a part with no record of arriving is counted as arrived"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36 m37 m38 m39 m40 m41"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
