@@ -56,6 +56,10 @@ VERIFY_TESTS="unit/foundation-verify.bats"
 BOTH_PATHS_TESTS="handlers/foundation-both-paths.bats"
 # Both surfaces against one config in one temp directory (#31583 QA round 4 and 5).
 CROSS_TESTS="handlers/foundation-cross-surface.bats"
+# The split delivery: parts, versions, by reference (#31411, #31583 QA round 2). QA found it was in no
+# target list, so nothing the split added could be scored.
+PARTS_TESTS="handlers/foundation-parts.bats"
+CUT_REL="hooks-handlers/foundation-cut.awk"
 STATUS_CMD_TESTS="structural/foundation-status-command.bats"
 HELP_REL="commands/help.md"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
@@ -74,6 +78,16 @@ _sedi() {
     # $1 = sed script, $2 = file
     local _t="$2.sedi.$$"
     sed "$1" "$2" > "$_t" && mv "$_t" "$2"
+}
+
+# Exact-text replacement, for a target that is awkward to anchor in sed (#31411 QA round 2): code
+# full of $, brackets and quotes. Replaces the first occurrence; text that is not there changes
+# nothing, and the no-op guard below reports that.
+_mrep() {
+    local f="$1" old="$2" new="$3" t
+    t="$(cat "$f"; printf x)"; t="${t%x}"
+    [[ "$t" == *"$old"* ]] || return 0
+    printf '%s' "${t/"$old"/"$new"}" > "$f"
 }
 
 # ---------------------------------------------------------------------------
@@ -133,7 +147,8 @@ desc_m05="orphaned out-file sweep disabled"
 # Stop recording that a firing began. A handler that never records a firing can never report
 # a lost one, which is the entire feature. Kept as a regression: this one was found by
 # mutation during the build and closed then.
-mutate_m06() { _sedi '/: > "\$_INFLIGHT" 2>\/dev\/null || true/d' "$1/$HANDLER_REL"; }
+# REPOINTED (#31411 QA round 2): the marker is written by temp and rename now, _mmry_fnd_write.
+mutate_m06() { _mrep "$1/$HANDLER_REL" '    _mmry_fnd_write "$_INFLIGHT" "" || true' '    :'; }
 targets_m06="$HANDLER_TESTS"
 desc_m06="in-flight marker is never written"
 
@@ -221,7 +236,7 @@ mutate_m11() {
         }
     ' "$f" > "$t" && mv "$t" "$f"
 }
-targets_m11="$HANDLER_TESTS $BOTH_PATHS_TESTS"
+targets_m11="$HANDLER_TESTS $BOTH_PATHS_TESTS $PARTS_TESTS"
 desc_m11="#31411 the token-cap cut reinstated (the set is silently truncated again)"
 
 # Replace the whole verification with the precondition it replaced: "the file is not empty".
@@ -233,7 +248,9 @@ desc_m11="#31411 the token-cap cut reinstated (the set is silently truncated aga
 mutate_m12() {
     local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m12"
     awk '
-        /^MANIFEST=/ { print "MANIFEST=\"${CACHE}.manifest\""
+        # REPOINTED (#31411 QA round 2): the dead MANIFEST assignment it anchored on is gone, so it
+        # now replaces the verification call itself.
+        /^_reason="\$\(mmry_verify_foundation_cache "\$CACHE"\)"$/ {
                        print "[[ -s \"$CACHE\" ]] || exit 0"
                        print "content=\"$(<\"$CACHE\")\""
                        print "printf '\''%s'\'' \"The following are the account'\''s FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
@@ -392,7 +409,104 @@ file_m22="$STATUS_REL"
 targets_m22="$CROSS_TESTS"
 desc_m22="#31583 the status command reports delivery without reading the failure evidence"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22"
+# ---------------------------------------------------------------------------
+# #31411 and #31583 QA round 2. Each new check, broken on its own; foundation-parts.bats holds the
+# tests that must refuse them.
+# ---------------------------------------------------------------------------
+
+mutate_m23() { _mrep "$1/$HANDLER_REL" '    _mmry_fnd_cut_bytes "$s" fill' '    :'; }
+targets_m23="$PARTS_TESTS"
+desc_m23="#31411 R1 the fuller cut is never tried, so sets that fit in six parts go by reference"
+
+mutate_m24() { _mrep "$1/$HANDLER_REL" '    [[ "$s" =~ $nonascii ]] || return 0' '    return 0'; }
+targets_m24="$PARTS_TESTS"
+desc_m24="#31411 R1 sets are counted in bytes only, so a non-ASCII set that fits goes by reference"
+
+mutate_m25() { _mrep "$1/$CUT_REL" '        w = (c in ISCONT) ? 0 : ((c in ISASTRAL) ? 2 : 1)' '        w = (c in ISCONT) ? 0 : 1'; }
+file_m25="$CUT_REL"
+targets_m25="$PARTS_TESTS"
+desc_m25="#31411 R1 a character outside the BMP counts as one, so a part of emoji overruns the limit"
+
+mutate_m26() { _mrep "$1/$HANDLER_REL" '                t="${w%[.!?][ $'"'"'\t'"'"']*}"' '                t="$w"'; }
+targets_m26="$PARTS_TESTS"
+desc_m26="#31411 TC3 a memory longer than a part is cut mid-sentence again"
+
+mutate_m27() { _mrep "$1/$HANDLER_REL" '    _fnd_path="$_fnd_snap"' '    _fnd_path="$CACHE"'; }
+targets_m27="$PARTS_TESTS"
+desc_m27="#31411 R1, #31583 R3 by reference points at the live shared cache again"
+
+mutate_m28() { _mrep "$1/$HANDLER_REL" '    if [[ -n "$_sc" && "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]] \' '    if true \'; }
+targets_m28="$PARTS_TESTS"
+desc_m28="#31583 R3 a copy that does not match the verified set is sent anyway"
+
+mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} none"' '            :'; }
+targets_m29="$PARTS_TESTS"
+desc_m29="#31583 R4 a part that leaves early records nothing, so an earlier prompt's record counts"
+
+mutate_m30() { _mrep "$1/$STATUS_REL" '        elif [[ -n "$_set1" && "$_ok" == "ok part ${_k} of ${_n} set ${_set1}" ]]; then' '        elif [[ "$_ok" == "ok part ${_k} of ${_n}"* ]]; then'; }
+file_m30="$STATUS_REL"
+targets_m30="$PARTS_TESTS"
+desc_m30="#31583 R4 parts from two versions of the set read as IN FULL"
+
+mutate_m31() { _mrep "$1/$STATUS_REL" '    _unknown=1' '    _n=1'; }
+file_m31="$STATUS_REL"
+targets_m31="$PARTS_TESTS"
+desc_m31="#31583 an unrecognised record reads as IN FULL (fails open)"
+
+mutate_m32() { _mrep "$1/$STATUS_REL" '(( BASH_REMATCH[1] <= 6 && BASH_REMATCH[1] <= _parts_max ))' 'true'; }
+file_m32="$STATUS_REL"
+targets_m32="$PARTS_TESTS"
+desc_m32="#31583 a part count above six is believed"
+
+mutate_m33() { _mrep "$1/$STATUS_REL" '    [[ -f "$f" ]] || return 0' '    [[ -f "$f" ]] || return 1'; }
+file_m33="$STATUS_REL"
+targets_m33="$PARTS_TESTS"
+desc_m33="#31583 a marker that is not a regular file is not read as a part cut short"
+
+mutate_m34() { _mrep "$1/$STATUS_REL" '    echo "Action:       ${_partly_action}"' '    echo "Action:       re-send the prompt. If it keeps happening, run /mmry:load-memories."'; }
+file_m34="$STATUS_REL"
+targets_m34="$PARTS_TESTS"
+desc_m34="#31583 the PARTLY advice no longer follows the cause of the missing part"
+
+mutate_m35() { _mrep "$1/$HANDLER_REL" '            NOTICE="MMRY AI could not load PART ${MMRY_FND_PART} of this account' '            NOTICE="[Foundation part ${MMRY_FND_PART}] ${NOTICE}"; : "'; }
+targets_m35="$PARTS_TESTS"
+desc_m35="#31411 a failing part tells the assistant the whole turn went without the directives"
+
+mutate_m36() { _mrep "$1/$HANDLER_REL" '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""' '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""'; }
+targets_m36="$PARTS_TESTS"
+desc_m36="#31411 the told marker is shared, so a session is told again after another session"
+
+# QA #2's four survivors at 0961a90 (handback 3 of 4), each kept here so it is seen to be refused.
+
+# H6, bash: every cut made hard, never at a line or sentence end.
+mutate_m37() { _mrep "$1/$HANDLER_REL" '        if [[ "$mode" == "fill" ]]; then' '        if true; then :; elif [[ "$mode" == "fill" ]]; then'; }
+targets_m37="$PARTS_TESTS"
+desc_m37="#31411 QA H6 every cut in the hook is hard, never at a line or sentence end"
+
+# H6, awk: the same in foundation-cut.awk, by making the second half impossible to reach.
+mutate_m38() { _mrep "$1/$CUT_REL" '            half = int(wb / 2); a = -1' '            half = wb + 1; a = -1'; }
+file_m38="$CUT_REL"
+targets_m38="$PARTS_TESTS"
+desc_m38="#31411 QA H6 every cut in foundation-cut.awk is hard, never at a line or sentence end"
+
+# H7: the early-exit bound doubled. A part cut at a line end can be little over half the cap, so
+# the last parts of such a set leave early and are dropped without a word.
+mutate_m39() { _mrep "$1/$HANDLER_REL" '(MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8)' '(MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP - 8)'; }
+targets_m39="$PARTS_TESTS"
+desc_m39="#31411 QA H7 the early exit assumes full parts, so a set of half-full parts loses its last parts"
+
+# H9: parts 2 to 6 stop recording their failures.
+mutate_m40() { _mrep "$1/$HANDLER_REL" '        _mmry_outcome "failed ${_FOUND_OUTCOME}"' '        (( MMRY_FND_PART > 1 )) || _mmry_outcome "failed ${_FOUND_OUTCOME}"'; }
+targets_m40="$PARTS_TESTS"
+desc_m40="#31583 QA H9 a part 2-6 that fails records nothing, so the status cannot say which or why"
+
+# S3: a part with no record counted as arrived.
+mutate_m41() { _mrep "$1/$STATUS_REL" '            _missing="${_missing}; part ${_k} has no record of arriving"' '            _got=$(( _got + 1 ))'; }
+file_m41="$STATUS_REL"
+targets_m41="$PARTS_TESTS"
+desc_m41="#31583 QA S3 a part with no record of arriving is counted as arrived"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36 m37 m38 m39 m40 m41"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
@@ -460,7 +574,7 @@ BASE="$WORK_BASE/baseline"
 mkdir -p "$BASE"
 _make_copy "$BASE"
 BASE_LOG="$WORK_BASE/baseline.log"
-if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS $BOTH_PATHS_TESTS $CROSS_TESTS; then
+if _run_suite "$BASE/mmry" "$BASE_LOG" $HANDLER_TESTS $BUDGET_TESTS $CONFIG_TESTS $WRITER_TESTS $STATUS_TESTS $STATUS_CMD_TESTS $VERIFY_TESTS $BOTH_PATHS_TESTS $CROSS_TESTS $PARTS_TESTS; then
     printf 'baseline: PASS (%s tests)\n\n' "$(grep -c '^ok ' "$BASE_LOG")"
 else
     printf 'baseline: FAIL — the harness is broken, not the code. Aborting.\n'
@@ -487,7 +601,18 @@ for m in $SELECTED; do
     eval "mfile=\${file_$m:-$HANDLER_REL}"
     before="$WORK_BASE/$m.before"
     cp "$DIR/mmry/$mfile" "$before"
-    "mutate_$m" "$DIR/mmry"
+    # A MUTATION THAT FAILED TO APPLY IS NOT SCORED (#31411 QA round 2). The harness used to ignore the
+    # mutate function's exit status, so a mutation that errored half way was scored against a copy
+    # nobody had looked at. And one that leaves a script bash cannot parse would be REFUSED for the
+    # syntax error, a verdict that says nothing about the line it changed.
+    if ! "mutate_$m" "$DIR/mmry"; then
+        printf '%s: THE MUTATION FAILED TO APPLY. Aborting rather than scoring a copy in an unknown state.\n' "$m"
+        exit 1
+    fi
+    if [[ "$mfile" == *.sh ]] && ! bash -n "$DIR/mmry/$mfile" 2>/dev/null; then
+        printf '%s: THE MUTANT DOES NOT PARSE. Fix the mutation; a syntax error proves nothing about the code.\n' "$m"
+        exit 1
+    fi
 
     # GUARD 1: a mutation that changed nothing would run a green suite against untouched
     # code and score it as a coverage hole. This is the defect the harness itself had.

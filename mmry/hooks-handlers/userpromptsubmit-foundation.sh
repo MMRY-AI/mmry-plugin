@@ -83,16 +83,26 @@ MMRY_FND_PART=1
 if [[ "${1:-}" == "--part" && "${2:-}" =~ ^[1-9][0-9]*$ ]]; then MMRY_FND_PART="$2"; fi
 MMRY_FND_PARTS_MAX="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 [[ "$MMRY_FND_PARTS_MAX" =~ ^[1-9][0-9]*$ ]] || MMRY_FND_PARTS_MAX=6
-# Characters of the SET per part, counted in bytes (see _mmry_fnd_parts). Leaves room for the part
-# header inside 9,900, under the 10,000 cap.
+# Characters of the SET per part, counted as Claude Code counts them, in UTF-16 units (see
+# _mmry_fnd_parts). With the heading, the part label and the cut-short note, the largest part there
+# can be stays under the 10,000 cap; tests/handlers/foundation-parts.bats pins that.
 MMRY_FND_PART_CAP=9500
+# What K parts hold, as the customer reads it: "57,000", with the separator (#31411 QA round 2).
+# Builtins only; the supervisor starts no process it does not need.
+_fnd_cn=$(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )); _FND_CAPACITY_TEXT=""
+while (( _fnd_cn >= 1000 )); do
+    printf -v _fnd_cg '%03d' $(( _fnd_cn % 1000 ))
+    _FND_CAPACITY_TEXT=",${_fnd_cg}${_FND_CAPACITY_TEXT}"; _fnd_cn=$(( _fnd_cn / 1000 ))
+done
+_FND_CAPACITY_TEXT="${_fnd_cn}${_FND_CAPACITY_TEXT}"
 _SFX=""
 (( MMRY_FND_PART > 1 )) && _SFX=".${MMRY_FND_PART}"
 _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 
 # A PART THE SET CANNOT REACH LEAVES AT ONCE, HERE, BEFORE ANYTHING ELSE IS READ. Every part but
-# the last is at least half a part long (see _mmry_fnd_parts), and characters never outnumber
-# bytes, so a set of B bytes has fewer than k parts whenever B < (k-1) * cap/2. That is decided
+# the last is at least half a window long in bytes, and a window is never fewer bytes than the cap
+# less the three a character can be stepped back by (see _mmry_fnd_parts), so a set of B bytes has
+# fewer than k parts whenever B < (k-1) * (cap/2 - 8). The 8 is that step back, and margin. Decided
 # from the manifest's own byte count with one read and no process, before anything else in the file
 # runs. With no verifiable manifest at all, part 1 owns every report about it.
 #
@@ -100,12 +110,54 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 # the supervisor block was measured over 15 interleaved runs on Windows and made no difference
 # (five unused parts 280 ms here, 273 ms there, against 210 ms for five bare bash starts). That cost
 # is what sets K; see hooks.json and the latency notes in #31411.
+# WRITE A RECORD OR MARKER BY TEMP AND RENAME (#31583 QA round 2). A reader never sees half a line,
+# and nothing already at the path - a directory, a FIFO - is ever opened for writing; a FIFO there
+# would block the write, and with it the prompt, until something read it. It costs one process, mv,
+# per record.
+_mmry_fnd_write() {
+    local t="${1}.w.$$"
+    printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    rm -f "$t" 2>/dev/null
+    return 1
+}
+
+# THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Read here, before
+# the quick exit, so that a part with nothing to send can still record that for this session
+# (#31583 QA round 2, R4). Claude Code sends session_id as the first field (captured from a real
+# payload: offset 1), so 160 bytes is enough whatever the prompt size; bash reads a pipe a byte at a
+# time, and reading the whole payload would make a long pasted prompt cost every part process. No id
+# means the old token-named records, unchanged. The worker inherits the id from the supervisor.
+if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+    MMRY_FND_SID=""
+    if [[ ! -t 0 ]]; then
+        _fnd_head=""
+        IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
+        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
+            MMRY_FND_SID="${BASH_REMATCH[1]}"
+        fi
+    fi
+    export MMRY_FND_SID
+fi
+
 if (( MMRY_FND_PART > 1 )); then
     _fnd_m="${_FOUND_TMPDIR}/mmry-foundation.md.manifest"
     _fnd_mb=""
     [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
-    [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] || exit 0
-    (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2) )) && exit 0
+    _fnd_quiet=1
+    if [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] && (( BASH_REMATCH[1] >= (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )); then
+        _fnd_quiet=0
+    fi
+    if (( _fnd_quiet )); then
+        # "none": nothing for this part on this prompt, recorded so that a record an earlier prompt
+        # left, when the set was larger, is never counted as having arrived on this one (#31583 QA
+        # round 2, R4).
+        if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+            _fnd_qtok="${MMRY_FND_SID:-}"
+            [[ -z "$_fnd_qtok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _fnd_qtok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _fnd_qtok=""; }
+            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} none"
+        fi
+        exit 0
+    fi
 fi
 
 # Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
@@ -203,15 +255,15 @@ _mmry_emit_escaped() {
 # inferring an order. The failure log stays, for whoever investigates.
 #
 # Stamped with the session token like the delivery record, so another session's outcome is never
-# read as this one's. Read without sourcing the client: the supervisor stays process-free.
+# read as this one's. Read without sourcing the client, and written by temp and rename, which
+# costs one mv (_mmry_fnd_write).
 _mmry_outcome() {
     local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
     [[ -z "$tok" && -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
-    # One redirect, no process (#31411 QA round 2, latency). The first version wrote a temp file and
-    # renamed it into place, which cost two process starts, mv and rm, on every prompt: measured on
-    # Windows, part 1 alone ran 975 ms against 797 ms for the hook before it. The line is a few dozen
-    # bytes and is read only by /mmry:foundation-status, on a later prompt, never during this one.
-    printf '%s %s' "$tok" "$1" > "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" 2>/dev/null
+    # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
+    # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
+    # could catch half a line, and a FIFO left at the path would have blocked the write.
+    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$tok $1"
     return 0
 }
 
@@ -347,15 +399,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # enough whatever the prompt size; bash reads a pipe a byte at a time, and reading the whole
     # payload would make a long pasted prompt cost every part process. The rest is left unread, as
     # this hook has always left all of it. No id means the old token-named records, unchanged.
-    MMRY_FND_SID=""
-    if [[ ! -t 0 ]]; then
-        _fnd_head=""
-        IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
-        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
-            MMRY_FND_SID="${BASH_REMATCH[1]}"
-        fi
-    fi
-    export MMRY_FND_SID
+    # This session's id was read at the top, before the quick exit (#31583 QA round 2, R4).
     _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
 
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
@@ -403,7 +447,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     DEADLINE_MARK="${_FOUND_TMPDIR}/.mmry-foundation-deadline.$$"
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
     : > "$OUTFILE" 2>/dev/null || true
-    : > "$_INFLIGHT" 2>/dev/null || true
+    _mmry_fnd_write "$_INFLIGHT" "" || true
 
     # THE WORKER DOES NOT GET TO SAY THE TURN WAS DELIVERED (#31583, security on QA round 4).
     #
@@ -585,6 +629,12 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             blank)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy checks out but contains no readable text, so there was nothing to send."
                 ;;
+            changed)
+                # Nothing is damaged: a new set landed while this turn was copying the old one for the
+                # assistant to read. Rebuilding would not help; the next prompt reads the new set.
+                _WHY="Nothing was truncated and nothing was guessed at; nothing was sent rather than a mix of two versions."
+                _REMEDY="Re-send the prompt."
+                ;;
             *)
                 # The states where a comparison really did happen and fail: size, contents,
                 # inconsistent. Only these get the sentence that says so.
@@ -596,7 +646,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         if (( ${_UPGRADE:-0} )); then
             USERMSG="MMRY AI: you have just updated the MMRY plugin, so this one turn ran without your Foundation directives while they are fetched again in the new format. Normally the next prompt has them. No action needed; if you still see this after a few prompts, run ${_FOUND_RELOAD_REF}."
         else
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} Run ${_FOUND_RELOAD_REF} to rebuild it, then ${_FOUND_STATUS_REF} to confirm."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run ${_FOUND_RELOAD_REF} to rebuild it, then ${_FOUND_STATUS_REF} to confirm.}"
         fi
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
@@ -659,7 +709,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection FAILED: %s\n' \
             "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
         if (( MMRY_FND_PART > 1 )); then
-            NOTICE="[Foundation part ${MMRY_FND_PART}] ${NOTICE}"
+            # A part names itself and does not claim the whole turn went without its directives
+            # (#31411 QA round 2): the other parts may well have arrived.
+            if (( HIT_DEADLINE == 1 )); then _fnd_cause="loading it took over ${DEADLINE}s and was stopped"; else _fnd_cause="its loader failed with exit code ${WORKER_RC}"; fi
+            NOTICE="MMRY AI could not load PART ${MMRY_FND_PART} of this account's FOUNDATION directives for this turn: ${_fnd_cause}. The other parts may have arrived, but without this one the set is incomplete. Do not claim to be following the complete set. Tell the user plainly that part ${MMRY_FND_PART} of their Foundation directives was not applied to this turn."
             USERMSG="${USERMSG/MMRY AI: your Foundation directives were NOT applied/MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was NOT applied}"
         fi
         _mmry_emit "$NOTICE" "$USERMSG"
@@ -691,7 +744,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if (( MISSED_PREVIOUS == 1 )); then
         # BODY is already escaped by the worker, so only the note is escaped here, and the
         # blank line between them is written as its escaped form.
-        BODY="$(_mmry_fnd_json_escape "NOTE: on the PREVIOUS turn these directives were not applied - loading them was cut short and its output discarded. Treat that turn's response as having been produced without them.")\n\n${BODY}"
+        BODY="$(_mmry_fnd_json_escape "NOTE: on the PREVIOUS turn these directives were not applied (loading was cut short). Treat that response as produced without them.")\n\n${BODY}"
         USERMSG="MMRY AI: your Foundation directives were not applied to the previous turn (the hook was cut short). They are applied again now."
         (( MMRY_FND_PART > 1 )) && USERMSG="MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was not applied to the previous turn (the hook was cut short). It is applied again now."
     fi
@@ -699,13 +752,15 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # BY REFERENCE: the customer is told once per session, not on every prompt. The assistant is
     # told on every prompt, because it needs the instruction every time.
     if [[ "$_FND_KIND" == BYREF* ]]; then
-        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""
+        # Named by the session (#31411 QA round 2), like every other record here, so one session
+        # telling its customer never stops another from telling theirs.
+        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""
         _tok="${MMRY_FND_SID:-}"
         [[ -z "$_tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
             _fnd_host_refs
-            USERMSG="MMRY AI: your Foundation set is larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to the full copy and asked to read it before answering. That works, but it relies on the assistant opening the file. To have the set applied directly, keep it under about $(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )) characters. ${USERMSG}"
+            USERMSG="MMRY AI: your Foundation set is larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
             printf '%s' "$_tok" > "$_told" 2>/dev/null || true
         fi
     fi
@@ -716,7 +771,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
         case "$_FND_KIND" in
-            "PART "*)  _fk="${_FND_KIND#PART }"; _mmry_outcome "ok part ${_fk% *} of ${_fk#* }" ;;
+            # "PART k n version": the version goes into the outcome record (#31583 QA round 2, R4), so
+            # the status command can tell a prompt whose parts came from two versions of the set.
+            "PART "*)  _fk=(${_FND_KIND#PART }); _mmry_outcome "ok part ${_fk[0]} of ${_fk[1]}${_fk[2]:+ set ${_fk[2]}}" ;;
             "BYREF "*) _mmry_outcome "ok by-reference ${_FND_KIND#BYREF }" ;;
             *)         _mmry_outcome "ok part 1 of 1" ;;
         esac
@@ -836,7 +893,6 @@ fi
 #   3 - the cache could not be verified; stdout carries the one-line reason
 # ============================================================================
 
-MANIFEST="${CACHE}.manifest"
 # Written on every verified injection so /mmry:foundation-status can answer "are my
 # directives reaching my assistants right now" without anyone reading a cache file
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
@@ -905,7 +961,7 @@ if (( _verdict != 0 )); then
     exit 3
 fi
 
-read -r _ok_word _exp_entries _act_bytes <<<"$_reason"
+read -r _ok_word _exp_entries _act_bytes _fnd_setid <<<"$_reason"
 content="$(<"$CACHE")"
 
 # ============================================================================
@@ -936,41 +992,106 @@ content="$(<"$CACHE")"
 [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=%s bytes=%s
 ' "${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
 
-# ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
-# treats a successful worker's output as already-escaped JSON string content and copies it.
-# CUT THE SET INTO PARTS, the same way in every firing (#31411 split).
+# CUT THE SET INTO PARTS, the same way in every firing (#31411 split, QA round 2 R1 and TC3).
 #
-# Counted in BYTES, with the locale forced to C. Claude Code counts the decoded string's length,
-# and for any text a UTF-8 byte count is never smaller than that, so a part that fits in bytes fits
-# in characters. A part ends after the last newline in the second half of its window, so a
-# directive is not cut mid-line when it does not have to be, and every part but the last is at least
-# half a window long, which is what lets parts 2..K leave at once on a small set. A window with no
-# newline in its second half is cut hard, stepped back off any UTF-8 continuation byte so a
-# character is never split. Stops one part past the maximum: more than that means by reference,
-# and the rest of a very large set does not need cutting to know it.
-_mmry_fnd_parts() {
-    local LC_ALL=C
-    local s="$1" cap="$MMRY_FND_PART_CAP" stop=$(( MMRY_FND_PARTS_MAX + 1 )) w head nxt
-    local cont=$'[\x80-\xbf]'
+# THE LIMIT IS IN CHARACTERS, NOT BYTES. Claude Code's 10,000 counts characters of the decoded
+# text, measured for non-ASCII text on 2026-10-04: a hook of 9,800 Japanese characters, 24,630
+# bytes, reached the model whole (it read the last marker, at character 9,780), while 10,400
+# characters was cut to a preview. Characters are counted as JavaScript counts them, in UTF-16
+# units: one per character, two for one outside the Basic Multilingual Plane (most emoji). That is
+# also how the account page counts, so the page and the plugin agree on what fits.
+#
+# WHERE A PART ENDS. The longest run that fits, pulled back to the last line end in its second
+# half, else the last sentence end (". ", "! ", "? ", or the Japanese full stop), else the last
+# blank, so a directive is not cut mid-line and one longer than a part is not cut mid-word (#31411
+# QA round 2, TC3). Only a run of more than half a part with no blank at all, a URL or unspaced
+# text, is cut hard, and then always between characters. Every part but the last is therefore at
+# least half a part long, which is what lets parts 2..K leave at once on a small set.
+#
+# WHEN THAT NEEDS MORE THAN K PARTS, CUT AGAIN, FULLER (#31411 QA round 2, R1). Pulling back to a
+# line end can leave a part half full: seven long memories of about 5,000 characters, 35,147 bytes,
+# needed seven parts and went by reference although they fit in four. So the set is cut again with
+# every part filled to the cap, pulled back only to a blank within its last 256 characters. By
+# reference therefore means the set does not fit: more than about K x 9,500 characters.
+#
+# THREE ATTEMPTS, CHEAPEST FIRST. 1) The tidy cut, then 2) the full cut, counted in BYTES here in
+# bash with no process: a byte count is never smaller than the character count, so a part that fits
+# in bytes fits in characters, and for plain ASCII the two are the same. That settles every ASCII
+# set and every other set that fits in K parts even counted in bytes. Only a set that still needs
+# more than K parts AND holds non-ASCII text is 3) cut again counting characters, by
+# foundation-cut.awk, which follows the same rules. That costs one process (measured: starting awk
+# alone took 270 ms on this Windows host), so it is kept to the sets that need it, the ones QA
+# found going by reference while they fit: a 24,700-character Japanese set is about 74,000 bytes.
+_mmry_fnd_cut_bytes() {
+    # Sets FND_PARTS from $1, mode $2 (tidy or fill), counting bytes, stopping one part past the
+    # maximum. Caller has LC_ALL=C.
+    local s="$1" mode="$2" cap="$MMRY_FND_PART_CAP" stop=$(( MMRY_FND_PARTS_MAX + 1 )) w t cut wb
+    local cont=$'^[\x80-\xbf]'
     FND_PARTS=()
     while [[ -n "$s" ]] && (( ${#FND_PARTS[@]} < stop )); do
         if (( ${#s} <= cap )); then
             FND_PARTS+=("$s"); s=""; break
         fi
-        w="${s:0:cap}"
-        head="${w%$'\n'*}"
-        if [[ "$head" != "$w" ]] && (( ${#head} >= cap / 2 )); then
-            w="${head}"$'\n'
+        # Never between the bytes of one character.
+        wb=$cap
+        while (( wb > 0 )) && [[ "${s:wb:1}" =~ $cont ]]; do wb=$(( wb - 1 )); done
+        w="${s:0:wb}"
+        cut=$wb
+        if [[ "$mode" == "fill" ]]; then
+            t="${w%[ $'\t\n\r']*}"
+            [[ "$t" != "$w" ]] && (( wb - ${#t} <= 256 )) && cut=$(( ${#t} + 1 ))
         else
-            nxt="${s:${#w}:1}"
-            while [[ -n "$nxt" && "$nxt" =~ $cont ]] && (( ${#w} > cap / 2 )); do
-                nxt="${w: -1}"
-                w="${w:0:${#w}-1}"
-            done
+            t="${w%$'\n'*}"
+            if [[ "$t" != "$w" ]] && (( ${#t} + 1 >= wb / 2 )); then
+                cut=$(( ${#t} + 1 ))
+            else
+                t="${w%[.!?][ $'\t']*}"
+                if [[ "$t" != "$w" ]] && (( ${#t} + 2 >= wb / 2 )); then
+                    cut=$(( ${#t} + 2 ))
+                else
+                    t="${w%$'\xe3\x80\x82'*}"
+                    if [[ "$t" != "$w" ]] && (( ${#t} + 3 >= wb / 2 )); then
+                        cut=$(( ${#t} + 3 ))
+                    else
+                        t="${w%[ $'\t']*}"
+                        [[ "$t" != "$w" ]] && (( ${#t} + 1 >= wb / 2 )) && cut=$(( ${#t} + 1 ))
+                    fi
+                fi
+            fi
         fi
-        FND_PARTS+=("$w")
-        s="${s:${#w}}"
+        FND_PARTS+=("${s:0:cut}")
+        s="${s:cut}"
     done
+    return 0
+}
+
+_mmry_fnd_parts() {
+    local LC_ALL=C
+    # Only the first K + 1 parts can ever matter, so only as much of the set as they could hold is
+    # cut: four bytes is the most a character takes. A set longer than that goes by reference
+    # whatever its content, and copying the rest of a very large set on every cut cost 947 ms on 1 MB.
+    local whole="$1"
+    local s="${whole:0:$(( (MMRY_FND_PARTS_MAX + 1) * MMRY_FND_PART_CAP * 4 ))}" nonascii=$'[\x80-\xff]' lens L off=0 parts=()
+    _mmry_fnd_cut_bytes "$s" tidy
+    (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
+    _mmry_fnd_cut_bytes "$s" fill
+    (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
+    # Plain ASCII: bytes are characters, so the set really does not fit.
+    [[ "$s" =~ $nonascii ]] || return 0
+    # Counted in characters. Only as much of the set as K + 1 parts could hold is passed: four bytes
+    # is the most a character takes, and anything beyond that is by reference regardless.
+    lens="$(LC_ALL=C awk -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
+        -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" \
+        <<<"$s" 2>/dev/null)" || return 0
+    while IFS= read -r L; do
+        [[ "$L" =~ ^[0-9]+$ ]] || return 0
+        parts+=("${s:off:L}")
+        off=$(( off + L ))
+    done <<<"$lens"
+    # Fail safe: keep the byte result, which goes by reference, unless these parts are within K and
+    # account for every byte of the set.
+    (( ${#parts[@]} >= 1 && ${#parts[@]} <= MMRY_FND_PARTS_MAX && off == ${#whole} )) || return 0
+    FND_PARTS=("${parts[@]}")
     return 0
 }
 
@@ -985,14 +1106,40 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
         printf '@@MMRY-NONE %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
         exit 0
     fi
-    _fnd_path="$CACHE"
-    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$CACHE" 2>/dev/null || printf '%s' "$CACHE")"
+    # A COPY MADE FOR THIS TURN, NOT THE LIVE CACHE (#31411 QA round 2 R1, #31583 QA round 2 R3).
+    # The assistant used to be pointed at the shared cache itself and told it was the complete,
+    # verified set, and any later write - another session starting, the daily refresh - could
+    # replace that file before the assistant opened it. It now gets a copy of exactly the bytes that
+    # were verified, named by this session, ending in a closing line it is told to reach. The copy is
+    # checked against the record before it is put in place, so a cache replaced while it was being
+    # copied sends nothing rather than a different set.
+    _fnd_key="${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}"
+    _fnd_snap="${MMRY_TMPDIR}/mmry-foundation.byref${_fnd_key:+.$_fnd_key}.md"
+    _fnd_snaptmp="${_fnd_snap}.new.$$"
+    _fnd_end="END OF FOUNDATION SET ${_fnd_setid}"
+    _sc="" _sb=""
+    if cp -f "$CACHE" "$_fnd_snaptmp" 2>/dev/null; then
+        read -r _sc _sb < <(cksum < "$_fnd_snaptmp" 2>/dev/null)
+    fi
+    if [[ -n "$_sc" && "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]] \
+        && printf '\n%s\n' "$_fnd_end" >> "$_fnd_snaptmp" 2>/dev/null \
+        && mv -f "$_fnd_snaptmp" "$_fnd_snap" 2>/dev/null; then
+        :
+    else
+        rm -f "$_fnd_snaptmp" 2>/dev/null
+        printf '%s' 'changed|your Foundation directives were being replaced as this turn started, so the copy prepared for it did not match the record'
+        exit 3
+    fi
+    # One path, converted for Windows below. The conversion read $_fnd_snap a second time, so
+    # mutation m27 (the path set to the live cache) changed nothing on Windows and survived there.
+    _fnd_path="$_fnd_snap"
+    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$_fnd_path" 2>/dev/null || printf '%s' "$_fnd_path")"
     # The product named is the one this host is (#31245 merged onto #31411): Codex spills a hook
     # over 10,000 bytes to a file much as Claude Code previews one over 10,000 characters.
     _fnd_lbl='Claude Code'
     if declare -F _mmry_host_resolve >/dev/null 2>&1; then _mmry_host_resolve; _fnd_lbl="${_MMRY_HOST_LABEL_V:-$_fnd_lbl}"; fi
-    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than ${_fnd_lbl} lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool; it is the complete, verified set: ${_fnd_path}
-If a response would conflict with any directive in it, follow the directive. If you cannot read the file, tell the user plainly that their Foundation directives were not applied to this turn."
+    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than ${_fnd_lbl} lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool, in pieces if it limits how much one read returns; you may need to ask the user for permission to read it. It is a copy of the complete, verified set, made for this turn: ${_fnd_path}
+Its last line is \"${_fnd_end}\". If you cannot read the file, or you do not reach that line, tell the user plainly that their Foundation directives were not applied to this turn. If a response would conflict with any directive in it, follow the directive."
     printf '@@MMRY-BYREF %s@@' "$_fnd_n"
 elif (( MMRY_FND_PART > _fnd_n )); then
     printf '@@MMRY-NONE %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
@@ -1002,12 +1149,12 @@ elif (( _fnd_n == 1 )); then
     _payload="${_fnd_head}
 
 ${content}"
-    printf '@@MMRY-PART 1 1@@'
+    printf '@@MMRY-PART 1 1 %s@@' "$_fnd_setid"
 else
-    _payload="${_fnd_head} This is PART ${MMRY_FND_PART} OF ${_fnd_n} of the set. The other parts arrive alongside this one, in any order, and together they are the whole set.
+    _payload="${_fnd_head} This is PART ${MMRY_FND_PART} OF ${_fnd_n} of the set, version ${_fnd_setid}. The parts arrive in any order and together are the whole set; if their versions differ, tell the user.
 
 ${FND_PARTS[$(( MMRY_FND_PART - 1 ))]}"
-    printf '@@MMRY-PART %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
+    printf '@@MMRY-PART %s %s %s@@' "$MMRY_FND_PART" "$_fnd_n" "$_fnd_setid"
 fi
 
 # ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor

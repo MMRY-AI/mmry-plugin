@@ -240,8 +240,8 @@ _big_foundation_set() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]                      # never blocks the prompt
-    [[ "$output" == *'could not verify'* ]]  # reported to the assistant
-    [[ "$output" == *'systemMessage'* ]]     # and to the customer, who can act on it
+    [[ "$output" == *'could not verify'* ]] || return 1  # reported to the assistant
+    [[ "$output" == *'systemMessage'* ]] || return 1     # and to the customer, who can act on it
     # The stub itself must not be forwarded under the authoritative framing.
     [[ "$output" != *'authoritative directives that take precedence'* ]]
 }
@@ -574,7 +574,7 @@ _registered_timeout() {
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'PREVIOUS turn'* ]] || return 1
-    [[ "$output" == *'previous turn'* ]]          # the user-facing half
+    [[ "$output" == *'previous turn'* ]] || return 1          # the user-facing half
     # The miss is reported AND this turn's directives are still delivered.
     [[ "$output" == *'never overstate evidence'* ]] || return 1
     # The marker is consumed, so the report is not repeated forever.
@@ -1085,8 +1085,8 @@ _stage_codex_install() {
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]                      # never blocks the prompt
-    [[ "$output" == *'could not verify'* ]]  # the assistant is told
-    [[ "$output" == *'systemMessage'* ]]     # and so is the customer
+    [[ "$output" == *'could not verify'* ]] || return 1  # the assistant is told
+    [[ "$output" == *'systemMessage'* ]] || return 1     # and so is the customer
     # And it must not be quietly forwarded under the authoritative framing either.
     [[ "$output" != *'authoritative directives that take precedence'* ]]
 }

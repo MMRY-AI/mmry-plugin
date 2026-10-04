@@ -353,7 +353,10 @@ SHIMEOF
     [[ -f "$handler" ]] || return 1
 
     # The watchdog subshell: from its `while` to the kill that ends it.
-    block="$(sed -n '/^        while /,/kill -TERM/p' "$handler")"
+    # The FIRST such loop only, ending at its kill (#31411 QA round 2). A sed range reopens at every
+    # later line that starts the same way, and the part cut added one below the watchdog, so the block
+    # ran to the end of the file and took in the cut's own counters.
+    block="$(awk '/^        while / { f = 1 } f { print } f && /kill -TERM/ { exit }' "$handler")"
     # SAMPLE SIZE, as everywhere else in this file: an extraction that found nothing must fail
     # loudly rather than pass a comparison against an empty string.
     (( $(printf '%s
@@ -828,7 +831,7 @@ _foundation_budget() {
         # Trailing newlines kept: a part cut after a newline ends in one, and $( ) would drop it.
         ctx="$(jq -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/budget-part$k.json" | tr -d '\r' && printf '.')"
         ctx="${ctx%.}"
-        [[ "$ctx" == *"This is PART $k OF 6 of the set."* ]] || { echo "part $k is missing or not labelled $k of 6"; return 1; }
+        [[ "$ctx" == *"This is PART $k OF 6 of the set, version "* ]] || { echo "part $k is missing or not labelled $k of 6"; return 1; }
         joined="${joined}${ctx#*$'\n\n'}"
         if grep -q systemMessage "$TEST_TMPDIR/budget-part$k.json"; then echo "part $k reported a problem"; return 1; fi
     done
@@ -883,7 +886,8 @@ _foundation_budget() {
     [[ "$output" == *systemMessage* ]] || return 1
     [[ "$output" == *'part 3 of your Foundation directives was NOT applied'* ]] || return 1
     # The assistant is told as well, and which part.
-    [[ "$output" == *'[Foundation part 3]'* ]] || return 1
+    # And the assistant is told which part (#31411 QA round 2: a part names itself).
+    [[ "$output" == *'could not load PART 3 of this account'* ]] || return 1
     # And no partial set was passed off as the account guidance.
     [[ "$output" != *'every claim backed by something you ran'* ]]
 }

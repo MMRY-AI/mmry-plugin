@@ -30,3 +30,7 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+
+# The cut program the per-prompt hook runs for non-ASCII sets (#31411). A CRLF checkout on
+# Windows would hand awk a carriage return at the end of every line of its program.
+*.awk text eol=lf
