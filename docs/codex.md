@@ -37,11 +37,15 @@ MMRY's hooks cannot be installed at all. Ask your administrator.
 
 **3. Sign in.**
 
-Ask Codex to run MMRY setup, or run it yourself:
+Run MMRY setup yourself, in a terminal:
 
 ```
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 ```
+
+Run it in a terminal rather than asking Codex to. In the Codex desktop app's default sandbox, a
+command the assistant runs cannot reach mmryai.com, so setup run that way stops with "could not
+reach MMRY AI" and changes nothing (observed on macOS, 2026-10-04).
 
 If you are on Windows and would rather not open Git Bash, this runs the same thing from PowerShell.
 It finds Git for Windows' bash from your Git install (`git --exec-path` points into it whichever
@@ -227,6 +231,7 @@ separate credentials and separate directories on purpose.
 | Symptom | First thing to check |
 |---|---|
 | No memories at session start | Did you answer **Trust all and continue** at the hook review? Restart Codex and look for it. |
+| Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |
 | Saving, searching or joining a group fails with a network or permission error | Your Codex sandbox settings may block network access or writes outside your project, and MMRY's scripts need both. See [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex). |
