@@ -10,8 +10,16 @@
 #
 # The server enforces who may do this (lead, creator or admin), so this does not pre-check the
 # role; it translates the refusal into words instead. And per DD-70, the server refuses to record
-# the transition when the consolidation stored nothing, returning 502 with the formation left
-# Active, so a failure here is safe to retry and is reported as exactly that.
+# the transition when the close-out record could not be saved, returning 502 with the formation
+# left Active, so that failure is safe to retry.
+#
+# #31738: THE SERVER'S REASON IS PRINTED, NOT REPLACED. Every 502 used to print one fixed sentence,
+# "could not be consolidated ... Try again shortly", whatever the server had said. The server's own
+# cause was that the AI found nothing durable to keep, which no retry changes, so a lead was told to
+# retry something that could never succeed and never shown why. The server now saves the record
+# itself and names each remaining refusal and whether a retry helps (already closed, a default
+# visibility it cannot save under, the store not answering), so its words are what is shown. This
+# script's own sentences remain for a reply that carries no reason, or only a sanitised one.
 #
 # #31046: THE SUMMARY IS NO LONGER THE WHOLE RECORD. The server returns the close-out account with
 # the transition - every member, the work it was given, and the state it ended in - and this prints
@@ -65,14 +73,29 @@ fi
 
 if ! mmry_debrief_formation "$formation_id" "$summary"; then
     code="${MMRY_HTTP_CODE:-0}"
-    case "$code" in
-        502) echo "The debrief could not be consolidated, so the formation has been left active and nothing was recorded. Try again shortly." ;;
-        403) echo "Refused. Only the formation's lead, its creator, or an administrator can close it out." ;;
-        404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
-        400) echo "The server refused the summary. ${MMRY_RESPONSE:-}" ;;
-        409) echo "Formation ${formation_id} is not active, so there is nothing to close out." ;;
-        *)   echo "Could not close out formation ${formation_id} (HTTP ${code}). It has not been changed." ;;
+    reason=""
+    if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+        reason="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r             'if type == "object" and (.error | type) == "string" then .error else empty end'             2>/dev/null || true)"
+    fi
+    # The sanitised placeholders carry no reason, and this script's sentence for that status says
+    # more than they do.
+    case "$reason" in
+        "Invalid request"|"Access denied"|"Not found"|"An internal error occurred") reason="" ;;
     esac
+    # Plain assignments rather than ${reason:-...}: an apostrophe inside that form, within double
+    # quotes, opens a quote in bash.
+    fallback=""
+    case "$code" in
+        502) fallback="The close-out could not be completed, so formation ${formation_id} has been left active and nothing was recorded. Retrying is safe." ;;
+        409) fallback="Formation ${formation_id} is not active, so there is nothing to close out." ;;
+        403) fallback="Refused. Only the formation's lead, its creator, or an administrator can close it out." ;;
+        404) reason=""
+             fallback="Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
+        400) fallback="The server refused the summary. ${MMRY_RESPONSE:-}" ;;
+        *)   reason=""
+             fallback="Could not close out formation ${formation_id} (HTTP ${code}). It has not been changed." ;;
+    esac
+    if [[ -n "$reason" ]]; then echo "$reason"; else echo "$fallback"; fi
     exit 1
 fi
 

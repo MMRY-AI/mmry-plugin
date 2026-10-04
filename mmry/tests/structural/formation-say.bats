@@ -351,28 +351,82 @@ _env() {
     [ -z "$output" ]
 }
 
-@test "debrief: a 502 says the formation is still active and nothing was recorded" {
-    # DD-70 server-side: a failed consolidation refuses to record the transition. The client must
-    # say that plainly AND must keep the local state, because the formation is still live.
+@test "debrief: a 502 prints the server's reason and keeps the formation" {
+    # DD-70 server-side: a close-out record that could not be saved refuses the transition. #31738:
+    # the server's reason is printed rather than replaced, and the local state is kept, because the
+    # formation is still live.
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
+    local why="The close-out record for formation 42 could not be saved because the memory store did not respond. Nothing was closed and the formation is still active. This is usually temporary: retrying is safe and will not record anything twice."
 
-    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"consolidation failed"}' \
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY="{\"error\":\"${why}\",\"detail\":null}" \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
         run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"left active"* ]]
-    [[ "$output" != *"closed out"* ]]
+    [[ "$output" == *"$why"* ]] || { echo "$output"; return 1; }
+    # The old fixed sentence told the lead to retry whatever the cause was.
+    [[ "$output" != *"could not be consolidated"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"closed out."* ]]
     run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
     [[ "$output" == 42* ]]
+}
+
+@test "debrief: a 502 with no reason still says the formation is left active and a retry is safe" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"left active"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Retrying is safe"* ]]
+    run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
+    [[ "$output" == 42* ]]
+}
+
+@test "debrief: an already closed formation is told so in the server's words (#31738)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local why="Formation 42 was already closed out on 2026-10-04 22:25 UTC, so there is nothing left to close. Retrying will not change that."
+
+    PATH="${bin}:${PATH}" FAKE_CODE=409 FAKE_BODY="{\"error\":\"${why}\",\"detail\":null}" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$why"* ]] || { echo "$output"; return 1; }
+}
+
+@test "debrief: a 403 with a reason prints it; a sanitised one gets the role sentence (#31738)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local why="The close-out record for formation 42 could not be saved: your default visibility is a group you are not a member of."
+
+    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY="{\"error\":\"${why}\",\"detail\":null}" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"default visibility is a group"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"Only the formation's lead"* ]] || { echo "$output"; return 1; }
+
+    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{"error":"Access denied","detail":null}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Only the formation's lead"* ]] || { echo "$output"; return 1; }
 }
 
 @test "debrief: a role refusal names who may close out, not a generic error" {
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
 
-    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{"error":"forbidden"}' \
+    # The body the API actually sends for this refusal: the lead check throws an
+    # UnauthorizedAccessException, which the handler sanitises to "Access denied". #31738 made the
+    # script print a server reason when there is one, so this fixture has to be the real answer.
+    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{"error":"Access denied","detail":null}' \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
         run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
 
