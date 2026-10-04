@@ -104,15 +104,42 @@ if (( _mmry_marker_ok == 0 )) && [[ "$(mmry_host)" == "codex" ]]; then
     exit 0
 fi
 
+# THE PLUGIN ROOT CARRIES THE MARKER TOO (#31245 QA, Security). lib-host.sh looks for the marker
+# beside whichever copy of a handler is running. A handler run from Codex's plugin cache, with
+# CODEX_HOME unset and a relocated home, found none and resolved as Claude. The plugin-root marker
+# names the home on its second line, because two levels above the plugin root is not the home.
+# Codex only, and only when the plugin root is inside this Codex home, so a plugin root that Claude
+# Code reads is never marked. Best effort: the state-directory marker above is the one that gates.
+if [[ "$(mmry_host)" == "codex" ]]; then
+    _mmry_norm_path "$(mmry_host_config_dir)"; _mmry_ci_home="$_MMRY_NP"
+    _mmry_norm_path "$P"; _mmry_ci_root="$_MMRY_NP"
+    if [[ -n "$_mmry_ci_home" && -n "$_mmry_ci_root" ]] && _mmry_path_is_within "$_mmry_ci_root" "$_mmry_ci_home"; then
+        printf 'codex\n%s\n' "$(mmry_host_config_dir)" > "$P/.mmry-host" 2>/dev/null || true
+    fi
+fi
+
 # Copy current handler and setup scripts (all platforms)
 cp "$P"/hooks-handlers/*.sh "${MMRY_STATE_DIR}/hooks-handlers/"
 # No .cmd is staged here, and none needs to be. The Windows launcher, codex-hook.cmd, is back since
 # #31245 QA round 8 and is named by every commandWindows entry in hooks/codex-hooks.json, but it is
 # run from the PLUGIN ROOT, beside the codex-hook.sh it starts, exactly as the Unix registrations
 # run codex-hook.sh from there. Nothing reaches it through this state directory.
-cp "$P"/setup/*.sh "${MMRY_STATE_DIR}/setup/"
-cp "$P"/setup/*.bat "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
-cp "$P"/setup/*.ps1 "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
+# NOT THE CLAUDE CODE INSTALLERS (#31245 QA). install.sh, install.ps1 and install.bat install MMRY
+# for Claude Code: they create ~/.claude and rewrite its settings, and none refuses on Codex the way
+# the uninstallers do. Nothing tells a Codex customer to run them, so they are not put in the Codex
+# home at all, and copies an earlier version put there are removed. Claude Code is unchanged.
+for _mmry_setup_file in "$P"/setup/*.sh "$P"/setup/*.bat "$P"/setup/*.ps1; do
+    [[ -f "$_mmry_setup_file" ]] || continue
+    case "$(basename "$_mmry_setup_file")" in
+        install.sh|install.ps1|install.bat)
+            [[ "$(mmry_host)" == "codex" ]] && continue ;;
+    esac
+    cp "$_mmry_setup_file" "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
+done
+if [[ "$(mmry_host)" == "codex" ]]; then
+    rm -f "${MMRY_STATE_DIR}/setup/install.sh" "${MMRY_STATE_DIR}/setup/install.ps1" \
+          "${MMRY_STATE_DIR}/setup/install.bat" 2>/dev/null || true
+fi
 
 # THE BUNDLED jq, BESIDE THE INSTALLED HANDLERS, ON CODEX (#31245 QA round 8).
 #

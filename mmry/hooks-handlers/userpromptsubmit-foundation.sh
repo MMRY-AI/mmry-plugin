@@ -265,29 +265,6 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # ticket needed three reports before anyone could act on it.
     _FOUND_LOG="${_FOUND_TMPDIR}/mmry-foundation.log"
 
-    # THE OFF SWITCH, honoured HERE and not only in the worker (#31434 QA).
-    #
-    # The crash notice below tells the customer to set foundationReinject false. That advice
-    # was inert on the very path that gave it: the toggle was read only by the worker, by way
-    # of mmry_load_config, and the crash branch runs precisely when the worker could not run.
-    # A customer who followed the instruction - in the config, in the environment, or both -
-    # saw the same banner on every prompt with no way to stop it. A remedy printed in a
-    # customer-facing string has to work.
-    #
-    # Checked UP FRONT, so the opt-out also skips the worker and the watchdog entirely: an
-    # opted-out customer pays one subshell instead of the ~3 s of process spawns a firing
-    # costs on Windows Git Bash.
-    #
-    # NOT by way of jq, deliberately. jq is a process, and this runs on every prompt; worse,
-    # the most likely reason the worker failed is a jq that is slow or broken, so deciding
-    # whether to REPORT a jq failure by invoking jq is how the check inherits the fault it is
-    # reporting on. An earlier cut of this fix did exactly that and measured 33 s against a
-    # 20 s budget with a 20 s-slow jq - it reintroduced the ticket's own defect inside the
-    # remedy for it. This reads the file with no process at all.
-    if _mmry_reinject_is_off_here; then
-        exit 0
-    fi
-
     # A HOST WITH NO CREDENTIAL OF ITS OWN IS SILENT, NOT ALARMING (#31245 QA round 4).
     #
     # THE DEFECT. On an unconfigured Codex install this handler fired on every prompt and exited
@@ -335,6 +312,34 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
                 exit 0
             fi
         fi
+    fi
+
+    # AFTER lib-host.sh, NOT BEFORE IT (#31245 QA). The off switch decides whether the Claude
+    # config may be read, and on Codex the answer comes from the host, which lib-host.sh settles.
+    # Asked before it, a copy run without MMRY_HOST exported could consult the Claude file.
+    # codex-hook.sh exports it for every hook, so this was safe on every shipped path; it is
+    # now safe by order as well.
+    # THE OFF SWITCH, honoured HERE and not only in the worker (#31434 QA).
+    #
+    # The crash notice below tells the customer to set foundationReinject false. That advice
+    # was inert on the very path that gave it: the toggle was read only by the worker, by way
+    # of mmry_load_config, and the crash branch runs precisely when the worker could not run.
+    # A customer who followed the instruction - in the config, in the environment, or both -
+    # saw the same banner on every prompt with no way to stop it. A remedy printed in a
+    # customer-facing string has to work.
+    #
+    # Checked UP FRONT, so the opt-out also skips the worker and the watchdog entirely: an
+    # opted-out customer pays one subshell instead of the ~3 s of process spawns a firing
+    # costs on Windows Git Bash.
+    #
+    # NOT by way of jq, deliberately. jq is a process, and this runs on every prompt; worse,
+    # the most likely reason the worker failed is a jq that is slow or broken, so deciding
+    # whether to REPORT a jq failure by invoking jq is how the check inherits the fault it is
+    # reporting on. An earlier cut of this fix did exactly that and measured 33 s against a
+    # 20 s budget with a 20 s-slow jq - it reintroduced the ticket's own defect inside the
+    # remedy for it. This reads the file with no process at all.
+    if _mmry_reinject_is_off_here; then
+        exit 0
     fi
 
     # THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Claude Code

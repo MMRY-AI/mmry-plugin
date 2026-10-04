@@ -126,6 +126,11 @@ writable_roots = ["/absolute/path/to/your/codex/home/mmry"]
 
 Use the absolute path of your own Codex home (`~/.codex` unless you have set `CODEX_HOME`).
 
+**Where the credential is read from.** MMRY reads its credential from `mmry-config.json` in your
+Codex home, and never falls back to Claude Code's. One exception: if `MMRY_CONFIG_FILE` is set in
+Codex's environment, MMRY reads that file instead, wherever it points. That includes Claude Code's
+`~/.claude/mmry-config.json`, if you point it there. Leave it unset unless you mean it.
+
 ---
 
 ## What you get

@@ -270,8 +270,12 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
             # stops at the first newline by itself, and the substring bounds what a corrupt or
             # hostile file can do exactly as head -c 64 did. The trailing strip covers the CR of
             # a CRLF file and any stray spaces, which is all `tr -d` was achieving here.
-            _mmry_marker_host=""
-            read -r _mmry_marker_host < "$_mmry_marker" 2>/dev/null || _mmry_marker_host=""
+            _mmry_marker_host="" _mmry_marker_home=""
+            {
+                read -r _mmry_marker_host || _mmry_marker_host=""
+                read -r _mmry_marker_home || true
+            } < "$_mmry_marker" 2>/dev/null
+            _mmry_marker_home="${_mmry_marker_home%$''}"
             _mmry_marker_host="${_mmry_marker_host:0:64}"
             _mmry_marker_host="${_mmry_marker_host//[[:space:]]/}"
             if [[ "$_mmry_marker_host" == "codex" ]]; then
@@ -282,7 +286,25 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
                 # correctly and then looked for the credential in ~/.codex, where there is none,
                 # and refused. Two directories up from the marker is where these files actually
                 # are, which beats any guess.
-                _MMRY_HOST_DIR_FROM_MARKER="$(cd "${_mmry_self_dir}/../.." && pwd 2>/dev/null)" || _MMRY_HOST_DIR_FROM_MARKER=""
+                #
+                # A MARKER MAY NAME THE HOME ITSELF (#31245 QA, Security). The state-directory
+                # marker sits at <home>/mmry/.mmry-host, so the rule above holds for it. The
+                # plugin-root marker, in Codex's plugin cache, is not two levels below the home, so
+                # it names the home on its second line. That line is believed only if it is a
+                # directory the running script is actually inside; anything else falls back to the
+                # state-directory layout. Only reached when MMRY_HOST was not exported, so never on
+                # a hook firing.
+                _MMRY_HOST_DIR_FROM_MARKER=""
+                if [[ -n "$_mmry_marker_home" && -d "$_mmry_marker_home" ]]; then
+                    _mmry_norm_path "$_mmry_marker_home"; _mmry_marker_home="$_MMRY_NP"
+                    _mmry_norm_path "$_mmry_self_dir"
+                    if [[ -n "$_mmry_marker_home" ]] && _mmry_path_is_within "$_MMRY_NP" "$_mmry_marker_home"; then
+                        _MMRY_HOST_DIR_FROM_MARKER="$_mmry_marker_home"
+                    fi
+                fi
+                if [[ -z "$_MMRY_HOST_DIR_FROM_MARKER" ]]; then
+                    _MMRY_HOST_DIR_FROM_MARKER="$(cd "${_mmry_self_dir}/../.." && pwd 2>/dev/null)" || _MMRY_HOST_DIR_FROM_MARKER=""
+                fi
                 [[ -n "$_MMRY_HOST_DIR_FROM_MARKER" ]] && export _MMRY_HOST_DIR_FROM_MARKER
             fi
         fi
@@ -308,7 +330,7 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
         # 3. The default Codex home, and any path segment that is literally ".codex".
         [[ -z "${MMRY_HOST:-}" && "$_mmry_self_dir" == */.codex/* ]] && MMRY_HOST="codex"
     fi
-    unset _mmry_self_dir _mmry_self_src _mmry_codex_home _mmry_marker _mmry_marker_host 2>/dev/null || true
+    unset _mmry_self_dir _mmry_self_src _mmry_codex_home _mmry_marker _mmry_marker_host _mmry_marker_home 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------------------------

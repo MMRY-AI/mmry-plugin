@@ -99,10 +99,14 @@ MMRY_REINJECT_MATCHED_VALUE=""
 # file fell through to this one, and Codex setup on a machine that also runs Claude Code loaded
 # the Claude account's key. tests/unit/codex-claude-config-isolation.bats plants a sentinel there.
 #
-# MMRY_HOST is the whole answer, and reading it costs no process. codex-hook.sh exports it for
-# every hook, and lib-host.sh sets it in this shell for every other Codex route when it is sourced:
-# the install marker, a script inside CODEX_HOME, a script under .codex. The resolver then keys
-# on it alone (_mmry_host_resolve), so asking the resolver as well added nothing. The mutation
+# MMRY_HOST is the answer, and reading it costs no process. codex-hook.sh exports it for every
+# hook. For anything else, lib-host.sh sets it in this shell when it is sourced and can tell it is
+# on Codex: the .mmry-host marker beside the running copy (the state directory, and since #31245 QA
+# the plugin root too), a script inside an exported CODEX_HOME, or a script under a .codex
+# directory. A copy outside all three is not recognised as Codex. That was a plugin-cache copy with
+# CODEX_HOME unset, which no shipped instruction leads to, and which the plugin-root marker now
+# covers. The resolver keys on MMRY_HOST alone (_mmry_host_resolve), so asking it as well added
+# nothing. The mutation
 # harness proved that: a mutant that dropped the resolver branch survived every test, because no
 # reachable state tells the two apart.
 _mmry_claude_config_fallback_ok() {

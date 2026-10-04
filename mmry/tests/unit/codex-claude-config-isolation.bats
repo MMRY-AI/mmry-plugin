@@ -140,20 +140,85 @@ _no_claude_value() {
     [[ "$output" == "off matched=off" ]] || { echo "$output"; return 1; }
 }
 
-# --- every discovery chain, not only the two known today ---------------------------------------
+# --- every mention of the Claude credential, in every shipped file (#31245 QA #1 delta) ----------
+#
+# The first version of this check scanned hooks-handlers/*.sh for one spelling of a file test and
+# caught 3 of the 11 spellings QA's Security reviewer tried. It now reads every file an install
+# ships (hooks-handlers and setup; .sh .cmd .bat .ps1), finds every line that names the Claude
+# credential file in any spelling (either slash, through CLAUDE_DIR, any HOME form), and requires
+# each to be one of three things:
+#   GUARDED  a read in a branch that has asked _mmry_claude_config_fallback_ok, which is false on
+#            Codex (the guarding line itself, or the assignment directly under it);
+#   DISPLAY  a fallback display string, a single-quoted literal assigned to a name, which is text
+#            for Claude Code's customer and never opened;
+#   CLAUDE   a Claude Code installer or uninstaller. The uninstallers refuse on Codex (their own
+#            tests), and since QA item 4 the installers are not put in a Codex home at all.
+# Anything else fails, which is how a new reading of the other product's file gets caught.
 
-@test "TC6: every shipped line that reads ~/.claude/mmry-config.json is behind the host guard" {
-    # A third copy of the discovery chain is how this comes back. Every code line that names the
-    # Claude config path as a FILE TO TEST OR READ must sit in a branch that has asked the host.
-    local f n=0 bad=""
-    for f in "$PLUGIN_ROOT"/hooks-handlers/*.sh; do
-        while IFS= read -r line; do
+_CLAUDE_CRED='\.claude[/\\]+mmry-config\.json|CLAUDE_DIR\}?/mmry-config\.json'
+
+# Prints "<lineno>\t<code line>\t<previous code line>" for each mention in a file.
+_claude_cred_mentions() {
+    RE="$_CLAUDE_CRED" awk '
+        { sub(/\r$/, ""); t = $0; sub(/^[ \t]+/, "", t) }
+        t == "" || t ~ /^#/ || t ~ /^(rem|REM|::)/ { next }
+        $0 ~ ENVIRON["RE"] { printf "%d\t%s\t%s\n", NR, t, prev }
+        { prev = t }
+    ' "$1"
+}
+
+_classify() {
+    local base="$1" code="$2" prev="$3"
+    [[ "$code" == *_mmry_claude_config_fallback_ok* ]] && { printf GUARDED; return 0; }
+    if [[ "$prev" == *_mmry_claude_config_fallback_ok* && "$code" =~ ^[A-Za-z_]+= ]]; then printf GUARDED; return 0; fi
+    if [[ "$code" =~ ^_?[A-Za-z_]+=\'~/\.claude/mmry-config\.json\'$ ]]; then printf DISPLAY; return 0; fi
+    case "$base" in
+        install.sh|install.ps1|install.bat|uninstall.sh|uninstall.bat) printf CLAUDE; return 0 ;;
+    esac
+    return 1
+}
+
+@test "TC6: every shipped mention of the Claude credential is a guarded read, a display string, or Claude Code's own" {
+    local f base n=0 bad="" lineno code prev kind
+    for f in "$PLUGIN_ROOT"/hooks-handlers/*.sh "$PLUGIN_ROOT"/hooks-handlers/*.cmd \
+             "$PLUGIN_ROOT"/setup/*.sh "$PLUGIN_ROOT"/setup/*.bat "$PLUGIN_ROOT"/setup/*.ps1; do
+        [[ -f "$f" ]] || continue
+        base="$(basename "$f")"
+        while IFS=$'\t' read -r lineno code prev; do
+            [[ -n "$lineno" ]] || continue
             n=$((n + 1))
-            [[ "$line" == *_mmry_claude_config_fallback_ok* ]] || bad="${bad}$(basename "$f"): ${line}"$'\n'
-        done < <(grep -E '(-f|-r|-e) "\$\{HOME(:-)?\}/\.claude/mmry-config\.json"' "$f" | grep -vE '^\s*#')
+            if kind="$(_classify "$base" "$code" "$prev")"; then
+                echo "  $kind  $base:$lineno" >&3
+            else
+                bad="${bad}${base}:${lineno}: ${code}"$'\n'
+            fi
+        done < <(_claude_cred_mentions "$f")
     done
-    echo "guarded reads found: $n" >&3
-    # SAMPLE SIZE: the two known chains. Zero would mean the pattern stopped matching anything.
-    (( n >= 2 )) || { echo "only $n reads found; the scan is not seeing the chains"; return 1; }
-    [[ -z "$bad" ]] || { echo "unguarded:"; printf '%s' "$bad"; return 1; }
+    echo "mentions found: $n" >&3
+    # SAMPLE SIZE: the two guarded chains alone are four lines. Fewer means the scan stopped seeing.
+    (( n >= 5 )) || { echo "only $n mentions found; the scan is not seeing the files"; return 1; }
+    [[ -z "$bad" ]] || { echo "mentions of the Claude credential that are none of the three:"; printf '%s' "$bad"; return 1; }
+}
+
+@test "control: the scan finds every spelling QA tried, and refuses an unguarded one" {
+    local probe="$BATS_TEST_TMPDIR/probe.sh"
+    cat > "$probe" <<'EOF'
+a="${HOME}/.claude/mmry-config.json"
+b="$HOME/.claude/mmry-config.json"
+c=~/.claude/mmry-config.json
+d="${HOME:-}/.claude/mmry-config.json"
+e='.claude\mmry-config.json'
+f="$CLAUDE_DIR/mmry-config.json"
+g="${CLAUDE_DIR}/mmry-config.json"
+cat ~/.claude//mmry-config.json
+h="$(mmry_home)/.claude/mmry-config.json"
+$p = Join-Path $env:USERPROFILE '.claude\mmry-config.json'
+set "P=%USERPROFILE%\.claude\mmry-config.json"
+# a comment naming ~/.claude/mmry-config.json is not a use
+EOF
+    local found; found="$(_claude_cred_mentions "$probe" | wc -l | tr -d ' ')"
+    [ "$found" -eq 11 ] || { echo "found $found of 11"; _claude_cred_mentions "$probe"; return 1; }
+    # And an unguarded read in an ordinary handler is refused.
+    run _classify "save-memory.sh" 'if [[ -f "$HOME/.claude/mmry-config.json" ]]; then' 'x=1'
+    [ "$status" -ne 0 ]
 }
