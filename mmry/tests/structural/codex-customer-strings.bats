@@ -140,6 +140,7 @@ _allowed_reason() {
         "userpromptsubmit-foundation.sh|_FOUND_HOST_LABEL='Claude Code'") printf 'F'; return 0 ;;
         "userpromptsubmit-foundation.sh|_fnd_lbl='Claude Code'") printf 'F'; return 0 ;;
         "foundation-status.sh|_FS_RELOAD='/mmry:load-memories'") printf 'F'; return 0 ;;
+        "foundation-status.sh|_FS_STATUS='/mmry:foundation-status'") printf 'F'; return 0 ;;
         "foundation-status.sh|_FS_CONFIG='~/.claude/mmry-config.json'") printf 'F'; return 0 ;;
         "foundation-status.sh|_FS_HOST='Claude Code'") printf 'F'; return 0 ;;
         "stop-check.sh|mmry_host_label() { printf 'Claude Code'; }") printf 'F'; return 0 ;;
@@ -264,6 +265,7 @@ userpromptsubmit-foundation.sh|_FOUND_STATUS_REF='/mmry:foundation-status'
 userpromptsubmit-foundation.sh|_FOUND_HOST_LABEL='Claude Code'
 userpromptsubmit-foundation.sh|_fnd_lbl='Claude Code'
 foundation-status.sh|_FS_RELOAD='/mmry:load-memories'
+foundation-status.sh|_FS_STATUS='/mmry:foundation-status'
 foundation-status.sh|_FS_CONFIG='~/.claude/mmry-config.json'
 foundation-status.sh|_FS_HOST='Claude Code'
 stop-check.sh|mmry_host_label() { printf 'Claude Code'; }

@@ -87,7 +87,8 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
     for k in 1 2 3 4 5 6; do
         out="$(_codex_part "$k")"
         ctx="$(printf '%s' "$out" | _ctx; printf '.')"; ctx="${ctx%.}"
-        [[ "$ctx" == *"This is PART $k OF 6 of the set."* ]] || { echo "part $k missing or not labelled $k of 6: ${ctx:0:200}"; return 1; }
+        # 31411 QA round 2 (aecdd6b) ties every part to its set: the label now carries the version.
+        [[ "$ctx" == *"This is PART $k OF 6 of the set, version "* ]] || { echo "part $k missing or not labelled $k of 6: ${ctx:0:200}"; return 1; }
         bytes="$(printf '%s' "$ctx" | LC_ALL=C wc -c | tr -d ' ')"
         echo "part $k: $bytes bytes" >&3
         (( bytes <= CODEX_SPILL_BYTES )) || { echo "part $k is $bytes bytes; Codex would spill it to a file"; return 1; }

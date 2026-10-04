@@ -49,10 +49,12 @@ mmry_load_config 2>/dev/null || true
 # command. The literals are the fallback for a copy with no lib-host.sh and are exactly what
 # Claude Code customers have always seen (requirement 4).
 _FS_RELOAD='/mmry:load-memories'
+_FS_STATUS='/mmry:foundation-status'
 _FS_CONFIG='~/.claude/mmry-config.json'
 _FS_HOST='Claude Code'
 if declare -F mmry_host_command_ref >/dev/null 2>&1; then
     _fs_x="$(mmry_host_command_ref load-memories)" && [[ -n "$_fs_x" ]] && _FS_RELOAD="$_fs_x"
+    _fs_x="$(mmry_host_command_ref foundation-status)" && [[ -n "$_fs_x" ]] && _FS_STATUS="$_fs_x"
 fi
 if declare -F mmry_host_config_file_ref >/dev/null 2>&1; then
     _fs_x="$(mmry_host_config_file_ref)" && [[ -n "$_fs_x" ]] && _FS_CONFIG="$_fs_x"
@@ -320,7 +322,7 @@ elif [[ -n "$_byref" ]]; then
 elif [[ -n "$_unknown" ]]; then
     echo "Delivered:    UNKNOWN for the most recent prompt - its record could not be read, so it cannot"
     echo "              be shown that your Foundation directives reached your assistant."
-    echo "Action:       re-send the prompt, then run /mmry:foundation-status again."
+    echo "Action:       re-send the prompt, then run ${_FS_STATUS} again."
 elif [[ -n "$_n" ]] && (( _n > 1 )); then
     echo "Delivered:    IN FULL on the most recent prompt, in ${_n} parts. Nothing is trimmed or cut."
 elif [[ -n "$_n" ]]; then
