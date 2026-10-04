@@ -216,3 +216,123 @@ _stored() { STORED="$(<"$CACHE")"; }
     [[ "$output" == *"Last sent:    nothing yet in this session."* ]] || { echo "SB was shown SA's last send: $output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
 }
+
+# ============================================================================
+# #31411 QA round 2: R1 (sets that fit in six parts went by reference) and TC3 (a memory longer
+# than a part was cut mid-sentence).
+# ============================================================================
+
+# Characters as Claude Code counts them, UTF-16 units, from the bytes, with tr and wc so it runs on
+# macOS as well: bytes, less continuation bytes, plus one for each four-byte character.
+_units() {
+    local b c a
+    b="$(printf '%s' "$1" | LC_ALL=C wc -c | tr -d ' ')"
+    c="$(printf '%s' "$1" | LC_ALL=C tr -cd '\200-\277' | wc -c | tr -d ' ')"
+    a="$(printf '%s' "$1" | LC_ALL=C tr -cd '\360-\367' | wc -c | tr -d ' ')"
+    printf '%s' "$(( b - c + a ))"
+}
+
+# Fire every part for the staged set and check: n parts inline, labelled, each under the cap in
+# characters, rejoining to exactly the set. Sets PART_COUNT.
+_assert_inline_whole() {
+    local want_n="$1" k joined="" u
+    _fire_all "${2:-}"
+    PART_COUNT=0
+    for k in 1 2 3 4 5 6; do
+        [ -s "$TEST_TMPDIR/part$k.json" ] || continue
+        _ctx "$k"
+        [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "went by reference"; return 1; }
+        u="$(_units "${PART_TEXT#*$'\n\n'}")"
+        (( u <= 9500 )) || { echo "part $k holds $u characters of the set, over 9,500"; return 1; }
+        (( $(_units "$PART_TEXT") < 10000 )) || { echo "part $k is over 10,000 characters"; return 1; }
+        joined="${joined}${PART_TEXT#*$'\n\n'}"
+        PART_COUNT=$(( PART_COUNT + 1 ))
+    done
+    [ "$PART_COUNT" -eq "$want_n" ] || { echo "expected $want_n parts, got $PART_COUNT"; return 1; }
+    _stored
+    [ "$joined" = "$STORED" ] || { echo "the parts do not rejoin to the stored set"; return 1; }
+}
+
+@test "parts: #31411 R1 seven long memories that fit in four parts are not sent by reference" {
+    # QA's case: seven memories of about 5,000 characters, one line each, 35,147 bytes. Pulling
+    # every part back to a line end made each one memory long, so it needed seven parts.
+    awk 'BEGIN { for (m = 1; m <= 7; m++) { printf "- Memory %d: ", m; for (j = 0; j < 95; j++) printf "This is sentence %d of memory %d and it has words. ", j, m; printf "\n" } }' > "$CACHE"
+    _seal
+    _assert_inline_whole 4
+}
+
+@test "parts: #31411 R1 a 24,700-character Japanese set is sent inline, counted in characters, not bytes" {
+    # Three bytes a character: about 74,000 bytes, which counted in bytes needs eight parts and went
+    # by reference. Claude Code counts characters (measured 2026-10-04), and it fits in three.
+    awk 'BEGIN { printf "- "; for (i = 0; i < 24698; i++) { if (i % 31 == 30) printf "\343\200\202"; else printf "\346\227\245" } printf "\n" }' > "$CACHE"
+    _seal
+    _assert_inline_whole 3
+}
+
+@test "parts: #31411 R1 a character outside the Basic Multilingual Plane counts as two" {
+    # 15,000 emoji: 60,000 bytes, too many for six parts counted in bytes, so they are counted in
+    # characters - and an emoji is two characters to Claude Code, as to JavaScript. Counted as one,
+    # a part would hold 19,000 and be cut to a preview.
+    awk 'BEGIN { printf "- "; for (i = 0; i < 15000; i++) printf "\360\237\230\200"; printf "\n" }' > "$CACHE"
+    _seal
+    _assert_inline_whole 4
+}
+
+@test "parts: #31411 TC3 a memory longer than a part is cut at a sentence end, never mid-word" {
+    printf -- '- Long: %s\n' "$(awk 'BEGIN { for (j = 0; j < 400; j++) printf "Sentence number %d is here to make the memory long enough. ", j }')" > "$CACHE"
+    _seal
+    _fire_all
+    local k n=0 last=""
+    for k in 1 2 3 4 5 6; do
+        [ -s "$TEST_TMPDIR/part$k.json" ] || continue
+        n=$(( n + 1 ))
+        _ctx "$k"; last="$PART_TEXT"
+        # Every part but the last must end exactly at a sentence end, with its space.
+        [ -s "$TEST_TMPDIR/part$(( k + 1 )).json" ] || continue
+        [[ "$PART_TEXT" == *'long enough. ' ]] || { echo "part $k ends mid-sentence: [${PART_TEXT: -40}]"; return 1; }
+    done
+    (( n >= 2 )) || { echo "control: the memory was not long enough to need two parts"; return 1; }
+}
+
+@test "parts: #31411 the cut in bash and the cut in foundation-cut.awk agree, part for part" {
+    # The hook cuts a plain ASCII set itself and hands anything else to foundation-cut.awk. The two
+    # must make the same cuts, or what a set receives would depend on one accented letter. Checked on
+    # a set the tidy cut handles and one that needs the fuller cut.
+    local which lens k want
+    for which in lines long; do
+        if [[ "$which" == lines ]]; then
+            _seed_lines 380
+        else
+            awk 'BEGIN { for (m = 1; m <= 7; m++) { printf "- Memory %d: ", m; for (j = 0; j < 95; j++) printf "This is sentence %d of memory %d and it has words. ", j, m; printf "\n" } }' > "$CACHE"; _seal
+        fi
+        _stored
+        lens="$(LC_ALL=C awk -v cap=9500 -v max=6 -f "$PLUGIN_ROOT/hooks-handlers/foundation-cut.awk" <<<"$STORED" | tr '\n' ' ')"
+        _fire_all
+        want=""
+        for k in 1 2 3 4 5 6; do
+            [ -s "$TEST_TMPDIR/part$k.json" ] || continue
+            _ctx "$k"
+            want="${want}$(printf '%s' "${PART_TEXT#*$'\n\n'}" | LC_ALL=C wc -c | tr -d ' ') "
+        done
+        [ "$lens" = "$want" ] || { echo "$which: awk cut [$lens], hook cut [$want]"; return 1; }
+    done
+}
+
+@test "parts: #31411 the largest part there can be, with the cut-short note, is still under 10,000 characters" {
+    # The worst case, measured rather than reasoned about: the largest part the cut can make (a set
+    # with no blank, cut hard at 9,500 characters) and the note added when the previous firing of
+    # that part was cut short. Claude Code swaps anything over 10,000 for a 2,000-character preview.
+    { printf -- '- Pasted: '; awk 'BEGIN { for (i = 0; i < 30000; i++) printf "x" }'; printf '\n'; } > "$CACHE"
+    _seal
+    _fire 2 S8
+    _ctx 2
+    local plain; plain="$(_units "$PART_TEXT")"
+    : > "$TEST_TMPDIR/.mmry-foundation-inflight.S8.2"
+    _fire 2 S8
+    _ctx 2
+    [[ "$PART_TEXT" == *'PREVIOUS turn'* ]] || { echo "control: the cut-short note was not added"; return 1; }
+    local worst; worst="$(_units "$PART_TEXT")"
+    echo "part 2: ${plain} characters plain, ${worst} with the note" >&3
+    (( plain >= 9500 )) || { echo "control: part 2 was not a full-size part ($plain)"; return 1; }
+    (( worst < 10000 ))
+}

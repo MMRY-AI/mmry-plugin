@@ -83,16 +83,18 @@ MMRY_FND_PART=1
 if [[ "${1:-}" == "--part" && "${2:-}" =~ ^[1-9][0-9]*$ ]]; then MMRY_FND_PART="$2"; fi
 MMRY_FND_PARTS_MAX="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 [[ "$MMRY_FND_PARTS_MAX" =~ ^[1-9][0-9]*$ ]] || MMRY_FND_PARTS_MAX=6
-# Characters of the SET per part, counted in bytes (see _mmry_fnd_parts). Leaves room for the part
-# header inside 9,900, under the 10,000 cap.
+# Characters of the SET per part, counted as Claude Code counts them, in UTF-16 units (see
+# _mmry_fnd_parts). With the heading, the part label and the cut-short note, the largest part there
+# can be stays under the 10,000 cap; tests/handlers/foundation-parts.bats pins that.
 MMRY_FND_PART_CAP=9500
 _SFX=""
 (( MMRY_FND_PART > 1 )) && _SFX=".${MMRY_FND_PART}"
 _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 
 # A PART THE SET CANNOT REACH LEAVES AT ONCE, HERE, BEFORE ANYTHING ELSE IS READ. Every part but
-# the last is at least half a part long (see _mmry_fnd_parts), and characters never outnumber
-# bytes, so a set of B bytes has fewer than k parts whenever B < (k-1) * cap/2. That is decided
+# the last is at least half a window long in bytes, and a window is never fewer bytes than the cap
+# less the three a character can be stepped back by (see _mmry_fnd_parts), so a set of B bytes has
+# fewer than k parts whenever B < (k-1) * (cap/2 - 8). The 8 is that step back, and margin. Decided
 # from the manifest's own byte count with one read and no process, before anything else in the file
 # runs. With no verifiable manifest at all, part 1 owns every report about it.
 #
@@ -105,7 +107,7 @@ if (( MMRY_FND_PART > 1 )); then
     _fnd_mb=""
     [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
     [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] || exit 0
-    (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2) )) && exit 0
+    (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )) && exit 0
 fi
 
 # Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
@@ -828,39 +830,106 @@ content="$(<"$CACHE")"
 
 # ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
 # treats a successful worker's output as already-escaped JSON string content and copies it.
-# CUT THE SET INTO PARTS, the same way in every firing (#31411 split).
+# CUT THE SET INTO PARTS, the same way in every firing (#31411 split, QA round 2 R1 and TC3).
 #
-# Counted in BYTES, with the locale forced to C. Claude Code counts the decoded string's length,
-# and for any text a UTF-8 byte count is never smaller than that, so a part that fits in bytes fits
-# in characters. A part ends after the last newline in the second half of its window, so a
-# directive is not cut mid-line when it does not have to be, and every part but the last is at least
-# half a window long, which is what lets parts 2..K leave at once on a small set. A window with no
-# newline in its second half is cut hard, stepped back off any UTF-8 continuation byte so a
-# character is never split. Stops one part past the maximum: more than that means by reference,
-# and the rest of a very large set does not need cutting to know it.
-_mmry_fnd_parts() {
-    local LC_ALL=C
-    local s="$1" cap="$MMRY_FND_PART_CAP" stop=$(( MMRY_FND_PARTS_MAX + 1 )) w head nxt
-    local cont=$'[\x80-\xbf]'
+# THE LIMIT IS IN CHARACTERS, NOT BYTES. Claude Code's 10,000 counts characters of the decoded
+# text, measured for non-ASCII text on 2026-10-04: a hook of 9,800 Japanese characters, 24,630
+# bytes, reached the model whole (it read the last marker, at character 9,780), while 10,400
+# characters was cut to a preview. Characters are counted as JavaScript counts them, in UTF-16
+# units: one per character, two for one outside the Basic Multilingual Plane (most emoji). That is
+# also how the account page counts, so the page and the plugin agree on what fits.
+#
+# WHERE A PART ENDS. The longest run that fits, pulled back to the last line end in its second
+# half, else the last sentence end (". ", "! ", "? ", or the Japanese full stop), else the last
+# blank, so a directive is not cut mid-line and one longer than a part is not cut mid-word (#31411
+# QA round 2, TC3). Only a run of more than half a part with no blank at all, a URL or unspaced
+# text, is cut hard, and then always between characters. Every part but the last is therefore at
+# least half a part long, which is what lets parts 2..K leave at once on a small set.
+#
+# WHEN THAT NEEDS MORE THAN K PARTS, CUT AGAIN, FULLER (#31411 QA round 2, R1). Pulling back to a
+# line end can leave a part half full: seven long memories of about 5,000 characters, 35,147 bytes,
+# needed seven parts and went by reference although they fit in four. So the set is cut again with
+# every part filled to the cap, pulled back only to a blank within its last 256 characters. By
+# reference therefore means the set does not fit: more than about K x 9,500 characters.
+#
+# THREE ATTEMPTS, CHEAPEST FIRST. 1) The tidy cut, then 2) the full cut, counted in BYTES here in
+# bash with no process: a byte count is never smaller than the character count, so a part that fits
+# in bytes fits in characters, and for plain ASCII the two are the same. That settles every ASCII
+# set and every other set that fits in K parts even counted in bytes. Only a set that still needs
+# more than K parts AND holds non-ASCII text is 3) cut again counting characters, by
+# foundation-cut.awk, which follows the same rules. That costs one process (measured: starting awk
+# alone took 270 ms on this Windows host), so it is kept to the sets that need it, the ones QA
+# found going by reference while they fit: a 24,700-character Japanese set is about 74,000 bytes.
+_mmry_fnd_cut_bytes() {
+    # Sets FND_PARTS from $1, mode $2 (tidy or fill), counting bytes, stopping one part past the
+    # maximum. Caller has LC_ALL=C.
+    local s="$1" mode="$2" cap="$MMRY_FND_PART_CAP" stop=$(( MMRY_FND_PARTS_MAX + 1 )) w t cut wb
+    local cont=$'^[\x80-\xbf]'
     FND_PARTS=()
     while [[ -n "$s" ]] && (( ${#FND_PARTS[@]} < stop )); do
         if (( ${#s} <= cap )); then
             FND_PARTS+=("$s"); s=""; break
         fi
-        w="${s:0:cap}"
-        head="${w%$'\n'*}"
-        if [[ "$head" != "$w" ]] && (( ${#head} >= cap / 2 )); then
-            w="${head}"$'\n'
+        # Never between the bytes of one character.
+        wb=$cap
+        while (( wb > 0 )) && [[ "${s:wb:1}" =~ $cont ]]; do wb=$(( wb - 1 )); done
+        w="${s:0:wb}"
+        cut=$wb
+        if [[ "$mode" == "fill" ]]; then
+            t="${w%[ $'\t\n\r']*}"
+            [[ "$t" != "$w" ]] && (( wb - ${#t} <= 256 )) && cut=$(( ${#t} + 1 ))
         else
-            nxt="${s:${#w}:1}"
-            while [[ -n "$nxt" && "$nxt" =~ $cont ]] && (( ${#w} > cap / 2 )); do
-                nxt="${w: -1}"
-                w="${w:0:${#w}-1}"
-            done
+            t="${w%$'\n'*}"
+            if [[ "$t" != "$w" ]] && (( ${#t} + 1 >= wb / 2 )); then
+                cut=$(( ${#t} + 1 ))
+            else
+                t="${w%[.!?][ $'\t']*}"
+                if [[ "$t" != "$w" ]] && (( ${#t} + 2 >= wb / 2 )); then
+                    cut=$(( ${#t} + 2 ))
+                else
+                    t="${w%$'\xe3\x80\x82'*}"
+                    if [[ "$t" != "$w" ]] && (( ${#t} + 3 >= wb / 2 )); then
+                        cut=$(( ${#t} + 3 ))
+                    else
+                        t="${w%[ $'\t']*}"
+                        [[ "$t" != "$w" ]] && (( ${#t} + 1 >= wb / 2 )) && cut=$(( ${#t} + 1 ))
+                    fi
+                fi
+            fi
         fi
-        FND_PARTS+=("$w")
-        s="${s:${#w}}"
+        FND_PARTS+=("${s:0:cut}")
+        s="${s:cut}"
     done
+    return 0
+}
+
+_mmry_fnd_parts() {
+    local LC_ALL=C
+    # Only the first K + 1 parts can ever matter, so only as much of the set as they could hold is
+    # cut: four bytes is the most a character takes. A set longer than that goes by reference
+    # whatever its content, and copying the rest of a very large set on every cut cost 947 ms on 1 MB.
+    local whole="$1"
+    local s="${whole:0:$(( (MMRY_FND_PARTS_MAX + 1) * MMRY_FND_PART_CAP * 4 ))}" nonascii=$'[\x80-\xff]' lens L off=0 parts=()
+    _mmry_fnd_cut_bytes "$s" tidy
+    (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
+    _mmry_fnd_cut_bytes "$s" fill
+    (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
+    # Plain ASCII: bytes are characters, so the set really does not fit.
+    [[ "$s" =~ $nonascii ]] || return 0
+    # Counted in characters. Only as much of the set as K + 1 parts could hold is passed: four bytes
+    # is the most a character takes, and anything beyond that is by reference regardless.
+    lens="$(LC_ALL=C awk -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
+        -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" \
+        <<<"$s" 2>/dev/null)" || return 0
+    while IFS= read -r L; do
+        [[ "$L" =~ ^[0-9]+$ ]] || return 0
+        parts+=("${s:off:L}")
+        off=$(( off + L ))
+    done <<<"$lens"
+    # Fail safe: keep the byte result, which goes by reference, unless these parts are within K and
+    # account for every byte of the set.
+    (( ${#parts[@]} >= 1 && ${#parts[@]} <= MMRY_FND_PARTS_MAX && off == ${#whole} )) || return 0
+    FND_PARTS=("${parts[@]}")
     return 0
 }
 
