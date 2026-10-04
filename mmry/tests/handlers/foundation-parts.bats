@@ -95,7 +95,7 @@ _stored() { STORED="$(<"$CACHE")"; }
         _ctx "$k"
         [ -n "$PART_TEXT" ] || { echo "part $k is empty"; return 1; }
         (( ${#PART_TEXT} < 10000 )) || { echo "part $k is ${#PART_TEXT} long, over the cap"; return 1; }
-        [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set."* ]] || { echo "part $k is not labelled $k of 4"; return 1; }
+        [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set, version "* ]] || { echo "part $k is not labelled $k of 4"; return 1; }
         joined="${joined}${PART_TEXT#*$'\n\n'}"
     done
     for k in 5 6; do
@@ -393,4 +393,120 @@ _assert_inline_whole() {
     echo "part 2: ${plain} characters plain, ${worst} with the note" >&3
     (( plain >= 9500 )) || { echo "control: part 2 was not a full-size part ($plain)"; return 1; }
     (( worst < 10000 ))
+}
+
+# ============================================================================
+# #31583 QA round 2, R4: tie every part's record to the set and to the prompt. If the set changes
+# while a prompt's parts are firing - the daily refresh, another session starting - the status could
+# say IN FULL when a part did not arrive, or when the parts came from two versions.
+# ============================================================================
+
+_version() { local v; v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; printf '%s' "${v%%[!0-9]*}"; }
+_outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "$( (( $2 > 1 )) && printf '.%s' "$2")"; }
+
+@test "parts: #31583 R4 every part names the version of the set it was cut from, and so does its record" {
+    _seed_lines 380
+    local v; v="$(_version)"
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "no checksum in the manifest"; return 1; }
+    _fire_all S6
+    local k
+    for k in 1 2 3 4; do
+        _ctx "$k"
+        [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set, version $v."* ]] || { echo "part $k does not name version $v: ${PART_TEXT:0:420}"; return 1; }
+        [ "$(cat "$(_outcome_file S6 "$k")")" = "S6 ok part $k of 4 set $v" ] || { echo "part $k record: $(cat "$(_outcome_file S6 "$k")")"; return 1; }
+    done
+}
+
+@test "parts: #31583 R4 a prompt whose parts came from two versions of the set is PARTLY, never IN FULL" {
+    _seed_lines 380
+    _fire 1 S7; _fire 2 S7
+    # Replaced between the firings of one prompt: a different set of the same shape.
+    awk 'BEGIN { for (i = 1; i <= 380; i++) printf "- Directive %04d: a REPLACED set, every line of it different from the first one.\n", i }' > "$CACHE"
+    _seal
+    _fire 3 S7; _fire 4 S7
+    _ctx 3
+    [[ "$PART_TEXT" == *'REPLACED'* ]] || { echo "control: part 3 did not come from the new set"; return 1; }
+    CLAUDE_CODE_SESSION_ID=S7 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 2 of 4 parts arrived; part 3 came from a different version of the set"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 R4 a part with nothing to send records none, so an earlier prompt's record never counts" {
+    # Prompt 1 delivers a four-part set in full, leaving a record for every part.
+    _seed_lines 380
+    _fire_all S10
+    CLAUDE_CODE_SESSION_ID=S10 run bash "$STATUSCMD"
+    [[ "$output" == *"IN FULL on the most recent prompt, in 4 parts"* ]] || { echo "control: $output"; return 1; }
+    # Prompt 2: parts 1 and 2 see the same set, then it is replaced by a one-part set before parts 3
+    # and 4 fire, so they leave at once with nothing to send. Their prompt-1 records name the same
+    # version as part 1's, so only the "none" they now write keeps them from counting.
+    _fire 1 S10; _fire 2 S10
+    printf -- '- Identity: a small set now.\n' > "$CACHE"; _seal
+    _fire 3 S10; _fire 4 S10
+    [ "$(cat "$(_outcome_file S10 3)")" = "S10 none" ] || { echo "part 3 record: $(cat "$(_outcome_file S10 3)")"; return 1; }
+    CLAUDE_CODE_SESSION_ID=S10 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 2 of 4 parts arrived; part 3 has no record of arriving; part 4 has no record of arriving."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 the status fails closed on a record it does not recognise" {
+    _seed_lines 380
+    _fire_all S11
+    printf 'S11 ok, trust me' > "$(_outcome_file S11 1)"
+    CLAUDE_CODE_SESSION_ID=S11 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    UNKNOWN for the most recent prompt"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 the status refuses a part count above six" {
+    _seed_lines 380
+    _fire_all S12
+    local v; v="$(_version)"
+    printf 'S12 ok part 1 of 7 set %s' "$v" > "$(_outcome_file S12 1)"
+    CLAUDE_CODE_SESSION_ID=S12 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    UNKNOWN for the most recent prompt"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 the PARTLY advice follows the cause of the part that did not arrive" {
+    _seed_lines 380
+    _fire_all S13
+    # Part 3's loader crashed: the hook tells the customer re-sending will not help, and so must this.
+    printf 'S13 failed crash' > "$(_outcome_file S13 3)"
+    CLAUDE_CODE_SESSION_ID=S13 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: the loader failed before it finished"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Action:       re-sending will not help."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 a marker that is not a regular file is still a marker: the part was cut short" {
+    _seed_lines 380
+    _fire_all S14
+    mkdir -p "$TEST_TMPDIR/.mmry-foundation-inflight.S14.3"
+    CLAUDE_CODE_SESSION_ID=S14 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3 was stopped before it finished"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 a record that is not a regular file is not read, and the answer is UNKNOWN" {
+    _seed_lines 380
+    _fire_all S15
+    rm -f "$(_outcome_file S15 1)"; mkdir -p "$(_outcome_file S15 1)"
+    CLAUDE_CODE_SESSION_ID=S15 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    UNKNOWN for the most recent prompt"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31411 a part that fails names itself and does not say the whole turn went without" {
+    _seed_lines 380
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
+    local slow="$TEST_TMPDIR/slow-jq.sh"
+    printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
+    chmod +x "$slow"
+    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S16
+    local ctx msg
+    ctx="$(jq -r '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part3.json")"
+    msg="$(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part3.json")"
+    [[ "$ctx" == *"could not load PART 3 of this account"* ]] || { echo "assistant: $ctx"; return 1; }
+    [[ "$ctx" != *"running WITHOUT the account's standing directives"* ]] || { echo "part 3 told the assistant the whole turn went without"; return 1; }
+    [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
 }

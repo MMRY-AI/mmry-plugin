@@ -110,12 +110,54 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 # the supervisor block was measured over 15 interleaved runs on Windows and made no difference
 # (five unused parts 280 ms here, 273 ms there, against 210 ms for five bare bash starts). That cost
 # is what sets K; see hooks.json and the latency notes in #31411.
+# WRITE A RECORD OR MARKER BY TEMP AND RENAME (#31583 QA round 2). A reader never sees half a line,
+# and nothing already at the path - a directory, a FIFO - is ever opened for writing; a FIFO there
+# would block the write, and with it the prompt, until something read it. It costs one process, mv,
+# per record.
+_mmry_fnd_write() {
+    local t="${1}.w.$$"
+    printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    rm -f "$t" 2>/dev/null
+    return 1
+}
+
+# THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Read here, before
+# the quick exit, so that a part with nothing to send can still record that for this session
+# (#31583 QA round 2, R4). Claude Code sends session_id as the first field (captured from a real
+# payload: offset 1), so 160 bytes is enough whatever the prompt size; bash reads a pipe a byte at a
+# time, and reading the whole payload would make a long pasted prompt cost every part process. No id
+# means the old token-named records, unchanged. The worker inherits the id from the supervisor.
+if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+    MMRY_FND_SID=""
+    if [[ ! -t 0 ]]; then
+        _fnd_head=""
+        IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
+        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
+            MMRY_FND_SID="${BASH_REMATCH[1]}"
+        fi
+    fi
+    export MMRY_FND_SID
+fi
+
 if (( MMRY_FND_PART > 1 )); then
     _fnd_m="${_FOUND_TMPDIR}/mmry-foundation.md.manifest"
     _fnd_mb=""
     [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
-    [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] || exit 0
-    (( BASH_REMATCH[1] < (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )) && exit 0
+    _fnd_quiet=1
+    if [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] && (( BASH_REMATCH[1] >= (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )); then
+        _fnd_quiet=0
+    fi
+    if (( _fnd_quiet )); then
+        # "none": nothing for this part on this prompt, recorded so that a record an earlier prompt
+        # left, when the set was larger, is never counted as having arrived on this one (#31583 QA
+        # round 2, R4).
+        if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+            _fnd_qtok="${MMRY_FND_SID:-}"
+            [[ -z "$_fnd_qtok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _fnd_qtok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _fnd_qtok=""; }
+            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} none"
+        fi
+        exit 0
+    fi
 fi
 
 # Emit one JSON object. $1 = additionalContext text (may be empty), $2 = systemMessage
@@ -217,11 +259,10 @@ _mmry_emit_escaped() {
 _mmry_outcome() {
     local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
     [[ -z "$tok" && -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
-    # One redirect, no process (#31411 QA round 2, latency). The first version wrote a temp file and
-    # renamed it into place, which cost two process starts, mv and rm, on every prompt: measured on
-    # Windows, part 1 alone ran 975 ms against 797 ms for the hook before it. The line is a few dozen
-    # bytes and is read only by /mmry:foundation-status, on a later prompt, never during this one.
-    printf '%s %s' "$tok" "$1" > "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" 2>/dev/null
+    # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
+    # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
+    # could catch half a line, and a FIFO left at the path would have blocked the write.
+    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$tok $1"
     return 0
 }
 
@@ -303,15 +344,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # enough whatever the prompt size; bash reads a pipe a byte at a time, and reading the whole
     # payload would make a long pasted prompt cost every part process. The rest is left unread, as
     # this hook has always left all of it. No id means the old token-named records, unchanged.
-    MMRY_FND_SID=""
-    if [[ ! -t 0 ]]; then
-        _fnd_head=""
-        IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
-        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
-            MMRY_FND_SID="${BASH_REMATCH[1]}"
-        fi
-    fi
-    export MMRY_FND_SID
+    # This session's id was read at the top, before the quick exit (#31583 QA round 2, R4).
     _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
 
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
@@ -359,7 +392,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     DEADLINE_MARK="${_FOUND_TMPDIR}/.mmry-foundation-deadline.$$"
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
     : > "$OUTFILE" 2>/dev/null || true
-    : > "$_INFLIGHT" 2>/dev/null || true
+    _mmry_fnd_write "$_INFLIGHT" "" || true
 
     # THE WORKER DOES NOT GET TO SAY THE TURN WAS DELIVERED (#31583, security on QA round 4).
     #
@@ -566,7 +599,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         printf '%s foundation reinjection FAILED: %s\n' \
             "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
         if (( MMRY_FND_PART > 1 )); then
-            NOTICE="[Foundation part ${MMRY_FND_PART}] ${NOTICE}"
+            # A part names itself and does not claim the whole turn went without its directives
+            # (#31411 QA round 2): the other parts may well have arrived.
+            if (( HIT_DEADLINE == 1 )); then _fnd_cause="loading it took over ${DEADLINE}s and was stopped"; else _fnd_cause="its loader failed with exit code ${WORKER_RC}"; fi
+            NOTICE="MMRY AI could not load PART ${MMRY_FND_PART} of this account's FOUNDATION directives for this turn: ${_fnd_cause}. The other parts may have arrived, but without this one the set is incomplete. Do not claim to be following the complete set. Tell the user plainly that part ${MMRY_FND_PART} of their Foundation directives was not applied to this turn."
             USERMSG="${USERMSG/MMRY AI: your Foundation directives were NOT applied/MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was NOT applied}"
         fi
         _mmry_emit "$NOTICE" "$USERMSG"
@@ -598,7 +634,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if (( MISSED_PREVIOUS == 1 )); then
         # BODY is already escaped by the worker, so only the note is escaped here, and the
         # blank line between them is written as its escaped form.
-        BODY="$(_mmry_fnd_json_escape "NOTE: on the PREVIOUS turn these directives were not applied - loading them was cut short and its output discarded. Treat that turn's response as having been produced without them.")\n\n${BODY}"
+        BODY="$(_mmry_fnd_json_escape "NOTE: on the PREVIOUS turn these directives were not applied (loading was cut short). Treat that response as produced without them.")\n\n${BODY}"
         USERMSG="MMRY AI: your Foundation directives were not applied to the previous turn (the hook was cut short). They are applied again now."
         (( MMRY_FND_PART > 1 )) && USERMSG="MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was not applied to the previous turn (the hook was cut short). It is applied again now."
     fi
@@ -624,7 +660,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
         case "$_FND_KIND" in
-            "PART "*)  _fk="${_FND_KIND#PART }"; _mmry_outcome "ok part ${_fk% *} of ${_fk#* }" ;;
+            # "PART k n version": the version goes into the outcome record (#31583 QA round 2, R4), so
+            # the status command can tell a prompt whose parts came from two versions of the set.
+            "PART "*)  _fk=(${_FND_KIND#PART }); _mmry_outcome "ok part ${_fk[0]} of ${_fk[1]}${_fk[2]:+ set ${_fk[2]}}" ;;
             "BYREF "*) _mmry_outcome "ok by-reference ${_FND_KIND#BYREF }" ;;
             *)         _mmry_outcome "ok part 1 of 1" ;;
         esac
@@ -997,12 +1035,12 @@ elif (( _fnd_n == 1 )); then
     _payload="${_fnd_head}
 
 ${content}"
-    printf '@@MMRY-PART 1 1@@'
+    printf '@@MMRY-PART 1 1 %s@@' "$_fnd_setid"
 else
-    _payload="${_fnd_head} This is PART ${MMRY_FND_PART} OF ${_fnd_n} of the set. The other parts arrive alongside this one, in any order, and together they are the whole set.
+    _payload="${_fnd_head} This is PART ${MMRY_FND_PART} OF ${_fnd_n} of the set, version ${_fnd_setid}. The parts arrive in any order and together are the whole set; if their versions differ, tell the user.
 
 ${FND_PARTS[$(( MMRY_FND_PART - 1 ))]}"
-    printf '@@MMRY-PART %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
+    printf '@@MMRY-PART %s %s %s@@' "$MMRY_FND_PART" "$_fnd_n" "$_fnd_setid"
 fi
 
 # ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor

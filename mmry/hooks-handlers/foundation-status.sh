@@ -178,6 +178,9 @@ _parts_max="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 # An outcome stamped with another session's token is not this session's and is not read.
 _outcome() {
     local f="${MMRY_TMPDIR}/mmry-foundation.outcome${_sid:+.$_sid}$1" l=""
+    # Something at the path that is not a regular file is not a record of anything, and is said so
+    # rather than read (#31583 QA round 2). A directory cannot be read and a FIFO would block.
+    if [[ -e "$f" && ! -f "$f" ]]; then printf '%s' unreadable; return 0; fi
     [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
     [[ -n "$_tok" && "${l%% *}" == "$_tok" ]] || return 1
     printf '%s' "${l#* }"
@@ -186,7 +189,9 @@ _outcome() {
 # session's start belong to an earlier session in the same temp directory and are not read.
 _cut_short() {
     local f="${MMRY_TMPDIR}/.mmry-foundation-inflight${_sid:+.$_sid}$1"
-    [[ -f "$f" ]] || return 1
+    [[ -e "$f" ]] || return 1
+    # A marker that is not a regular file is still a marker: fail closed (#31583 QA round 2).
+    [[ -f "$f" ]] || return 0
     # A marker named by this session is this session's. Only the token-named fallback can belong
     # to an earlier session in the same temp directory, and only it needs the age check.
     [[ -n "$_sid" ]] && return 0
@@ -228,7 +233,15 @@ mmry_foundation_delivered_this_session "$MMRY_TMPDIR" "$_sid" && _delivered=1
 
 _failed_why=""
 _partly=""
+_partly_action=""
 _byref=""
+_unknown=""
+_n=""
+# FAIL CLOSED (#31583 QA round 2). Only a record in one of the forms the hook writes counts for
+# anything. Anything else - a torn line, a file that is not a regular file, words a third party put
+# there - cannot be shown to describe the most recent prompt, so it is reported as unknown, never
+# as delivered. Part counts above six are refused the same way: the hook is registered six times,
+# so no prompt can have had more.
 _o1="$(_outcome "")"
 if _cut_short ""; then
     _failed_why="the last prompt was stopped before it finished loading them"
@@ -236,26 +249,42 @@ elif [[ "$_o1" == failed* ]]; then
     _why_and_action "${_o1#failed }"
     _failed_why="$_WHY"
     _failed_action="$_ACTION"
-elif [[ "$_o1" == "ok by-reference "* ]]; then
+elif [[ "$_o1" =~ ^ok\ by-reference\ [0-9]{1,4}$ ]]; then
     _byref=1
-elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([0-9]+)$ ]]; then
+elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([1-9])(\ set\ ([0-9]{1,10}))?$ ]] && (( BASH_REMATCH[1] <= 6 && BASH_REMATCH[1] <= _parts_max )); then
     _n="${BASH_REMATCH[1]}"
+    # EVERY PART MUST BE PART OF THE SAME SET (#31583 QA round 2, R4). Each part names the version
+    # it was cut from. A replacement landing between part firings - the daily refresh, another
+    # session starting - can leave parts from two versions, or a part that found the new set smaller
+    # and sent nothing; neither may read as IN FULL. A part from another version, a part that sent
+    # nothing, and a part with no record all count as not arrived.
+    _set1="${BASH_REMATCH[3]}"
     _got=1
     _missing=""
     for (( _k = 2; _k <= _n; _k++ )); do
         _ok="$(_outcome "$(_sfx "$_k")")"
         if _cut_short "$(_sfx "$_k")"; then
             _missing="${_missing}; part ${_k} was stopped before it finished"
-        elif [[ "$_ok" == "ok part ${_k} of ${_n}" ]]; then
+            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+        elif [[ -n "$_set1" && "$_ok" == "ok part ${_k} of ${_n} set ${_set1}" ]]; then
             _got=$(( _got + 1 ))
+        elif [[ "$_ok" =~ ^ok\ part\ ${_k}\ of\ [1-9]\ set\ [0-9]{1,10}$ ]]; then
+            _missing="${_missing}; part ${_k} came from a different version of the set, which was replaced while it was being sent"
+            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt."
         elif [[ "$_ok" == failed* ]]; then
             _why_and_action "${_ok#failed }"
             _missing="${_missing}; part ${_k}: ${_WHY}"
+            # The advice follows the cause of the first part that did not arrive (#31583 QA round 2):
+            # after a crash re-sending does not help, and the hook has already said so.
+            [[ -n "$_partly_action" ]] || _partly_action="$_ACTION"
         else
             _missing="${_missing}; part ${_k} has no record of arriving"
+            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt. If it keeps happening, run /mmry:load-memories."
         fi
     done
     (( _got < _n )) && _partly="${_got} of ${_n} parts arrived${_missing}"
+elif [[ -n "$_o1" ]]; then
+    _unknown=1
 fi
 
 if [[ -n "$_failed_why" ]]; then
@@ -265,15 +294,19 @@ if [[ -n "$_failed_why" ]]; then
 elif [[ -n "$_partly" ]]; then
     echo "Delivered:    PARTLY on the most recent prompt - ${_partly}."
     echo "              That prompt ran without part of your Foundation directives."
-    echo "Action:       re-send the prompt. If it keeps happening, run /mmry:load-memories."
+    echo "Action:       ${_partly_action}"
 elif [[ -n "$_byref" ]]; then
     echo "Delivered:    BY REFERENCE on the most recent prompt. Your set is larger than Claude Code lets"
     echo "              a plugin show on each prompt (${_parts_max} parts of under 10,000 characters), so"
     echo "              your assistant was pointed to the full copy and asked to read it. That relies on"
     echo "              the assistant opening the file, and it may need your permission to read it."
-elif [[ -n "${_n:-}" ]] && (( _n > 1 )); then
+elif [[ -n "$_unknown" ]]; then
+    echo "Delivered:    UNKNOWN for the most recent prompt - its record could not be read, so it cannot"
+    echo "              be shown that your Foundation directives reached your assistant."
+    echo "Action:       re-send the prompt, then run /mmry:foundation-status again."
+elif [[ -n "$_n" ]] && (( _n > 1 )); then
     echo "Delivered:    IN FULL on the most recent prompt, in ${_n} parts. Nothing is trimmed or cut."
-elif [[ -n "$_o1" ]]; then
+elif [[ -n "$_n" ]]; then
     echo "Delivered:    IN FULL on the most recent prompt. Nothing is trimmed or cut."
 else
     echo "Delivered:    nothing yet in this session."
