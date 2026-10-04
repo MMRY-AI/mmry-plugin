@@ -56,10 +56,11 @@ VERIFY_TESTS="unit/foundation-verify.bats"
 BOTH_PATHS_TESTS="handlers/foundation-both-paths.bats"
 # Both surfaces against one config in one temp directory (#31583 QA round 4 and 5).
 CROSS_TESTS="handlers/foundation-cross-surface.bats"
-# The split delivery: parts, versions, by reference (#31411, #31583 QA round 2). QA found it was in no
-# target list, so nothing the split added could be scored.
+# The split delivery: parts, versions, by reference (#31411, #31583 QA round 2, #31597). QA found it
+# was in no target list, so nothing the split added could be scored.
 PARTS_TESTS="handlers/foundation-parts.bats"
 CUT_REL="hooks-handlers/foundation-cut.awk"
+SESSION_START_REL="hooks-handlers/session-start.sh"
 STATUS_CMD_TESTS="structural/foundation-status-command.bats"
 HELP_REL="commands/help.md"
 CLIENT_REL="hooks-handlers/mmry-client.sh"
@@ -228,7 +229,7 @@ mutate_m11() {
     local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m11"
     awk '
         { print }
-        /^content="\$\(<"\$CACHE"\)"$/ {
+        /^content="\$MMRY_FND_SET"$/ {
             print "cap_chars=$(( ${MMRY_FOUNDATION_TOKEN_CAP:-1500} * 4 ))"
             print "if (( ${#content} > cap_chars )); then"
             print "    content=\"${content:0:cap_chars}\""
@@ -243,14 +244,14 @@ desc_m11="#31411 the token-cap cut reinstated (the set is silently truncated aga
 # This IS #31583. Four bytes is not empty, so a stub passes and is forwarded to the assistant
 # framed as the account's authoritative guidance.
 #
-# The mutation deletes the verification block by replacing the manifest read with an
+# The mutation deletes the verification by replacing the single read of the set (#31597) with an
 # unconditional pass, which is the smallest edit that restores the old behaviour.
 mutate_m12() {
     local f="$1/$HANDLER_REL" t="$1/$HANDLER_REL.m12"
     awk '
-        # REPOINTED (#31411 QA round 2): the dead MANIFEST assignment it anchored on is gone, so it
-        # now replaces the verification call itself.
-        /^_reason="\$\(mmry_verify_foundation_cache "\$CACHE"\)"$/ {
+        # REPOINTED (#31411 QA round 2, then #31597): it replaces the verification call itself, which
+        # is now the single read of the set.
+        /^mmry_read_foundation_set "\$CACHE"$/ {
                        print "[[ -s \"$CACHE\" ]] || exit 0"
                        print "content=\"$(<\"$CACHE\")\""
                        print "printf '\''%s'\'' \"The following are the account'\''s FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
@@ -302,7 +303,7 @@ desc_m14="#31583 the refusal is reported to the assistant but never to the custo
 # routine and the cache variable is lowercase there. Forcing it true makes every cache, healthy
 # ones included, report as missing, which is what test case 4 exists to catch.
 mutate_m15() {
-    _sedi 's|^    if \[\[ ! -r "\$cache" \]\]; then$|    if true; then|' "$1/$CLIENT_REL"
+    _sedi 's|^    if (( _got == 0 )); then$|    if true; then|' "$1/$CLIENT_REL"
 }
 file_m15="$CLIENT_REL"
 targets_m15="$VERIFY_TESTS $HANDLER_TESTS"
@@ -314,7 +315,7 @@ desc_m15="#31583 every firing reports a failure, healthy ones included"
 mutate_m16() {
     local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m16"
     awk '
-        /^    tmp="\$\{cache\}\.new\.\$\$"$/ { print "    tmp=\"$cache\""; next }
+        /^    body="\$\{cache\}\.body\.\$\$"$/ { print "    body=\"$cache\""; next }
         { print }
     ' "$f" > "$t" && mv "$t" "$f"
 }
@@ -332,7 +333,7 @@ mutate_m17() {
     # is the guard doing its job, and it is why m17 had never produced a verdict.
     local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m17"
     awk '
-        /^    entries="\$\(printf/ { print "    entries=\"$(grep -c '\''^- '\'' \"$tmp\" 2>/dev/null || true)\""; next }
+        /^    entries="\$\(printf/ { print "    entries=\"$(grep -c '\''^- '\'' \"$body\" 2>/dev/null || true)\""; next }
         { print }
     ' "$f" > "$t" && mv "$t" "$f"
 }
@@ -348,7 +349,7 @@ desc_m17="#31583 manifest entry count taken from a line count rather than the re
 # silent on a live account and no test notices.
 # REPOINTED (#31583 QA r3), same cause again.
 mutate_m18() {
-    _sedi 's|^        if \[\[ -s "\$cache" \]\]; then$|        if false; then|' "$1/$CLIENT_REL"
+    _sedi 's|^        if \[\[ -n "\$body" \]\]; then$|        if false; then|' "$1/$CLIENT_REL"
 }
 file_m18="$CLIENT_REL"
 targets_m18="$VERIFY_TESTS $HANDLER_TESTS"
@@ -435,9 +436,12 @@ mutate_m27() { _mrep "$1/$HANDLER_REL" '    _fnd_path="$_fnd_snap"' '    _fnd_pa
 targets_m27="$PARTS_TESTS"
 desc_m27="#31411 R1, #31583 R3 by reference points at the live shared cache again"
 
-mutate_m28() { _mrep "$1/$HANDLER_REL" '    if [[ -n "$_sc" && "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]] \' '    if true \'; }
+# REPOINTED (#31597): the copy is written from the set this turn verified, so the check that a file
+# copy matched it is gone. The mutation takes the copy from the file again, which hands the assistant
+# the record line and trailer as well, and bytes a refresh may have replaced since the check.
+mutate_m28() { _mrep "$1/$HANDLER_REL" '        && { printf '"'"'%s\n\n%s\n'"'"' "$content" "$_fnd_end" > "$_fnd_snaptmp"; } 2>/dev/null \' '        && { cp -f "$CACHE" "$_fnd_snaptmp" && printf '"'"'\n%s\n'"'"' "$_fnd_end" >> "$_fnd_snaptmp"; } 2>/dev/null \'; }
 targets_m28="$PARTS_TESTS"
-desc_m28="#31583 R3 a copy that does not match the verified set is sent anyway"
+desc_m28="#31583 R3, #31597 the by-reference copy is taken from the file again, not from the set this turn verified"
 
 mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} none"' '            :'; }
 targets_m29="$PARTS_TESTS"
@@ -506,7 +510,81 @@ file_m41="$STATUS_REL"
 targets_m41="$PARTS_TESTS"
 desc_m41="#31583 QA S3 a part with no record of arriving is counted as arrived"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36 m37 m38 m39 m40 m41"
+# #31597: one file, one read. Each check the format change added, broken on its own.
+# ---------------------------------------------------------------------------
+
+# The hook verifies one copy and delivers another: a second read of the file after the check.
+# This is the gap the ticket found beside the two-file one. With the record and trailer in the
+# file, a second raw read also hands the assistant the record line, so the byte-for-byte tests see
+# it at once; in production it would also deliver bytes a refresh had replaced since the check.
+mutate_m42() {
+    _sedi 's|^content="\$MMRY_FND_SET"$|content="$(<"$CACHE")"|' "$1/$HANDLER_REL"
+}
+targets_m42="$HANDLER_TESTS $BOTH_PATHS_TESTS"
+desc_m42="#31597 the hook delivers a second read of the file, not the copy it verified"
+
+# The writer stops ending the file with the trailer. The single read uses $(<file), which drops
+# trailing newlines, so the set's own last newline is lost and every set fails on length.
+mutate_m43() {
+    local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m43"
+    awk '
+        /^           && printf .%s. "\$MMRY_FND_TRAILER"; } > "\$tmp" 2>\/dev\/null$/ { print "           ; } > \"$tmp\" 2>/dev/null"; next }
+        { print }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+file_m43="$CLIENT_REL"
+targets_m43="$WRITER_TESTS"
+desc_m43="#31597 the writer drops the trailer, so the set's last newline is lost to the read"
+
+# The part label stops naming the version, so the assistant cannot see the parts disagree.
+mutate_m44() {
+    _sedi 's|of the set, version \${_fnd_setid}\. The parts arrive|of the set. The parts arrive|' "$1/$HANDLER_REL"
+}
+targets_m44="$PARTS_TESTS"
+desc_m44="#31597 the part label no longer names the version of the set"
+
+# A set stored in this session and removed before its first delivery goes silent again: the hook
+# no longer looks at the marker SessionStart leaves.
+mutate_m45() {
+    _sedi 's|^        if _fnd_stored="\$(mmry_foundation_stored_entries "\$MMRY_TMPDIR" "\${MMRY_FND_SID:-}")" \&\& (( _fnd_stored > 0 )); then$|        if false; then|' "$1/$HANDLER_REL"
+}
+targets_m45="$HANDLER_TESTS $BOTH_PATHS_TESTS"
+desc_m45="#31597 a set removed before its first delivery is not reported missing (marker ignored)"
+
+# SessionStart stops leaving the marker. Same customer-visible effect as m45, from the other end.
+mutate_m46() {
+    _sedi 's|^    mmry_foundation_mark_stored "\$MMRY_TMPDIR" "\$SESSION_ID" "\${MMRY_FND_WRITTEN_ENTRIES:-0}" \|\| true$|    :|' "$1/$SESSION_START_REL"
+}
+file_m46="$SESSION_START_REL"
+targets_m46="$BOTH_PATHS_TESTS"
+desc_m46="#31597 SessionStart no longer records that a set was stored"
+
+# WINDOWS ONLY. The writer stops probing for a jq that turns newlines into CR LF, so on Windows the
+# stored set gains a carriage return on every line and the assistant is handed bytes the service
+# never sent. On macOS and Linux jq does no such translation and this mutant cannot be told apart
+# from the code, so it is run only where it can bite; see WINDOWS_ONLY_MUTATIONS below.
+mutate_m47() {
+    local f="$1/$CLIENT_REL" t="$1/$CLIENT_REL.m47"
+    awk '
+        /^    \[\[ "\$probe" == \*\$.\\r.\* \]\] && jqb="-b"$/ { print "    :"; next }
+        { print }
+    ' "$f" > "$t" && mv "$t" "$f"
+}
+file_m47="$CLIENT_REL"
+targets_m47="$BOTH_PATHS_TESTS"
+desc_m47="#31597 (Windows) the writer no longer stops jq adding CR to every line"
+
+# A directory standing where the by-reference copy goes is written INTO, and the assistant is
+# pointed at the directory (#31597). The guard refuses it and nothing is sent.
+mutate_m48() { _mrep "$1/$HANDLER_REL" '    if [[ ! -d "$_fnd_snap" ]] \' '    if true \'; }
+targets_m48="$PARTS_TESTS"
+desc_m48="#31597 a by-reference copy that cannot be written is pointed at anyway"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36 m37 m38 m39 m40 m41 m42 m43 m44 m45 m46 m48"
+# m47 can only bite where jq rewrites newlines, which is a native Windows jq. Elsewhere it is run by
+# name if wanted and is expected to survive there.
+WINDOWS_ONLY_MUTATIONS="m47"
+case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ALL_MUTATIONS="$ALL_MUTATIONS $WINDOWS_ONLY_MUTATIONS" ;; esac
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its
