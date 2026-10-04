@@ -1349,11 +1349,18 @@ mmry_process_context() {
     # says so; empty when it says nothing, which is what a server without #31740 does, so the
     # caller cannot mistake an ignored replacement for an applied one. Read only when one was
     # asked for, so an ordinary save spawns nothing extra.
+    # And how many memories the save stored (#31740 QA round 1): with a replacement, "nothing was
+    # stored" must never be reported as "saved, the old one is still active".
     MMRY_SUPERSEDE_APPLIED=""
+    MMRY_PROCESS_STORED=""
     if [[ -n "$supersedes_id" && -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
-        MMRY_SUPERSEDE_APPLIED="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
-            'if (.supersede | type) == "object" then (.supersede.applied | tostring) else empty end' \
+        local _sup=""
+        _sup="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            '[(if (.supersede | type) == "object" then (.supersede.applied | tostring) else "" end),
+              (if (.stored | type) == "number" then (.stored | tostring) else "" end)] | join("|")' \
             2>/dev/null || true)"
+        MMRY_SUPERSEDE_APPLIED="${_sup%%|*}"
+        [[ "$_sup" == *"|"* ]] && MMRY_PROCESS_STORED="${_sup#*|}"
     fi
 
     # #29912 — record successful save so stop-check.sh can compute time-since-last-save

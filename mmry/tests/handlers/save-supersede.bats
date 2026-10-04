@@ -90,8 +90,9 @@ _process_lines() { grep 'memories/process' "$TEST_TMPDIR/curl-log.txt" 2>/dev/nu
 
 @test "31740 req2: an id that cannot be a memory is refused before anything is sent" {
     local bad
+    # '' is in the list on purpose (#31740 QA round 1): an empty value used to be ignored, so the
+    # save went through as an unrelated memory.
     for bad in abc 0 -5 4.2 '' 99999999999; do
-        [[ -n "$bad" ]] || continue
         rm -f "$TEST_TMPDIR/curl-log.txt"
         run bash "$SAVE" --context "A correction" --supersedes "$bad"
         [ "$status" -eq 1 ] || { echo "accepted --supersedes $bad (status $status)"; return 1; }
@@ -106,4 +107,79 @@ _process_lines() { grep 'memories/process' "$TEST_TMPDIR/curl-log.txt" 2>/dev/nu
     run bash "$SAVE" --context "A correction" --supersedes 2147483647
     [ "$status" -eq 0 ]
     [[ "$(_process_lines)" == *'"supersedesId":2147483647}'* ]]
+}
+
+# --- QA round 1 (#31740) ----------------------------------------------------------------------
+
+@test "31740 qa: one past the largest id the API can hold is refused before anything is sent" {
+    # QA's surviving mutation P5: nothing tested the bound itself.
+    run bash "$SAVE" --context "A correction" --supersedes 2147483648
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"positive whole number"* ]] || { echo "$output"; return 1; }
+    [[ -z "$(_process_lines)" ]]
+}
+
+@test "31740 qa: --supersedes with no value at all is refused, not read as the next flag" {
+    run bash "$SAVE" --context "A correction" --supersedes
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"needs the id"* ]] || { echo "$output"; return 1; }
+    [[ -z "$(_process_lines)" ]]
+}
+
+@test "31740 qa: --permission-group-id is checked like --supersedes" {
+    local bad
+    for bad in abc 0 -1 1.5 ''; do
+        rm -f "$TEST_TMPDIR/curl-log.txt"
+        run bash "$SAVE" --context "x" --visibility group --permission-group-id "$bad"
+        [ "$status" -eq 1 ] || { echo "accepted --permission-group-id '$bad' (status $status)"; return 1; }
+        [[ "$output" == *"positive whole number"* ]] || { echo "$bad: $output"; return 1; }
+        [[ -z "$(_process_lines)" ]] || { echo "'$bad' reached the API"; return 1; }
+    done
+    rm -f "$TEST_TMPDIR/curl-log.txt"
+    run bash "$SAVE" --context "x" --visibility group --permission-group-id 7
+    [ "$status" -eq 0 ] || { echo "a valid group id was refused: $output"; return 1; }
+    [[ "$(_process_lines)" == *'"permissionGroupID":7'* ]]
+}
+
+@test "31740 qa: nothing stored is exit 1, never 'saved, old one still active'" {
+    # QA (A): the assistant told the customer a lost correction had been saved.
+    export MOCK_CURL_HTTP_CODE="202"
+    export MOCK_CURL_RESPONSE='{"message":"AI processing failed. Nothing was saved, so memory 42 was not replaced and is still active.","stored":0,"supersede":{"memoryId":42,"applied":false,"reason":"nothing-stored"}}'
+    run bash "$SAVE" --context "A correction" --supersedes 42
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"Nothing was saved"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"NOT replaced and is still active"* ]]
+}
+
+@test "31740 qa: nothing stored is exit 1 even from a server that reports no outcome" {
+    export MOCK_CURL_HTTP_CODE="202"
+    export MOCK_CURL_RESPONSE='{"message":"AI processing not configured.","stored":0}'
+    run bash "$SAVE" --context "A correction" --supersedes 42
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"Nothing was saved"* ]]
+}
+
+@test "31740 qa: a Foundation memory the API will not replace is exit 1 with the API's reason" {
+    export MOCK_CURL_HTTP_CODE="403"
+    export MOCK_CURL_RESPONSE='{"message":"Nothing was saved. Memory 42 is a Foundation memory.","stored":0,"supersede":{"memoryId":42,"applied":false,"reason":"foundation"}}'
+    run bash "$SAVE" --context "A correction" --supersedes 42
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"is a Foundation memory"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"Error (HTTP 403)"* ]]
+}
+
+@test "31740 qa: a different visibility the API refuses is exit 1 with the API's reason" {
+    export MOCK_CURL_HTTP_CODE="400"
+    export MOCK_CURL_RESPONSE='{"message":"Nothing was saved. Memory 42 is Private, and a replacement keeps the visibility of the memory it replaces.","stored":0,"supersede":{"memoryId":42,"applied":false,"reason":"visibility-differs"}}'
+    run bash "$SAVE" --context "A correction" --visibility global --supersedes 42
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"keeps the visibility"* ]]
+}
+
+@test "31740 qa: a replacement the API could not confirm is exit 3, saved and possibly still active" {
+    export MOCK_CURL_HTTP_CODE="202"
+    export MOCK_CURL_RESPONSE='{"message":"Stored 1 memory. Whether memory 42 was replaced could not be confirmed; it may still be active.","stored":1,"supersede":{"memoryId":42,"applied":false,"reason":"unverified"}}'
+    run bash "$SAVE" --context "A correction" --supersedes 42
+    [ "$status" -eq 3 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"could not be confirmed"* ]]
 }
