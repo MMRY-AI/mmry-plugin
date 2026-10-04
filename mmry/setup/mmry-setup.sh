@@ -577,9 +577,13 @@ if [[ "$(mmry_host)" == "codex" ]]; then
     echo "There are no slash commands to type on Codex. Just ask in plain words:"
     echo "  \"remember this\", \"what do you know about X\", \"make that private\"."
     echo ""
-    echo "One more step the first time: when Codex starts it asks whether to trust MMRY's"
-    echo "hooks. Choose \"Trust all and continue\". If you choose not to trust them, MMRY"
-    echo "appears installed and does nothing."
+    # Not every Codex asks (#31245, Mac live run 2026-10-04): the CLI shows a hook review on
+    # start, the desktop app showed none. Both record trust the same way, in config.toml.
+    echo "One more step the first time: Codex runs MMRY's hooks only once you trust them."
+    echo "  - Codex CLI: it asks when it starts. Choose \"Trust all and continue\"."
+    echo "  - Codex desktop app: it does not ask. Trust MMRY's hooks in the app before your"
+    echo "    first conversation."
+    echo "Until they are trusted, MMRY appears installed and does nothing."
     echo ""
     # A URL that exists TODAY. mmryai.com has no /docs/codex page yet, and printing one would be
     # the v1.18 failure again: an announcement promising something a customer cannot reach.

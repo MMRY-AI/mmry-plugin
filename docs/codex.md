@@ -25,12 +25,23 @@ codex plugin add mmry@mmry-plugin
 
 **2. Restart Codex, and trust the hooks.**
 
-The first time Codex starts after installing, it shows a hook review listing MMRY's handlers and
-asks whether to trust them. Choose **Trust all and continue**.
+Codex runs a plugin's hooks only once you have trusted them, and MMRY does nothing without its
+hooks: no memories load and nothing is saved. Where you trust them depends on which Codex you use.
 
-This step is not optional and it is not cosmetic. If you choose "Continue without trusting", MMRY
-appears installed and does nothing at all: no memories load, nothing is saved. If you skipped it by
-accident, remove and re-add the plugin to see the prompt again.
+- **Codex CLI:** the first time it starts after installing, it shows a hook review listing MMRY's
+  handlers. Choose **Trust all and continue**. If you chose "Continue without trusting" by accident,
+  remove and re-add the plugin to see the review again.
+- **Codex desktop app:** it does not show that review when it starts (seen on macOS, 2026-10-04).
+  Trust MMRY's hooks in the app before your first conversation.
+
+**To check that they are trusted,** open `config.toml` in your Codex home
+(`${CODEX_HOME:-$HOME/.codex}/config.toml`). Codex records each trusted hook there as a table named
+`[hooks.state."mmry@mmry-plugin:hooks/codex-hooks.json:..."]` holding a `trusted_hash`. If there are
+none for `mmry@mmry-plugin`, the hooks are not trusted yet. Codex writes these itself; do not edit them.
+
+**After an update.** Codex trusts a hook as it was registered when you trusted it. If an MMRY update
+changes how a hook is registered, Codex treats that hook as changed and does not run it until you
+trust it again, the same way as the first time.
 
 If your organisation has set `allow_managed_hooks_only = true` in its Codex requirements policy,
 MMRY's hooks cannot be installed at all. Ask your administrator.
@@ -230,7 +241,7 @@ separate credentials and separate directories on purpose.
 
 | Symptom | First thing to check |
 |---|---|
-| No memories at session start | Did you answer **Trust all and continue** at the hook review? Restart Codex and look for it. |
+| No memories at session start | MMRY's hooks are probably not trusted, or changed in an update and need trusting again. Check `config.toml` as described in step 2, then trust them (CLI: the review on start; desktop app: in the app). |
 | Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |
