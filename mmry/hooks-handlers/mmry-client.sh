@@ -1351,16 +1351,25 @@ mmry_process_context() {
     # asked for, so an ordinary save spawns nothing extra.
     # And how many memories the save stored (#31740 QA round 1): with a replacement, "nothing was
     # stored" must never be reported as "saved, the old one is still active".
+    # And the reason (#31740 QA round 2): "unverified" means the old memory MAY still be active,
+    # which the caller must not report as "was not replaced".
     MMRY_SUPERSEDE_APPLIED=""
     MMRY_PROCESS_STORED=""
+    MMRY_SUPERSEDE_REASON=""
     if [[ -n "$supersedes_id" && -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
-        local _sup=""
+        local _sup="" _rest=""
         _sup="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
             '[(if (.supersede | type) == "object" then (.supersede.applied | tostring) else "" end),
-              (if (.stored | type) == "number" then (.stored | tostring) else "" end)] | join("|")' \
+              (if (.stored | type) == "number" then (.stored | tostring) else "" end),
+              (if (.supersede | type) == "object" and (.supersede.reason | type) == "string"
+                 then (.supersede.reason | gsub("[|\r\n]"; "")) else "" end)] | join("|")' \
             2>/dev/null || true)"
         MMRY_SUPERSEDE_APPLIED="${_sup%%|*}"
-        [[ "$_sup" == *"|"* ]] && MMRY_PROCESS_STORED="${_sup#*|}"
+        if [[ "$_sup" == *"|"* ]]; then
+            _rest="${_sup#*|}"
+            MMRY_PROCESS_STORED="${_rest%%|*}"
+            [[ "$_rest" == *"|"* ]] && MMRY_SUPERSEDE_REASON="${_rest#*|}"
+        fi
     fi
 
     # #29912 — record successful save so stop-check.sh can compute time-since-last-save

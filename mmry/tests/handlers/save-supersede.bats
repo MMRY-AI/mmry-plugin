@@ -181,5 +181,19 @@ _process_lines() { grep 'memories/process' "$TEST_TMPDIR/curl-log.txt" 2>/dev/nu
     export MOCK_CURL_RESPONSE='{"message":"Stored 1 memory. Whether memory 42 was replaced could not be confirmed; it may still be active.","stored":1,"supersede":{"memoryId":42,"applied":false,"reason":"unverified"}}'
     run bash "$SAVE" --context "A correction" --supersedes 42
     [ "$status" -eq 3 ] || { echo "status $status: $output"; return 1; }
-    [[ "$output" == *"could not be confirmed"* ]]
+    [[ "$output" == *"could not be confirmed"* ]] || { echo "$output"; return 1; }
+    # QA round 2: nothing may contradict it. "May still be active" is the truth; "was NOT replaced
+    # and is still active" is a claim nobody can make, because the read-back failed.
+    [[ "$output" != *"NOT replaced"* ]] || { echo "contradicting line printed: $output"; return 1; }
+    [[ "$output" != *"is still active"* ]] || { echo "contradicting line printed: $output"; return 1; }
+}
+
+@test "31740 qa2: an unverified replacement says it may still be active even with no server message" {
+    # The plugin's own line has to carry it, because the server's message is optional.
+    export MOCK_CURL_HTTP_CODE="202"
+    export MOCK_CURL_RESPONSE='{"stored":1,"supersede":{"memoryId":42,"applied":false,"reason":"unverified"}}'
+    run bash "$SAVE" --context "A correction" --supersedes 42
+    [ "$status" -eq 3 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == *"Whether memory 42 was replaced could not be confirmed, so it may still be active."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"NOT replaced"* ]] || { echo "contradicting line printed: $output"; return 1; }
 }
