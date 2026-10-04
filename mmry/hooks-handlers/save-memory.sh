@@ -67,10 +67,35 @@ if [[ -z "$CONTEXT" ]]; then
     exit 1
 fi
 
-if mmry_process_context "$CONTEXT" "manual" "$WORKING_DIR" "$SESSION_ID" "$PROJECT_ID" "$TASK_ID" "$VISIBILITY" "$PERMISSION_GROUP_ID"; then
+# --supersedes: the id of the memory this save REPLACES (#31740). It was parsed above and then
+# never sent, so a correction was saved beside the memory it corrected and both stayed live. It is
+# checked here, so a typo is refused rather than reaching the API as a different memory's id.
+if [[ -n "$SUPERSEDES" ]]; then
+    if [[ ! "$SUPERSEDES" =~ ^[1-9][0-9]{0,9}$ ]] || (( 10#$SUPERSEDES > 2147483647 )); then
+        echo "Error: --supersedes takes the id of the memory being replaced, a positive whole number (got: ${SUPERSEDES})." >&2
+        exit 1
+    fi
+fi
+
+# Exit status: 0 saved (and, with --supersedes, the old memory retired); 1 nothing saved;
+# 3 saved, but the memory named by --supersedes was NOT retired and is still active.
+if mmry_process_context "$CONTEXT" "manual" "$WORKING_DIR" "$SESSION_ID" "$PROJECT_ID" "$TASK_ID" "$VISIBILITY" "$PERMISSION_GROUP_ID" "$SUPERSEDES"; then
     # Bug #8 (#29950): print the server's short ack when available, otherwise fall back.
     echo "${MMRY_PROCESS_MESSAGE:-Memory sent to MMRY AI for processing.}"
+    if [[ -n "$SUPERSEDES" && "${MMRY_SUPERSEDE_APPLIED:-}" != "true" ]]; then
+        if [[ -z "${MMRY_SUPERSEDE_APPLIED:-}" ]]; then
+            echo "MMRY AI did not report replacing memory ${SUPERSEDES}, so treat it as still active." >&2
+        else
+            echo "Memory ${SUPERSEDES} was NOT replaced and is still active." >&2
+        fi
+        exit 3
+    fi
 else
-    _mmry_format_error "save"
+    if [[ -n "$SUPERSEDES" && "${MMRY_HTTP_CODE:-}" == "404" && -n "${MMRY_PROCESS_MESSAGE:-}" ]]; then
+        # The API refused the replacement and saved nothing; its message says why and what to do.
+        echo "MMRY AI: ${MMRY_PROCESS_MESSAGE}" >&2
+    else
+        _mmry_format_error "save"
+    fi
     exit 1
 fi

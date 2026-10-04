@@ -119,7 +119,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --session-id "$CLAUDE_SESSION_ID"
 ```
 
-Optional parameters (`--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`) can be omitted — they default to empty/NULL. **Always include `--session-id "$CLAUDE_SESSION_ID"`.** `--working-dir` is optional — if omitted, it defaults to the session launch directory (persisted at session start). Returns `NewMemoryID` on success.
+Optional parameters (`--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`) can be omitted — they default to empty/NULL. **Always include `--session-id "$CLAUDE_SESSION_ID"`.** `--working-dir` is optional — if omitted, it defaults to the session launch directory (persisted at session start). It prints a short confirmation from MMRY AI. It does not print the new memory's id, so do not tell the user one.
 
 ## When to Store a Memory
 Store a memory when any of the following happen:
@@ -207,27 +207,23 @@ mmry_delete_link 42 87
 
 ### Supersedes Pattern
 
-When a decision changes, store the new memory and link it as `supersedes`:
-```bash
-# Store updated decision — returns NewMemoryID (e.g., 95)
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
-  --tier "Operational" --category "Decision" --scope "backend" \
-  --topic "Primary Product ID" \
-  --content "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
-  --source "eric" --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
-
-# Link to the old decision it replaces
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/link-memories.sh" 95 42 "supersedes"
-```
-
-Or use the `--supersedes` flag to do both in one step:
+When a fact or decision changes, save the new memory with `--supersedes <old id>`. MMRY AI saves
+it, retires the old memory so it stops being recalled, and links the two:
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
-  --tier "Operational" --category "Decision" --scope "backend" \
-  --topic "Primary Product ID" \
-  --content "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
-  --source "eric" --supersedes 42 --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
+  --context "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
+  --supersedes 42 --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
 ```
+
+Read the exit status, because it says whether the replacement happened:
+
+| Exit | Meaning | What to tell the user |
+|------|---------|-----------------------|
+| 0 | Saved, and memory 42 is retired | The correction is saved and replaces the old memory. |
+| 1 | Nothing saved | The message says why. Usually memory 42 does not exist, is already retired, or is not one this user can see. Check the id, or save without `--supersedes`. |
+| 3 | Saved, but memory 42 is still active | Both are live. Say so plainly; do not claim the old one was replaced. |
+
+Use the id of a memory you actually loaded or found. Never guess one.
 
 ## Search
 

@@ -1318,6 +1318,9 @@ mmry_process_context() {
     local task_id="${6:-}"
     local visibility="${7:-}"
     local permission_group_id="${8:-}"
+    # #31740: the memory this save replaces. Empty is omitted by _mmry_build_json, so a save
+    # without it sends exactly the request it always has.
+    local supersedes_id="${9:-}"
 
     local body
     body=$(_mmry_build_json \
@@ -1328,7 +1331,8 @@ mmry_process_context() {
         "projectId"           "$project_id" \
         "taskId"              "$task_id" \
         "visibility"          "$visibility" \
-        "#permissionGroupID"  "$permission_group_id")
+        "#permissionGroupID"  "$permission_group_id" \
+        "#supersedesId"       "$supersedes_id")
 
     _mmry_request POST "/api/memories/process" "$body"
     local rc=$?
@@ -1339,6 +1343,17 @@ mmry_process_context() {
     MMRY_PROCESS_MESSAGE=""
     if [[ -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
         MMRY_PROCESS_MESSAGE="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.message // empty' 2>/dev/null || true)"
+    fi
+
+    # #31740: whether the API retired the memory this save named. "true" only when the response
+    # says so; empty when it says nothing, which is what a server without #31740 does, so the
+    # caller cannot mistake an ignored replacement for an applied one. Read only when one was
+    # asked for, so an ordinary save spawns nothing extra.
+    MMRY_SUPERSEDE_APPLIED=""
+    if [[ -n "$supersedes_id" && -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
+        MMRY_SUPERSEDE_APPLIED="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            'if (.supersede | type) == "object" then (.supersede.applied | tostring) else empty end' \
+            2>/dev/null || true)"
     fi
 
     # #29912 — record successful save so stop-check.sh can compute time-since-last-save
