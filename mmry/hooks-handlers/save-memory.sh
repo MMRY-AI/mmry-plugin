@@ -106,6 +106,10 @@ if mmry_process_context "$CONTEXT" "manual" "$WORKING_DIR" "$SESSION_ID" "$PROJE
     if [[ -n "$SUPERSEDES" && "${MMRY_SUPERSEDE_APPLIED:-}" != "true" ]]; then
         if [[ -z "${MMRY_SUPERSEDE_APPLIED:-}" ]]; then
             echo "MMRY AI did not report replacing memory ${SUPERSEDES}, so treat it as still active." >&2
+        elif [[ "${MMRY_SUPERSEDE_REASON:-}" == "unverified" ]]; then
+            # #31740 QA round 2: the save stood and the read-back failed, so nobody knows. Saying
+            # "was NOT replaced" here contradicted the server's own "may still be active".
+            echo "Whether memory ${SUPERSEDES} was replaced could not be confirmed, so it may still be active." >&2
         else
             echo "Memory ${SUPERSEDES} was NOT replaced and is still active." >&2
         fi
