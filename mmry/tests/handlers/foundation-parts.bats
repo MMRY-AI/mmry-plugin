@@ -510,3 +510,18 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     [[ "$ctx" != *"running WITHOUT the account's standing directives"* ]] || { echo "part 3 told the assistant the whole turn went without"; return 1; }
     [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
 }
+
+# #31411 QA round 2: the "customer was told" marker is named by the session. With one shared marker
+# holding the last session told, two sessions taking turns each overwrote it, and a session was told
+# again on every prompt that followed one from the other.
+@test "parts: #31411 a by-reference set is announced once per session even while another session takes turns" {
+    _seed_lines 800
+    _fire 1 SA
+    jq -e 'has("systemMessage")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "control: session A was not told"; return 1; }
+    _fire 1 SB
+    jq -e 'has("systemMessage")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "session B was never told"; return 1; }
+    _fire 1 SA
+    if jq -e 'has("systemMessage")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "session A was told a second time"; return 1; fi
+    _ctx 1
+    [[ "$PART_TEXT" == *"BEFORE YOU ANSWER"* ]] || { echo "session A's assistant lost the reference"; return 1; }
+}

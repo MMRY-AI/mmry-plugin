@@ -44,7 +44,6 @@ set +e +u
 mmry_load_config 2>/dev/null || true
 
 CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
-MANIFEST="${CACHE}.manifest"
 # THIS SESSION, by its own id (#31583 QA round 6, R4(c)). The command runtime provides
 # CLAUDE_CODE_SESSION_ID; the per-prompt hook reads the same id from its payload, so both file this
 # session's records under one name and another session's are never read here. With no id, the old

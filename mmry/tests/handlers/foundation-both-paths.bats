@@ -31,12 +31,32 @@ setup() {
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
 }
 
+# Fire every part the way Claude Code does, one process each, and gather what the assistant
+# receives (#31411 QA round 2: TC5 must cover a set that needs more than one part). Each part's
+# additionalContext is decoded with jq -b, its heading and label dropped (everything up to the first
+# blank line), and the rest appended to delivered.txt. all-output.txt keeps the raw JSON of every
+# part. Sets DELIVERED_PARTS.
+_deliver_all() {
+    local k f c
+    : > "$TEST_TMPDIR/delivered.txt"; : > "$TEST_TMPDIR/all-output.txt"; DELIVERED_PARTS=0
+    for k in 1 2 3 4 5 6; do
+        f="$TEST_TMPDIR/part$k.json"
+        bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part "$k" < /dev/null > "$f" 2>/dev/null
+        [ -s "$f" ] || continue
+        cat "$f" >> "$TEST_TMPDIR/all-output.txt"
+        jq -b -j '.hookSpecificOutput.additionalContext' "$f" > "$TEST_TMPDIR/ctx$k.txt" || return 1
+        c="$(cat "$TEST_TMPDIR/ctx$k.txt"; printf .)"; c="${c%.}"
+        printf '%s' "${c#*$'\n\n'}" >> "$TEST_TMPDIR/delivered.txt"
+        DELIVERED_PARTS=$(( DELIVERED_PARTS + 1 ))
+    done
+}
+
 # A Foundation set big enough that any surviving budget would bite. The old cut was at 6,000
 # characters, so this is comfortably past it, and one memory's CONTENT is itself a bulleted
 # list because that is the shape that broke entry counting once already.
 _big_response() {
     local filler
-    filler="$(printf 'w%.0s' $(seq 1 900))"
+    filler="$(printf 'w%.0s' $(seq 1 1600))"
     printf '['
     local i
     for i in $(seq 1 9); do
@@ -65,39 +85,17 @@ _big_response() {
     stored_bytes="$(wc -c < "$CACHE")"
     [ "$stored_bytes" -gt 7000 ]
 
-    # What the model actually receives, read off the emitted hook JSON rather than recomputed.
-    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [ "$status" -eq 0 ]
-    local emitted="$output"
-
-    # DECODED AND COMPARED AS BYTES, via files.
-    #
-    # The first cut of this hand-escaped the stored text and compared it against the raw JSON,
-    # copying the approach used elsewhere in the suite. It failed, and not because the product
-    # was wrong: the emitted JSON carried \r\n correctly and my replacement strings lost their
-    # backslashes, so the test was comparing "rn" against "\r\n". Measured with od before
-    # concluding anything.
-    #
-    # So the comparison goes through files instead. bash writes the emitted JSON byte for byte
-    # with printf, python reads both in BINARY and compares. Nothing passes through a Windows
-    # native binary's stdout, which is what rewrites \n as \r\n and corrupts exactly the bytes
-    # under test.
-    printf '%s' "$emitted" > "$TEST_TMPDIR/emitted.json"
-
-    # NO INTERPRETER (#31411 QA round 2, on a real Mac). This used `python -c`, and macOS has had no
-    # bare `python` since 12.3, so on a Mac the comparison never ran. jq decodes the JSON instead,
-    # with -b so a native Windows jq writes the bytes as they are rather than turning every newline
-    # into CRLF (measured: without -b, a two-line value came out with a CR before each LF). The cache is read with
-    # $(<file), exactly as the handler reads it, which strips trailing newlines on both sides.
-    jq -b -j '.hookSpecificOutput.additionalContext' "$TEST_TMPDIR/emitted.json" > "$TEST_TMPDIR/ctx.txt" || {
-        echo "jq could not decode what the hook emitted"; return 1; }
-    local ctx stored
-    ctx="$(<"$TEST_TMPDIR/ctx.txt")"
+    # What the model actually receives, read off every part the hook emits rather than recomputed
+    # (#31411 QA round 2: TC5 has to cover a set that needs more than one part). Decoded with jq -b,
+    # so a native Windows jq writes the bytes as they are, and compared as whole strings.
+    _deliver_all || { echo "jq could not decode what the hook emitted"; return 1; }
+    (( DELIVERED_PARTS >= 2 )) || { echo "control: the set fitted one part, so this would not test the split ($DELIVERED_PARTS)"; return 1; }
+    local delivered stored
+    delivered="$(cat "$TEST_TMPDIR/delivered.txt"; printf .)"; delivered="${delivered%.}"
     stored="$(<"$CACHE")"
-    [ -n "$stored" ] || { echo "the cache was empty, so a suffix match would prove nothing"; return 1; }
-    # The delivered text must END with exactly the stored set; the handler prefixes its framing.
-    [[ "$ctx" == *"$stored" ]] || {
-        echo "DIFFER: delivered tail [${ctx: -60}] vs stored tail [${stored: -60}]"; return 1; }
+    [ -n "$stored" ] || { echo "the cache was empty, so a comparison would prove nothing"; return 1; }
+    [ "$delivered" = "$stored" ] || {
+        echo "DIFFER: ${#delivered} delivered against ${#stored} stored; tails [${delivered: -60}] [${stored: -60}]"; return 1; }
 }
 
 @test "#31411 TC5: every directive session-start stored arrives, first to last" {
@@ -105,18 +103,19 @@ _big_response() {
     export MOCK_CURL_HTTP_CODE="200"
 
     bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
-    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [ "$status" -eq 0 ]
+    _deliver_all || return 1
+    (( DELIVERED_PARTS >= 2 )) || { echo "control: one part only"; return 1; }
+    local out; out="$(cat "$TEST_TMPDIR/all-output.txt")"
 
     # Named one by one, so a cut anywhere is caught rather than only at the two ends.
     local i
     for i in $(seq 1 9); do
-        [[ "$output" == *"Directive $i"* ]] || { echo "lost Directive $i"; return 1; }
+        [[ "$out" == *"Directive $i"* ]] || { echo "lost Directive $i"; return 1; }
     done
-    [[ "$output" == *'Values'* ]] || return 1
-    [[ "$output" == *'Service'* ]] || return 1
+    [[ "$out" == *'Values'* ]] || return 1
+    [[ "$out" == *'Service'* ]] || return 1
     # And the tier filter held on the way through.
-    [[ "$output" != *'not foundation'* ]]
+    [[ "$out" != *'not foundation'* ]]
 }
 
 @test "#31411 TC5: the two paths agree on the COUNT, not only on the text" {
@@ -127,9 +126,9 @@ _big_response() {
 
     # session-start's writer counts from the API response: ten Foundation memories, one of
     # which has three bulleted lines in its content, so a line count would say twelve.
-    grep -q 'entries=10' "${CACHE}.manifest"
+    grep -q 'entries=10' "${CACHE}.manifest" || return 1
 
-    bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" >/dev/null
+    bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" < /dev/null >/dev/null
     run cat "$TEST_TMPDIR/mmry-foundation.status"
     [[ "$output" == *'entries=10'* ]]
 }
@@ -142,14 +141,14 @@ _big_response() {
 
     bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
     local stored_bytes
-    stored_bytes="$(wc -c < "$CACHE")"
+    stored_bytes="$(wc -c < "$CACHE" | tr -d ' ')"
     [ "$stored_bytes" -gt 7000 ]
 
-    run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *'Directive 9'* ]] || return 1
-    [[ "$output" != *'truncated'* ]] || return 1
-    [ ${#output} -gt 7000 ]
+    _deliver_all || return 1
+    local out; out="$(cat "$TEST_TMPDIR/all-output.txt")"
+    [[ "$out" == *'Directive 9'* ]] || return 1
+    [[ "$out" != *'truncated'* ]] || return 1
+    [ "$(wc -c < "$TEST_TMPDIR/delivered.txt" | tr -d ' ')" -gt 7000 ]
 }
 
 # ============================================================================

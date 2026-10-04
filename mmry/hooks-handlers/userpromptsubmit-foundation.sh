@@ -255,7 +255,8 @@ _mmry_emit_escaped() {
 # inferring an order. The failure log stays, for whoever investigates.
 #
 # Stamped with the session token like the delivery record, so another session's outcome is never
-# read as this one's. Read without sourcing the client: the supervisor stays process-free.
+# read as this one's. Read without sourcing the client, and written by temp and rename, which
+# costs one mv (_mmry_fnd_write).
 _mmry_outcome() {
     local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
     [[ -z "$tok" && -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
@@ -782,7 +783,6 @@ fi
 #   3 - the cache could not be verified; stdout carries the one-line reason
 # ============================================================================
 
-MANIFEST="${CACHE}.manifest"
 # Written on every verified injection so /mmry:foundation-status can answer "are my
 # directives reaching my assistants right now" without anyone reading a cache file
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
@@ -882,8 +882,6 @@ content="$(<"$CACHE")"
 [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=%s bytes=%s
 ' "${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}" "$_exp_entries" "$_act_bytes" > "$STATUS_OUT" 2>/dev/null || true
 
-# ESCAPED HERE, INSIDE THE DEADLINE (#31411 QA, R6). See _mmry_emit_escaped. The supervisor
-# treats a successful worker's output as already-escaped JSON string content and copies it.
 # CUT THE SET INTO PARTS, the same way in every firing (#31411 split, QA round 2 R1 and TC3).
 #
 # THE LIMIT IS IN CHARACTERS, NOT BYTES. Claude Code's 10,000 counts characters of the decoded
