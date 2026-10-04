@@ -181,10 +181,11 @@ _big_response() {
     # that was not a defect, while a second clear moved above its emit lower down would have
     # passed it. Now each clear is walked back to the end of the previous exit path: it must
     # meet an emit first, or the path must say, in a comment, that it never emits.
-    grep -q ': > "\$_INFLIGHT"' "$f"
+    # The marker is written by temp and rename since #31583 QA round 2 (_mmry_fnd_write).
+    grep -q '_mmry_fnd_write "\$_INFLIGHT"' "$f"
     local report
     report="$(awk '
-        /: > "\$_INFLIGHT"/                          { inpath = 1; emitted = 0; noemit = 0; next }
+        /_mmry_fnd_write "\$_INFLIGHT"/              { inpath = 1; emitted = 0; noemit = 0; next }
         !inpath                                        { next }
         /^[[:space:]]*exit 0[[:space:]]*$/             { emitted = 0; noemit = 0; next }
         /_mmry_emit(_escaped)? "/                      { emitted = 1 }
