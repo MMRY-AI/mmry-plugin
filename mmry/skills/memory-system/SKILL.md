@@ -220,8 +220,13 @@ Read the exit status, because it says whether the replacement happened:
 | Exit | Meaning | What to tell the user |
 |------|---------|-----------------------|
 | 0 | Saved, and memory 42 is retired | The correction is saved and replaces the old memory. |
-| 1 | Nothing saved | The message says why. Usually memory 42 does not exist, is already retired, or is not one this user can see. Check the id, or save without `--supersedes`. |
-| 3 | Saved, but memory 42 is still active | Both are live. Say so plainly; do not claim the old one was replaced. |
+| 1 | Nothing saved | The message says why: memory 42 does not exist, is already retired or is not one this user can see; it is a Foundation memory; a different visibility was asked for; or MMRY AI could not save it at all. Say the correction was NOT saved, and act on the reason. |
+| 3 | Saved, but memory 42 may still be active | Both may be live. Say so plainly; do not claim the old one was replaced. |
+
+The replacement keeps the old memory's tier and visibility: a private memory stays private, and so
+does its correction. So do not pass `--visibility` with `--supersedes`, unless it is the visibility
+the old memory already has; a different one is refused. A Foundation memory cannot be replaced by a
+save at all; the account owner changes those in the MMRY AI portal.
 
 Use the id of a memory you actually loaded or found. Never guess one.
 
