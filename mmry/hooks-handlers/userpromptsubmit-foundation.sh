@@ -1020,8 +1020,10 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
         printf '%s' 'changed|your Foundation directives were being replaced as this turn started, so the copy prepared for it did not match the record'
         exit 3
     fi
+    # One path, converted for Windows below. The conversion read $_fnd_snap a second time, so
+    # mutation m27 (the path set to the live cache) changed nothing on Windows and survived there.
     _fnd_path="$_fnd_snap"
-    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$_fnd_snap" 2>/dev/null || printf '%s' "$_fnd_snap")"
+    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$_fnd_path" 2>/dev/null || printf '%s' "$_fnd_path")"
     _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than Claude Code lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool, in pieces if it limits how much one read returns; you may need to ask the user for permission to read it. It is a copy of the complete, verified set, made for this turn: ${_fnd_path}
 Its last line is \"${_fnd_end}\". If you cannot read the file, or you do not reach that line, tell the user plainly that their Foundation directives were not applied to this turn. If a response would conflict with any directive in it, follow the directive."
     printf '@@MMRY-BYREF %s@@' "$_fnd_n"

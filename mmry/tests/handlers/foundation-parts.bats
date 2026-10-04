@@ -159,11 +159,23 @@ _stored() { STORED="$(<"$CACHE")"; }
 
 # #31411 QA round 2 R1, #31583 QA round 2 R3: the assistant was pointed at the live shared cache and
 # told it was the complete, verified set, and a later write could replace it before it was opened.
+# The file the assistant was told to read, from the text it was given, as a path this shell can open.
+# Read from the payload, not by the name the copy is expected to have: a test that opens the copy by
+# its own name cannot see the assistant being pointed somewhere else (mutation m27).
+_pointed() {
+    local p="${PART_TEXT#*made for this turn: }"
+    p="${p%%$'\n'*}"
+    command -v cygpath >/dev/null 2>&1 && p="$(cygpath -u "$p")"
+    printf '%s' "$p"
+}
+
 @test "parts: by reference points at a copy of exactly the verified set, ending in the line the assistant must reach" {
     _seed_lines 800
     _fire_all S1
     _ctx 1
-    local snap="$TEST_TMPDIR/mmry-foundation.byref.S1.md" v
+    local snap v
+    snap="$(_pointed)"
+    [ "$snap" -ef "$TEST_TMPDIR/mmry-foundation.byref.S1.md" ] || { echo "the assistant was pointed at [$snap], not this session's copy"; return 1; }
     [ -f "$snap" ] || { echo "no copy was made for this turn"; return 1; }
     v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
     # The closing line names this version of the set, and the assistant is told to reach it.
@@ -176,7 +188,10 @@ _stored() { STORED="$(<"$CACHE")"; }
 @test "parts: the copy the assistant was pointed at survives the cache being replaced after the turn" {
     _seed_lines 800
     _fire 1 S1
-    local snap="$TEST_TMPDIR/mmry-foundation.byref.S1.md"
+    _ctx 1
+    local snap
+    snap="$(_pointed)"
+    [ -f "$snap" ] || { echo "the assistant was pointed at [$snap], which is not a file"; return 1; }
     cp "$snap" "$TEST_TMPDIR/snap-before"
     # Another session starts, or the daily refresh runs: the shared cache becomes a different set.
     awk 'BEGIN { for (i = 1; i <= 800; i++) printf "- Directive %04d: a DIFFERENT set written after the turn began.\n", i }' > "$CACHE"
