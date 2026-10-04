@@ -250,7 +250,7 @@ mmry_foundation_manifest_path() {
 # is one routine now and both callers format their own words from its verdict.
 #
 # CONTRACT. Echoes a single line and returns:
-#   0  "ok <entries> <bytes>"        verified, deliver it
+#   0  "ok <entries> <bytes> <cksum>"  verified, deliver it; the cksum names this version of the set
 #   1  "absent" or "empty"           nothing to deliver and nothing wrong, say nothing
 #   3  "<state>|<customer prose>"    refuse
 #
@@ -412,7 +412,7 @@ mmry_verify_foundation_cache() {
         return 3
     fi
 
-    printf 'ok %s %s' "$exp_entries" "$act_bytes"
+    printf 'ok %s %s %s' "$exp_entries" "$act_bytes" "$act_cksum"
     return 0
 }
 

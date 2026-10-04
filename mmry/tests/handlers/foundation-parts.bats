@@ -137,10 +137,12 @@ _stored() { STORED="$(<"$CACHE")"; }
     _fire_all S1
     _ctx 1
     [[ "$PART_TEXT" == *"BEFORE YOU ANSWER, read this file in full"* ]] || { echo "part 1 does not tell the assistant to read the file"; return 1; }
-    [[ "$PART_TEXT" == *"mmry-foundation.md"* ]] || { echo "part 1 does not name the file"; return 1; }
+    [[ "$PART_TEXT" == *"mmry-foundation.byref.S1.md"* ]] || { echo "part 1 does not name this session's copy: ${PART_TEXT:0:600}"; return 1; }
+    [[ "$PART_TEXT" == *"permission"* ]] || { echo "part 1 does not say it may need permission"; return 1; }
     [[ "$PART_TEXT" != *"Directive 0001"* ]] || { echo "part 1 sent some of the set as well as the reference"; return 1; }
     (( ${#PART_TEXT} < 2000 )) || { echo "the reference is ${#PART_TEXT} long; it must fit a preview"; return 1; }
     jq -e '.systemMessage | test("larger than Claude Code lets a plugin show")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "the customer was not told"; return 1; }
+    jq -e '.systemMessage | test("57,000") and test("permission")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "the notice lacks 57,000 or the permission warning: $(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
     local k
     for k in 2 3 4 5 6; do
         [ ! -s "$TEST_TMPDIR/part$k.json" ] || { echo "part $k spoke on a by-reference set"; return 1; }
@@ -153,6 +155,62 @@ _stored() { STORED="$(<"$CACHE")"; }
     CLAUDE_CODE_SESSION_ID=S1 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    BY REFERENCE on the most recent prompt"* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
+}
+
+# #31411 QA round 2 R1, #31583 QA round 2 R3: the assistant was pointed at the live shared cache and
+# told it was the complete, verified set, and a later write could replace it before it was opened.
+@test "parts: by reference points at a copy of exactly the verified set, ending in the line the assistant must reach" {
+    _seed_lines 800
+    _fire_all S1
+    _ctx 1
+    local snap="$TEST_TMPDIR/mmry-foundation.byref.S1.md" v
+    [ -f "$snap" ] || { echo "no copy was made for this turn"; return 1; }
+    v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
+    # The closing line names this version of the set, and the assistant is told to reach it.
+    [ "$(tail -n 1 "$snap")" = "END OF FOUNDATION SET $v" ] || { echo "last line: [$(tail -n 1 "$snap")]"; return 1; }
+    [[ "$PART_TEXT" == *"Its last line is \"END OF FOUNDATION SET $v\""* ]] || { echo "the assistant is not told the closing line"; return 1; }
+    # Everything before the closing line is the stored set, byte for byte.
+    cmp -s <(head -c "$(wc -c < "$CACHE" | tr -d ' ')" "$snap") "$CACHE" || { echo "the copy differs from the stored set"; return 1; }
+}
+
+@test "parts: the copy the assistant was pointed at survives the cache being replaced after the turn" {
+    _seed_lines 800
+    _fire 1 S1
+    local snap="$TEST_TMPDIR/mmry-foundation.byref.S1.md"
+    cp "$snap" "$TEST_TMPDIR/snap-before"
+    # Another session starts, or the daily refresh runs: the shared cache becomes a different set.
+    awk 'BEGIN { for (i = 1; i <= 800; i++) printf "- Directive %04d: a DIFFERENT set written after the turn began.\n", i }' > "$CACHE"
+    _seal
+    cmp -s "$snap" "$TEST_TMPDIR/snap-before" || { echo "the copy for this turn changed under the assistant"; return 1; }
+    run grep -c 'DIFFERENT' "$snap"
+    [ "$output" = "0" ]
+}
+
+@test "parts: each session has its own copy, so one session's turn never rewrites another's" {
+    _seed_lines 800
+    _fire 1 SA
+    cp "$TEST_TMPDIR/mmry-foundation.byref.SA.md" "$TEST_TMPDIR/sa-before"
+    awk 'BEGIN { for (i = 1; i <= 800; i++) printf "- Directive %04d: the set session B sees, long enough to need more than six parts.\n", i }' > "$CACHE"
+    _seal
+    _fire 1 SB
+    [ -f "$TEST_TMPDIR/mmry-foundation.byref.SB.md" ] || { echo "session B has no copy"; return 1; }
+    cmp -s "$TEST_TMPDIR/mmry-foundation.byref.SA.md" "$TEST_TMPDIR/sa-before" || { echo "session B rewrote session A's copy"; return 1; }
+}
+
+@test "parts: a set replaced while its copy is being made sends nothing, and says to re-send" {
+    _seed_lines 800
+    # A cp that copies something other than what was verified: the case of a new set landing between
+    # the check and the copy, made deterministic.
+    mkdir -p "$TEST_TMPDIR/shim"
+    # The shim takes its own directory off PATH first, or its cp would find itself and never return.
+    printf '%s\n' '#!/usr/bin/env bash' 'PATH="${PATH#*:}"' 'src="${@: -2:1}"; dst="${@: -1}"' 'cp "$src" "$dst" && printf "%s\n" "- Directive 9999: appended by the shim." >> "$dst"' > "$TEST_TMPDIR/shim/cp"
+    chmod +x "$TEST_TMPDIR/shim/cp"
+    PATH="$TEST_TMPDIR/shim:$PATH" _fire 1 S9
+    _ctx 1
+    [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "it pointed the assistant at a copy that did not match"; return 1; }
+    jq -e '.systemMessage | test("NOT applied") and test("Re-send the prompt")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "$(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
+    if jq -e '.systemMessage | test("load-memories")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "it prescribed a rebuild for a set that was only being replaced"; return 1; fi
+    [ ! -e "$TEST_TMPDIR/mmry-foundation.byref.S9.md" ] || { echo "a mismatched copy was left in place"; return 1; }
 }
 
 @test "parts: the status says IN FULL in four parts only while all four arrived, and PARTLY when one did not" {

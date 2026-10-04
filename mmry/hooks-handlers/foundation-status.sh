@@ -146,7 +146,7 @@ if (( _verdict != 0 )); then
 fi
 
 # Verified. The verdict carries the numbers so they cannot be recomputed differently here.
-read -r _ok_word _exp_entries _act_bytes <<<"$_reason"
+read -r _ok_word _exp_entries _act_bytes _ <<<"$_reason"
 echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_act_bytes} bytes, matching what was stored."
 
 # 3. WAS THE MOST RECENT PROMPT ACTUALLY DELIVERED? (#31583 QA round 5, 4e)
@@ -211,6 +211,9 @@ _why_and_action() {
     elif [[ "$code" == "upgrade" ]]; then
         _WHY="they were stored by an earlier plugin version and are being fetched again"
         _ACTION="none needed. If this persists after a few prompts, run /mmry:load-memories."
+    elif [[ "$code" == "refused changed" ]]; then
+        _WHY="your directives were being replaced as the prompt arrived, so nothing was sent rather than a mix of two versions"
+        _ACTION="re-send the prompt."
     elif [[ "$code" =~ ^refused($|\ [a-z-]{1,20}$) ]]; then
         _WHY="the stored copy could not be verified, so it was refused rather than used"
         _ACTION="run /mmry:load-memories to rebuild it."
@@ -267,7 +270,7 @@ elif [[ -n "$_byref" ]]; then
     echo "Delivered:    BY REFERENCE on the most recent prompt. Your set is larger than Claude Code lets"
     echo "              a plugin show on each prompt (${_parts_max} parts of under 10,000 characters), so"
     echo "              your assistant was pointed to the full copy and asked to read it. That relies on"
-    echo "              the assistant opening the file."
+    echo "              the assistant opening the file, and it may need your permission to read it."
 elif [[ -n "${_n:-}" ]] && (( _n > 1 )); then
     echo "Delivered:    IN FULL on the most recent prompt, in ${_n} parts. Nothing is trimmed or cut."
 elif [[ -n "$_o1" ]]; then

@@ -87,6 +87,14 @@ MMRY_FND_PARTS_MAX="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 # _mmry_fnd_parts). With the heading, the part label and the cut-short note, the largest part there
 # can be stays under the 10,000 cap; tests/handlers/foundation-parts.bats pins that.
 MMRY_FND_PART_CAP=9500
+# What K parts hold, as the customer reads it: "57,000", with the separator (#31411 QA round 2).
+# Builtins only; the supervisor starts no process it does not need.
+_fnd_cn=$(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )); _FND_CAPACITY_TEXT=""
+while (( _fnd_cn >= 1000 )); do
+    printf -v _fnd_cg '%03d' $(( _fnd_cn % 1000 ))
+    _FND_CAPACITY_TEXT=",${_fnd_cg}${_FND_CAPACITY_TEXT}"; _fnd_cn=$(( _fnd_cn / 1000 ))
+done
+_FND_CAPACITY_TEXT="${_fnd_cn}${_FND_CAPACITY_TEXT}"
 _SFX=""
 (( MMRY_FND_PART > 1 )) && _SFX=".${MMRY_FND_PART}"
 _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
@@ -503,6 +511,12 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             blank)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy checks out but contains no readable text, so there was nothing to send."
                 ;;
+            changed)
+                # Nothing is damaged: a new set landed while this turn was copying the old one for the
+                # assistant to read. Rebuilding would not help; the next prompt reads the new set.
+                _WHY="Nothing was truncated and nothing was guessed at; nothing was sent rather than a mix of two versions."
+                _REMEDY="Re-send the prompt."
+                ;;
             *)
                 # The states where a comparison really did happen and fail: size, contents,
                 # inconsistent. Only these get the sentence that says so.
@@ -513,7 +527,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         if (( ${_UPGRADE:-0} )); then
             USERMSG="MMRY AI: you have just updated the MMRY plugin, so this one turn ran without your Foundation directives while they are fetched again in the new format. Normally the next prompt has them. No action needed; if you still see this after a few prompts, run /mmry:load-memories."
         else
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm.}"
         fi
         printf '%s foundation reinjection REFUSED: %s
 '             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
@@ -592,12 +606,14 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # BY REFERENCE: the customer is told once per session, not on every prompt. The assistant is
     # told on every prompt, because it needs the instruction every time.
     if [[ "$_FND_KIND" == BYREF* ]]; then
-        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""
+        # Named by the session (#31411 QA round 2), like every other record here, so one session
+        # telling its customer never stops another from telling theirs.
+        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""
         _tok="${MMRY_FND_SID:-}"
         [[ -z "$_tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
-            USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to the full copy and asked to read it before answering. That works, but it relies on the assistant opening the file. To have the set applied directly, keep it under about $(( MMRY_FND_PARTS_MAX * MMRY_FND_PART_CAP )) characters. ${USERMSG}"
+            USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
             printf '%s' "$_tok" > "$_told" 2>/dev/null || true
         fi
     fi
@@ -797,7 +813,7 @@ if (( _verdict != 0 )); then
     exit 3
 fi
 
-read -r _ok_word _exp_entries _act_bytes <<<"$_reason"
+read -r _ok_word _exp_entries _act_bytes _fnd_setid <<<"$_reason"
 content="$(<"$CACHE")"
 
 # ============================================================================
@@ -944,10 +960,34 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
         printf '@@MMRY-NONE %s %s@@' "$MMRY_FND_PART" "$_fnd_n"
         exit 0
     fi
-    _fnd_path="$CACHE"
-    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$CACHE" 2>/dev/null || printf '%s' "$CACHE")"
-    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than Claude Code lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool; it is the complete, verified set: ${_fnd_path}
-If a response would conflict with any directive in it, follow the directive. If you cannot read the file, tell the user plainly that their Foundation directives were not applied to this turn."
+    # A COPY MADE FOR THIS TURN, NOT THE LIVE CACHE (#31411 QA round 2 R1, #31583 QA round 2 R3).
+    # The assistant used to be pointed at the shared cache itself and told it was the complete,
+    # verified set, and any later write - another session starting, the daily refresh - could
+    # replace that file before the assistant opened it. It now gets a copy of exactly the bytes that
+    # were verified, named by this session, ending in a closing line it is told to reach. The copy is
+    # checked against the record before it is put in place, so a cache replaced while it was being
+    # copied sends nothing rather than a different set.
+    _fnd_key="${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}"
+    _fnd_snap="${MMRY_TMPDIR}/mmry-foundation.byref${_fnd_key:+.$_fnd_key}.md"
+    _fnd_snaptmp="${_fnd_snap}.new.$$"
+    _fnd_end="END OF FOUNDATION SET ${_fnd_setid}"
+    _sc="" _sb=""
+    if cp -f "$CACHE" "$_fnd_snaptmp" 2>/dev/null; then
+        read -r _sc _sb < <(cksum < "$_fnd_snaptmp" 2>/dev/null)
+    fi
+    if [[ -n "$_sc" && "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]] \
+        && printf '\n%s\n' "$_fnd_end" >> "$_fnd_snaptmp" 2>/dev/null \
+        && mv -f "$_fnd_snaptmp" "$_fnd_snap" 2>/dev/null; then
+        :
+    else
+        rm -f "$_fnd_snaptmp" 2>/dev/null
+        printf '%s' 'changed|your Foundation directives were being replaced as this turn started, so the copy prepared for it did not match the record'
+        exit 3
+    fi
+    _fnd_path="$_fnd_snap"
+    command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$_fnd_snap" 2>/dev/null || printf '%s' "$_fnd_snap")"
+    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than Claude Code lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool, in pieces if it limits how much one read returns; you may need to ask the user for permission to read it. It is a copy of the complete, verified set, made for this turn: ${_fnd_path}
+Its last line is \"${_fnd_end}\". If you cannot read the file, or you do not reach that line, tell the user plainly that their Foundation directives were not applied to this turn. If a response would conflict with any directive in it, follow the directive."
     printf '@@MMRY-BYREF %s@@' "$_fnd_n"
 elif (( MMRY_FND_PART > _fnd_n )); then
     printf '@@MMRY-NONE %s %s@@' "$MMRY_FND_PART" "$_fnd_n"

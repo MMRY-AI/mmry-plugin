@@ -44,8 +44,11 @@ _state()  { printf '%s' "${1%%|*}"; }
     run mmry_verify_foundation_cache "$CACHE"
     [ "$status" -eq 0 ]
     [[ "$output" == "ok 1 "* ]] || return 1
-    # The byte count is the file's, not an echo of the manifest's claim.
-    [[ "$output" == *" $(wc -c < "$CACHE" | tr -d ' ')" ]]
+    # The byte count is the file's, not an echo of the manifest's claim, and the checksum that
+    # follows it names this version of the set (#31583 QA round 2, R4: every part is tied to it).
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    [ "$output" = "ok 1 $b $s" ]
 }
 
 @test "verify: nothing on disk at all returns 1 absent, which is not damage" {
