@@ -54,9 +54,10 @@ Run MMRY setup yourself, in a terminal:
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 ```
 
-Run it in a terminal rather than asking Codex to. In the Codex desktop app's default sandbox, a
-command the assistant runs cannot reach mmryai.com, so setup run that way stops with "could not
-reach MMRY AI" and changes nothing (observed on macOS, 2026-10-04).
+Running it in a terminal is the simplest way. You can also ask Codex to run it, but in the Codex
+desktop app's default sandbox a command the assistant runs cannot reach mmryai.com: setup stops
+with "could not reach MMRY AI" and changes nothing until you approve the assistant's request for
+access (see [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex)).
 
 If you are on Windows and would rather not open Git Bash, this runs the same thing from PowerShell.
 It finds Git for Windows' bash from your Git install (`git --exec-path` points into it whichever
@@ -106,9 +107,24 @@ If that prints an error rather than a version, install Git for Windows from
 ### What MMRY's commands need from Codex
 
 When your assistant saves, searches or joins a coordination group, it runs one of MMRY's scripts.
-Those scripts reach mmryai.com over the network and write under your Codex home folder, which is
-outside your project. If your Codex sandbox settings block network access or writes outside the
-project, those commands fail. Every test run behind this page was made with Codex allowed both.
+Those scripts reach mmryai.com over the network and write in the `mmry` folder of your Codex home,
+which is outside your project. Codex's default sandbox allows neither (seen in the desktop app on
+macOS, 2026-10-04). MMRY's hooks are not affected, because Codex runs those itself.
+
+**What happens:** the first time an MMRY command is blocked in a conversation, your assistant asks
+Codex for network access and write access to that folder, and Codex asks you to approve it. Approve
+it for the conversation, and every MMRY command after it works. A new conversation asks again.
+
+**If you would rather not be asked,** you can allow it permanently in `config.toml` in your Codex
+home. This widens the sandbox for everything the assistant runs, not only MMRY:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["/absolute/path/to/your/codex/home/mmry"]
+```
+
+Use the absolute path of your own Codex home (`~/.codex` unless you have set `CODEX_HOME`).
 
 ---
 
@@ -245,7 +261,7 @@ separate credentials and separate directories on purpose.
 | Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |
-| Saving, searching or joining a group fails with a network or permission error | Your Codex sandbox settings may block network access or writes outside your project, and MMRY's scripts need both. See [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex). |
+| Saving, searching or joining a group fails with "HTTP 000" or a permission error | Codex's sandbox is blocking network access or writes to the MMRY folder. Approve your assistant's request for access for the conversation, or see [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex) to allow it permanently. |
 | Setup says "Failed to translate" or `execvpe(/bin/bash) failed` | You ran it in PowerShell and it picked the Linux subsystem's bash. Use the Git Bash window, or the explicit PowerShell form above. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |

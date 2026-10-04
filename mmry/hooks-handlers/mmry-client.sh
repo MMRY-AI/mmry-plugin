@@ -644,6 +644,15 @@ _mmry_format_error() {
         echo "Run $(_mmry_setup_ref) to re-authenticate." >&2
     else
         echo "Error (HTTP ${MMRY_HTTP_CODE}): ${MMRY_RESPONSE}" >&2
+        # THE SANDBOX, NAMED WHERE THE ASSISTANT SEES IT (#31245 A'). A curl that reached nothing
+        # on Codex is, in the desktop app's default sandbox, no network; say what to ask for.
+        # "curl failed" only: HTTP 000 is also the no-credential case, which has its own words.
+        # Claude Code prints exactly what it always has.
+        if [[ "$MMRY_HTTP_CODE" == "000" && "$MMRY_RESPONSE" == "curl failed" ]] \
+            && declare -F mmry_host_codex_access_hint >/dev/null 2>&1 \
+            && [[ "$(mmry_host)" == "codex" ]]; then
+            mmry_host_codex_access_hint >&2
+        fi
     fi
 }
 

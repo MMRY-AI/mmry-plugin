@@ -805,6 +805,29 @@ mmry_session_id() {
     return 0
 }
 
+# WHAT THE ASSISTANT MUST ASK CODEX FOR WHEN ITS SANDBOX BLOCKS MMRY (#31245 A', Mac live run
+# 2026-10-04). In the Codex desktop app's default sandbox a command the assistant runs has no
+# network and cannot write under the Codex home, so every save, search, join and setup failed with
+# nothing to say what to do. Codex lets the assistant ask the customer for exactly that access for
+# the conversation (the request_permissions tool: network enabled, plus absolute paths to write,
+# codex-rs core/src/tools/handlers/shell_spec.rs), so this prints the request to make. Defined here
+# because both the client and setup source this file and must not ask for different things.
+# $1, when given, is one more path that needs write access (setup's credential file).
+mmry_host_codex_access_hint() {
+    local dir extra=""
+    dir="$(mmry_host_path_for_model "$(mmry_host_state_dir)")"
+    dir="${dir//\\/\\\\}"
+    if [[ -n "${1:-}" ]]; then
+        extra="$(mmry_host_path_for_model "$1")"
+        extra=", \"${extra//\\/\\\\}\""
+    fi
+    echo "MMRY AI could not be reached from here. In Codex this usually means the sandbox has no"
+    echo "network access. Assistant: call request_permissions with"
+    echo "  {\"permissions\": {\"network\": {\"enabled\": true}, \"file_system\": {\"write\": [\"${dir}\"${extra}]}}}"
+    echo "approved for this conversation, then run the same command again. If the customer declines,"
+    echo "tell them, and that they can run it in a terminal instead."
+}
+
 mmry_host_credential_present() {
     _mmry_host_resolve
     [[ -f "${_MMRY_HOST_DIR_V}/mmry-config.json" ]]

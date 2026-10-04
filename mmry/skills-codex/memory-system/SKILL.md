@@ -59,6 +59,41 @@ Why it is shaped like that, so you do not "simplify" it:
 
 On macOS and Linux, run the commands as written.
 
+## If an MMRY command cannot reach MMRY AI: ask for access, once per conversation
+
+In the Codex desktop app's default sandbox, a command you run has no network access and cannot
+write under the Codex home, so MMRY's scripts fail there. The hooks are not affected; only what you
+run yourself. You will see one of:
+
+- `Error (HTTP 000): curl failed`, followed by a request_permissions line
+- `Error: could not reach MMRY AI at https://mmryai.com ...` from setup
+- `Could not join formation N (HTTP 000)`
+
+When that happens, do not retry the same command blindly and do not tell the customer it worked.
+Call the `request_permissions` tool for network access and write access to the MMRY folder in the
+Codex home, and ask the customer to approve it **for this conversation**. The error output prints
+the exact request with this machine's paths; use it. It has this shape:
+
+```json
+{
+  "reason": "MMRY AI needs to reach mmryai.com and keep its files in your Codex home for this conversation.",
+  "permissions": {
+    "network": { "enabled": true },
+    "file_system": { "write": ["<absolute path of the Codex home>/mmry"] }
+  }
+}
+```
+
+Setup also writes the credential file beside that folder, so for setup add
+`<absolute path of the Codex home>/mmry-config.json` to `write`. The paths must be absolute; the
+request does not expand `${CODEX_HOME:-$HOME/.codex}`.
+
+Once it is approved, run the same MMRY command again. An approval for the conversation covers
+every MMRY command after it, so ask once, not before each command. If the customer declines, or
+the tool is not offered, say so plainly and give them the two alternatives: run the command
+themselves in a terminal, or allow it permanently in their Codex settings (see docs/codex.md,
+"What MMRY's commands need from Codex").
+
 ## What is different on Codex, and what to do instead
 
 This platform does not give plugins typed slash commands. On Claude Code a customer types

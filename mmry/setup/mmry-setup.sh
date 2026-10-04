@@ -251,6 +251,12 @@ _mmry_setup_unreachable() {
     echo "If an assistant ran this for you, its sandbox may not allow network access."
     echo "Run the same command yourself in a terminal:"
     echo "  $(mmry_host_setup_hint)"
+    # On Codex the assistant can ask for that access instead (#31245 A'). Setup also writes the
+    # credential file, which sits beside the mmry folder rather than inside it.
+    if [[ "$(mmry_host)" == "codex" ]] && declare -F mmry_host_codex_access_hint >/dev/null 2>&1; then
+        echo ""
+        mmry_host_codex_access_hint "$(mmry_host_config_file)"
+    fi
     exit 1
 }
 
