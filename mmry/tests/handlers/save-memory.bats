@@ -119,21 +119,28 @@ setup() {
 }
 
 @test "save-memory: accepts --supersedes for updates" {
+    # #31740: this used to pass with the id silently dropped. A replacement now succeeds only
+    # when the API reports it applied; handlers/save-supersede.bats covers the rest.
+    export MOCK_CURL_HTTP_CODE="202"
+    export MOCK_CURL_RESPONSE='{"message":"Stored 1 memory. It replaces memory 42, which is no longer active.","stored":1,"supersede":{"memoryId":42,"applied":true,"reason":"replaced"}}'
     run bash "$PLUGIN_ROOT/hooks-handlers/save-memory.sh" \
         --context "New version" \
         --supersedes 42
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *"$SAVE_SUCCESS_PATTERN"* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"replaces memory 42"* ]]
 }
 
 @test "save-memory: accepts all optional parameters together" {
+    # #31740: with --supersedes, success means the API reported the replacement applied.
+    export MOCK_CURL_HTTP_CODE="202"
+    export MOCK_CURL_RESPONSE='{"message":"Stored 1 memory. It replaces memory 10, which is no longer active.","stored":1,"supersede":{"memoryId":10,"applied":true,"reason":"replaced"}}'
     run bash "$PLUGIN_ROOT/hooks-handlers/save-memory.sh" \
         --context "All options set" \
         --task-id "TASK-99" --working-dir "/tmp/project" \
         --project-id 5 --session-id "sess-xyz" \
         --visibility private --supersedes 10
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *"$SAVE_SUCCESS_PATTERN"* ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"replaces memory 10"* ]]
 }
 
 @test "save-memory: accepts --permission-group-id" {
