@@ -374,6 +374,11 @@ _ctx_raw() {
         n=$(( n + 1 ))
     done
     (( n >= 2 && n <= 6 )) || { echo "expected 2 to 6 parts inline, got $n"; return 1; }
+    # Every byte compared, the internal CRs included, except a CR at the very end: the set ends in a
+    # line end, and whether its CR is delivered depends on how the reader strips that line end
+    # (bash's $(<) in Git Bash drops CR and LF together; #31597's set file drops the LF alone).
+    joined="${joined%$'\r'}"; STORED="${STORED%$'\r'}"
+    [ "$(printf '%s' "$joined" | LC_ALL=C tr -cd '\r' | wc -c)" -ge 4 ] || { echo "the CRs between memories were not delivered"; return 1; }
     [ "$joined" = "$STORED" ] || {
         echo "the parts do not rejoin to the stored set: $(printf '%s' "$joined" | LC_ALL=C wc -c) of $(printf '%s' "$STORED" | LC_ALL=C wc -c) bytes"
         return 1
@@ -675,7 +680,7 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     # The log is written when the cache is refused or the loader fails. A FIFO there blocked that
     # write, so a damaged set hung the hook instead of being reported.
     _seed_lines 3
-    printf -- '- x\n' > "$CACHE"      # the stub #31583 is about, against the manifest of the real set
+    printf -- '- x\n' > "$SET"        # the stub #31583 is about, in place of the sealed set (#31597)
     local fifo="$TEST_TMPDIR/mmry-foundation.log"
     mkfifo "$fifo"
     _finishes_within 25 _fire 1 N2L || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
