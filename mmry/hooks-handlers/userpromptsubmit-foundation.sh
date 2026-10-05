@@ -901,7 +901,9 @@ content="$(<"$CACHE")"
 # WHEN THAT NEEDS MORE THAN K PARTS, CUT AGAIN, FULLER (#31411 QA round 2, R1). Pulling back to a
 # line end can leave a part half full: seven long memories of about 5,000 characters, 35,147 bytes,
 # needed seven parts and went by reference although they fit in four. So the set is cut again with
-# every part filled to the cap, pulled back only to a blank within its last 256 characters. By
+# every part filled to the cap, pulled back to the last line end or sentence end in its last 400
+# bytes (#31411 QA round 3, TC3: pulled back only to a blank, every cut fell mid-sentence), else to a
+# blank in its last 256. If even that needs more than K parts, it is packed to a blank alone. By
 # reference therefore means the set does not fit: more than about K x 9,500 characters.
 #
 # THREE ATTEMPTS, CHEAPEST FIRST. 1) The tidy cut, then 2) the full cut, counted in BYTES here in
@@ -927,9 +929,24 @@ _mmry_fnd_cut_bytes() {
         while (( wb > 0 )) && [[ "${s:wb:1}" =~ $cont ]]; do wb=$(( wb - 1 )); done
         w="${s:0:wb}"
         cut=$wb
-        if [[ "$mode" == "fill" ]]; then
-            t="${w%[ $'\t\n\r']*}"
-            [[ "$t" != "$w" ]] && (( wb - ${#t} <= 256 )) && cut=$(( ${#t} + 1 ))
+        if [[ "$mode" == "fill" || "$mode" == "pack" ]]; then
+            # fill (#31411 QA round 3, TC3): the last line end or sentence end in the part's last
+            # 400 bytes, whichever is latest, so a filled part still ends where a sentence does.
+            # pack, the old fill: a blank within the last 256 bytes. fill falls back to it too.
+            local fbest=0 c
+            if [[ "$mode" == "fill" ]]; then
+                t="${w%$'\n'*}"
+                [[ "$t" != "$w" ]] && { c=$(( ${#t} + 1 )); (( wb - c <= 400 && c > fbest )) && fbest=$c; }
+                t="${w%[.!?][ $'\t']*}"
+                [[ "$t" != "$w" ]] && { c=$(( ${#t} + 2 )); (( wb - c <= 400 && c > fbest )) && fbest=$c; }
+                t="${w%$'\xe3\x80\x82'*}"
+                [[ "$t" != "$w" ]] && { c=$(( ${#t} + 3 )); (( wb - c <= 400 && c > fbest )) && fbest=$c; }
+                (( fbest > 0 )) && cut=$fbest
+            fi
+            if (( fbest == 0 )); then
+                t="${w%[ $'\t\n\r']*}"
+                [[ "$t" != "$w" ]] && (( wb - ${#t} <= 256 )) && cut=$(( ${#t} + 1 ))
+            fi
         else
             t="${w%$'\n'*}"
             if [[ "$t" != "$w" ]] && (( ${#t} + 1 >= wb / 2 )); then
@@ -965,6 +982,11 @@ _mmry_fnd_parts() {
     _mmry_fnd_cut_bytes "$s" tidy
     (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
     _mmry_fnd_cut_bytes "$s" fill
+    (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
+    # Pulling a part back to a sentence end can, at the margin, cost the part that made the set fit.
+    # Then the set is packed as before, to a blank, rather than sent by reference (TC3 never at R1's
+    # expense).
+    _mmry_fnd_cut_bytes "$s" pack
     (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
     # Plain ASCII: bytes are characters, so the set really does not fit.
     [[ "$s" =~ $nonascii ]] || return 0

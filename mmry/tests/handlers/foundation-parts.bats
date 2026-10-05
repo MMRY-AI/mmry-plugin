@@ -406,6 +406,35 @@ _ctx_raw() {
     (( n >= 2 )) || { echo "control: the memory was not long enough to need two parts"; return 1; }
 }
 
+@test "parts: #31411 TC3 when parts are filled to fit, each is still cut at a sentence end" {
+    # QA round 3 (2026-10-05): QA's seven memories of about 5,000 characters need the fill cut to fit
+    # in four parts, and the fill cut pulled back only to a space, so every boundary fell
+    # mid-sentence, including inside a memory, with a sentence end 70 characters back. It now takes
+    # the last line end or sentence end in a part's last 400 bytes before falling back to a space.
+    awk 'BEGIN { for (m = 1; m <= 7; m++) { printf "- Memory %d: ", m; for (j = 0; j < 95; j++) printf "This is sentence %d of memory %d and it has words. ", j, m; printf "\n" } }' > "$CACHE"
+    _seal
+    _assert_inline_whole 4
+    local k
+    for k in 1 2 3; do
+        _ctx "$k"
+        [[ "$PART_TEXT" == *'has words. ' || "$PART_TEXT" == *$'\n' ]] \
+            || { echo "part $k ends mid-sentence: [${PART_TEXT: -60}]"; return 1; }
+    done
+}
+
+@test "parts: #31411 TC3 the same holds for a non-ASCII set, cut by foundation-cut.awk" {
+    # The same seven memories with one accented word each, so the hook hands them to the awk cut.
+    awk 'BEGIN { for (m = 1; m <= 7; m++) { printf "- Memory %d caf\303\251: ", m; for (j = 0; j < 95; j++) printf "This is sentence %d of memory %d and it has words. ", j, m; printf "\n" } }' > "$CACHE"
+    _seal
+    _assert_inline_whole 4
+    local k
+    for k in 1 2 3; do
+        _ctx "$k"
+        [[ "$PART_TEXT" == *'has words. ' || "$PART_TEXT" == *$'\n' ]] \
+            || { echo "part $k ends mid-sentence: [${PART_TEXT: -60}]"; return 1; }
+    done
+}
+
 @test "parts: #31411 the cut in bash and the cut in foundation-cut.awk agree, part for part" {
     # The hook cuts a plain ASCII set itself and hands anything else to foundation-cut.awk. The two
     # must make the same cuts, or what a set receives would depend on one accented letter. Checked on
