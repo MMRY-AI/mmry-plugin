@@ -287,14 +287,24 @@ _mmry_fnd_json_escape() {
 # R6 says there is no size at which the product silently withholds the set; this is what makes
 # that true at any size rather than merely at every size anyone has measured.
 _mmry_emit_escaped() {
-    local ctx_escaped="$1" msg="$2"
+    local ctx_escaped="$1" msg="$2" rc=0
     [[ -z "$ctx_escaped" && -z "$msg" ]] && return 0
-    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$ctx_escaped"
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$ctx_escaped" || rc=1
     if [[ -n "$msg" ]]; then
-        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")"
+        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")" || rc=1
     fi
-    printf '}'
+    printf '}' || rc=1
+    _mmry_fnd_drop_unsent
+    return $rc
 }
+
+# WHAT A FAILED EMIT LEFT BEHIND GOES NOWHERE (#31583, foundation-parts test 506 on macOS). When the
+# emit cannot be written, the printf builtin on macOS keeps the last stdio buffer of it, 1,024 bytes of
+# the payload, and the next builtin printf flushes them into wherever its own output goes: the outcome
+# record, written next, began with 1,024 bytes of the customer's directives. An empty printf aimed at
+# /dev/null flushes that buffer harmlessly; after an emit that worked there is nothing in it. Builtins
+# only, no process. Any part of the emit that failed makes the emit fail, not only the last piece.
+_mmry_fnd_drop_unsent() { printf '' >/dev/null 2>&1; return 0; }
 
 # THE OUTCOME OF THE MOST RECENT FIRING, one line, last write wins (#31583 QA round 6).
 #
@@ -347,16 +357,19 @@ _mmry_fnd_part1_said() {
 }
 
 _mmry_emit() {
-    local ctx="$1" msg="$2"
+    local ctx="$1" msg="$2" rc=0
     [[ -z "$ctx" && -z "$msg" ]] && return 0
     printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' \
-        "$(_mmry_fnd_json_escape "$ctx")"
+        "$(_mmry_fnd_json_escape "$ctx")" || rc=1
     # Omit systemMessage entirely when there is nothing to say, rather than emitting an
     # empty string that a client could render as a blank notice.
     if [[ -n "$msg" ]]; then
-        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")"
+        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")" || rc=1
     fi
-    printf '}'
+    printf '}' || rc=1
+    # The refusal and failure notices are followed by a record too (see _mmry_fnd_drop_unsent).
+    _mmry_fnd_drop_unsent
+    return $rc
 }
 
 # THE OFF-SWITCH LIVES IN ONE PLACE NOW (#31583 QA round 4, finding 4a).
