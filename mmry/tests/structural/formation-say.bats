@@ -372,22 +372,78 @@ _env() {
     [[ "$output" == 42* ]]
 }
 
-@test "debrief: a 502 with no reason still says the formation is left active and a retry is safe" {
+@test "debrief: a 5xx with no reason never claims nothing changed, and keeps the formation (#31738 QA)" {
+    # A 5xx can come after the close-out record was saved, so "it has not been changed" would be
+    # false exactly when it matters. The script says what is known and that a retry is safe.
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
-    local bin; bin="$(_fake_curl_dir)"
-
-    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='' \
-        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
-
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"left active"* ]] || { echo "$output"; return 1; }
-    [[ "$output" == *"Retrying is safe"* ]]
+    local bin code; bin="$(_fake_curl_dir)"
+    for code in 500 502 504; do
+        PATH="${bin}:${PATH}" FAKE_CODE="$code" FAKE_BODY='' \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+        [ "$status" -ne 0 ] || { echo "$code exited 0"; return 1; }
+        [[ "$output" == *"could not be completed or confirmed (HTTP ${code})"* ]] || { echo "$code: $output"; return 1; }
+        [[ "$output" == *"Closing it out again is safe"* ]] || { echo "$code: $output"; return 1; }
+        [[ "$output" != *"has not been changed"* ]] || { echo "$code claims nothing changed: $output"; return 1; }
+    done
     run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
     [[ "$output" == 42* ]]
 }
 
-@test "debrief: an already closed formation is told so in the server's words (#31738)" {
+@test "debrief: a request that got no answer says the outcome is not known, never that nothing changed (#31738 QA)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="${BATS_TEST_TMPDIR}/fail-bin"
+    mkdir -p "$bin"
+    printf '#!/usr/bin/env bash\nexit 28\n' > "${bin}/curl"   # curl's own timeout
+    chmod +x "${bin}/curl"
+
+    PATH="${bin}:${PATH}" MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"whether formation 42 was closed out is not known"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"has not been changed"* ]] || { echo "$output"; return 1; }
+}
+
+@test "debrief: 402, 429 and 503 print the server's reason (#31738 QA)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin code why; bin="$(_fake_curl_dir)"
+    for code in 402 429 503; do
+        why="SERVER-REASON-${code}: the server said why."
+        PATH="${bin}:${PATH}" FAKE_CODE="$code" FAKE_BODY="{\"error\":\"${why}\",\"detail\":null}" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+        [ "$status" -ne 0 ] || { echo "$code exited 0"; return 1; }
+        [[ "$output" == *"$why"* ]] || { echo "$code dropped the reason: $output"; return 1; }
+    done
+}
+
+@test "debrief: a reason is printed without control characters (#31738 QA)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    # JSON escapes for ESC and BEL: a server message that tried to drive the terminal.
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"Saved \u001b[31mred\u001b[0m and \u0007rung.","detail":null}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Saved "*"red"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *$'\033'* ]] || { echo "an escape character reached the terminal"; return 1; }
+    [[ "$output" != *$'\a'* ]] || { echo "a bell reached the terminal"; return 1; }
+}
+
+@test "debrief: the server's own 404 text is treated as no reason (#31738 QA)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"Resource not found","detail":null}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" != "Resource not found" ]] || { echo "printed the placeholder as a reason"; return 1; }
+    [[ "$output" == *"could not be completed or confirmed"* ]] || { echo "$output"; return 1; }
+}
+
+@test "debrief: an already closed formation is told so in the server's words, and local state is cleared (#31738)" {
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
     local why="Formation 42 was already closed out on 2026-10-04 22:25 UTC, so there is nothing left to close. Retrying will not change that."
@@ -398,6 +454,9 @@ _env() {
 
     [ "$status" -ne 0 ]
     [[ "$output" == *"$why"* ]] || { echo "$output"; return 1; }
+    # QA round 1: the local state still pointed at a formation that will never serve again.
+    run bash "${HANDLERS}/formation-state.sh" get "$CLAUDE_SESSION_ID"
+    [ -z "$output" ] || { echo "local state kept after 409: $output"; return 1; }
 }
 
 @test "debrief: a 403 with a reason prints it; a sanitised one gets the role sentence (#31738)" {

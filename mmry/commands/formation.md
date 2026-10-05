@@ -339,9 +339,11 @@ finished never reported anything.
 happened; the summary says what it meant.
 
 If the close-out could not complete, the script prints the server's own reason, and that reason
-says whether retrying will help: a store that did not answer is safe to retry, an already closed
-formation is not. Pass it through as it is. The formation is still active in every such case. Do not
-tell the user it was closed out unless the script said so.
+says whether retrying will help. Pass it through as it is. A formation that is already closed out or
+stood down is not active and cannot be closed again; the script clears its local state. Otherwise
+the formation may still be active, or, when the answer was lost, may already be closed: closing it
+out again is safe either way and says which. Do not tell the user it was closed out unless the
+script said so.
 
 ### leave
 

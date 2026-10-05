@@ -75,23 +75,42 @@ if ! mmry_debrief_formation "$formation_id" "$summary"; then
     code="${MMRY_HTTP_CODE:-0}"
     reason=""
     if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
-        reason="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r             'if type == "object" and (.error | type) == "string" then .error else empty end'             2>/dev/null || true)"
+        reason="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            'if type == "object" and (.error | type) == "string" then .error else empty end' \
+            2>/dev/null || true)"
     fi
+    # Printed to a terminal, so nothing in it may drive one (#31738 QA round 1): control
+    # characters, escape sequences included, are removed. Newlines and tabs are kept.
+    reason="$(printf '%s' "$reason" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
     # The sanitised placeholders carry no reason, and this script's sentence for that status says
-    # more than they do.
+    # more than they do. "Resource not found" is what the server sends for a 404.
     case "$reason" in
-        "Invalid request"|"Access denied"|"Not found"|"An internal error occurred") reason="" ;;
+        "Invalid request"|"Access denied"|"Resource not found"|"Not found"|"An internal error occurred") reason="" ;;
     esac
+    # NOTHING HERE SAYS "IT HAS NOT BEEN CHANGED" UNLESS THAT IS KNOWN (#31738 QA round 1). A 5xx or
+    # a request that got no answer may come after the close-out record was saved, and possibly
+    # after the formation was closed; saying it was not changed was false in exactly those cases.
     # Plain assignments rather than ${reason:-...}: an apostrophe inside that form, within double
     # quotes, opens a quote in bash.
     fallback=""
     case "$code" in
-        502) fallback="The close-out could not be completed, so formation ${formation_id} has been left active and nothing was recorded. Retrying is safe." ;;
-        409) fallback="Formation ${formation_id} is not active, so there is nothing to close out." ;;
+        409) fallback="Formation ${formation_id} is not active, so there is nothing to close out."
+             # Already closed or stood down: the local state points at a formation that will never
+             # serve again, so it is cleared exactly as a successful close-out clears it.
+             bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id" 2>/dev/null || true ;;
         403) fallback="Refused. Only the formation's lead, its creator, or an administrator can close it out." ;;
         404) reason=""
              fallback="Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
         400) fallback="The server refused the summary. ${MMRY_RESPONSE:-}" ;;
+        402) fallback="Credits exhausted. Your MMRY AI subscription has run out of API credits, so formation ${formation_id} was not closed out." ;;
+        429) fallback="Too many requests just now. Wait a moment, then close formation ${formation_id} out again." ;;
+        000) reason=""
+             if [[ "${MMRY_RESPONSE:-}" == "Authentication failed" ]]; then
+                 fallback="Could not sign in to MMRY AI, so nothing was sent and formation ${formation_id} was not closed out. Run /mmry:setup."
+             else
+                 fallback="MMRY AI did not answer, so whether formation ${formation_id} was closed out is not known. Closing it out again is safe: if it already was, you will be told so."
+             fi ;;
+        5[0-9][0-9]) fallback="The close-out of formation ${formation_id} could not be completed or confirmed (HTTP ${code}). Closing it out again is safe: if its record was saved, it is used rather than saved twice." ;;
         *)   reason=""
              fallback="Could not close out formation ${formation_id} (HTTP ${code}). It has not been changed." ;;
     esac
