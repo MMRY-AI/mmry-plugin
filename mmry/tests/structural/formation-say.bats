@@ -484,6 +484,28 @@ _env() {
     [[ "$output" != *$'\xc2\x9b'* && "$output" != *$'\033'* ]] || { echo "a control reached the terminal in the record"; return 1; }
 }
 
+@test "debrief: a carriage return cannot overwrite what the lead reads, in a reason or in the record (#31738 QA r3)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    # QA's case. On a terminal a bare CR sends the cursor back to the start of the line, so
+    # "did nothing", CR, "finished all work" showed the lead only the second half. Both halves have
+    # to reach the lead, and the CR must not.
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"Wingman 2 did nothing\rfinished all work.","detail":null}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"did nothing"*"finished all work."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *$'\r'* ]] || { echo "a carriage return reached the terminal in the reason"; return 1; }
+
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='{"id":42,"status":"Debriefed","closeOut":{"record":"Wingman 2 did nothing\rfinished all work.\nSecond line."}}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"did nothing"*"finished all work."*"Second line."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *$'\r'* ]] || { echo "a carriage return reached the terminal in the record"; return 1; }
+}
+
 @test "debrief: the server's own 404 text is treated as no reason (#31738 QA)" {
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"

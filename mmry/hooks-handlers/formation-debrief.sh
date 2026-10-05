@@ -73,7 +73,9 @@ fi
 
 # Removes the control characters a terminal acts on, C0 and C1 alike, keeping tab and newline
 # (#31738 QA round 2). jq's regex works on characters, so it sees C1 controls, which tr cannot.
-_MMRY_JQ_CLEAN='def clean: gsub("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]"; "");'
+# Carriage return goes too (#31738 QA round 3): a bare CR sends the cursor back to the start of the
+# line, so "did nothing", CR, "finished all work" showed the lead only the second half.
+_MMRY_JQ_CLEAN='def clean: gsub("[\u0000-\u0008\u000b-\u001f\u007f-\u009f]"; "");'
 
 if ! mmry_debrief_formation "$formation_id" "$summary"; then
     code="${MMRY_HTTP_CODE:-0}"
@@ -88,8 +90,9 @@ if ! mmry_debrief_formation "$formation_id" "$summary"; then
             2>/dev/null || true)"
     fi
     # Printed to a terminal, so nothing in it may drive one (#31738 QA round 1): control
-    # characters, escape sequences included, are removed. Newlines and tabs are kept.
-    reason="$(printf '%s' "$reason" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
+    # characters, escape sequences and carriage returns included, are removed. Newlines and tabs are
+    # kept.
+    reason="$(printf '%s' "$reason" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
     # The sanitised placeholders carry no reason, and this script's sentence for that status says
     # more than they do. "Resource not found" is what the server sends for a 404.
     case "$reason" in
@@ -142,7 +145,7 @@ if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
     # 2): it carries what members typed, and it was printed raw. jq removes C0 and C1 controls; tr
     # then removes any control byte a jq without that regex support let through.
     record="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${_MMRY_JQ_CLEAN}"' (.closeOut.record // empty) | clean' 2>/dev/null || true)"
-    record="$(printf '%s' "$record" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
+    record="$(printf '%s' "$record" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
 fi
 
 if [[ -n "$record" ]]; then
