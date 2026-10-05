@@ -141,13 +141,13 @@ _mmry_fnd_log() {
 # one prompt start within moments of each other and the next prompt's start later than that by the
 # whole answer and the customer's reply. The status command groups records by this second.
 #
-# No process where bash has a clock: EPOCHSECONDS from bash 5, printf %(%s)T from bash 4.2. Only the
-# bash 3.2 a Mac ships pays for date. A clock that cannot be read gives 0, which groups with nothing.
+# No process where bash has a clock: printf %(%s)T from bash 4.2. Only the bash 3.2 a Mac ships pays
+# for date. A clock that cannot be read gives 0, which groups with nothing. Not bash 5's clock
+# variables: bash 3.2 is the floor, and #31245's portability guard refuses them in shipped code
+# (Lead/PM decision 2026-10-05 14:36 UTC: drop them, do not loosen the guard).
 _mmry_fnd_now() {
     _FND_NOW=""
-    if (( BASH_VERSINFO[0] >= 5 )); then
-        _FND_NOW="${EPOCHSECONDS:-}"
-    elif (( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 )); then
+    if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
         printf -v _FND_NOW '%(%s)T' -1 2>/dev/null
     fi
     [[ "$_FND_NOW" =~ ^[0-9]{1,12}$ ]] || _FND_NOW="$(date +%s 2>/dev/null)"

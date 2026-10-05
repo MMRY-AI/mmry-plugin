@@ -413,11 +413,17 @@ if (( _delivered )); then
     # THE SIZE ONLY WHERE IT ARRIVED (#31411 QA round 3). The delivery record describes the whole set
     # and part 1 writes it, so under PARTLY it gave the full size for a prompt that had only part of it,
     # and under BY REFERENCE the size of a set that was never shown, only pointed to.
+    #
+    # AND ONLY FOR THE PROMPT THAT ARRIVED IN FULL (#31411 QA round 4). The delivery record is whatever
+    # part 1 last delivered, and does not say how. After a set went by reference and the next prompt
+    # failed, this line gave the full set's size for a turn that had only been pointed to a copy. The
+    # size is stated only when the most recent prompt is IN FULL; otherwise only when it was sent.
     if [[ -n "$_partly" ]]; then
         _what=", in part (see above)"
     elif [[ -n "$_byref" ]]; then
         _what=", by reference to a copy (see above)"
-    elif [[ "$_st" =~ ^ok[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)$ ]]; then
+    elif [[ -n "$_n" && -z "$_failed_why" && -z "$_unknown" && -z "$_nothing" ]] \
+        && [[ "$_st" =~ ^ok[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)$ ]]; then
         _what=" (${BASH_REMATCH[1]} directives, ${BASH_REMATCH[2]} bytes)"
     fi
     if [[ "$_when" =~ ^[0-9]+$ ]] && [[ "$_now" =~ ^[0-9]+$ ]] && (( _now >= _when )); then
