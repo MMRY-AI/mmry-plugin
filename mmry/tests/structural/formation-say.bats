@@ -432,6 +432,58 @@ _env() {
     [[ "$output" != *$'\a'* ]] || { echo "a bell reached the terminal"; return 1; }
 }
 
+
+@test "debrief: a 400 never prints the raw body, and a validation refusal prints its own message (#31738 QA r2)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    # The shape FluentValidation answers with: the messages are under .errors, not .error.
+    PATH="${bin}:${PATH}" FAKE_CODE=400 FAKE_BODY='{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.1","title":"One or more validation errors occurred.","status":400,"errors":{"Context":["The summary must be 8000 characters or fewer."]},"traceId":"00-abc"}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"The summary must be 8000 characters or fewer."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"traceId"* && "$output" != *"{"* ]] || { echo "printed the raw body: $output"; return 1; }
+
+    # A body that is not JSON at all gets this script's own sentence, never the body.
+    PATH="${bin}:${PATH}" FAKE_CODE=400 FAKE_BODY='<html><body>Bad Request</body></html>' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"refused the summary"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"<html>"* ]] || { echo "printed the raw body: $output"; return 1; }
+}
+
+@test "debrief: a reason of -n is printed, not taken as an option (#31738 QA r2)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"-n","detail":null}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [ "$(printf '%s' "$output" | tr -d '\r')" = "-n" ] || { echo "[$output]"; return 1; }
+}
+
+@test "debrief: C1 controls are removed from a reason and from the record printed on success (#31738 QA r2)" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    # U+009B is CSI on its own, one character that a terminal acts on like ESC [. In UTF-8 it is
+    # two bytes, C2 9B, which is why a byte filter cannot see it.
+    PATH="${bin}:${PATH}" FAKE_CODE=502 FAKE_BODY='{"error":"Saved \u009b2J and \u001b[31mred.","detail":null}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Saved "*"2J and "*"red."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *$'\xc2\x9b'* && "$output" != *$'\033'* ]] || { echo "a control reached the terminal in the reason"; return 1; }
+
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='{"id":42,"status":"Debriefed","closeOut":{"record":"Account \u009b2J typed by a member, and \u001b[31mred\u001b[0m.\nSecond line."}}' \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Account "*"2J typed by a member"*"Second line."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *$'\xc2\x9b'* && "$output" != *$'\033'* ]] || { echo "a control reached the terminal in the record"; return 1; }
+}
+
 @test "debrief: the server's own 404 text is treated as no reason (#31738 QA)" {
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"

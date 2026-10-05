@@ -71,12 +71,20 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
+# Removes the control characters a terminal acts on, C0 and C1 alike, keeping tab and newline
+# (#31738 QA round 2). jq's regex works on characters, so it sees C1 controls, which tr cannot.
+_MMRY_JQ_CLEAN='def clean: gsub("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]"; "");'
+
 if ! mmry_debrief_formation "$formation_id" "$summary"; then
     code="${MMRY_HTTP_CODE:-0}"
     reason=""
     if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+        # The reason is cleaned inside jq as well as by tr below (#31738 QA round 2): tr works on
+        # bytes, so it cannot see a C1 control (U+0080 to U+009F, two bytes in UTF-8, CSI among
+        # them), which a terminal still acts on. A validation refusal (RFC 7807) carries its
+        # messages under .errors rather than .error, and those are read the same way.
         reason="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
-            'if type == "object" and (.error | type) == "string" then .error else empty end' \
+            "${_MMRY_JQ_CLEAN}"' if type == "object" and (.error | type) == "string" then (.error | clean) elif type == "object" and (.errors | type) == "object" then ([.errors[] | if type == "array" then .[] else . end | select(type == "string") | clean] | join(" ")) else empty end' \
             2>/dev/null || true)"
     fi
     # Printed to a terminal, so nothing in it may drive one (#31738 QA round 1): control
@@ -101,7 +109,7 @@ if ! mmry_debrief_formation "$formation_id" "$summary"; then
         403) fallback="Refused. Only the formation's lead, its creator, or an administrator can close it out." ;;
         404) reason=""
              fallback="Formation ${formation_id} no longer exists, or it belongs to another account. Run /mmry:formation leave." ;;
-        400) fallback="The server refused the summary. ${MMRY_RESPONSE:-}" ;;
+        400) fallback="The server refused the summary, so formation ${formation_id} was not closed out. Check its length and wording, then close it out again." ;;
         402) fallback="Credits exhausted. Your MMRY AI subscription has run out of API credits, so formation ${formation_id} was not closed out." ;;
         429) fallback="Too many requests just now. Wait a moment, then close formation ${formation_id} out again." ;;
         000) reason=""
@@ -114,7 +122,9 @@ if ! mmry_debrief_formation "$formation_id" "$summary"; then
         *)   reason=""
              fallback="Could not close out formation ${formation_id} (HTTP ${code}). It has not been changed." ;;
     esac
-    if [[ -n "$reason" ]]; then echo "$reason"; else echo "$fallback"; fi
+    # printf, not echo: a reason that is exactly "-n" or "-e" was taken as an option and printed
+    # nothing (#31738 QA round 2).
+    if [[ -n "$reason" ]]; then printf '%s\n' "$reason"; else printf '%s\n' "$fallback"; fi
     exit 1
 fi
 
@@ -128,7 +138,11 @@ bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id" 2>/dev/null || true
 # one - the close-out is still readable with /mmry:formation report.
 record=""
 if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
-    record="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.closeOut.record // empty' 2>/dev/null || true)"
+    # Printed to a terminal like a refusal's reason, so it is cleaned the same way (#31738 QA round
+    # 2): it carries what members typed, and it was printed raw. jq removes C0 and C1 controls; tr
+    # then removes any control byte a jq without that regex support let through.
+    record="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${_MMRY_JQ_CLEAN}"' (.closeOut.record // empty) | clean' 2>/dev/null || true)"
+    record="$(printf '%s' "$record" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')"
 fi
 
 if [[ -n "$record" ]]; then
