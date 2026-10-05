@@ -1015,3 +1015,26 @@ _damage_set() {
     done
     [ -z "$hits" ] || { echo "$hits"; return 1; }
 }
+
+# Test 506 on macOS (#31583): after a failed emit the shell's printf there carried 1,024 bytes of the
+# payload into the next record it wrote. Only the Mac shows the bytes; this checks, on any platform, the
+# thing that prevents them: once an emit has failed, records are written by an external printf, and on a
+# prompt whose emit worked they are not (no process on the path every prompt takes).
+@test "parts: #31583 506 after a failed emit the record is written by an external printf, and only then" {
+    _seed_lines 380
+    _fire_all S90
+    local shim="$TEST_TMPDIR/printf-shim" calls="$TEST_TMPDIR/printf-calls" real
+    real="$(type -P printf)"
+    mkdir -p "$shim"
+    printf '#!/bin/sh\necho x >> "%s"\nexec "%s" "$@"\n' "$calls" "$real" > "$shim/printf"
+    chmod +x "$shim/printf"
+    # CONTROL: an emit that works writes its records with the builtin.
+    printf '{"session_id":"S90","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | PATH="$shim:$PATH" bash "$HOOK" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
+    [ ! -s "$calls" ] || { echo "a working emit used an external printf $(wc -l < "$calls") time(s)"; return 1; }
+    # Standard output closed: the emit fails, and what follows must not go through the builtin.
+    printf '{"session_id":"S90","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | PATH="$shim:$PATH" bash "$HOOK" --part 3 >&- 2>/dev/null
+    [ -s "$calls" ] || { echo "after a failed emit the record was still written with the builtin"; return 1; }
+    [[ "$(cat "$(_outcome_file S90 3)")" =~ ^S90\ [0-9]+\ failed\ emit$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S90 3)")"; return 1; }
+}

@@ -121,7 +121,12 @@ _mmry_fnd_write() {
     # writing straight to one blocks, and a rename cannot replace one on Windows, where MSYS refuses
     # it as a read-only file system. A directory is left alone; the rename then fails, as it should.
     [[ -e "$1" && ! -f "$1" && ! -d "$1" ]] && rm -f "$1" 2>/dev/null
-    printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    if [[ -n "${_FND_STDOUT_SPOILED:-}" ]]; then
+        # After a failed emit, not the builtin: see _mmry_fnd_spoil.
+        env printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    else
+        printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    fi
     rm -f "$t" 2>/dev/null
     return 1
 }
@@ -131,7 +136,11 @@ _mmry_fnd_write() {
 # turn instead of being reported. The log is a diagnostic, so a log that cannot be written is skipped.
 _mmry_fnd_log() {
     [[ -e "$_FOUND_LOG" && ! -f "$_FOUND_LOG" ]] && return 0
-    printf '%s\n' "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+    if [[ -n "${_FND_STDOUT_SPOILED:-}" ]]; then
+        env printf '%s\n' "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+    else
+        printf '%s\n' "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+    fi
 }
 
 # THE SECOND THIS FIRING STARTED, written into every record it makes (#31583 QA round 3, R4(a)).
@@ -295,17 +304,20 @@ _mmry_emit_escaped() {
         printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")" || rc=1
     fi
     printf '}' || rc=1
-    _mmry_fnd_drop_unsent
+    (( rc == 0 )) || _mmry_fnd_spoil
     return $rc
 }
 
-# WHAT A FAILED EMIT LEFT BEHIND GOES NOWHERE (#31583, foundation-parts test 506 on macOS). When the
-# emit cannot be written, the printf builtin on macOS keeps the last stdio buffer of it, 1,024 bytes of
-# the payload, and the next builtin printf flushes them into wherever its own output goes: the outcome
-# record, written next, began with 1,024 bytes of the customer's directives. An empty printf aimed at
-# /dev/null flushes that buffer harmlessly; after an emit that worked there is nothing in it. Builtins
-# only, no process. Any part of the emit that failed makes the emit fail, not only the last piece.
-_mmry_fnd_drop_unsent() { printf '' >/dev/null 2>&1; return 0; }
+# AFTER A FAILED EMIT, NOTHING IS WRITTEN WITH THE PRINTF BUILTIN (#31583, foundation-parts test 506 on
+# macOS). When the emit cannot be written, the shell's printf on macOS keeps the last 1,024 bytes of it,
+# and the next builtin printf carries them into wherever its own output goes: the outcome record,
+# written next, began with 1,024 bytes of the customer's directives, broke its own format, and read as
+# no record. Measured on the Mac bench: flushing to /dev/null first, reopening stdout, and a subshell
+# all leave the bytes in place; an external printf does not carry them. So a failed emit marks the
+# shell spoiled and every record and log line after it is written by an external printf. One process
+# per write, on the failure path only; a prompt whose emit worked pays nothing. Any piece of the emit
+# that failed makes the emit fail, not only the last.
+_mmry_fnd_spoil() { _FND_STDOUT_SPOILED=1; }
 
 # THE OUTCOME OF THE MOST RECENT FIRING, one line, last write wins (#31583 QA round 6).
 #
@@ -368,8 +380,8 @@ _mmry_emit() {
         printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")" || rc=1
     fi
     printf '}' || rc=1
-    # The refusal and failure notices are followed by a record too (see _mmry_fnd_drop_unsent).
-    _mmry_fnd_drop_unsent
+    # The refusal and failure notices are followed by a record too (see _mmry_fnd_spoil).
+    (( rc == 0 )) || _mmry_fnd_spoil
     return $rc
 }
 
