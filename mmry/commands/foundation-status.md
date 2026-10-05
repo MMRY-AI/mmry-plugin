@@ -4,11 +4,13 @@ Usage: `/mmry:foundation-status`
 
 ## What This Does
 
-Foundation memories are your standing directives, re-sent to the assistant on every prompt.
-This reports, in plain words, whether that is really happening: whether re-injection is
-switched on, whether the locally stored copy still matches the record MMRY wrote when it
-last fetched your directives, how many directives and characters it holds, and how long ago
-it was last sent.
+Foundation memories are your standing directives, applied to every prompt: sent with it, in up
+to six parts, or, when the set is too large for Claude Code to show, pointed to as a copy the
+assistant is asked to read. This reports, in plain words, whether that is really happening:
+whether re-injection is switched on, whether the locally stored copy still matches the
+record MMRY wrote when it last fetched your directives, how many directives and bytes it holds,
+whether the most recent prompt received them in full, in part or by reference, and how long ago
+they were last sent.
 
 It is a LOCAL integrity check and makes no network call. That is worth being precise about,
 because the two questions are different. It can tell you your copy is intact and is being
