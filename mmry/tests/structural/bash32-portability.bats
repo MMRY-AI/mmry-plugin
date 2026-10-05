@@ -25,6 +25,11 @@ _BASH4_PATTERNS=(
     # Not bash, but the same macOS failure: BSD sed rejects the label, exits 0 and passes the text
     # through unescaped (#31245 QA round 10, session-start.sh setup message, found on a Mac).
     'GNU-only sed label loop :a;N;$!ba|:a;N;[$]!ba'
+    # The same loop in its other spellings, and GNU's other way to join lines, -z, which BSD sed does
+    # not have either (#31737: close the class, not one spelling of it).
+    'GNU-only sed label loop written as separate -e parts|-e[[:space:]]*.?:a.?[[:space:]]+-e'
+    'GNU-only sed branch written $!b a|[$]!b[[:space:]]+a([^[:alnum:]_]|$)'
+    'GNU-only sed -z (NUL-separated input)|sed[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*z([[:space:]]|$)'
 )
 
 # Prints "file:line: construct: text" for every hit under the given root.
@@ -69,13 +74,17 @@ echo "${v@Q}"
 echo "$EPOCHSECONDS"
 wait -n
 printf x | sed ':a;N;$!ba;s/\n/ /g'
+printf x | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'
+printf x | sed ':a;N;$!b a;s/\n/ /g'
+printf x | sed -z 's/\n/ /g'
 # mapfile in a comment is not a use
 BAD
     local hits; hits="$(_scan_bash4 "$root")"
     local expect
     for expect in "mapfile or readarray" "associative array" "case-modification" "&>>" \
                   "case fall-through" "transformation expansion" "EPOCHSECONDS" "wait -n" \
-                  "GNU-only sed label loop"; do
+                  "GNU-only sed label loop" "written as separate -e parts" "branch written \$!b a" \
+                  "sed -z"; do
         [[ "$hits" == *"$expect"* ]] || { echo "the scanner missed: $expect"; echo "$hits"; return 1; }
     done
     [[ "$(grep -c 'mapfile or readarray' <<< "$hits")" -eq 2 ]] || {
