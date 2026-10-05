@@ -32,9 +32,10 @@ _BASH4_PATTERNS=(
     # through unescaped (#31245 QA round 10, session-start.sh setup message, found on a Mac).
     'GNU-only sed label loop :a;N;$!ba|:a;N;[$]!ba'
     # Other spellings, kept as quick literal checks. sed-program-scan.awk is what reads them all.
-    # The separate -e spelling works on BSD sed (QA #2's Mac probe), so it is named a line join, not
-    # GNU-only: the line join itself is what the product replaced.
-    'sed line join written as separate -e parts|-e[[:space:]]*.?:a.?[[:space:]]+-e'
+    # The separate -e spelling runs on BSD sed (QA #2's Mac probe), so it is not called GNU-only. It is
+    # still refused, by the Lead's ruling (2026-10-05): under POSIX, N on the last line prints nothing,
+    # so a one-line input comes out empty on a Mac, and the shipped code uses the bash join anyway.
+    'sed line join written as separate -e parts, which BSD sed empties for one-line input|-e[[:space:]]*.?:a.?[[:space:]]+-e'
     'GNU-only sed branch written $!b a|[$]!b[[:space:]]+a([^[:alnum:]_]|$)'
     'GNU-only sed -z (NUL-separated input)|sed[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*z([[:space:]]|$)'
 )
@@ -95,7 +96,10 @@ _scan_sed_programs() {
     # program exactly, written in double quotes. Lines 22 and 23 are comments, line 24 is an
     # ordinary sed program, line 25 is what pattern 28 would match if grep read its leading -e as an
     # option (QA round 1, software-engineer review), and line 26 carries U1 in a trailing comment.
-    # None of those five may be refused.
+    # None of those five may be refused. Lines 27 to 30 are QA round 2's: the Mac's in-place form,
+    # sed -i '' PROGRAM FILE, which the scanner read the GNU way and took '' for the program, and its
+    # GNU twin; an abbreviated long option, --null; and a $'...' program. Each got past or survived a
+    # scanner mutant.
     cat > "$root/hooks-handlers/bad.sh" <<'BAD'
 mapfile -t lines < f
 readarray x < f
@@ -123,11 +127,15 @@ printf x | sed -n 'H;${x;s/\n/ /g;p}'
 printf x | sed 's/a/b/g; s/c/d/'
 echo host:a -e x
 echo ok # sed ":a;N;\$!ba;s/\n/ /g" in a trailing comment is not a use either
+sed -i '' ':x;N;$!bx;s/\n/ /g' FILE
+sed -i ':x;N;$!bx;s/\n/ /g' FILE
+sed --null 's/\n/ /g'
+sed $':x;N;$!bx;s/\\n/ /g'
 BAD
     local hits; hits="$(_scan_bash4 "$root"; _scan_sed_programs "$root")"
     local label="sed reads a label or branch that runs into ; or } (GNU-only: BSD sed takes the rest of the line as the label)"
     local null="sed reads -z or --null-data (GNU-only: BSD sed has no NUL-separated mode)"
-    local join="sed reads a line join (N, H, G or -z, then a newline in s or y): use the bash join"
+    local join="sed reads a line join (N, H, G or -z, then a newline in s or y): use the bash join. BSD sed's N prints nothing on the last line, so a one-line input comes out empty"
     local brace="sed reads a } with no ; or newline before it (BSD sed rejects it; write ;})"
     local want=(
         "1: mapfile or readarray (bash 4)"
@@ -141,7 +149,7 @@ BAD
         "9: EPOCHSECONDS or EPOCHREALTIME (bash 5)"
         "10: wait -n (bash 4.3)"
         "11: GNU-only sed label loop :a;N;\$!ba" "11: $label" "11: $join"
-        "12: sed line join written as separate -e parts" "12: $join"
+        "12: sed line join written as separate -e parts, which BSD sed empties for one-line input" "12: $join"
         "13: GNU-only sed branch written \$!b a" "13: $label" "13: $join"
         "14: GNU-only sed -z (NUL-separated input)" "14: $null" "14: $join"
         "15: $label" "15: $join"
@@ -151,6 +159,10 @@ BAD
         "19: $null" "19: $join"
         "20: $null" "20: $join"
         "21: $join" "21: $brace"
+        "27: $label" "27: $join"
+        "28: $label" "28: $join"
+        "29: $null" "29: $join"
+        "30: $label" "30: $join"
     )
     local w
     for w in "${want[@]}"; do
