@@ -815,6 +815,9 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
         | bash "$broken/hooks-handlers/userpromptsubmit-foundation.sh" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
     jq -e '.systemMessage | test("part 3 of your Foundation directives was NOT applied")' "$TEST_TMPDIR/part3.json" >/dev/null \
         || { echo "the customer was not told: $(cat "$TEST_TMPDIR/part3.json")"; return 1; }
+    # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
+    # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).
+    _one_prompt S43
     CLAUDE_CODE_SESSION_ID=S43 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: the loader failed before it finished."* ]] || { echo "$output"; return 1; }
 }
@@ -843,6 +846,9 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     printf '{"session_id":"S52","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
         | PATH="$shim:$PATH" "$real_bash" "$HOOK" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
     [[ "$(cat "$(_outcome_file S52 3)")" =~ ^S52\ [0-9]+\ failed\ unfinished$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S52 3)")"; return 1; }
+    # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
+    # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).
+    _one_prompt S52
     CLAUDE_CODE_SESSION_ID=S52 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: the loader ended without recording what it sent."* ]] || { echo "$output"; return 1; }
 }
@@ -854,6 +860,9 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     printf '{"session_id":"S45","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
         | bash "$HOOK" --part 3 >&- 2>/dev/null
     [[ "$(cat "$(_outcome_file S45 3)")" =~ ^S45\ [0-9]+\ failed\ emit$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S45 3)")"; return 1; }
+    # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
+    # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).
+    _one_prompt S45
     CLAUDE_CODE_SESSION_ID=S45 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: they were prepared but could not be handed to Claude Code."* ]] || { echo "$output"; return 1; }
 }
