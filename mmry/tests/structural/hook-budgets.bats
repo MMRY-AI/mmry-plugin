@@ -37,29 +37,30 @@ setup() {
 # The CHEAPEST of $1 runs, in ms, rounded up (#31411 QA round 3, item 8). What these bars guard is the
 # handler's own cost, and on a machine two other suites are loading, the average measured the other
 # suites: the bars went red with them and passed alone. The cheapest run is the closest a busy machine
-# gets to the handler's own cost, and a handler that really grew is no cheaper on any run. Needs
-# bash 5's EPOCHREALTIME for per-run timing; without it (bash 3.2 on a Mac) it is the average below.
+# gets to the handler's own cost, and a handler that really grew is no cheaper on any run. Per-run
+# timing comes from date's nanoseconds where date has them (GNU date: Linux, Git Bash); a date that
+# does not (BSD date on a Mac prints the letter N) gets the average below. Not bash 5's clock
+# variables: bash 3.2 is the floor and #31245's portability guard refuses them (Lead/PM, 2026-10-05).
+# The date in each reading is counted against the handler, which rounds against ourselves.
+_ns() { local t; t="$(date +%s%N 2>/dev/null)"; [[ "$t" =~ ^[0-9]{16,}$ ]] && printf '%s' "$t"; }
 _min_ms() {
-    if [[ -z "${EPOCHREALTIME:-}" || "${BASH_VERSINFO[0]}" -lt 5 ]]; then _avg_ms "$@"; return; fi
+    [[ -n "$(_ns)" ]] || { _avg_ms "$@"; return; }
     local runs="$1"; shift
     local i t0 t1 us best=""
     for (( i = 0; i < runs; i++ )); do
-        t0="${EPOCHREALTIME/[.,]/}"
+        t0="$(_ns)"
         "$@" >/dev/null 2>&1 </dev/null || true
-        t1="${EPOCHREALTIME/[.,]/}"
-        us=$(( 10#$t1 - 10#$t0 ))
+        t1="$(_ns)"
+        us=$(( (10#$t1 - 10#$t0) / 1000 ))
         [[ -z "$best" ]] || (( us < best )) && best=$us
     done
     echo $(( (best + 999) / 1000 ))
 }
 
-# Now in ms, for one firing: EPOCHREALTIME where bash has it, whole seconds otherwise.
+# Now in ms, for one firing: date's nanoseconds where it has them, whole seconds otherwise.
 _now_ms() {
-    if [[ -n "${EPOCHREALTIME:-}" && "${BASH_VERSINFO[0]}" -ge 5 ]]; then
-        local t="${EPOCHREALTIME/[.,]/}"; echo $(( 10#$t / 1000 ))
-    else
-        echo $(( $(date +%s) * 1000 ))
-    fi
+    local t; t="$(_ns)"
+    if [[ -n "$t" ]]; then echo $(( 10#$t / 1000000 )); else echo $(( $(date +%s) * 1000 )); fi
 }
 
 _avg_ms() {

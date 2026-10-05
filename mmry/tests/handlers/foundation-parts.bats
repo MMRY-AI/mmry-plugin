@@ -979,3 +979,30 @@ _damage_set() {
     [[ "$ctx" == *"could not verify PART 3 of this account's FOUNDATION directives"* ]] || { echo "assistant: $ctx"; return 1; }
     [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
 }
+
+@test "parts: #31411 after a by-reference prompt and then a failed one, the last-sent line gives no size" {
+    # QA #2, round 4: "Last sent: ... (8 directives, 70009 bytes)" after the set went by reference and
+    # the next prompt failed, the full size of something that was never sent in full.
+    _seed_lines 800
+    _fire_all S80
+    CLAUDE_CODE_SESSION_ID=S80 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    BY REFERENCE"* ]] || { echo "control: $output"; return 1; }
+    # The next prompt: part 1's loader fails.
+    _rec S80 1 'failed crash'
+    CLAUDE_CODE_SESSION_ID=S80 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    NOT on the most recent prompt"* ]] || { echo "control: $output"; return 1; }
+    [[ "$output" == *"Last sent:    "* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"(800 directives"* ]] || { echo "the size of a set never sent in full: $output"; return 1; }
+}
+
+@test "parts: #31411 the shipped hook keeps to bash 3.2: no bash 5 clock variable" {
+    # #31245's portability guard refuses bash 5's clock variables in shipped code; this branch had one
+    # in the hook and two in hook-budgets.bats. Checked here on the files this ticket changed, with the
+    # guard's own pattern, comment lines skipped as the guard skips them.
+    local f hits=""
+    for f in "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh" \
+             "$PLUGIN_ROOT/tests/structural/hook-budgets.bats"; do
+        hits="${hits}$(grep -n -E 'EPOCH(SECONDS|REALTIME)' "$f" | grep -v -E '^[0-9]+:[[:space:]]*#' | sed "s|^|${f##*/}:|")"
+    done
+    [ -z "$hits" ] || { echo "$hits"; return 1; }
+}
