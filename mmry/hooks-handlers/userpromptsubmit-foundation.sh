@@ -970,7 +970,12 @@ _mmry_fnd_parts() {
     [[ "$s" =~ $nonascii ]] || return 0
     # Counted in characters. Only as much of the set as K + 1 parts could hold is passed: four bytes
     # is the most a character takes, and anything beyond that is by reference regardless.
-    lens="$(LC_ALL=C awk -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
+    # BINMODE=1 (#31411 QA round 3): gawk on Windows reads its input in text mode and drops the CR
+    # of every CRLF, and on Windows the cache IS written with CRLF (native jq 1.7.1 and 1.8.2 both
+    # do). The lengths then summed short of the set, the check below failed, and every non-ASCII set
+    # of two or more memories went by reference. Binary input keeps every byte. Any other awk treats
+    # BINMODE as an ordinary variable it never reads, so BSD awk on a Mac is unaffected.
+    lens="$(LC_ALL=C awk -v BINMODE=1 -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
         -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" \
         <<<"$s" 2>/dev/null)" || return 0
     while IFS= read -r L; do

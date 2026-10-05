@@ -342,6 +342,45 @@ _assert_inline_whole() {
     _assert_inline_whole 3
 }
 
+# The decoded additionalContext of part $1, carriage returns KEPT. For a fixture that holds them on
+# purpose: _ctx strips them, because a native Windows jq adds one to every newline it prints, so
+# here jq is asked not to (-b, binary output; jq builds on other platforms accept it and print the
+# same bytes either way).
+_ctx_raw() {
+    PART_TEXT="$( { jq -b -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part$1.json" 2>/dev/null \
+        || jq -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part$1.json"; } && printf '.')" || return 1
+    PART_TEXT="${PART_TEXT%.}"
+}
+
+@test "parts: #31411 R1 a non-ASCII set written with CRLF, as Windows jq writes it, goes inline and loses no byte" {
+    # QA round 3 (2026-10-05): on Windows both the bundled jq 1.7.1 and the system jq 1.8.2 write the
+    # cache with CRLF. gawk, reading foundation-cut.awk's input in text mode, dropped every CR, so
+    # the cut lengths summed short of the set, the whole-set check failed, and the hook fell back to
+    # the byte cut, which needs more than six parts for non-ASCII text: every non-ASCII set of two or
+    # more memories went BY REFERENCE on every Windows install. Five memories of Japanese, about
+    # 24,500 characters and 73,500 bytes, each line ending CRLF.
+    awk 'BEGIN { for (m = 1; m <= 5; m++) { printf "- M%d: ", m; for (i = 0; i < 4900; i++) { if (i % 31 == 30) printf "\343\200\202"; else printf "\346\227\245" } printf "\r\n" } }' > "$CACHE"
+    _seal
+    _stored
+    [[ "$STORED" == *$'\r\n- M2'* ]] || { echo "control: the fixture does not hold CRLF line ends"; return 1; }
+
+    _fire_all
+    local k joined="" n=0
+    for k in 1 2 3 4 5 6; do
+        [ -s "$TEST_TMPDIR/part$k.json" ] || continue
+        _ctx_raw "$k"
+        [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "went by reference"; return 1; }
+        (( $(_units "$PART_TEXT") < 10000 )) || { echo "part $k is over 10,000 characters"; return 1; }
+        joined="${joined}${PART_TEXT#*$'\n\n'}"
+        n=$(( n + 1 ))
+    done
+    (( n >= 2 && n <= 6 )) || { echo "expected 2 to 6 parts inline, got $n"; return 1; }
+    [ "$joined" = "$STORED" ] || {
+        echo "the parts do not rejoin to the stored set: $(printf '%s' "$joined" | LC_ALL=C wc -c) of $(printf '%s' "$STORED" | LC_ALL=C wc -c) bytes"
+        return 1
+    }
+}
+
 @test "parts: #31411 R1 a character outside the Basic Multilingual Plane counts as two" {
     # 15,000 emoji: 60,000 bytes, too many for six parts counted in bytes, so they are counted in
     # characters - and an emoji is two characters to Claude Code, as to JavaScript. Counted as one,
