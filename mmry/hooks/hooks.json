@@ -25,7 +25,32 @@
         "hooks": [
           {
             "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\"", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 1", 
+            "timeout": 20
+          }, 
+          {
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 2", 
+            "timeout": 20
+          }, 
+          {
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 3", 
+            "timeout": 20
+          }, 
+          {
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 4", 
+            "timeout": 20
+          }, 
+          {
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 5", 
+            "timeout": 20
+          }, 
+          {
+            "type": "command", 
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 6", 
             "timeout": 20
           }
         ]

@@ -566,10 +566,13 @@ LATECURL
     run bash -c "env PATH='${shim}:${bin}:${PATH}' MMRY_TEST_CALL_COUNTER='${counter}' \
             FAKE_CODE=200 FAKE_BODY='[]' \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid' \
-            MMRY_IDLE_POLL_SECONDS=3 MMRY_IDLE_POLL_INTERVAL=1 \
+            MMRY_IDLE_POLL_SECONDS=8 MMRY_IDLE_POLL_INTERVAL=1 \
             bash '${HANDLERS}/formation-check.sh' \
             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
 
+    # 8 s, not 3 (#31411 QA round 3, item 8): with two other suites on the machine one request took
+    # most of 3 s, so the poller had time to ask only once and this read as "did not poll". A handler
+    # that does not poll asks once in any budget; the control below shows exactly that at 8 s.
     [ "$status" -eq 0 ] || { echo "the poller woke the model with nothing to say: ${status} ${output}"; return 1; }
     [ -z "$output" ]
 
@@ -577,7 +580,7 @@ LATECURL
     # returns. Anything that asked more than once against an always-empty server was polling.
     local calls; calls="$(cat "$counter" 2>/dev/null || printf '0')"
     [ "$calls" -ge 2 ] || {
-        echo "Stop made ${calls} request(s) against a 3s budget at a 1s interval, so it did not poll"
+        echo "Stop made ${calls} request(s) against an 8s budget at a 1s interval, so it did not poll"
         return 1
     }
 }

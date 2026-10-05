@@ -22,6 +22,33 @@ LAST_UPDATE_SENTINEL="${PLUGIN_ROOT}/.last-self-update"
 MARKETPLACE_URL="https://raw.githubusercontent.com/MMRY-AI/mmry-plugin/master/.claude-plugin/marketplace.json"
 REPO_ARCHIVE_URL="https://github.com/MMRY-AI/mmry-plugin/archive/refs/heads/master.tar.gz"
 
+# NEVER SELF-UPDATE A CHECKOUT (#31411 QA).
+#
+# This pulls master over PLUGIN_ROOT. When PLUGIN_ROOT is a git working tree that is
+# destruction, not an update: it replaces the branch under development with the released
+# plugin, and because HEAD does not move, git reports the result as ordinary uncommitted
+# edits rather than as the branch having been rolled back.
+#
+# It happened twice on 2026-09-20, both times reverting 13 files on
+# 31411/foundation-integrity, including plugin.json from 2.9.2 to 2.9.1. The second time came
+# through the committed test suite: handlers/session-start.bats runs session-start.sh with
+# PLUGIN_ROOT pointing at the worktree, and session-start.sh line 11 calls this script. So the
+# plugin's own tests could swap the code under test for the released code, which makes any
+# result from them evidence of nothing. Nothing was lost only because the branch was pushed.
+#
+# A .git entry is the signal: present means somebody is working on this tree, and the way it
+# gets a new version is git, not a tarball.
+#
+# Opt-out kept separately for harnesses that copy the plugin somewhere without .git.
+if [[ -e "${PLUGIN_ROOT}/../.git" || -e "${PLUGIN_ROOT}/.git" ]]; then
+    echo "mmry self-update: plugin root is a git checkout; refusing to overwrite it" >&2
+    exit 0
+fi
+if [[ -n "${MMRY_NO_SELF_UPDATE:-}" ]]; then
+    echo "mmry self-update: disabled by MMRY_NO_SELF_UPDATE" >&2
+    exit 0
+fi
+
 # Resolve jq (system or bundled) for version parsing. #30624. Tolerate a missing
 # resolver on a partial install rather than crash this best-effort background check.
 if ! source "$(cd "$(dirname "$0")" && pwd)/lib-jq.sh" 2>/dev/null; then
