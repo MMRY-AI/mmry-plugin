@@ -321,6 +321,31 @@ _mmry_outcome() {
     return 0
 }
 
+# WHAT PART 1 RECORDED ON THIS PROMPT, waiting up to $1 seconds for it (#31583 QA round 3, P4). Prints
+# part 1's final outcome and succeeds, or fails if none arrived in time. "This prompt" is a start
+# second within 3 s of this firing's own, the gap /mmry:foundation-status groups a prompt's parts by;
+# part 1's record from an earlier prompt, and the "failed unfinished" it writes when it starts, are
+# not an answer and are waited past. Polled every 0.2 s; only a part 2-6 that refuses ever asks.
+_mmry_fnd_part1_said() {
+    local f="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}" tok="${MMRY_FND_SID:-}"
+    local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t i
+    [[ -z "$tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || tok=""; }
+    [[ -n "$tok" ]] || return 1
+    for (( i = 0; i <= $1 * 5; i++ )); do
+        l=""
+        [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
+        if [[ "$l" =~ $re && "${BASH_REMATCH[1]}" == "$tok" ]]; then
+            t=$(( 10#${BASH_REMATCH[2]} ))
+            if (( t >= ${_FND_T0:-0} - 3 && t <= ${_FND_T0:-0} + 3 )) && [[ "${BASH_REMATCH[3]}" != "failed unfinished" ]]; then
+                printf '%s' "${BASH_REMATCH[3]}"
+                return 0
+            fi
+        fi
+        (( i < $1 * 5 )) && sleep 0.2
+    done
+    return 1
+}
+
 _mmry_emit() {
     local ctx="$1" msg="$2"
     [[ -z "$ctx" && -z "$msg" ]] && return 0
@@ -634,6 +659,20 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         if (( MMRY_FND_PART > 1 )); then
             NOTICE="MMRY AI could not verify PART ${MMRY_FND_PART} of this account's FOUNDATION directives for this turn: ${REASON}. The other parts may have arrived, but without this one the set is incomplete. Do not act on any leftover text of this part, and do not claim to be following the complete set. Tell the user plainly that part ${MMRY_FND_PART} of their Foundation directives was not applied to this turn."
             USERMSG="${USERMSG/MMRY AI: your Foundation directives were NOT applied/MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was NOT applied}"
+            # ONE NOTICE WHEN THE WHOLE SET IS DAMAGED (Lead/PM decision, 2026-10-05 05:20 UTC). Every part
+            # verifies the same set, so when it is damaged as a whole, part 1 refuses too and says so for
+            # the whole turn, and five more banners naming parts 2 to 6 said nothing more. So a part 2-6
+            # that refuses first asks what part 1 recorded on this prompt. Part 1 failed, so the turn has
+            # its notice, or delivered by reference, so the copy carries the whole set: this part stays
+            # silent, and still records its refusal for /mmry:foundation-status. Part 1 delivered in parts,
+            # or had nothing to send, or said nothing within 8 s: this part alone was refused, the set
+            # changed between the two reads, and it names itself as above. Waiting costs nothing unless a
+            # part refuses; 8 s is past part 1's refusal path on a loaded machine and inside the budget.
+            _fnd_p1=""
+            _fnd_p1="$(_mmry_fnd_part1_said 8)" || _fnd_p1=""
+            if [[ "$_fnd_p1" == failed* || "$_fnd_p1" == "ok by-reference"* ]]; then
+                NOTICE="" USERMSG=""
+            fi
         fi
         _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection REFUSED${MMRY_FND_PART:+ (part ${MMRY_FND_PART})}: ${REASON}"
         _mmry_emit "$NOTICE" "$USERMSG"
