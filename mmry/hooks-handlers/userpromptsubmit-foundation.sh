@@ -116,9 +116,21 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 # per record.
 _mmry_fnd_write() {
     local t="${1}.w.$$"
+    # A FIFO or other special file planted at the target is removed first (#31411 QA round 3, N2):
+    # writing straight to one blocks, and a rename cannot replace one on Windows, where MSYS refuses
+    # it as a read-only file system. A directory is left alone; the rename then fails, as it should.
+    [[ -e "$1" && ! -f "$1" && ! -d "$1" ]] && rm -f "$1" 2>/dev/null
     printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
     rm -f "$t" 2>/dev/null
     return 1
+}
+
+# One line onto the log, only when the log is absent or a regular file (#31411 QA round 3, N2). A FIFO
+# planted there blocked the append, and with it the hook, outside any deadline: a damaged set hung the
+# turn instead of being reported. The log is a diagnostic, so a log that cannot be written is skipped.
+_mmry_fnd_log() {
+    [[ -e "$_FOUND_LOG" && ! -f "$_FOUND_LOG" ]] && return 0
+    printf '%s\n' "$1" >> "$_FOUND_LOG" 2>/dev/null || true
 }
 
 # THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Read here, before
@@ -132,7 +144,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if [[ ! -t 0 ]]; then
         _fnd_head=""
         IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
-        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
+        # No dot (#31411 QA round 3, F7): records are named <name>.<session id>.<part>, so the id
+        # "abc.2" named session abc's part-2 record. Claude Code and Codex send ids without one.
+        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]{1,100})\" ]]; then
             MMRY_FND_SID="${BASH_REMATCH[1]}"
         fi
     fi
@@ -563,8 +577,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         else
             USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm.}"
         fi
-        printf '%s foundation reinjection REFUSED: %s
-'             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
+        _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection REFUSED: ${REASON}"
         _mmry_emit "$NOTICE" "$USERMSG"
         if (( ${_UPGRADE:-0} )); then
             _mmry_outcome "failed upgrade"
@@ -597,8 +610,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
             _FOUND_OUTCOME="crash"
         fi
-        printf '%s foundation reinjection FAILED: %s\n' \
-            "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
+        _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection FAILED: ${_FOUND_EVENT}"
         if (( MMRY_FND_PART > 1 )); then
             # A part names itself and does not claim the whole turn went without its directives
             # (#31411 QA round 2): the other parts may well have arrived.
@@ -651,7 +663,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
             USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
-            printf '%s' "$_tok" > "$_told" 2>/dev/null || true
+            # Written to a temporary file and renamed into place (#31411 QA round 3, N2): writing
+            # straight to it blocked on a FIFO planted at this name, and the rename replaces one.
+            _mmry_fnd_write "$_told" "$_tok" || true
         fi
     fi
 

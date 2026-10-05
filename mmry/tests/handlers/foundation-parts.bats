@@ -636,3 +636,64 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: loading them took longer than the 1s limit and was stopped."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"has no record"* ]] || { echo "$output"; return 1; }
 }
+
+# ---- #31411 QA round 3: N2 (a FIFO where the hook writes) and F7 (a dot in a session id) -------
+
+# Runs "$@" in the background and waits up to $1 seconds. 0 if it finished, 1 if it was still running,
+# in which case it is killed. Portable: no timeout(1), which a stock Mac does not have.
+_finishes_within() {
+    local secs="$1" pid i; shift
+    "$@" & pid=$!
+    for (( i = 0; i < secs * 10; i++ )); do
+        if ! kill -0 "$pid" 2>/dev/null; then wait "$pid" 2>/dev/null; return 0; fi
+        sleep 0.1
+    done
+    kill "$pid" 2>/dev/null
+    return 1
+}
+
+# Opens a FIFO for reading and writing at once, which never blocks, so a hook stuck on it is released.
+_release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
+
+@test "parts: #31411 N2 a FIFO at the by-reference marker does not hang the hook, and the customer is still told" {
+    # QA round 3: by reference records that the customer has been told this session. A FIFO planted
+    # at that marker blocked the write, and with it the whole hook, outside any deadline.
+    _seed_lines 800
+    local fifo="$TEST_TMPDIR/.mmry-foundation-byref-told.N2S"
+    mkfifo "$fifo"
+    _finishes_within 25 _fire 1 N2S || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
+    _ctx 1
+    [[ "$PART_TEXT" == *"BEFORE YOU ANSWER"* ]] || { echo "part 1 lost the reference: ${PART_TEXT:0:200}"; return 1; }
+    jq -e '.systemMessage | test("larger than Claude Code lets a plugin show")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "the customer was not told"; return 1; }
+    [[ -f "$fifo" && ! -p "$fifo" ]] || { echo "the marker is still not a regular file"; _release_fifo "$fifo"; return 1; }
+}
+
+@test "parts: #31411 N2 a FIFO at the log does not hang a refusal, and the refusal still reaches the customer" {
+    # The log is written when the cache is refused or the loader fails. A FIFO there blocked that
+    # write, so a damaged set hung the hook instead of being reported.
+    _seed_lines 3
+    printf -- '- x\n' > "$CACHE"      # the stub #31583 is about, against the manifest of the real set
+    local fifo="$TEST_TMPDIR/mmry-foundation.log"
+    mkfifo "$fifo"
+    _finishes_within 25 _fire 1 N2L || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
+    jq -e '.systemMessage | test("NOT applied")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "the refusal did not reach the customer: $(cat "$TEST_TMPDIR/part1.json")"; _release_fifo "$fifo"; return 1; }
+    [[ -p "$fifo" ]] || { echo "control: the FIFO was replaced, so this proves nothing about writing past it"; return 1; }
+    _release_fifo "$fifo"
+}
+
+@test "parts: #31411 F7 a session id with a dot is no session id, so it cannot name another session's part" {
+    # QA round 3: records are named <name>.<session id>.<part>, so the session "S7.2" wrote its part 1
+    # record to exactly the file session "S7" uses for part 2. A dot is not accepted in a session id;
+    # Claude Code and Codex send ids without one.
+    _seed_lines 3
+    _fire 1 S7.2
+    [ ! -e "$TEST_TMPDIR/mmry-foundation.outcome.S7.2" ] || { echo "S7.2 wrote S7's part-2 record"; return 1; }
+    # CONTROL: an ordinary id names its own record.
+    _fire 1 S7
+    [ -f "$TEST_TMPDIR/mmry-foundation.outcome.S7" ] || { echo "control: S7 did not write its own record"; return 1; }
+    # And the shared helper agrees.
+    run bash -c 'source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1; printf "[%s][%s]" "$(mmry_foundation_sid S7.2)" "$(mmry_foundation_sid S7)"' _ "$PLUGIN_ROOT"
+    [ "$output" = "[][S7]" ] || { echo "mmry_foundation_sid gave $output"; return 1; }
+}

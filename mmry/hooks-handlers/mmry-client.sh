@@ -298,9 +298,11 @@ mmry_foundation_session_token() {
 # the fallback for a caller that has no session id, which is exactly the old behaviour.
 #
 # Only characters that are safe in a file name are accepted; anything else is no session id at all.
+# Not a dot (#31411 QA round 3, F7): records are named <name>.<session id>.<part>, so "abc.2" would
+# name session abc's part-2 record.
 mmry_foundation_sid() {
     local sid="${1:-}"
-    [[ "$sid" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || sid=""
+    [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || sid=""
     printf '%s' "$sid"
 }
 
