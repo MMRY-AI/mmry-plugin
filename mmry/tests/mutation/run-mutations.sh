@@ -435,11 +435,13 @@ mutate_m27() { _mrep "$1/$HANDLER_REL" '    _fnd_path="$_fnd_snap"' '    _fnd_pa
 targets_m27="$PARTS_TESTS"
 desc_m27="#31411 R1, #31583 R3 by reference points at the live shared cache again"
 
-mutate_m28() { _mrep "$1/$HANDLER_REL" '    if [[ -n "$_sc" && "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]] \' '    if true \'; }
+# The mismatch check now stands on its own line (#31411 QA round 3), so a copy that cannot be written
+# has its own state; the mutation makes it never see a mismatch.
+mutate_m28() { _mrep "$1/$HANDLER_REL" '    if (( _fnd_made )) && [[ -n "$_sc" ]] && ! [[ "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]]; then' '    if false; then'; }
 targets_m28="$PARTS_TESTS"
 desc_m28="#31583 R3 a copy that does not match the verified set is sent anyway"
 
-mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} none"' '            :'; }
+mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"' '            :'; }
 targets_m29="$PARTS_TESTS"
 desc_m29="#31583 R4 a part that leaves early records nothing, so an earlier prompt's record counts"
 
@@ -506,7 +508,81 @@ file_m41="$STATUS_REL"
 targets_m41="$PARTS_TESTS"
 desc_m41="#31583 QA S3 a part with no record of arriving is counted as arrived"
 
-ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36 m37 m38 m39 m40 m41"
+# ---- #31583 / #31411 QA round 3 (DEV 02 round 4) ----------------------------------------------------
+
+# R4(a): the status counts a record whatever prompt it came from.
+mutate_m42() { _mrep "$1/$STATUS_REL" '    [[ "${_rs[k]}" == ok && -n "$_floor" ]] && (( 10#${_rt[k]} >= _floor )) || return 1' '    [[ "${_rs[k]}" == ok ]] || return 1'; }
+file_m42="$STATUS_REL"
+targets_m42="$PARTS_TESTS"
+desc_m42="#31583 QA r3 R4(a) a part that never ran on the latest prompt is counted from an earlier one"
+
+# R4(b): no record written when a firing starts, so an exit that writes none leaves the last prompt's.
+mutate_m43() { _mrep "$1/$HANDLER_REL" '    _mmry_outcome "failed unfinished"' '    :'; }
+targets_m43="$PARTS_TESTS"
+desc_m43="#31583 QA r3 R4(b) no pessimistic record, so a silent exit leaves the previous prompt's record"
+
+# R3 / P4: a part 2-6 that refuses is silent on the turn again.
+mutate_m44() { _mrep "$1/$HANDLER_REL" '        _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection REFUSED${MMRY_FND_PART:+ (part ${MMRY_FND_PART})}: ${REASON}"
+        _mmry_emit "$NOTICE" "$USERMSG"' '        (( MMRY_FND_PART > 1 )) || _mmry_emit "$NOTICE" "$USERMSG"'; }
+targets_m44="$PARTS_TESTS"
+desc_m44="#31583 QA r3 R3 a part 2-6 that refuses tells nobody on the turn"
+
+# A directory at the by-reference copy path: every check for it removed.
+mutate_m45() {
+    _mrep "$1/$HANDLER_REL" '    if [[ ! -d "$_fnd_snap" ]] && cp -f "$CACHE" "$_fnd_snaptmp" 2>/dev/null; then' '    if cp -f "$CACHE" "$_fnd_snaptmp" 2>/dev/null; then'
+    _mrep "$1/$HANDLER_REL" '        && [[ ! -d "$_fnd_snap" ]] \' '        && true \'
+    _mrep "$1/$HANDLER_REL" '        && [[ -f "$_fnd_snap" ]]; then' '        ; then'
+}
+targets_m45="$PARTS_TESTS"
+desc_m45="#31411 QA r3 a directory at the copy path takes the copy, and the assistant is pointed at the directory"
+
+# A copy that cannot be written reported as a replacement in progress again.
+mutate_m46() { _mrep "$1/$HANDLER_REL" "        printf '%s' 'copy|the copy of" "        printf '%s' 'changed|the copy of"; }
+targets_m46="$PARTS_TESTS"
+desc_m46="#31411 QA r3 a copy that cannot be written is reported as the set being replaced"
+
+# P8: the hook reads only the first 160 bytes for the session id.
+mutate_m47() { _mrep "$1/$HANDLER_REL" '        while (( _fnd_rc == 0 && ${#_fnd_head} < 4096 )) && [[ ! "$_fnd_head" =~ $_fnd_re ]]; do' '        while false; do'; }
+targets_m47="$PARTS_TESTS"
+desc_m47="#31583 QA r3 P8 a session id past byte 160 is not read"
+
+# P8: the status never reads the token-named records the hook falls back to.
+mutate_m48() { _mrep "$1/$STATUS_REL" '    _sid=""
+fi
+STATUS=' '    :
+fi
+STATUS='; }
+file_m48="$STATUS_REL"
+targets_m48="$PARTS_TESTS"
+desc_m48="#31583 QA r3 P8 the status looks only under the session id and says nothing yet after a delivery"
+
+# R4(b): a failed emit records nothing of its own.
+mutate_m49() { _mrep "$1/$HANDLER_REL" '        _mmry_outcome "failed emit"' '        :'; }
+targets_m49="$PARTS_TESTS"
+desc_m49="#31583 QA r3 R4(b) a failed emit is not recorded as one"
+
+# R4(b): a client that will not load is a quiet exit again.
+mutate_m50() { _mrep "$1/$HANDLER_REL" 'mmry-client.sh" 2>/dev/null || exit 4' 'mmry-client.sh" 2>/dev/null || exit 0'; }
+targets_m50="$PARTS_TESTS"
+desc_m50="#31583 QA r3 R4(b) a loader that cannot load the client leaves in silence"
+
+# R4(b): a part whose loader finds an empty set leaves without saying so.
+mutate_m51() { _mrep "$1/$HANDLER_REL" '> "$STATUS_OUT" 2>/dev/null || true
+    _mmry_fnd_nothing' '> "$STATUS_OUT" 2>/dev/null || true
+    exit 0'; }
+targets_m51="$PARTS_TESTS"
+desc_m51="#31583 QA r3 R4(b) a part whose loader finds an empty set records nothing"
+
+# Item 6: the last-sent line gives the full size under PARTLY again.
+mutate_m52() { _mrep "$1/$STATUS_REL" '    if [[ -n "$_partly" ]]; then
+        _what=", in part (see above)"
+    elif' '    if false; then :
+    elif'; }
+file_m52="$STATUS_REL"
+targets_m52="$PARTS_TESTS"
+desc_m52="#31411 QA r3 the last-sent line gives the full size of a set that arrived only in part"
+
+ALL_MUTATIONS="m01 m02 m03 m04 m05 m06 m07 m08 m09 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21 m22 m23 m24 m25 m26 m27 m28 m29 m30 m31 m32 m33 m34 m35 m36 m37 m38 m39 m40 m41 m42 m43 m44 m45 m46 m47 m48 m49 m50 m51 m52"
 
 # NOT in ALL_MUTATIONS. Exists only so `--self-check` can prove the no-op guard actually
 # aborts, instead of the comment at the top of this file merely asserting that it does. Its

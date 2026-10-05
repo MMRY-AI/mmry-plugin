@@ -49,6 +49,20 @@ CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
 # session's records under one name and another session's are never read here. With no id, the old
 # token-named records are read, exactly as before.
 _sid="$(mmry_foundation_sid "${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}")"
+# WHEN THE HOOK COULD NOT FIND THIS SESSION'S ID (#31583 QA round 3, P8). It reads the id from the start
+# of the payload, and where the id is not there it files its records under the session token, as it
+# did before records were named by session. This command used to look only under the id and answered
+# "nothing yet" after a delivery. With nothing at all under this session's id, it reads the token's.
+_fnd_any_record() {
+    local p
+    for p in "" .2 .3 .4 .5 .6; do
+        [[ -e "${MMRY_TMPDIR}/mmry-foundation.outcome${1:+.$1}${p}" ]] && return 0
+    done
+    [[ -e "$(mmry_foundation_record_path "$MMRY_TMPDIR" "$1")" ]]
+}
+if [[ -n "$_sid" ]] && ! _fnd_any_record "$_sid" && _fnd_any_record ""; then
+    _sid=""
+fi
 STATUS="$(mmry_foundation_record_path "$MMRY_TMPDIR" "$_sid")"
 
 echo "MMRY AI - Foundation directive status"
@@ -75,7 +89,9 @@ if MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here; th
     echo "Set foundationReinject to true in ~/.claude/mmry-config.json to turn it back on."
     exit 0
 fi
-echo "Re-injection: ON - directives are re-sent on every prompt."
+# Not "re-sent on every prompt" (#31411 QA round 3): a set too large to show is not sent at all,
+# the assistant is pointed to a copy of it. How the most recent prompt went is the Delivered line.
+echo "Re-injection: ON - your directives are applied to every prompt; the most recent one is below."
 
 # 2. What does the stored copy claim to be, and is it actually that?
 #
@@ -175,14 +191,64 @@ _parts_max="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 # stamped with the session, replaced atomically, last write wins: "ok part k of n",
 # "ok by-reference n", "failed <why>" or "none". Part 1's file has no suffix, part k's ends ".k".
 # An outcome stamped with another session's token is not this session's and is not read.
-_outcome() {
-    local f="${MMRY_TMPDIR}/mmry-foundation.outcome${_sid:+.$_sid}$1" l=""
+#
+# AND WHICH PROMPT IT WAS (#31583 QA round 3, R4(a)). A part that never ran on a prompt kept the
+# previous prompt's record, and that record counted. Every record now carries the second its part
+# started: "<session> <second> <outcome>". Claude Code starts the six parts of a prompt together and
+# waits for all of them before the model answers, so one prompt's parts start within moments of each
+# other, and the next prompt's start after the whole answer and the customer's reply. So the records
+# are grouped by that second: the latest start, and every start within _FND_GAP seconds of the next
+# one down, are the most recent prompt. A record outside that group is an earlier prompt's and does
+# not count, whatever it says.
+#
+# THE LIMIT, stated: a prompt sent less than _FND_GAP seconds after the previous one's parts started
+# cannot be told apart from it, so a part that never ran on it can still be counted from the one
+# before. Three seconds is under any real turn - the hooks, the model's answer and the customer's
+# next prompt - and over the spread of six parts started together, even on a busy machine.
+_FND_GAP=3
+_sfx() { (( $1 > 1 )) && printf '.%s' "$1"; }
+_rs=() _rt=() _ro=()
+for (( _k = 1; _k <= 6; _k++ )); do
+    _f="${MMRY_TMPDIR}/mmry-foundation.outcome${_sid:+.$_sid}$(_sfx "$_k")"
+    _rs[_k]=absent _rt[_k]="" _ro[_k]=""
     # Something at the path that is not a regular file is not a record of anything, and is said so
     # rather than read (#31583 QA round 2). A directory cannot be read and a FIFO would block.
-    if [[ -e "$f" && ! -f "$f" ]]; then printf '%s' unreadable; return 0; fi
-    [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
-    [[ -n "$_tok" && "${l%% *}" == "$_tok" ]] || return 1
-    printf '%s' "${l#* }"
+    if [[ -e "$_f" && ! -f "$_f" ]]; then _rs[_k]=unreadable; continue; fi
+    [[ -f "$_f" && -r "$_f" ]] || continue
+    _l=""; _l="$(<"$_f")" 2>/dev/null || _l=""
+    [[ -n "$_tok" && "${_l%% *}" == "$_tok" ]] || continue
+    _l="${_l#* }"
+    if [[ "$_l" =~ ^([0-9]{1,12})\ (.+)$ ]]; then
+        _rs[_k]=ok _rt[_k]="${BASH_REMATCH[1]}" _ro[_k]="${BASH_REMATCH[2]}"
+    else
+        # This session's, but not in the form the hook writes: torn, planted, or from a plugin version
+        # whose records carried no start second. It cannot be shown to describe the most recent prompt.
+        _rs[_k]=junk
+    fi
+done
+# The most recent prompt: from the latest start, down through every start within the gap of the next.
+_floor=""
+for (( _k = 1; _k <= 6; _k++ )); do
+    [[ "${_rs[_k]}" == ok ]] || continue
+    { [[ -z "$_floor" ]] || (( 10#${_rt[_k]} > _floor )); } && _floor=$(( 10#${_rt[_k]} ))
+done
+while [[ -n "$_floor" ]]; do
+    _next=""
+    for (( _k = 1; _k <= 6; _k++ )); do
+        [[ "${_rs[_k]}" == ok ]] || continue
+        _t=$(( 10#${_rt[_k]} ))
+        (( _t < _floor && _floor - _t <= _FND_GAP )) || continue
+        { [[ -z "$_next" ]] || (( _t > _next )); } && _next=$_t
+    done
+    [[ -n "$_next" ]] || break
+    _floor=$_next
+done
+# What part $1 reported on the most recent prompt. Fails when it reported nothing on that prompt.
+_outcome() {
+    local k="${1#.}"; k="${k:-1}"
+    if [[ "${_rs[k]}" == unreadable ]]; then printf '%s' unreadable; return 0; fi
+    [[ "${_rs[k]}" == ok && -n "$_floor" ]] && (( 10#${_rt[k]} >= _floor )) || return 1
+    printf '%s' "${_ro[k]}"
 }
 # A firing killed before it finished leaves its in-flight marker behind. Markers older than this
 # session's start belong to an earlier session in the same temp directory and are not read.
@@ -196,7 +262,6 @@ _cut_short() {
     [[ -n "$_sid" ]] && return 0
     [[ ! -f "$_session_file" ]] || [[ "$f" -nt "$_session_file" ]]
 }
-_sfx() { (( $1 > 1 )) && printf '.%s' "$1"; }
 
 # FIXED SENTENCES FROM A CAUSE CODE (#31583 QA round 6). The outcome record lives in a shared temp
 # directory, so nothing in it is printed: only a code and a number are read, and anything else reads
@@ -215,6 +280,15 @@ _why_and_action() {
     elif [[ "$code" == "upgrade" ]]; then
         _WHY="they were stored by an earlier plugin version and are being fetched again"
         _ACTION="none needed. If this persists after a few prompts, run /mmry:load-memories."
+    elif [[ "$code" == "emit" ]]; then
+        _WHY="they were prepared but could not be handed to Claude Code"
+        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+    elif [[ "$code" == "unfinished" ]]; then
+        _WHY="the loader ended without recording what it sent"
+        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+    elif [[ "$code" == "refused copy" ]]; then
+        _WHY="the copy your assistant reads them from could not be written, so it was not pointed at one"
+        _ACTION="re-send the prompt. If it keeps happening, check that your temporary folder has free space and can be written to."
     elif [[ "$code" == "refused changed" ]]; then
         _WHY="your directives were being replaced as the prompt arrived, so nothing was sent rather than a mix of two versions"
         _ACTION="re-send the prompt."
@@ -231,6 +305,8 @@ _delivered=0
 mmry_foundation_delivered_this_session "$MMRY_TMPDIR" "$_sid" && _delivered=1
 
 _failed_why=""
+_failed_line2=""
+_nothing=""
 _partly=""
 _partly_action=""
 _byref=""
@@ -242,8 +318,19 @@ _n=""
 # as delivered. Part counts above six are refused the same way: the hook is registered six times,
 # so no prompt can have had more.
 _o1="$(_outcome "")"
+_o1_here=$?
 if _cut_short ""; then
     _failed_why="the last prompt was stopped before it finished loading them"
+elif (( _o1_here != 0 )) && [[ "${_rs[1]}" != junk && -n "$_floor" ]]; then
+    # Part 1 has nothing on the most recent prompt while another part does: it never ran, or its
+    # record is an earlier prompt's (#31583 QA round 3, R4(a)). Part 1 carries the start of the set and
+    # says how many parts there are, so nothing about this prompt can be shown to have arrived.
+    _failed_why="part 1 of your directives has no record of arriving on it"
+    _failed_line2="It cannot be shown that your Foundation directives reached your assistant."
+elif [[ "$_o1" == none ]]; then
+    # The hook found nothing to send when the prompt arrived: no set loaded yet, or re-injection off
+    # then. Both are checked above, as they are now; this is a prompt from before they changed.
+    _nothing=1
 elif [[ "$_o1" == failed* ]]; then
     _why_and_action "${_o1#failed }"
     _failed_why="$_WHY"
@@ -282,13 +369,13 @@ elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([1-9])(\ set\ ([0-9]{1,10}))?$ ]] && (( BAS
         fi
     done
     (( _got < _n )) && _partly="${_got} of ${_n} parts arrived${_missing}"
-elif [[ -n "$_o1" ]]; then
+elif [[ -n "$_o1" || "${_rs[1]}" == junk ]]; then
     _unknown=1
 fi
 
 if [[ -n "$_failed_why" ]]; then
     echo "Delivered:    NOT on the most recent prompt - ${_failed_why}."
-    echo "              That prompt ran without your Foundation directives."
+    echo "              ${_failed_line2:-That prompt ran without your Foundation directives.}"
     echo "Action:       ${_failed_action:-re-send the prompt. If it keeps happening, run /mmry:load-memories.}"
 elif [[ -n "$_partly" ]]; then
     echo "Delivered:    PARTLY on the most recent prompt - ${_partly}."
@@ -303,10 +390,15 @@ elif [[ -n "$_unknown" ]]; then
     echo "Delivered:    UNKNOWN for the most recent prompt - its record could not be read, so it cannot"
     echo "              be shown that your Foundation directives reached your assistant."
     echo "Action:       re-send the prompt, then run /mmry:foundation-status again."
+elif [[ -n "$_nothing" ]]; then
+    echo "Delivered:    NOTHING on the most recent prompt - there was nothing to send when it arrived."
+    echo "Action:       re-send the prompt, then run /mmry:foundation-status again."
 elif [[ -n "$_n" ]] && (( _n > 1 )); then
-    echo "Delivered:    IN FULL on the most recent prompt, in ${_n} parts. Nothing is trimmed or cut."
+    # Not "nothing is trimmed or cut" beside "in N parts" (#31411 QA round 3): the set IS cut, into
+    # parts, at sentence ends. What matters is that every part arrived and they add up to the set.
+    echo "Delivered:    IN FULL on the most recent prompt, in ${_n} parts. Every part arrived; together they are the whole set."
 elif [[ -n "$_n" ]]; then
-    echo "Delivered:    IN FULL on the most recent prompt. Nothing is trimmed or cut."
+    echo "Delivered:    IN FULL on the most recent prompt. Nothing was left out."
 else
     echo "Delivered:    nothing yet in this session."
 fi
@@ -318,7 +410,14 @@ if (( _delivered )); then
     _when="$(_mmry_mtime "$STATUS" 2>/dev/null)"
     _now="$(date +%s 2>/dev/null || echo 0)"
     _what=""
-    if [[ "$_st" =~ ^ok[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)$ ]]; then
+    # THE SIZE ONLY WHERE IT ARRIVED (#31411 QA round 3). The delivery record describes the whole set
+    # and part 1 writes it, so under PARTLY it gave the full size for a prompt that had only part of it,
+    # and under BY REFERENCE the size of a set that was never shown, only pointed to.
+    if [[ -n "$_partly" ]]; then
+        _what=", in part (see above)"
+    elif [[ -n "$_byref" ]]; then
+        _what=", by reference to a copy (see above)"
+    elif [[ "$_st" =~ ^ok[[:space:]]+entries=([0-9]+)[[:space:]]+bytes=([0-9]+)$ ]]; then
         _what=" (${BASH_REMATCH[1]} directives, ${BASH_REMATCH[2]} bytes)"
     fi
     if [[ "$_when" =~ ^[0-9]+$ ]] && [[ "$_now" =~ ^[0-9]+$ ]] && (( _now >= _when )); then
