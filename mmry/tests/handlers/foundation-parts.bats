@@ -934,3 +934,48 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     [[ "$output" == *"Last sent:    "*", by reference to a copy (see above)."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"(800 directives"* ]] || { echo "$output"; return 1; }
 }
+
+# ---- P4: ONE notice when the whole set is damaged (Lead/PM decision, 2026-10-05) --------------------
+
+# The set damaged under its own record, the stub #31583 is about, in whichever layout this branch keeps
+# it: a cache beside its manifest, or (#31597) one file holding both.
+_damage_set() {
+    if [[ -n "${SET:-}" ]]; then fnd_set_with "$(fnd_set_record)" $'- x\n'; else printf -- '- x\n' > "$CACHE"; fi
+}
+
+@test "parts: #31583 P4 whole-set damage gives the turn ONE notice, part 1's, not one per part" {
+    # 380 directives: every one of the six parts reaches its loader, and every one refuses the stub.
+    _seed_lines 380
+    _damage_set
+    _fire_all S70
+    local k shown=0
+    for k in 1 2 3 4 5 6; do
+        [ -s "$TEST_TMPDIR/part$k.json" ] && shown=$(( shown + 1 ))
+    done
+    [ "$shown" -eq 1 ] || { echo "$shown parts spoke; expected part 1 alone"; for k in 2 3 4 5 6; do [ -s "$TEST_TMPDIR/part$k.json" ] && echo "part $k: $(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part$k.json")"; done; return 1; }
+    jq -e '.systemMessage | test("your Foundation directives were NOT applied")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "part 1 did not give the whole-set notice: $(cat "$TEST_TMPDIR/part1.json")"; return 1; }
+    jq -e '.hookSpecificOutput.additionalContext | test("running WITHOUT the account")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "the assistant was not told: $(cat "$TEST_TMPDIR/part1.json")"; return 1; }
+    # The silent parts still record their refusal, so the status names them.
+    for k in 2 3 4 5 6; do
+        [[ "$(cat "$(_outcome_file S70 "$k")")" =~ ^S70\ [0-9]+\ failed\ refused\ [a-z-]+$ ]] || { echo "part $k record: $(cat "$(_outcome_file S70 "$k")")"; return 1; }
+    done
+    # And the status says the copy is refused, not that anything arrived.
+    CLAUDE_CODE_SESSION_ID=S70 run bash "$STATUSCMD"
+    [[ "$output" == *"It is being REFUSED, not used."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 P4 a part 2-6 refused on a prompt whose part 1 delivered still names itself" {
+    _seed_lines 380
+    # Part 1 delivers; the set is then damaged before part 3 reads it.
+    _fire 1 S71
+    _damage_set
+    _fire 3 S71
+    local ctx msg
+    ctx="$(jq -r '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part3.json")"
+    msg="$(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part3.json")"
+    [[ "$ctx" == *"could not verify PART 3 of this account's FOUNDATION directives"* ]] || { echo "assistant: $ctx"; return 1; }
+    [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
+}

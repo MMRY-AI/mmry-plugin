@@ -662,6 +662,14 @@ mutate_m99() { _sedi 's|IMPOSSIBLE-SENTINEL-31434-NEVER-PRESENT|x|' "$1/$HANDLER
 targets_m99="$HANDLER_TESTS"
 desc_m99="deliberately matches nothing; exercises the harness's own guard"
 
+# P4 (Lead/PM decision, 2026-10-05): parts 2-6 stop asking what part 1 recorded, so whole-set damage
+# shows a banner per part again. Numbered m59 so the same commit carries onto #31597's branch, where
+# m53-m58 are taken, and added to the list here for the same reason.
+mutate_m59() { _mrep "$1/$HANDLER_REL" '            _fnd_p1="$(_mmry_fnd_part1_said 8)" || _fnd_p1=""' '            _fnd_p1=""'; }
+targets_m59="$PARTS_TESTS"
+desc_m59="#31583 P4 whole-set damage shows one banner per part again"
+ALL_MUTATIONS="$ALL_MUTATIONS m59"
+
 # A mutation this harness deliberately does NOT claim to cover, stated rather than omitted:
 # the config-loading teardown (#31434 QA). Removing it leaks a file into the working tree
 # instead of failing an assertion, so no mutation of it can go red. It is verified by
