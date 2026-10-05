@@ -133,12 +133,17 @@ _mmry_fnd_write() {
 # One line onto the log, only when the log is absent or a regular file (#31411 QA round 3, N2). A FIFO
 # planted there blocked the append, and with it the hook, outside any deadline: a damaged set hung the
 # turn instead of being reported. The log is a diagnostic, so a log that cannot be written is skipped.
+#
+# It stamps the time itself (#31583, test 506 on macOS, Mac bench round 2). After a failed emit ANY
+# command substitution captures the 1,024 stale bytes, because the subshell inherits them and flushes
+# them into the captured output: the callers' "$(date ...)" put a slice of the directives into the log
+# line before any write happened. So after a failed emit the stamp is taken inside a fresh process.
 _mmry_fnd_log() {
     [[ -e "$_FOUND_LOG" && ! -f "$_FOUND_LOG" ]] && return 0
     if [[ -n "${_FND_STDOUT_SPOILED:-}" ]]; then
-        env printf '%s\n' "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+        env sh -c 'printf "%s %s\n" "$(date +%FT%T 2>/dev/null || echo now)" "$1"' _ "$1" >> "$_FOUND_LOG" 2>/dev/null || true
     else
-        printf '%s\n' "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+        printf '%s %s\n' "$(date +%FT%T 2>/dev/null || echo now)" "$1" >> "$_FOUND_LOG" 2>/dev/null || true
     fi
 }
 
@@ -307,8 +312,8 @@ _mmry_emit_escaped() {
     return $rc
 }
 
-# AFTER A FAILED EMIT, NOTHING IS WRITTEN WITH THE PRINTF BUILTIN (#31583, foundation-parts test 506 on
-# macOS). When the emit cannot be written, the shell's printf on macOS keeps the last 1,024 bytes of it,
+# AFTER A FAILED EMIT, NOTHING IS WRITTEN WITH THE PRINTF BUILTIN, AND NOTHING IS CAPTURED WITH $( )
+# (#31583, foundation-parts test 506 on macOS). When the emit cannot be written, the shell's printf on macOS keeps the last 1,024 bytes of it,
 # and the next builtin printf carries them into wherever its own output goes: the outcome record,
 # written next, began with 1,024 bytes of the customer's directives, broke its own format, and read as
 # no record. Measured on the Mac bench: flushing to /dev/null first, reopening stdout, and a subshell
@@ -333,7 +338,9 @@ _mmry_fnd_spoil() { _FND_STDOUT_SPOILED=1; }
 # costs one mv (_mmry_fnd_write).
 _mmry_outcome() {
     local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
-    [[ -z "$tok" && -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
+    # read, not $(<file): it runs after a failed emit too, where a command substitution would capture
+    # the stale bytes (see _mmry_fnd_spoil).
+    [[ -z "$tok" && -f "$f" && -r "$f" ]] && { IFS= read -r tok < "$f" 2>/dev/null || [[ -n "$tok" ]] || tok=""; }
     # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
     # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
     # could catch half a line, and a FIFO left at the path would have blocked the write.
@@ -699,7 +706,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
                 NOTICE="" USERMSG=""
             fi
         fi
-        _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection REFUSED${MMRY_FND_PART:+ (part ${MMRY_FND_PART})}: ${REASON}"
+        _mmry_fnd_log "foundation reinjection REFUSED${MMRY_FND_PART:+ (part ${MMRY_FND_PART})}: ${REASON}"
         _mmry_emit "$NOTICE" "$USERMSG"
         if (( ${_UPGRADE:-0} )); then
             _mmry_outcome "failed upgrade"
@@ -732,7 +739,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
             _FOUND_OUTCOME="crash"
         fi
-        _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection FAILED: ${_FOUND_EVENT}"
+        _mmry_fnd_log "foundation reinjection FAILED: ${_FOUND_EVENT}"
         if (( MMRY_FND_PART > 1 )); then
             # A part names itself and does not claim the whole turn went without its directives
             # (#31411 QA round 2): the other parts may well have arrived.
@@ -814,7 +821,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # The hand-over to Claude Code failed (#31583 QA round 3, R4(b)). Nothing was delivered, and
         # this used to leave the previous prompt's record to say otherwise.
         _mmry_outcome "failed emit"
-        _mmry_fnd_log "$(date +%FT%T 2>/dev/null || echo now) foundation reinjection FAILED: the output could not be written (part ${MMRY_FND_PART})"
+        _mmry_fnd_log "foundation reinjection FAILED: the output could not be written (part ${MMRY_FND_PART})"
     fi
     rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
     exit 0

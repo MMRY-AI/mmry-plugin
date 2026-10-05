@@ -1058,4 +1058,9 @@ _damage_set() {
         | PATH="$shim:$PATH" bash "$HOOK" --part 3 >&- 2>/dev/null
     [ -s "$calls" ] || { echo "after a failed emit the record was still written with the builtin"; return 1; }
     [[ "$(cat "$(_outcome_file S90 3)")" =~ ^S90\ [0-9]+\ failed\ emit$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S90 3)")"; return 1; }
+    # And the log line it adds is that line alone: on macOS a "$(date)" taken after the failed emit
+    # carried 1,024 bytes of the directives into it (Mac bench, fc6a954).
+    local last; last="$(tail -n 1 "$TEST_TMPDIR/mmry-foundation.log")"
+    [[ "$last" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}\ foundation\ reinjection\ FAILED:\ the\ output\ could\ not\ be\ written\ \(part\ 3\)$ ]] \
+        || { echo "log line: ${last:0:200} ($(printf '%s' "$last" | wc -c) bytes)"; return 1; }
 }
