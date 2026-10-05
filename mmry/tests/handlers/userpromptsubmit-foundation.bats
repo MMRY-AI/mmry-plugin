@@ -453,7 +453,11 @@ _registered_timeout() {
     manifest_now
     _make_config
     local shim start elapsed budget
-    shim="$(_make_slow_jq 20)"
+    # LOAD (#31411 QA round 3, item 8). Bounded at 12 s against a 20 s jq, this stopwatch could fail on
+    # a machine two other suites were loading while the handler did the right thing. The jq now takes a
+    # minute and the bound sits at 30 s: a handler with no working deadline waits the whole minute, and
+    # the right path does not take 30 s however busy the machine.
+    shim="$(_make_slow_jq 60)"
     budget="$(_registered_timeout)"
 
     start="$(date +%s)"
@@ -463,7 +467,8 @@ _registered_timeout() {
     # Did not hang: stopped itself at its own deadline, well inside the hook budget.
     [ "$status" -eq 0 ]
     (( elapsed >= 3 )) || return 1
-    (( elapsed < 12 )) || return 1
+    # Not waiting for the jq: a handler with no deadline takes the jq's 60 s.
+    (( elapsed < 30 )) || return 1
     (( elapsed < budget )) || return 1
     # The user is told, in terms they can act on.
     [[ "$output" == *'systemMessage'* ]] || return 1
@@ -512,13 +517,17 @@ _registered_timeout() {
     printf '#!/bin/sh\nexit 127\n' > "$shimdir/bash"
     chmod +x "$shimdir/bash"
 
+    # LOAD (#31411 QA round 3, item 8). This stopwatch failed when two other suites shared the machine
+    # and passed alone, while the handler took the correct crash path every time (17 of 17, QA #1). The
+    # deadline is now a minute and the bound 30 s: a crash that waited for the deadline cannot finish
+    # under 60, and a fast crash does not take 30 however busy the machine.
     start="$(date +%s)"
-    PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
+    MMRY_FOUNDATION_DEADLINE_SECS=60 PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     elapsed=$(( $(date +%s) - start ))
 
     [ "$status" -eq 0 ]
     # It failed FAST. Anything that took a deadline's worth of time is not this scenario.
-    (( elapsed < 5 )) || return 1
+    (( elapsed < 30 )) || return 1
     # Told as a failure, with the real exit code, and explicitly NOT as a duration.
     [[ "$output" == *'systemMessage'* ]] || return 1
     [[ "$output" == *'NOT applied to this turn'* ]] || return 1
@@ -662,15 +671,18 @@ _registered_timeout() {
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
 
     local start elapsed captured
+    # LOAD (#31411 QA round 3, item 8). The orphan this exists for holds the descriptor until the
+    # deadline, so the deadline is now a minute and the bound 30 s, where it was 12 and 6: a busy machine
+    # no longer reaches the bound on the right path, and the orphan still holds the reader for 60.
     start="$(date +%s)"
-    captured="$( { MMRY_FOUNDATION_DEADLINE_SECS=12 bash "$HANDLER" </dev/null; } 3>&1 )"
+    captured="$( { MMRY_FOUNDATION_DEADLINE_SECS=60 bash "$HANDLER" </dev/null; } 3>&1 )"
     elapsed=$(( $(date +%s) - start ))
 
     # The answer is right...
     [[ "$captured" == *'never overstate evidence'* ]] || return 1
     # ...and the reader was released as soon as it was produced, not at the deadline.
-    echo "time to EOF with an extra inherited descriptor: ${elapsed}s against a 12s deadline" >&3
-    (( elapsed < 6 ))
+    echo "time to EOF with an extra inherited descriptor: ${elapsed}s against a 60s deadline" >&3
+    (( elapsed < 30 ))
 }
 
 @test "userpromptsubmit-foundation: a firing killed outright LEAVES the marker, end to end (#31434)" {
@@ -694,9 +706,17 @@ EOF
 
     # SIGKILL, because that is what the harness does on timeout: no trap, no cleanup, nothing.
     MMRY_JQ="$shim" bash "$HANDLER" >/dev/null 2>&1 </dev/null &
-    local victim=$!
-    sleep 2
-    kill -9 "$victim" 2>/dev/null
+    local victim=$! i
+    # Killed once it has written its marker and its out-file, not after a fixed 2 s (#31411 QA round 3,
+    # item 8): on a loaded machine 2 s was not always enough to get that far, and the test then failed
+    # on the kill landing early rather than on anything the handler did. Up to 30 s, polled; a handler
+    # that never writes the marker still fails below.
+    for (( i = 0; i < 300; i++ )); do
+        [[ -f "$TEST_TMPDIR/.mmry-foundation-inflight" && -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]] && break
+        sleep 0.1
+    done
+    # It may already have finished if it never wrote the marker; the assertions below say so.
+    kill -9 "$victim" 2>/dev/null || true
     wait "$victim" 2>/dev/null || true
 
     # The evidence that a turn was lost has to survive the kill, or nobody can ever be told.
@@ -835,17 +855,20 @@ manifest_now
 ' > "$CACHE"
 manifest_now
     local shim start elapsed
-    shim="$(_make_slow_jq 30)"
+    # LOAD (#31411 QA round 3, item 8). The deadline is now a minute and the bound 30 s, where both were
+    # 3: an off switch that was not honoured waits out the deadline behind the slow jq, and an honoured
+    # one does not take 30 s however busy the machine.
+    shim="$(_make_slow_jq 120)"
 
     _write_toggle_config '"false"'
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     start="$(date +%s)"
-    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=60 run bash "$HANDLER"
     elapsed=$(( $(date +%s) - start ))
 
     [ "$status" -eq 0 ]
     [ -z "$output" ]
-    (( elapsed < 3 ))
+    (( elapsed < 30 ))
 }
 
 # ============================================================================

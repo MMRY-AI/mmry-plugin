@@ -33,6 +33,34 @@ setup() {
 # `date +%s%3N` is a GNU extension and macOS does not have it, so this times a BATCH with
 # whole seconds and divides. Coarse on purpose: it is portable to the bash 3.2 / BSD date
 # that macOS actually ships, and the margins being asserted here are large.
+# The CHEAPEST of $1 runs, in ms, rounded up (#31411 QA round 3, item 8). What these bars guard is the
+# handler's own cost, and on a machine two other suites are loading, the average measured the other
+# suites: the bars went red with them and passed alone. The cheapest run is the closest a busy machine
+# gets to the handler's own cost, and a handler that really grew is no cheaper on any run. Needs
+# bash 5's EPOCHREALTIME for per-run timing; without it (bash 3.2 on a Mac) it is the average below.
+_min_ms() {
+    if [[ -z "${EPOCHREALTIME:-}" || "${BASH_VERSINFO[0]}" -lt 5 ]]; then _avg_ms "$@"; return; fi
+    local runs="$1"; shift
+    local i t0 t1 us best=""
+    for (( i = 0; i < runs; i++ )); do
+        t0="${EPOCHREALTIME/[.,]/}"
+        "$@" >/dev/null 2>&1 </dev/null || true
+        t1="${EPOCHREALTIME/[.,]/}"
+        us=$(( 10#$t1 - 10#$t0 ))
+        [[ -z "$best" ]] || (( us < best )) && best=$us
+    done
+    echo $(( (best + 999) / 1000 ))
+}
+
+# Now in ms, for one firing: EPOCHREALTIME where bash has it, whole seconds otherwise.
+_now_ms() {
+    if [[ -n "${EPOCHREALTIME:-}" && "${BASH_VERSINFO[0]}" -ge 5 ]]; then
+        local t="${EPOCHREALTIME/[.,]/}"; echo $(( 10#$t / 1000 ))
+    else
+        echo $(( $(date +%s) * 1000 ))
+    fi
+}
+
 _avg_ms() {
     local runs="$1"; shift
     local start finish i
@@ -124,10 +152,10 @@ EOF
 
     local handler cost budget
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
-    cost="$(_avg_ms 5 bash "$handler")"
+    cost="$(_min_ms 5 bash "$handler")"
     budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" | tr -d '\r')"
 
-    echo "measured cost: ${cost} ms over 5 runs; registered budget: ${budget} s" >&3
+    echo "measured cost: ${cost} ms, the cheapest of 5 runs; registered budget: ${budget} s" >&3
 
     # THE PREMISE: the thing that was timed actually ran, and actually did the work.
     #
@@ -300,7 +328,7 @@ exec jq "$@"
 SHIMEOF
     chmod +x "$shim"
 
-    local handler budget start elapsed_ms out margin_ms
+    local handler budget start elapsed_ms out margin_ms control_ms own_ms real_bash broken
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | if length == 1 then .[0] else "DISAGREE" end' "$HOOKS_FILE" )"
     # Trim anything that is not a digit, rather than naming a carriage return: jq.exe
@@ -310,19 +338,38 @@ SHIMEOF
     budget="${budget%%[![:digit:]]*}"
     [[ "$budget" =~ ^[0-9]+$ ]] || return 1
 
-    start="$(date +%s)"
+    # THE CONTROL, at the same moment on the same machine (#31411 QA round 3, item 8): the same
+    # handler, whose loader fails at once, so it pays everything a firing pays - start-up, the
+    # records, the report - except the wait. This assertion went red when two other suites shared the
+    # machine and passed alone: what grew under load was that per-firing cost, not the deadline.
+    real_bash="$(command -v bash)"
+    broken="$TEST_TMPDIR/broken-bash"
+    mkdir -p "$broken"
+    printf '#!/bin/sh\nexit 127\n' > "$broken/bash"
+    chmod +x "$broken/bash"
+    start="$(_now_ms)"
+    PATH="$broken:$PATH" "$real_bash" "$handler" >/dev/null 2>&1 </dev/null
+    control_ms=$(( $(_now_ms) - start ))
+
+    start="$(_now_ms)"
     out="$(MMRY_JQ="$shim" bash "$handler" 2>/dev/null)"
-    elapsed_ms=$(( ( $(date +%s) - start ) * 1000 ))
+    elapsed_ms=$(( $(_now_ms) - start ))
     margin_ms=$(( budget * 1000 - elapsed_ms ))
-    echo "ENFORCED wall clock: ${elapsed_ms} ms; registered budget: ${budget}s; margin: ${margin_ms} ms" >&3
+    # What the plugin's own deadline cost, net of what this machine charges any firing right now.
+    own_ms=$(( elapsed_ms - control_ms ))
+    echo "ENFORCED wall clock: ${elapsed_ms} ms; a firing with no wait: ${control_ms} ms; the deadline's own share: ${own_ms} ms; registered budget: ${budget}s; margin: ${margin_ms} ms" >&3
 
     # The premise: it really did hang, so this measures the guard and not a fast path.
     (( elapsed_ms >= 9000 )) || return 1
-    # THE ASSERTION. The plugin stopped itself before the harness could, with a stated margin.
-    # 5 s, not "under the budget": finishing at 19.5 s would satisfy the letter of the
-    # invariant on an idle box and still lose the race on a loaded one.
+    # THE ASSERTION. The plugin stopped itself before the harness could: under the budget, as
+    # measured, whatever the load, because past it the harness discards the output.
     (( elapsed_ms < budget * 1000 )) || return 1
-    (( margin_ms >= 5000 )) || return 1
+    # And with a stated margin. 5 s, not "under the budget": finishing at 19.5 s would satisfy the
+    # letter of the invariant on an idle box and still lose the race on a loaded one. The margin is
+    # what the plugin's own deadline leaves of the budget for that per-firing cost, so it is taken
+    # net of the control: the shipped 15 s deadline that #31434 QA failed leaves under 5 s here on
+    # any machine, while a busy machine no longer fails a 10 s one.
+    (( budget * 1000 - own_ms >= 5000 )) || return 1
     # And the customer was told. A guard that wins the race and says nothing is the silent
     # loss wearing a different hat.
     [[ "$out" == *'NOT applied to this turn'* ]] || return 1
