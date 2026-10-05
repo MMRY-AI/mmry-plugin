@@ -29,7 +29,7 @@ BEGIN {
     NL = "\n"
     F_LABEL = "sed reads a label or branch that runs into ; or } (GNU-only: BSD sed takes the rest of the line as the label)"
     F_NULL = "sed reads -z or --null-data (GNU-only: BSD sed has no NUL-separated mode)"
-    F_JOIN = "sed reads a line join (N, H, G or -z, then a newline in s or y): use the bash join"
+    F_JOIN = "sed reads a line join (N, H, G or -z, then a newline in s or y): use the bash join. BSD sed's N prints nothing on the last line, so a one-line input comes out empty"
     F_BRACE = "sed reads a } with no ; or newline before it (BSD sed rejects it; write ;})"
 }
 
@@ -194,11 +194,11 @@ function read_paren(    r, c, depth) {
 
 function is_prefix(s, of) { return s != "" && index(of, s) == 1 }
 
-function judge(rel, ln,    i, w, name, val, eq, j, c, rest, prog, nprog, fromfile, nop, op1, z) {
-    prog = ""; nprog = 0; fromfile = 0; nop = 0; z = 0
+function judge(rel, ln,    i, w, name, val, eq, j, c, rest, prog, nprog, fromfile, nop, z, bare_i, k, lab, join, brace) {
+    prog = ""; nprog = 0; fromfile = 0; nop = 0; z = 0; bare_i = 0
     for (i = 1; i <= NW; i++) {
         w = W[i]
-        if (w == "--") { for (i++; i <= NW; i++) if (++nop == 1) op1 = W[i]; break }
+        if (w == "--") { for (i++; i <= NW; i++) OP[++nop] = W[i]; break }
         if (substr(w, 1, 2) == "--") {
             name = substr(w, 3); val = ""; eq = index(name, "=")
             if (eq) { val = substr(name, eq + 1); name = substr(name, 1, eq - 1) }
@@ -221,20 +221,35 @@ function judge(rel, ln,    i, w, name, val, eq, j, c, rest, prog, nprog, fromfil
                 }
                 if (c == "f") { fromfile = 1; if (substr(w, j + 1) == "") i++; break }
                 if (c == "l") { if (substr(w, j + 1) == "") i++; break }
-                if (c == "i") break
+                # IN-PLACE IS READ BOTH WAYS (#31737 QA round 2). GNU sed takes -i's suffix attached
+                # (-i.bak) or not at all; BSD sed, the one macOS ships, takes it as the NEXT word, so
+                # `sed -i '' PROGRAM FILE` is the Mac's own in-place form, and reading it the GNU way
+                # took the empty suffix for the program. A bare -i or -I is judged both ways below.
+                if (c == "i" || c == "I") { if (substr(w, j + 1) == "") bare_i = 1; break }
                 if (c == "z") z = 1
             }
             continue
         }
-        if (++nop == 1) op1 = w
+        OP[++nop] = w
     }
-    if (nprog == 0 && !fromfile && nop > 0) { prog = op1; nprog = 1 }
 
-    walk(prog)
-    if (P_LABEL) report(rel, ln, F_LABEL)
+    # Each reading is judged on its own, so a join is never assembled from two different readings.
+    lab = 0; join = 0; brace = 0
+    if (nprog > 0) {
+        walk(prog)
+        lab = P_LABEL; join = (P_MECH || z) && P_NL; brace = P_BRACE
+    } else if (!fromfile) {
+        for (k = 1; k <= nop && k <= (bare_i ? 2 : 1); k++) {
+            walk(OP[k])
+            if (P_LABEL) lab = 1
+            if ((P_MECH || z) && P_NL) join = 1
+            if (P_BRACE) brace = 1
+        }
+    }
+    if (lab) report(rel, ln, F_LABEL)
     if (z) report(rel, ln, F_NULL)
-    if ((P_MECH || z) && P_NL) report(rel, ln, F_JOIN)
-    if (P_BRACE) report(rel, ln, F_BRACE)
+    if (join) report(rel, ln, F_JOIN)
+    if (brace) report(rel, ln, F_BRACE)
 }
 
 function report(rel, ln, what,    key) {
