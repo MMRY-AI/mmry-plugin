@@ -156,4 +156,14 @@ _mmry_reinject_is_off_here() {
 # callers already source this file or can at no cost, and two copies of customer words drift.
 # The marker that records it was said is .mmry-foundation-empty-told.<session id> in the temp
 # directory, holding the session's key; the token-named form, with no session id, is written too.
-MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run /mmry:foundation-status at any time to check."
+#
+# The command it names is the host's own (#31245 carried onto develop): on Codex there is nothing to
+# type, so it names the Codex script. With no argument it is the Claude Code literal, unchanged.
+_mmry_fnd_set_empty_notice() {
+    MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+}
+_mmry_fnd_set_empty_notice
+if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+    _mmry_fnd_x="$(mmry_host_command_ref foundation-status)" && [[ -n "$_mmry_fnd_x" ]] && _mmry_fnd_set_empty_notice "$_mmry_fnd_x"
+    unset _mmry_fnd_x
+fi

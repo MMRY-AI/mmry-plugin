@@ -873,6 +873,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _etok="${_etok:-no-session}"
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
             if [[ "$_etok" != "$_etold_tok" ]]; then
+                _fnd_host_refs
+                _mmry_fnd_set_empty_notice "$_FOUND_STATUS_REF"
                 _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
             fi
         fi

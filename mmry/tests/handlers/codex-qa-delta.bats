@@ -28,6 +28,7 @@ setup() {
 }
 
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
 
 # A plugin root, at $1, that is a faithful copy except that session-init's delegate is a probe.
 _plugin_at() {
@@ -150,10 +151,10 @@ _host_of() {
     printf 'codex\n' > "$state/.mmry-host"
     printf '%s' '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"k","foundationRefreshSeconds":0}' > "$CX/mmry-config.json"
     printf '%s' '{"apiKey":"claude-k","foundationReinject":"false"}' > "$HOME/.claude/mmry-config.json"
-    local cache="$TEST_TMPDIR/mmry-foundation.md" s b n
+    # The set is one sealed file since #31597 (develop); fnd_seal writes it as the writer does.
+    local cache="$TEST_TMPDIR/mmry-foundation.md"
     printf -- '- Identity: Eric builds MMRY.\n' > "$cache"
-    read -r s b < <(cksum < "$cache")
-    printf 'mmry-foundation v1 entries=1 bytes=%s cksum=%s\n' "$b" "$s" > "${cache}.manifest"
+    fnd_seal "$cache" 1 "$TEST_TMPDIR/mmry-foundation-set.md"
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
 
     run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE -u CLAUDE_PLUGIN_ROOT HOME="$HOME" \

@@ -143,6 +143,8 @@ _allowed_reason() {
         "foundation-status.sh|_FS_STATUS='/mmry:foundation-status'") printf 'F'; return 0 ;;
         "foundation-status.sh|_FS_CONFIG='~/.claude/mmry-config.json'") printf 'F'; return 0 ;;
         "foundation-status.sh|_FS_HOST='Claude Code'") printf 'F'; return 0 ;;
+        # (F) develop's #31597 empty-set notice: the default when no host command is passed or derived.
+        "lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE=\"MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run \${1:-/mmry:foundation-status} at any time to check.\"") printf 'F'; return 0 ;;
         "stop-check.sh|mmry_host_label() { printf 'Claude Code'; }") printf 'F'; return 0 ;;
         # (B) the Claude branch of the Foundation-store fault hint.
         "session-start.sh|_mmry_fnd_retry_hint=\"ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check\"") printf 'B'; return 0 ;;

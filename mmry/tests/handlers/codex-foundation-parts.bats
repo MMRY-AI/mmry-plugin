@@ -24,15 +24,18 @@
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
 
 CODEX_DIR=""
 CACHE=""
+SET=""
 
 # The byte line Codex 0.154.0 spills at: 2,500 tokens of 4 bytes.
 CODEX_SPILL_BYTES=10000
 
 setup() {
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    SET="$TEST_TMPDIR/mmry-foundation-set.md"
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
     CODEX_DIR="$TEST_TMPDIR/codexhome"
     mkdir -p "$CODEX_DIR/mmry"
@@ -49,13 +52,10 @@ EOF
     cp "$CODEX_DIR/mmry-config.json" "$MMRY_CONFIG_FILE"
 }
 
-# Record a planted cache the way the writer does; #31411 refuses an unrecorded one.
+# Seal a staged cache into the set file the hook reads, as the writer does (#31597 on develop:
+# the set is one file with its record inside, and an unsealed one is refused).
 manifest_now() {
-    local c="${1:-$CACHE}" n s b
-    read -r s b < <(cksum < "$c")
-    n="$(grep -c '^- ' "$c" 2>/dev/null || true)"
-    [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "$n" "$b" "$s" > "${c}.manifest"
+    fnd_seal "${1:-$CACHE}" "" "$SET"
 }
 
 # A Codex hook firing: codex-hook.sh sets the host, the payload is Codex's (session_id first, as
@@ -137,7 +137,7 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
 @test "codex parts: a refused cache tells a Codex customer commands that exist on Codex" {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
     manifest_now
-    printf -- '- x\n' > "$CACHE"
+    fnd_set_with "$(fnd_set_record)" $'- x\n'
     local out msg
     out="$(_codex_part 1)"
     msg="$(printf '%s' "$out" | _msg)"
@@ -152,7 +152,7 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
 @test "codex parts: req4 control - on Claude Code the refusal names the slash commands, as it did" {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
     manifest_now
-    printf -- '- x\n' > "$CACHE"
+    fnd_set_with "$(fnd_set_record)" $'- x\n'
     local msg
     msg="$(_claude_part 1 | _msg)"
     [[ "$msg" == *"Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm."* ]] || { echo "$msg"; return 1; }
