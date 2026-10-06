@@ -60,9 +60,11 @@ if [[ "$HOOK_READ_STATUS" == "empty" || "$HOOK_READ_STATUS" == "timeout" ]]; the
 fi
 
 # stdin may not be JSON outside a hook context; jq returns empty and we fall
-# back to the env var, then "unknown". This is a data fallback, not a jq one.
+# back to the env vars, then "unknown". This is a data fallback, not a jq one.
+# CLAUDE_CODE_SESSION_ID is what the Bash tool sets: /mmry:load-memories runs this script there with
+# no payload, and its Foundation marker must be filed under the real session (#31597 QA round 3, R3).
 SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
-SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
+SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
 
 # SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
 #

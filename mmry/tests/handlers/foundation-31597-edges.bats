@@ -20,7 +20,7 @@ load '../helpers/foundation-set'
 setup() {
     setup_mock_curl
     create_test_config "http://localhost:5291" "test-api-key" "apikey" >/dev/null
-    unset CLAUDE_SESSION_ID
+    unset CLAUDE_SESSION_ID CLAUDE_CODE_SESSION_ID
     export HOME="$TEST_TMPDIR/fakehome"
     mkdir -p "$HOME/.claude/mmry/hooks-handlers" "$HOME/.claude/mmry/setup"
     SET="$TEST_TMPDIR/mmry-foundation-set.md"
@@ -118,6 +118,46 @@ _show() { echo "expected: $(od -c "$1" | tail -4)"; echo "received: $(od -c "$2"
     [[ "$(cat "$TEST_TMPDIR/prompt.json")" == *'records 2 Foundation directives but the cache holding them is missing'* ]]
 }
 
+# /mmry:load-memories runs session-start.sh through the Bash tool: no hook payload on stdin, and the
+# session id only in CLAUDE_CODE_SESSION_ID (QA round 3, cases B1 and B2). Its marker must be filed
+# under that session, or the prompt hook, which looks under the real id, finds nothing and is silent.
+_load_memories() { CLAUDE_CODE_SESSION_ID="$1" bash "$START" < /dev/null > "$TEST_TMPDIR/load-$1.json" 2>/dev/null; }
+
+_THREE='[{"memoryTier":"Foundation","topic":"One","content":"first"},{"memoryTier":"Foundation","topic":"Two","content":"second"},{"memoryTier":"Foundation","topic":"Three","content":"third"}]'
+
+@test "#31597 R3 (B1): SessionStart's fetch fails, /mmry:load-memories stores 3, the set is removed: reported missing" {
+    export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
+    _start lm1
+    [ ! -f "$SET" ] || { echo "control: SessionStart stored a set although its fetch failed"; return 1; }
+
+    export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE="$_THREE"
+    _load_memories lm1
+    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v2 entries=3 '* ]] || { echo "control: load-memories stored no set"; return 1; }
+
+    export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
+    rm -f "$SET"
+    _prompt lm1
+    local out; out="$(cat "$TEST_TMPDIR/prompt.json")"
+    [[ "$out" == *'records 3 Foundation directives but the cache holding them is missing'* ]] || { echo "said: [$out]"; return 1; }
+    [[ "$out" == *'systemMessage'* ]]
+}
+
+@test "#31597 R3 (B2): SessionStart stores an empty set, /mmry:load-memories stores 3, the set is removed: reported missing" {
+    export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE='[{"memoryTier":"Strategic","topic":"Plan","content":"not a directive"}]'
+    _start lm2
+    [ "$(cat "$TEST_TMPDIR/mmry-foundation.stored.lm2")" = "0" ] || { echo "control: SessionStart's marker is not 0"; return 1; }
+
+    export MOCK_CURL_RESPONSE="$_THREE"
+    _load_memories lm2
+    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v2 entries=3 '* ]] || { echo "control: load-memories stored no set"; return 1; }
+
+    export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
+    rm -f "$SET"
+    _prompt lm2
+    local out; out="$(cat "$TEST_TMPDIR/prompt.json")"
+    [[ "$out" == *'records 3 Foundation directives but the cache holding them is missing'* ]] || { echo "said: [$out]"; return 1; }
+}
+
 # ============================================================================
 # TC4
 # ============================================================================
@@ -200,6 +240,19 @@ _EMPTY_WORDS='this account has no Foundation directives'
     [ -z "$output" ] || { echo "part 3 said: $output"; return 1; }
     run bash "$HOOK" --part 1 < "$(_payload tc4f)"
     [[ "$output" == *"$_EMPTY_WORDS"* ]]
+}
+
+# With no session id anywhere, SessionStart's told-marker is the token form, and the prompt hook falls
+# back to it (QA round 3, Q4). Without it the session is told about the empty set twice.
+@test "#31597 TC4: with no session id anywhere, told at SessionStart and not again on the first prompt" {
+    export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE='[{"memoryTier":"Strategic","topic":"Plan","content":"not a directive"}]'
+    printf '{"hook_event_name":"x"}' > "$TEST_TMPDIR/payload-nosid.json"
+    bash "$START" < "$TEST_TMPDIR/payload-nosid.json" > "$TEST_TMPDIR/start-nosid.json" 2>/dev/null
+    run jq -r '.systemMessage // empty' "$TEST_TMPDIR/start-nosid.json"
+    [[ "$output" == *"$_EMPTY_WORDS"* ]] || { echo "control: SessionStart did not tell: $(cat "$TEST_TMPDIR/start-nosid.json")"; return 1; }
+
+    run bash "$HOOK" --part 1 < "$TEST_TMPDIR/payload-nosid.json"
+    [[ "$output" != *"$_EMPTY_WORDS"* ]] || { echo "told again on the first prompt: $output"; return 1; }
 }
 
 # ============================================================================
