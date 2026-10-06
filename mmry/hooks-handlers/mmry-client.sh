@@ -262,7 +262,10 @@ mmry_foundation_set_path() {
 #                                                       names this version of the set
 #                       "absent" or "empty"             rc 1, nothing to deliver, nothing wrong
 #                       "<state>|<customer prose>"      rc 3, refuse
-#   MMRY_FND_SET      on rc 0 only: the verified set, trailing newlines removed as $(<file) would
+#   MMRY_FND_SET      on rc 0 only: the verified set, less the one newline the writer puts after the
+#                     last directive (#31597 r2: a directive's own trailing newlines are kept). A NUL
+#                     the service sent is held here as byte 0xFF, see mmry_write_foundation_cache;
+#                     every delivery turns it back.
 #   MMRY_FND_SETID    on rc 0 only: the set's checksum, which names this version of the set
 # Call it directly, never inside $( ): a command substitution is a subshell, and the set would be
 # lost with it. mmry_verify_foundation_cache is the same check for a caller that needs only the
@@ -369,7 +372,9 @@ mmry_foundation_delivery_detail() {
 # and a set removed before its first delivery in a session would have been silent. So SessionStart
 # leaves this marker after it stores a set, holding the number of directives, and a missing set is
 # reported in the words it always was. It is named by the session, like the delivery record, so a
-# marker left by another session never makes this one claim a loss.
+# marker left by another session never makes this one claim a loss. The writer leaves it itself, on
+# its success path, since #31597 r2: a set stored by the per-prompt refresh needs it as much as one
+# stored by SessionStart.
 mmry_foundation_stored_path() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" key
     key="$(mmry_foundation_session_key "$dir" "${2:-}")" || return 1
@@ -394,6 +399,13 @@ mmry_foundation_stored_entries() {
     n="$(<"$p")" 2>/dev/null || return 1
     [[ "$n" =~ ^[0-9]{1,9}$ ]] || return 1
     printf '%s' "$n"
+}
+
+# ONE OPEN OF THE SET FILE, into the caller's local "raw" (bash scope is dynamic, so no copy is
+# made). Its own function so the three-try retry below can be tested by making it fail on purpose
+# (#31597 r2, TC6): a real rename window cannot be summoned on demand.
+_mmry_fnd_open() {
+    [[ -f "$1" && -r "$1" ]] && raw="$(<"$1")" 2>/dev/null
 }
 
 mmry_read_foundation_set() {
@@ -421,7 +433,7 @@ mmry_read_foundation_set() {
     # place blocked the read, and every prompt with it, until the deadline (#31583 QA round 5).
     local raw="" _try _got=0
     for _try in 1 2 3; do
-        if [[ -f "$cache" && -r "$cache" ]] && raw="$(<"$cache")" 2>/dev/null; then
+        if _mmry_fnd_open "$cache"; then
             _got=1
             break
         fi
@@ -489,10 +501,13 @@ mmry_read_foundation_set() {
         return 3
     fi
 
-    # Delivered exactly as $(<file) delivered the old cache: trailing newlines removed, nothing
-    # else touched. The account page's set-size count relies on that (5 characters of framing per
-    # memory, less the final newline).
-    while [[ "$body" == *$'\n' ]]; do body="${body%$'\n'}"; done
+    # ONE NEWLINE REMOVED, THE WRITER'S OWN (#31597 r2, TC5). jq ends every directive with a
+    # newline, so the set ends with one the service never sent, and that one is removed. Any before
+    # it belong to the last directive and are kept: this used to remove trailing newlines in a loop,
+    # as $(<file) did for the old cache, and a directive ending in two newlines arrived with none.
+    # The account page's set-size count is unchanged by this: 5 characters of framing per memory,
+    # less the final newline.
+    body="${body%$'\n'}"
     MMRY_FND_SET="$body"
     MMRY_FND_SETID="$exp_cksum"
     # The checksum is the verdict's fourth field (#31411 QA round 2): the hook names the set's
@@ -511,13 +526,19 @@ mmry_verify_foundation_cache() {
 }
 
 mmry_write_foundation_cache() {
-    # Usage: mmry_write_foundation_cache <response-json> <set-file>
+    # Usage: mmry_write_foundation_cache <response-json> <set-file> [session-id]
     # Writes the Foundation-tier memories (topic + content) as ONE file: the record line, the set,
     # the trailer. The hook applies framing at inject time, so the set holds just the data.
     #
     # Returns 0 only when the new file is in place. On any failure the EXISTING file is left
     # exactly as it was.
-    local resp="$1" cache="$2"
+    #
+    # THE SESSION ID, when given, is the session the set is stored for: on success the writer leaves
+    # the stored marker for it (#31597 r2, R3). Every writer comes here, SessionStart and the
+    # per-prompt refresh alike, so a set stored by either and removed before its first delivery is
+    # reported missing. Only SessionStart used to leave the marker, so a session whose own fetch
+    # failed and whose set then arrived by refresh lost it in silence.
+    local resp="$1" cache="$2" sid="${3:-}"
     local body tmp entries sum count
 
     [[ -n "${MMRY_JQ:-}" ]] || return 1
@@ -525,10 +546,13 @@ mmry_write_foundation_cache() {
     # WRITE TO TEMPORARY FILES, NEVER STRAIGHT TO THE SET (#31583). A redirect at the final name
     # truncates the customer's good set before jq has said whether it has anything to put there.
     #
-    # NUL BYTES ARE DROPPED HERE (#31597). A memory holding \u0000 would put a NUL in the file,
-    # bash cannot hold one in a variable, and the single read would then come up short and refuse
-    # that account's set on every prompt. The old reader dropped NULs too, at delivery, so the
-    # assistant receives exactly what it did before.
+    # A NUL IS STORED AS BYTE 0xFF, AND DELIVERED AS A NUL (#31597 r2, TC5). bash cannot hold a NUL
+    # in a variable, and the single read holds the set in one, so a NUL in the file would come up
+    # short and the set would be refused on every prompt. Round 1 dropped NULs here, and QA counted
+    # 16 bytes delivered for 17 sent. jq writes only valid UTF-8, and 0xFF is never part of valid
+    # UTF-8, so a 0xFF in the stored set can only be a NUL the service sent. One-for-one, so the
+    # record's byte count is the service's; every delivery turns it back
+    # (mmry_foundation_restore_nul, and the JSON escape in the per-prompt hook).
     body="${cache}.body.$$"
     tmp="${cache}.new.$$"
 
@@ -543,7 +567,8 @@ mmry_write_foundation_cache() {
     [[ "$probe" == *$'\r'* ]] && jqb="-b"
 
     if ! printf '%s' "$resp" \
-        | "$MMRY_JQ" ${jqb:+"$jqb"} -r '[.[] | select(.memoryTier == "Foundation")] | .[] | ("- \(.topic): \(.content)" | explode | map(select(. != 0)) | implode)' \
+        | "$MMRY_JQ" ${jqb:+"$jqb"} -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
+        | LC_ALL=C tr '\000' '\377' \
         > "$body" 2>/dev/null
     then
         rm -f "$body" 2>/dev/null
@@ -571,19 +596,34 @@ mmry_write_foundation_cache() {
     # is no second file to arrive late.
     mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
     MMRY_FND_WRITTEN_ENTRIES="$entries"
+    # The set is in place: record that it was stored for this session (R3, above). A marker that
+    # cannot be written does not undo a stored set, so this cannot fail the write.
+    mmry_foundation_mark_stored "${cache%/*}" "$sid" "$entries" || true
     return 0
 }
 
+# A NUL the service sent is held in the stored set as byte 0xFF (see mmry_write_foundation_cache).
+# Writes $1 to stdout with each 0xFF turned back into a NUL, for a delivery that writes bytes rather
+# than JSON. Costs a process only when the set holds one.
+mmry_foundation_restore_nul() {
+    local LC_ALL=C
+    if [[ "$1" == *$'\xff'* ]]; then
+        printf '%s' "$1" | tr '\377' '\000'
+    else
+        printf '%s' "$1"
+    fi
+}
+
 mmry_refresh_foundation_cache() {
-    # Usage: mmry_refresh_foundation_cache <working-dir> <cache-file>
+    # Usage: mmry_refresh_foundation_cache <working-dir> <cache-file> [session-id]
     # Re-fetches startup memories and rewrites the Foundation cache ONLY on a successful
     # fetch, so an offline/failed refresh never clobbers a good cache. Returns 0 on refresh.
     # Returns 0 only if the cache AND its manifest were actually rewritten (#31583). It
     # previously returned 0 whenever the FETCH succeeded, regardless of what the write did,
     # so a failed write was indistinguishable from a refreshed cache to every caller.
-    local workdir="$1" cache="$2"
+    local workdir="$1" cache="$2" sid="${3:-}"
     if mmry_get_startup_memories "$workdir" >/dev/null 2>&1; then
-        mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache" || return 1
+        mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache" "$sid" || return 1
         return 0
     fi
     return 1

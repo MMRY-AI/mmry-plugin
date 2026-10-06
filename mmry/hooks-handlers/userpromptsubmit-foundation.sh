@@ -264,7 +264,11 @@ _mmry_fnd_json_escape() {
     local LC_ALL=C
     local s="$1" out="" p i=0 n step=16384
     n=${#s}
-    local _cc=$'[\001-\010\013\014\016-\037]' _need=0 _i _ch _hex
+    local _cc=$'[\001-\010\013\014\016-\037]' _need=0 _i _ch _hex _ff=$'\xff' _needff=0
+    # A NUL THE SERVICE SENT, held in the stored set as byte 0xFF (#31597 r2, TC5; see
+    # mmry_write_foundation_cache), goes out as the JSON escape for a NUL. 0xFF is never part of
+    # UTF-8, so nothing else can be mistaken for one. One test decides, as below.
+    [[ "$s" == *"$_ff"* ]] && _needff=1
     # EVERY OTHER CONTROL CHARACTER, BUT ONLY WHEN ONE IS THERE (#31411 QA, R1). JSON forbids
     # raw characters below 0x20 in a string, and only tab, CR and LF used to be escaped, so a
     # form feed pasted from a PDF or a word processor broke the hook's JSON while the product
@@ -285,6 +289,7 @@ _mmry_fnd_json_escape() {
                 p="${p//"$_ch"/\\u00${_hex}}"
             done
         fi
+        (( _needff )) && p="${p//"$_ff"/\\u0000}"
         out+="$p"
         i=$(( i + step ))
     done
@@ -742,10 +747,25 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # watchdog had already let the worker go, so on a large set it alone could carry the turn
     # past the hook budget, where the harness discards the output and nothing is said.
     if [[ ! "$BODY" =~ [^[:space:]] ]]; then
-        # NO EMIT ON THIS PATH: there is nothing to send, so nothing can go missing.
         # Nothing to send, so nothing can go missing in the sending. A verified-empty record
         # is a true answer and is promoted; for toggle-off or no-cache there is no pending
         # record and this is a no-op.
+        #
+        # AN EMPTY SET IS TOLD, ONCE A SESSION (#31597 r2, TC4, Lead/PM decision 2026-10-06). It used
+        # to be silent on every prompt, so the customer was never told unless they ran the status
+        # command. Said on the customer's channel only, and recorded per session in the same marker
+        # SessionStart writes when it told them first, so it is never repeated on later prompts:
+        # #31583 removed the warning on every prompt and that stays removed. With no session id and
+        # no token the marker holds a fixed word, so even then it is said once, not every prompt.
+        if [[ "$_FND_KIND" == *" empty" ]]; then
+            _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
+            [[ -z "$_etok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _etok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _etok=""; }
+            _etok="${_etok:-no-session}"
+            [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
+            if [[ "$_etok" != "$_etold_tok" ]]; then
+                _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
+            fi
+        fi
         if [[ -e "$_PENDING" ]]; then
             mv -f "$_PENDING" "$_STATUS" 2>/dev/null
             _mmry_outcome "ok part 1 of 1"
@@ -867,7 +887,9 @@ if (( MMRY_FND_PART == 1 )) && [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_S
     _lock_age=$(( _now - $(_mmry_mtime "$_lock") ))
     if (( _cache_age >= REFRESH_SECS )) && (( _lock_age >= REFRESH_SECS )); then
         touch "$_lock" 2>/dev/null || true
-        ( mmry_refresh_foundation_cache "$PWD" "$CACHE" >/dev/null 2>&1 & ) 2>/dev/null || true
+        # With this session's id, so the writer leaves the stored marker for THIS session (#31597
+        # r2, R3): a set the refresh stores and that is then removed before delivery is reported.
+        ( mmry_refresh_foundation_cache "$PWD" "$CACHE" "${MMRY_FND_SID:-}" >/dev/null 2>&1 & ) 2>/dev/null || true
     fi
 fi
 
@@ -962,11 +984,13 @@ if (( _verdict == 1 )); then
         fi
         _mmry_fnd_nothing
     fi
-    # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
-    # so it goes on the record the status command reads.
+    # Verified and genuinely empty. Not damage, but it IS an answer, so it goes on the record the
+    # status command reads, and the supervisor is told it was EMPTY rather than merely nothing, so it
+    # can tell the customer once this session (#31597 r2, TC4).
     [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=0 bytes=0
 ' "${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}" > "$STATUS_OUT" 2>/dev/null || true
-    _mmry_fnd_nothing
+    printf '@@MMRY-NONE %s 0 empty@@' "$MMRY_FND_PART"
+    exit 0
 fi
 
 if (( _verdict != 0 )); then
@@ -1177,7 +1201,7 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
     # path is checked to be no directory before the rename and to be a regular file after it, which
     # also catches one made in between, and anything the rename put inside one is removed.
     if [[ ! -d "$_fnd_snap" ]] \
-        && { printf '%s\n\n%s\n' "$content" "$_fnd_end" > "$_fnd_snaptmp"; } 2>/dev/null \
+        && { mmry_foundation_restore_nul "$content" && printf '\n\n%s\n' "$_fnd_end"; } > "$_fnd_snaptmp" 2>/dev/null \
         && mv -f "$_fnd_snaptmp" "$_fnd_snap" 2>/dev/null \
         && [[ -f "$_fnd_snap" ]]; then
         :

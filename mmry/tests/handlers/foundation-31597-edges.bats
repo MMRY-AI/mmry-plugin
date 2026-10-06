@@ -64,7 +64,8 @@ _received() {
 # Wait up to 20 s for the set file to appear (the background refresh writing it).
 _await_set() {
     local i
-    for (( i = 0; i < 100; i++ )); do [ -f "$SET" ] && return 0; sleep 0.2; done
+    # Half a second more once it is there: the writer leaves the stored marker just after the rename.
+    for (( i = 0; i < 100; i++ )); do [ -f "$SET" ] && { sleep 0.5; return 0; }; sleep 0.2; done
     echo "the background refresh never stored a set"; return 1
 }
 
@@ -94,6 +95,27 @@ _show() { echo "expected: $(od -c "$1" | tail -4)"; echo "received: $(od -c "$2"
     [[ "$out" == *'records 2 Foundation directives but the cache holding them is missing'* ]] || { echo "said: [$out]"; return 1; }
     [[ "$out" == *'systemMessage'* ]] || return 1
     [[ "$out" != *'first'* ]]
+}
+
+# The same, with a second session started after the first in the same temp directory, so the shared
+# token names the OTHER session. The refresh must file its marker under the session that ran it, not
+# under whatever the token says.
+@test "#31597 R3: the refresh files its marker under its own session, not the shared token" {
+    export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
+    _start r3a
+    _start r3b
+    [ "$(cat "$TEST_TMPDIR/mmry-foundation.session")" = "r3b" ] || { echo "control: the token is not session b's"; return 1; }
+
+    export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_DELAY=3
+    export MOCK_CURL_RESPONSE='[{"memoryTier":"Foundation","topic":"One","content":"first"},{"memoryTier":"Foundation","topic":"Two","content":"second"}]'
+    _prompt r3a
+    _await_set || return 1
+    unset MOCK_CURL_DELAY
+    [ -f "$TEST_TMPDIR/mmry-foundation.stored.r3a" ] || { echo "no marker for session a"; ls -a "$TEST_TMPDIR"; return 1; }
+
+    rm -f "$SET"
+    _prompt r3a
+    [[ "$(cat "$TEST_TMPDIR/prompt.json")" == *'records 2 Foundation directives but the cache holding them is missing'* ]]
 }
 
 # ============================================================================
