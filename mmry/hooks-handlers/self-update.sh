@@ -132,12 +132,54 @@ if [[ -z "$remote_version" ]]; then
     exit 0
 fi
 
-# Compare versions — if same, no update needed.
-if [[ "$local_version" == "$remote_version" ]]; then
+# Compare versions: update ONLY when the published version is strictly newer (#31245 UAT).
+#
+# This used to be `local == remote`, so any difference meant "update", in either direction. A Mac
+# Codex install of the 2.10.0 branch build was replaced on its first signed-in session with
+# master's 2.9.1, which brought back the 2.9.1 macOS hook defect on every prompt. Anyone whose
+# installed copy is ahead of master's marketplace.json is in the same position, including the
+# minutes after a release while a CDN still serves the old file.
+#
+# Numeric, field by field, so 2.10.0 ranks above 2.9.1 (a string comparison gets that wrong).
+# A pre-release or build suffix (-rc1, +sha) is ignored. A version that is not dotted digits is
+# not guessed at: this is a best-effort background check, and leaving the install alone is the
+# outcome that cannot do harm.
+_mmry_version_core() {
+    local v="${1%%[-+]*}"
+    [[ "$v" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
+    printf '%s' "$v"
+}
+
+# Returns 0 when $1 is strictly newer than $2, 1 when it is not, 2 when either is unparseable.
+_mmry_version_newer() {
+    local a b ai bi i n
+    a="$(_mmry_version_core "$1")" || return 2
+    b="$(_mmry_version_core "$2")" || return 2
+    local IFS=.
+    local -a av=($a) bv=($b)
+    n=${#av[@]}; (( ${#bv[@]} > n )) && n=${#bv[@]}
+    for (( i = 0; i < n; i++ )); do
+        ai=$(( 10#${av[i]:-0} )); bi=$(( 10#${bv[i]:-0} ))
+        (( ai > bi )) && return 0
+        (( ai < bi )) && return 1
+    done
+    return 1
+}
+
+newer_rc=0
+_mmry_version_newer "$remote_version" "$local_version" || newer_rc=$?
+if (( newer_rc == 2 )); then
+    log "cannot compare versions '${local_version}' and '${remote_version}'; leaving the install alone"
+    exit 0
+fi
+if (( newer_rc != 0 )); then
+    if [[ "$local_version" != "$remote_version" ]]; then
+        log "installed ${local_version} is newer than published ${remote_version}; not downgrading"
+    fi
     exit 0
 fi
 
-# Version mismatch — download and apply update.
+# Published version is newer — download and apply update.
 tmp_archive="$(mktemp "${TMPDIR}/mmry-update-XXXXXX.tar.gz")"
 tmp_extract="$(mktemp -d "${TMPDIR}/mmry-update-XXXXXX")"
 
