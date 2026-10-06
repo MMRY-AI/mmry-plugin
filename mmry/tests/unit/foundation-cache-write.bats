@@ -170,15 +170,45 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
     [ "$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')" -eq 0 ]
 }
 
-@test "write_foundation_cache: #31597 a NUL inside a memory is dropped, so the set still verifies" {
-    # bash cannot hold a NUL in a variable, so a set containing one could never pass the single
-    # read: it would be refused on every prompt for as long as the memory existed. The old reader
-    # dropped NULs at delivery, so the assistant receives what it always did.
+@test "write_foundation_cache: #31597 r2 a NUL inside a memory is kept, and the set still verifies" {
+    # bash cannot hold a NUL in a variable, and the single read holds the set in one. So the writer
+    # stores each NUL as byte 0xFF, which UTF-8 never contains and jq therefore never writes, and
+    # every delivery turns it back into a NUL. Round 1 dropped it, and QA counted 16 bytes for 17.
     local resp='[{"memoryTier":"Foundation","topic":"Odd","content":"before\u0000after"}]'
     run mmry_write_foundation_cache "$resp" "$CACHE"
     [ "$status" -eq 0 ]
+    fnd_set_body "$CACHE" > "$TEST_TMPDIR/body.bin"
+    printf -- '- Odd: before\377after\n' > "$TEST_TMPDIR/want.bin"
+    cmp "$TEST_TMPDIR/want.bin" "$TEST_TMPDIR/body.bin" || { od -c "$TEST_TMPDIR/body.bin"; return 1; }
     mmry_read_foundation_set "$CACHE" || { echo "refused: $MMRY_FND_VERDICT"; return 1; }
-    [[ "$MMRY_FND_SET" == *'beforeafter'* ]]
+    [[ "$MMRY_FND_SET" == *'before'$'\xff''after'* ]]
+}
+
+# R3 (#31597 round 2): the writer leaves the evidence that a set was stored, for the session it was
+# given, on its success path. Every writer: SessionStart and the per-prompt refresh both come here.
+@test "write_foundation_cache: #31597 r2 a successful write records the set as stored for the session it was given" {
+    run mmry_write_foundation_cache "$(_resp)" "$CACHE" sess-w1
+    [ "$status" -eq 0 ]
+    [ -f "$TEST_TMPDIR/mmry-foundation.stored.sess-w1" ] || { ls -a "$TEST_TMPDIR"; return 1; }
+    run mmry_foundation_stored_entries "$TEST_TMPDIR" sess-w1
+    [ "$status" -eq 0 ] && [ "$output" = "2" ]
+}
+
+@test "write_foundation_cache: #31597 r2 a failed write records nothing as stored" {
+    run mmry_write_foundation_cache 'not json' "$CACHE" sess-w2
+    [ "$status" -ne 0 ]
+    [ ! -e "$TEST_TMPDIR/mmry-foundation.stored.sess-w2" ]
+}
+
+@test "write_foundation_cache: #31597 r2 the refresh passes its session on to the writer" {
+    load '../helpers/mock-config'
+    setup_mock_curl
+    export MOCK_CURL_RESPONSE='[{"memoryTier":"Foundation","topic":"A","content":"a"},{"memoryTier":"Foundation","topic":"B","content":"b"},{"memoryTier":"Foundation","topic":"C","content":"c"}]'
+    export MOCK_CURL_HTTP_CODE=200
+    run mmry_refresh_foundation_cache "$TEST_TMPDIR" "$CACHE" sess-w3
+    [ "$status" -eq 0 ] || return 1
+    run mmry_foundation_stored_entries "$TEST_TMPDIR" sess-w3
+    [ "$status" -eq 0 ] && [ "$output" = "3" ]
 }
 
 # ============================================================================

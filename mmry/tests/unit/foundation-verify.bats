@@ -177,3 +177,75 @@ _state()  { printf '%s' "${1%%|*}"; }
     # Customer-facing, so it must read as a sentence rather than a token.
     [ "${#prose}" -gt 20 ]
 }
+
+# ============================================================================
+# #31597 round 2, TC6: checks QA named that no test could see broken.
+# ============================================================================
+
+# The record pattern is anchored at its end. Without the anchor a record line carrying anything after
+# its checksum would be believed, and the extra text with it.
+@test "verify: #31597 a record line with anything after its checksum is not a record" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    local s b
+    read -r s b < <(cksum < "$CACHE")
+    { printf 'mmry-foundation v2 entries=1 bytes=%s cksum=%s trailing\n' "$b" "$s"; cat "$CACHE"; printf 'END OF FOUNDATION SET'; } > "$SET"
+    run mmry_verify_foundation_cache "$SET"
+    [ "$status" -eq 3 ] || { echo "accepted: $output"; return 1; }
+    [ "$(_state "$output")" = "bad-manifest" ]
+}
+
+# A file that is ONE line, a well-formed record with no newline after it, has no set at all. It is
+# refused as an unreadable record, not read as a record whose set is the record itself.
+@test "verify: #31597 a lone record line with no newline is refused as bad-manifest" {
+    printf 'mmry-foundation v2 entries=0 bytes=0 cksum=4294967295' > "$SET"
+    run mmry_verify_foundation_cache "$SET"
+    [ "$status" -eq 3 ] || { echo "accepted: $output"; return 1; }
+    [ "$(_state "$output")" = "bad-manifest" ]
+}
+
+# An open that fails during a replacement is tried again, up to three times in all, and no more. The
+# open is its own function so a test can make it fail on purpose; a real rename window cannot be
+# summoned on demand.
+@test "verify: #31597 an open that fails twice and then works is retried and verifies" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    fnd_seal "$CACHE" 1
+    _OPENS=0
+    eval "_real_open() $(declare -f _mmry_fnd_open | tail -n +2)"
+    _mmry_fnd_open() { _OPENS=$(( _OPENS + 1 )); (( _OPENS < 3 )) && return 1; _real_open "$@"; }
+    mmry_read_foundation_set "$SET" || { echo "refused after $_OPENS opens: $MMRY_FND_VERDICT"; return 1; }
+    [ "$_OPENS" -eq 3 ]
+}
+
+@test "verify: #31597 an open that never works is tried three times, then reported, not looped on" {
+    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
+    fnd_seal "$CACHE" 1
+    _OPENS=0
+    _mmry_fnd_open() { _OPENS=$(( _OPENS + 1 )); return 1; }
+    local rc=0
+    mmry_read_foundation_set "$SET" || rc=$?
+    [ "$rc" -eq 3 ] || { echo "rc $rc: $MMRY_FND_VERDICT"; return 1; }
+    [ "$(_state "$MMRY_FND_VERDICT")" = "unreadable" ] || return 1
+    [ "$_OPENS" -eq 3 ]
+}
+
+# The stored marker is believed only when it is digits.
+@test "verify: #31597 a stored marker that is not digits is no marker" {
+    local m
+    for m in '1+1' 'abc' '2 3' '-4' 'x[0]' ''; do
+        printf '%s' "$m" > "$TEST_TMPDIR/mmry-foundation.stored.sidx"
+        run mmry_foundation_stored_entries "$TEST_TMPDIR" sidx
+        [ "$status" -eq 1 ] || { echo "believed [$m] as [$output]"; return 1; }
+    done
+    printf '%s' '7' > "$TEST_TMPDIR/mmry-foundation.stored.sidx"
+    run mmry_foundation_stored_entries "$TEST_TMPDIR" sidx
+    [ "$status" -eq 0 ] && [ "$output" = "7" ]
+}
+
+# TC5: the reader removes ONE trailing newline, the one the writer puts after the last directive, and
+# keeps any the directive itself ends with.
+@test "verify: #31597 a set whose last directive ends in newlines keeps them, less the writer's one" {
+    printf -- '- A: one\n- B: two\n\n\n' > "$CACHE"
+    fnd_seal "$CACHE" 2
+    mmry_read_foundation_set "$SET" || return 1
+    [ "$MMRY_FND_SET" = $'- A: one\n- B: two\n\n' ] || { echo "got: $(printf '%s' "$MMRY_FND_SET" | od -c)"; return 1; }
+}
