@@ -728,7 +728,7 @@ mutate_m66() {
     _mrep "$1/$CLIENT_REL" '    if [[ "$header" == "$raw" || ! "$header" =~ $re ]]; then' '    if false; then'
 }
 file_m66="$CLIENT_REL"
-targets_m66="$VERIFY_TESTS $HANDLER_TESTS"
+targets_m66="$VERIFY_TESTS"
 desc_m66="#31597 X11 a set file with no record line is not refused for it"
 
 # R3. The per-prompt refresh stops passing its session to the writer, so the marker is filed under the
