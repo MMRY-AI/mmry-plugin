@@ -1,0 +1,8 @@
+== TC1 + R3/R6: Windows, stock PATH (System32, Windows, WindowsPowerShell, Git cmd folder; no sh on PATH), registrations at this branch. Self-update held off; installed handlers identical to the branch after the run.
+codex cli_version: 0.154.0
+rollout file: rollout-2026-10-02T18-48-16-01a0ff72-9c40-79e2-a688-1db1770deac1.jsonl
+  2026-10-03T01:48:22.018Z  developer (hook) : MMRY AI loaded 14 memories. Read them now: C:\Users\<user>\AppData\Local\Temp\mmry-memories.md
+  2026-10-03T01:48:24.101Z  user             : Reply with the single word READY.
+  2026-10-03T01:48:24.130Z  developer (hook) : The following are the account's FOUNDATION memories - author ... [Foundation memory contents removed]
+  2026-10-03T01:48:27.946Z  assistant        : I’ll read the required memories and check the UTC timestamp.
+  2026-10-03T01:48:41.344Z  assistant        : READY  2026-10-03 01:48:36 UTC

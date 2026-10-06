@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# userpromptsubmit-foundation.sh — UserPromptSubmit hook (#30579, #31434).
+# userpromptsubmit-foundation.sh, UserPromptSubmit hook (#30579, #31434).
 #
 # Re-injects the account's Foundation-tier memories inline on EVERY prompt, framed as
 # authoritative directives, from a session-local cache written at SessionStart
@@ -19,7 +19,7 @@
 #   - Opt-out. foundationReinject=false (config or env) makes this a no-op.
 #   - BOUNDED WALL CLOCK, and it says so when it fails (#31434). See below.
 #
-# #31434 — why this file is split into a supervisor and a worker.
+# #31434, why this file is split into a supervisor and a worker.
 #
 # When a hook exceeds its hooks.json timeout, Claude Code kills it and DISCARDS its
 # output. For this hook that means the turn silently runs with none of the account's
@@ -46,7 +46,7 @@
 #      on the NEXT firing and reported then. Belt and braces, because a silent loss is the
 #      whole defect.
 
-# NOTE: deliberately NOT `set -e` — a failure here must never fail the user's prompt.
+# NOTE: deliberately NOT `set -e`, a failure here must never fail the user's prompt.
 set -uo pipefail 2>/dev/null || true
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -410,7 +410,7 @@ _mmry_emit() {
 source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
 
 # ============================================================================
-# SUPERVISOR — bounds the wall clock and owns everything the customer sees.
+# SUPERVISOR, bounds the wall clock and owns everything the customer sees.
 # ============================================================================
 if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # This handler's contract is "one JSON object on stdout, or nothing at all". It has no
@@ -434,6 +434,60 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # ticket needed three reports before anyone could act on it.
     _FOUND_LOG="${_FOUND_TMPDIR}/mmry-foundation.log"
 
+    # A HOST WITH NO CREDENTIAL OF ITS OWN IS SILENT, NOT ALARMING (#31245 QA round 4).
+    #
+    # THE DEFECT. On an unconfigured Codex install this handler fired on every prompt and exited
+    # 1 with zero bytes. The chain: the worker sources mmry-client.sh, which sources lib-jq.sh,
+    # which asks lib-host.sh whether this host has its own credential; on Codex with none, that
+    # refuses with `exit 1` rather than returning non-zero, so the worker's own
+    # `|| exit 0` never sees it and the worker dies with rc=1.
+    #
+    # AND AFTER #31434 IT GOT WORSE, NOT BETTER. The new supervisor cannot tell that apart from a
+    # broken install, so rc=1 took the crash branch and printed, on EVERY prompt: "the loader
+    # exited with code 1 ... the usual cause is an incomplete plugin install. Run
+    # /mmry:load-memories ... or set foundationReinject to false in ~/.claude/mmry-config.json."
+    # A slash command Codex customers cannot type, the OTHER product's config file, and a cause
+    # that is not true. A silent exit became a wrong, alarming, every-prompt message. Reproduced
+    # on this branch after the merge, 838 bytes of it.
+    #
+    # THE FIX IS THE ONE formation-check.sh ALREADY MAKES, at its line 111, for the same reason
+    # and in the same words: the refusal is correct for a handler the MODEL runs, where a human
+    # reads the message and acts on it, and wrong for a hook that fires unattended on every
+    # prompt, whose governing rule is to fail open and silent. So the question is asked HERE,
+    # before anything can answer it wrongly, and answered with exit 0.
+    #
+    # ON CLAUDE CODE THIS IS A NO-OP by construction: mmry_host_assert_own_credential returns 0
+    # immediately unless the host is codex, so no existing install changes behaviour.
+    #
+    # ONLY AN EXPLICIT REFUSAL STOPS US. A MISSING lib-host.sh MUST NOT. hook-guard.sh documents
+    # why: this script runs from a directory somebody else assembled, and a curated copy without
+    # the resolver exists in the test suite today. Treating "could not ask" as "refuse" would
+    # silently switch Foundation re-injection off for anyone with such a copy - trading a Codex
+    # bug for a Claude one. The two outcomes are therefore kept distinct rather than collapsed
+    # into one exit status.
+    #
+    # SOURCED IN THIS SHELL, NOT A SUBSHELL, because `$(...)` is a fork and this runs on every
+    # prompt - #31434 spent real effort getting forks off this path and this must not put one
+    # back. The only thing that has to be undone afterwards is lib-host.sh's `set -e`: this
+    # handler deliberately runs without it, because a failure here must never fail the
+    # customer's prompt. -u and pipefail are already on from line 46, so `set +e` restores
+    # exactly the options this file chose.
+    if [[ -f "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" >/dev/null 2>&1
+        set +e
+        if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
+            if ! mmry_host_assert_own_credential >/dev/null 2>&1; then
+                exit 0
+            fi
+        fi
+    fi
+
+    # AFTER lib-host.sh, NOT BEFORE IT (#31245 QA). The off switch decides whether the Claude
+    # config may be read, and on Codex the answer comes from the host, which lib-host.sh settles.
+    # Asked before it, a copy run without MMRY_HOST exported could consult the Claude file.
+    # codex-hook.sh exports it for every hook, so this was safe on every shipped path; it is
+    # now safe by order as well.
     # THE OFF SWITCH, honoured HERE and not only in the worker (#31434 QA).
     #
     # The crash notice below tells the customer to set foundationReinject false. That advice
@@ -478,7 +532,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=10
 
     # A marker left behind by a previous firing means that firing never reached its own
-    # exit — the harness killed the whole handler — so that turn ran without directives
+    # exit, the harness killed the whole handler, so that turn ran without directives
     # and nobody was told. Report it now.
     MISSED_PREVIOUS=0
     [[ -f "$_INFLIGHT" ]] && MISSED_PREVIOUS=1
@@ -619,6 +673,36 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # emit instead costs nothing and restores the guarantee: a firing killed anywhere, in the
     # worker or in the emit, leaves the marker, and the next turn says so.
 
+    # THE REMEDIES AND THE PRODUCT NAME, PER HOST (#31245 merged onto #31411).
+    #
+    # #31411 added three customer messages to this file that the Codex work had never seen: the
+    # refusal and upgrade notices, which named /mmry:load-memories and /mmry:foundation-status, and
+    # the by-reference notice, which said the set was "larger than Claude Code lets a plugin show".
+    # On Codex there is nothing to type and the product is not Claude Code. The deadline and crash
+    # notices below already derived their references; this is that derivation, moved into one place
+    # so every notice in the file takes it from the same source. Called only on paths that are
+    # already reporting something, so the forks never land on an ordinary prompt. The literals are
+    # the fallback for a copy with no lib-host.sh, and are what Claude Code customers see, byte for
+    # byte (requirement 4).
+    _fnd_host_refs() {
+        local _x=""
+        _FOUND_RELOAD_REF='/mmry:load-memories'
+        _FOUND_CONFIG_REF='~/.claude/mmry-config.json'
+        _FOUND_STATUS_REF='/mmry:foundation-status'
+        _FOUND_HOST_LABEL='Claude Code'
+        if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+            _FOUND_RELOAD_REF="$(mmry_host_command_ref load-memories)"
+            _x="$(mmry_host_command_ref foundation-status)" && [[ -n "$_x" ]] && _FOUND_STATUS_REF="$_x"
+        fi
+        if declare -F mmry_host_config_file_ref >/dev/null 2>&1; then
+            _FOUND_CONFIG_REF="$(mmry_host_config_file_ref)"
+        fi
+        if declare -F mmry_host_label >/dev/null 2>&1; then
+            _x="$(mmry_host_label)" && [[ -n "$_x" ]] && _FOUND_HOST_LABEL="$_x"
+        fi
+        return 0
+    }
+
     # THE CACHE WAS THERE AND COULD NOT BE TRUSTED (#31583).
     #
     # Distinct from both a crash and a deadline, and it needs its own words: nothing was
@@ -671,7 +755,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
                 ;;
         esac
         NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run /mmry:load-memories to rebuild it, then /mmry:foundation-status to confirm.}"
+        _fnd_host_refs
+        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run ${_FOUND_RELOAD_REF} to rebuild it, then ${_FOUND_STATUS_REF} to confirm.}"
         # A PART 2-6 THAT REFUSES SAYS SO ON THE TURN (#31583 QA round 3, R3, architecture P4). It used
         # to stay silent on the grounds that a refusal is about the whole set and part 1 reports it. When
         # the set is damaged as a whole, that is true. When it changed between part 1's check and this
@@ -708,12 +793,36 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 
     if (( WORKER_RC != 0 )); then
         # The turn proceeds either way; what matters is that the customer is told, in terms
-        # they can act on, that this turn is running WITHOUT their standing directives — and
+        # they can act on, that this turn is running WITHOUT their standing directives, and
         # told the RIGHT thing. A crash and a deadline need different remedies, so they are
         # reported as different events rather than both as "it was slow".
+
+        # AND "IN TERMS THEY CAN ACT ON" MEANS THE HOST'S TERMS (#31245 QA round 6).
+        #
+        # THE DEFECT. Both notices below named "/mmry:load-memories" and
+        # "~/.claude/mmry-config.json". On Codex the first is a command that cannot be typed and
+        # the second is the OTHER PRODUCT'S file - on a Codex-only machine, a file that does not
+        # exist. So the two remedies offered for a message the customer sees on a failing prompt
+        # were both uncarryable. Reproduced at 725 bytes on a CONFIGURED Codex install that hit
+        # the deadline.
+        #
+        # THIS IS THE SAME DEFECT AS THE ONE FIXED FORTY LINES ABOVE, IN THIS FILE, IN ROUND 4.
+        # That fix made an UNCONFIGURED Codex install exit silently instead of printing this
+        # text. It did nothing for a CONFIGURED one, which still reaches here on any worker
+        # failure - and a configured install is the ordinary case, not the edge. Fixing the
+        # branch somebody looked at and leaving its sibling is the recurring shape of this task,
+        # which is why the reference is now DERIVED rather than written out again.
+        #
+        # RESOLVED HERE, INSIDE THE FAILURE BRANCH, so the forks are paid only on a prompt that
+        # has already failed - never on the per-prompt success path #31434 spent real effort
+        # clearing. lib-host.sh was sourced into THIS shell near the top of the supervisor, so
+        # the functions are already defined; the guard covers the curated-copy case documented
+        # there, and its fallback is the literal this file has always carried, byte for byte,
+        # which is requirement 4.
+        _fnd_host_refs
         if (( HIT_DEADLINE == 1 )); then
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: loading exceeded ${DEADLINE}s and was stopped so the prompt would not stall. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run /mmry:load-memories to rebuild the local cache, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn (loading took over ${DEADLINE}s and was stopped). Re-send the prompt to try again. If it keeps happening, run ${_FOUND_RELOAD_REF} to rebuild the local cache, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
             _FOUND_EVENT="deadline exceeded (${DEADLINE}s), worker killed"
             _FOUND_OUTCOME="deadline ${DEADLINE}"
         else
@@ -721,7 +830,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             # false cause, an invented duration, and a remedy (re-send the prompt) that cannot
             # work, because whatever made the worker exit non-zero will do it again.
             NOTICE="MMRY AI could not load this account's FOUNDATION directives for this turn: the loader failed with exit code ${WORKER_RC}. This was a failure, not a slow turn. This turn is running WITHOUT the account's standing directives. Do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run /mmry:load-memories to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ~/.claude/mmry-config.json to turn re-injection off."
+            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn — the loader exited with code ${WORKER_RC}. This is a failure rather than a slow load, so re-sending the prompt will not help; the usual cause is an incomplete plugin install. Run ${_FOUND_RELOAD_REF} to rebuild the local cache, reinstall the plugin if that fails, or set foundationReinject to false in ${_FOUND_CONFIG_REF} to turn re-injection off."
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
             _FOUND_OUTCOME="crash"
         fi
@@ -740,7 +849,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     fi
 
     # Worker finished inside the deadline with nothing to inject (toggle off, no cache,
-    # empty cache). Nothing was lost, so say nothing — including about a previous miss,
+    # empty cache). Nothing was lost, so say nothing, including about a previous miss,
     # which would be a false alarm when there are no directives to apply.
     # Same fix as the verifier's blank check, for the same measured reason (#31411 QA): this
     # was a whole-set rewrite costing 8,306 ms at 400 KB and sat OUTSIDE every guard, after the
@@ -764,6 +873,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _etok="${_etok:-no-session}"
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
             if [[ "$_etok" != "$_etold_tok" ]]; then
+                _fnd_host_refs
+                _mmry_fnd_set_empty_notice "$_FOUND_STATUS_REF"
                 _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
             fi
         fi
@@ -800,7 +911,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         [[ -z "$_tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
-            USERMSG="MMRY AI: your Foundation set is larger than Claude Code lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
+            _fnd_host_refs
+            USERMSG="MMRY AI: your Foundation set is larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
             # Written to a temporary file and renamed into place (#31411 QA round 3, N2): writing
             # straight to it blocked on a FIFO planted at this name, and the rename replaces one.
             _mmry_fnd_write "$_told" "$_tok" || true
@@ -830,7 +942,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 fi
 
 # ============================================================================
-# WORKER — the real work. Writes PLAIN TEXT to stdout; the supervisor does the
+# WORKER, the real work. Writes PLAIN TEXT to stdout; the supervisor does the
 # JSON. Anything that goes wrong here means "emit nothing", never "fail".
 # ============================================================================
 
@@ -840,7 +952,7 @@ fi
 _MMRY_ENV_REINJECT="${MMRY_FOUNDATION_REINJECT-}"
 
 # Source the client for MMRY_TMPDIR + config parsing. It runs `set -euo pipefail` at the
-# top, so relax those options again immediately after — we must not fail the prompt.
+# top, so relax those options again immediately after, we must not fail the prompt.
 # shellcheck disable=SC1091
 # A CLIENT THAT WILL NOT LOAD IS A FAILURE (#31583 QA round 3, R4(b)). It used to exit 0, which the
 # supervisor reads as "nothing to send", so the customer was told nothing and the previous prompt's
@@ -1215,7 +1327,11 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
     # mutation m27 (the path set to the live cache) changed nothing on Windows and survived there.
     _fnd_path="$_fnd_snap"
     command -v cygpath >/dev/null 2>&1 && _fnd_path="$(cygpath -w "$_fnd_path" 2>/dev/null || printf '%s' "$_fnd_path")"
-    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than Claude Code lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool, in pieces if it limits how much one read returns; you may need to ask the user for permission to read it. It is a copy of the complete, verified set, made for this turn: ${_fnd_path}
+    # The product named is the one this host is (#31245 merged onto #31411): Codex spills a hook
+    # over 10,000 bytes to a file much as Claude Code previews one over 10,000 characters.
+    _fnd_lbl='Claude Code'
+    if declare -F _mmry_host_resolve >/dev/null 2>&1; then _mmry_host_resolve; _fnd_lbl="${_MMRY_HOST_LABEL_V:-$_fnd_lbl}"; fi
+    _payload="The account's FOUNDATION memories - authoritative directives that take precedence over defaults - are too large to show here: the complete set is ${_act_bytes} bytes, more than ${_fnd_lbl} lets a plugin show on one prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters). BEFORE YOU ANSWER, read this file in full with your file-reading tool, in pieces if it limits how much one read returns; you may need to ask the user for permission to read it. It is a copy of the complete, verified set, made for this turn: ${_fnd_path}
 Its last line is \"${_fnd_end}\". If you cannot read the file, or you do not reach that line, tell the user plainly that their Foundation directives were not applied to this turn. If a response would conflict with any directive in it, follow the directive."
     printf '@@MMRY-BYREF %s@@' "$_fnd_n"
 elif (( MMRY_FND_PART > _fnd_n )); then

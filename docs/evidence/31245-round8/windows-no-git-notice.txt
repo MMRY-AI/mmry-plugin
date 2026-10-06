@@ -1,0 +1,6 @@
+== Windows, launcher unable to find Git anywhere (installed launcher edited to search names that do not exist). The notice comes from codex-hook.cmd, which self-update does not replace.
+codex cli_version: 0.154.0
+rollout file: rollout-2026-10-02T18-02-27-01a0ff48-a94c-72d3-8402-defe14c0d88b.jsonl
+  2026-10-03T01:02:29.368Z  developer (hook) : MMRY AI could not start on this Windows machine: Git for Windows was not found. Install it from https://gitforwindows.org with its default options, then start a new session.
+  2026-10-03T01:02:30.075Z  user             : Reply with the single word READY.
+  2026-10-03T01:02:32.320Z  assistant        : READY

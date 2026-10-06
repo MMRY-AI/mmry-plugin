@@ -43,6 +43,26 @@ source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || {
 set +e +u
 mmry_load_config 2>/dev/null || true
 
+# THE REMEDIES THIS COMMAND OFFERS ARE THE HOST'S OWN (#31245 merged onto #31411). On Codex there
+# is no slash command to type, no ~/.claude, and the product is not Claude Code; the session-init
+# copy of this script sits beside the others, so the model runs it by path like every Codex
+# command. The literals are the fallback for a copy with no lib-host.sh and are exactly what
+# Claude Code customers have always seen (requirement 4).
+_FS_RELOAD='/mmry:load-memories'
+_FS_STATUS='/mmry:foundation-status'
+_FS_CONFIG='~/.claude/mmry-config.json'
+_FS_HOST='Claude Code'
+if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+    _fs_x="$(mmry_host_command_ref load-memories)" && [[ -n "$_fs_x" ]] && _FS_RELOAD="$_fs_x"
+    _fs_x="$(mmry_host_command_ref foundation-status)" && [[ -n "$_fs_x" ]] && _FS_STATUS="$_fs_x"
+fi
+if declare -F mmry_host_config_file_ref >/dev/null 2>&1; then
+    _fs_x="$(mmry_host_config_file_ref)" && [[ -n "$_fs_x" ]] && _FS_CONFIG="$_fs_x"
+fi
+if declare -F mmry_host_label >/dev/null 2>&1; then
+    _fs_x="$(mmry_host_label)" && [[ -n "$_fs_x" ]] && _FS_HOST="$_fs_x"
+fi
+
 CACHE="${MMRY_TMPDIR}/mmry-foundation-set.md"
 # THIS SESSION, by its own id (#31583 QA round 6, R4(c)). The command runtime provides
 # CLAUDE_CODE_SESSION_ID; the per-prompt hook reads the same id from its payload, so both file this
@@ -86,7 +106,7 @@ source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
 if MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here; then
     echo "Re-injection is TURNED OFF (foundationReinject=${MMRY_REINJECT_MATCHED_VALUE:-false})."
     echo "Your Foundation directives are NOT being sent to your assistant on each prompt."
-    echo "Set foundationReinject to true in ~/.claude/mmry-config.json to turn it back on."
+    echo "Set foundationReinject to true in ${_FS_CONFIG} to turn it back on."
     exit 0
 fi
 # Not "re-sent on every prompt" (#31411 QA round 3): a set too large to show is not sent at all,
@@ -117,16 +137,16 @@ if (( _verdict == 1 )); then
         if mmry_foundation_delivered_this_session "$MMRY_TMPDIR" "$_sid"; then
             echo "Stored copy:  DISAPPEARED - it was delivered in this session and is now gone."
             echo "              It is being REFUSED, not used."
-            echo "Action:       run /mmry:load-memories to rebuild it."
+            echo "Action:       run ${_FS_RELOAD} to rebuild it."
         elif _stored="$(mmry_foundation_stored_entries "$MMRY_TMPDIR" "$_sid")" && (( _stored > 0 )); then
             # Stored in this session, never delivered, now gone (#31597): the words the manifest
             # produced when it was a separate file and outlived the set.
             echo "Stored copy:  MISSING - the manifest records ${_stored} Foundation directives but the cache holding them is missing."
             echo "              It is being REFUSED, not used."
-            echo "Action:       run /mmry:load-memories to rebuild it."
+            echo "Action:       run ${_FS_RELOAD} to rebuild it."
         else
             echo "Stored copy:  NOT LOADED YET in this session."
-            echo "Action:       run /mmry:load-memories, or start a new session."
+            echo "Action:       run ${_FS_RELOAD}, or start a new session."
         fi
     else
         echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
@@ -151,7 +171,7 @@ if (( _verdict != 0 )); then
     esac
     echo "Stored copy:  ${_label} - ${_prose}."
     echo "              It is being REFUSED, not used."
-    echo "Action:       run /mmry:load-memories to rebuild it."
+    echo "Action:       run ${_FS_RELOAD} to rebuild it."
     exit 0
 fi
 
@@ -268,25 +288,25 @@ _why_and_action() {
     _WHY="" _ACTION=""
     if [[ "$code" =~ ^deadline\ ([0-9]{1,4})$ ]]; then
         _WHY="loading them took longer than the ${BASH_REMATCH[1]}s limit and was stopped"
-        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+        _ACTION="re-send the prompt. If it keeps happening, run ${_FS_RELOAD}."
     elif [[ "$code" == "crash" ]]; then
         _WHY="the loader failed before it finished"
-        _ACTION="re-sending will not help. Run /mmry:load-memories, and reinstall the plugin if that fails."
+        _ACTION="re-sending will not help. Run ${_FS_RELOAD}, and reinstall the plugin if that fails."
     elif [[ "$code" == "emit" ]]; then
-        _WHY="they were prepared but could not be handed to Claude Code"
-        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+        _WHY="they were prepared but could not be handed to ${_FS_HOST}"
+        _ACTION="re-send the prompt. If it keeps happening, run ${_FS_RELOAD}."
     elif [[ "$code" == "unfinished" ]]; then
         _WHY="the loader ended without recording what it sent"
-        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+        _ACTION="re-send the prompt. If it keeps happening, run ${_FS_RELOAD}."
     elif [[ "$code" == "refused unwritable" ]]; then
         _WHY="the copy prepared for your assistant to read could not be written, so nothing was sent"
         _ACTION="re-send the prompt. If it keeps happening, check that your temp folder can be written to and has free space."
     elif [[ "$code" =~ ^refused($|\ [a-z-]{1,20}$) ]]; then
         _WHY="the stored copy could not be verified, so it was refused rather than used"
-        _ACTION="run /mmry:load-memories to rebuild it."
+        _ACTION="run ${_FS_RELOAD} to rebuild it."
     else
         _WHY="the reason was not recorded"
-        _ACTION="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+        _ACTION="re-send the prompt. If it keeps happening, run ${_FS_RELOAD}."
     fi
 }
 
@@ -340,7 +360,7 @@ elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([1-9])(\ set\ ([0-9]{1,10}))?$ ]] && (( BAS
         _ok="$(_outcome "$(_sfx "$_k")")"
         if _cut_short "$(_sfx "$_k")"; then
             _missing="${_missing}; part ${_k} was stopped before it finished"
-            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt. If it keeps happening, run ${_FS_RELOAD}."
         elif [[ -n "$_set1" && "$_ok" == "ok part ${_k} of ${_n} set ${_set1}" ]]; then
             _got=$(( _got + 1 ))
         elif [[ "$_ok" =~ ^ok\ part\ ${_k}\ of\ [1-9]\ set\ [0-9]{1,10}$ ]]; then
@@ -354,7 +374,7 @@ elif [[ "$_o1" =~ ^ok\ part\ 1\ of\ ([1-9])(\ set\ ([0-9]{1,10}))?$ ]] && (( BAS
             [[ -n "$_partly_action" ]] || _partly_action="$_ACTION"
         else
             _missing="${_missing}; part ${_k} has no record of arriving"
-            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt. If it keeps happening, run /mmry:load-memories."
+            [[ -n "$_partly_action" ]] || _partly_action="re-send the prompt. If it keeps happening, run ${_FS_RELOAD}."
         fi
     done
     (( _got < _n )) && _partly="${_got} of ${_n} parts arrived${_missing}"
@@ -365,23 +385,23 @@ fi
 if [[ -n "$_failed_why" ]]; then
     echo "Delivered:    NOT on the most recent prompt - ${_failed_why}."
     echo "              ${_failed_line2:-That prompt ran without your Foundation directives.}"
-    echo "Action:       ${_failed_action:-re-send the prompt. If it keeps happening, run /mmry:load-memories.}"
+    echo "Action:       ${_failed_action:-re-send the prompt. If it keeps happening, run ${_FS_RELOAD}.}"
 elif [[ -n "$_partly" ]]; then
     echo "Delivered:    PARTLY on the most recent prompt - ${_partly}."
     echo "              That prompt ran without part of your Foundation directives."
     echo "Action:       ${_partly_action}"
 elif [[ -n "$_byref" ]]; then
-    echo "Delivered:    BY REFERENCE on the most recent prompt. Your set is larger than Claude Code lets"
+    echo "Delivered:    BY REFERENCE on the most recent prompt. Your set is larger than ${_FS_HOST} lets"
     echo "              a plugin show on each prompt (${_parts_max} parts of under 10,000 characters), so"
     echo "              your assistant was pointed to the full copy and asked to read it. That relies on"
     echo "              the assistant opening the file, and it may need your permission to read it."
 elif [[ -n "$_unknown" ]]; then
     echo "Delivered:    UNKNOWN for the most recent prompt - its record could not be read, so it cannot"
     echo "              be shown that your Foundation directives reached your assistant."
-    echo "Action:       re-send the prompt, then run /mmry:foundation-status again."
+    echo "Action:       re-send the prompt, then run ${_FS_STATUS} again."
 elif [[ -n "$_nothing" ]]; then
     echo "Delivered:    NOTHING on the most recent prompt - there was nothing to send when it arrived."
-    echo "Action:       re-send the prompt, then run /mmry:foundation-status again."
+    echo "Action:       re-send the prompt, then run ${_FS_STATUS} again."
 elif [[ -n "$_n" ]] && (( _n > 1 )); then
     # Not "nothing is trimmed or cut" beside "in N parts" (#31411 QA round 3): the set IS cut, into
     # parts, at sentence ends. What matters is that every part arrived and they add up to the set.

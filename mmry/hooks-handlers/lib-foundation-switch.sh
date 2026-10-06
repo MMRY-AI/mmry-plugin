@@ -90,6 +90,29 @@ _mmry_reinject_off() {
 # to quote it. Empty when nothing could be read.
 MMRY_REINJECT_MATCHED_VALUE=""
 
+# THE OTHER PRODUCT'S CREDENTIAL IS NEVER A FALLBACK ON CODEX (#31245 TC6).
+#
+# ~/.claude/mmry-config.json is the Claude Code credential. On Codex, lib-host.sh points
+# MMRY_CONFIG_FILE at the Codex home and refuses when that file is missing, but two doors stay
+# open past the refusal by design: MMRY_ALLOW_NO_CREDENTIAL=1 (mmry-setup.sh, which runs before a
+# Codex credential exists) and a key given in the environment. Through either, a missing Codex
+# file fell through to this one, and Codex setup on a machine that also runs Claude Code loaded
+# the Claude account's key. tests/unit/codex-claude-config-isolation.bats plants a sentinel there.
+#
+# MMRY_HOST is the answer, and reading it costs no process. codex-hook.sh exports it for every
+# hook. For anything else, lib-host.sh sets it in this shell when it is sourced and can tell it is
+# on Codex: the .mmry-host marker beside the running copy (the state directory, and since #31245 QA
+# the plugin root too), a script inside an exported CODEX_HOME, or a script under a .codex
+# directory. A copy outside all three is not recognised as Codex. That was a plugin-cache copy with
+# CODEX_HOME unset, which no shipped instruction leads to, and which the plugin-root marker now
+# covers. The resolver keys on MMRY_HOST alone (_mmry_host_resolve), so asking it as well added
+# nothing. The mutation
+# harness proved that: a mutant that dropped the resolver branch survived every test, because no
+# reachable state tells the two apart.
+_mmry_claude_config_fallback_ok() {
+    [[ "${MMRY_HOST:-}" != "codex" ]]
+}
+
 _mmry_reinject_is_off_here() {
     local v="" cfg="" txt=""
     MMRY_REINJECT_MATCHED_VALUE=""
@@ -106,7 +129,7 @@ _mmry_reinject_is_off_here() {
         cfg="$MMRY_CONFIG_FILE"
     elif [[ -n "${PLUGIN_ROOT:-}" && -f "${PLUGIN_ROOT}/mmry-config.json" ]]; then
         cfg="${PLUGIN_ROOT}/mmry-config.json"
-    elif [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
+    elif _mmry_claude_config_fallback_ok && [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
         cfg="${HOME}/.claude/mmry-config.json"
     fi
     [[ -n "$cfg" && -r "$cfg" ]] || return 1
@@ -133,4 +156,14 @@ _mmry_reinject_is_off_here() {
 # callers already source this file or can at no cost, and two copies of customer words drift.
 # The marker that records it was said is .mmry-foundation-empty-told.<session id> in the temp
 # directory, holding the session's key; the token-named form, with no session id, is written too.
-MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run /mmry:foundation-status at any time to check."
+#
+# The command it names is the host's own (#31245 carried onto develop): on Codex there is nothing to
+# type, so it names the Codex script. With no argument it is the Claude Code literal, unchanged.
+_mmry_fnd_set_empty_notice() {
+    MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+}
+_mmry_fnd_set_empty_notice
+if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+    _mmry_fnd_x="$(mmry_host_command_ref foundation-status)" && [[ -n "$_mmry_fnd_x" ]] && _mmry_fnd_set_empty_notice "$_mmry_fnd_x"
+    unset _mmry_fnd_x
+fi

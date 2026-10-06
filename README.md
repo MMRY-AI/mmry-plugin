@@ -1,11 +1,22 @@
-# MMRY AI Plugin for Claude Code
+# MMRY AI Plugin for Claude Code and OpenAI Codex
 
-Persistent memory system that gives Claude Code long-term recall across sessions.
+Persistent memory system that gives your assistant long-term recall across sessions.
 
-- **Session start**: Automatically loads your memories
-- **Session end**: Prompts to save decisions, issues, and conventions
-- **Context compression**: Saves continuity notes so nothing is lost
-- **Plan accepted**: Saves accepted plans as decision records
+Using **OpenAI Codex**? Start at **[docs/codex.md](docs/codex.md)** - installation, setup, the
+supported surface, and uninstall all differ from the Claude Code instructions below.
+
+| What happens | Claude Code | OpenAI Codex |
+|---|---|---|
+| Your memories load at session start | yes | yes |
+| Foundation memories restated on every prompt | yes | yes |
+| Coordination-group messages delivered as you work | yes | yes |
+| A message that arrives while your assistant is idle wakes it | yes | not available: it arrives with the next thing that happens in the session |
+| A prompt to save what is new | at session end | on your next message, when something is unsaved |
+| Continuity notes saved before the context is compressed | yes | not available: Codex gives plugins no moment before it compresses |
+| An accepted plan saved as a decision record | yes | not available: Codex has no plan-accepted moment |
+| Typed slash commands such as /mmry:save | yes | not available: ask in plain words, for example "save this" |
+
+[docs/codex.md](docs/codex.md) states each Codex gap and what you get instead.
 
 ## Setup (macOS)
 

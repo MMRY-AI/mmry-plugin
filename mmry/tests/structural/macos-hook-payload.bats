@@ -494,7 +494,7 @@ LATECURL
     _reset_locks
     printf '%s' "{\"session_id\":\"${CLAUDE_SESSION_ID}\",\"hook_event_name\":\"Stop\"}"         > "${BATS_TEST_TMPDIR}/payload.json"
 
-    run bash -c "env PATH='${shim}:${late}:${PATH}' MMRY_TEST_CALL_COUNTER='${counter}'             FAKE_BODY='${VALID_TRANSMISSION}'             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid'             MMRY_IDLE_POLL_SECONDS=6 MMRY_IDLE_POLL_INTERVAL=1             bash '${HANDLERS}/formation-check.sh'             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
+    run bash -c "env PATH='${shim}:${late}:${PATH}' MMRY_TEST_CALL_COUNTER='${counter}'             FAKE_BODY='${VALID_TRANSMISSION}'             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL='http://fake.invalid'             MMRY_IDLE_POLL_SECONDS=12 MMRY_IDLE_POLL_INTERVAL=1             bash '${HANDLERS}/formation-check.sh'             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
 
     [ "$status" -eq 2 ] || {
         echo "Stop did not wake the session for a message that arrived while it was watching (exit ${status}): ${output}"
@@ -554,6 +554,10 @@ LATECURL
     # faster of two supported platforms is not an assertion. The request count is the evidence the
     # claim is actually made of, it is what the late-message test above already uses, and it does
     # not move with the weather.
+    #
+    # 8 SECONDS, NOT 3 (#31245 QA). Counting requests fixed the stopwatch, but a 3s budget still
+    # fitted only one request on a loaded Windows host: QA saw "1 request(s) against a 3s budget" in
+    # 1 of 3 runs. The control below already uses 8s for the same reason, so the two now agree.
     local bin; bin="$(_fake_curl_dir)"
     local shim; shim="$(_macos_shim_dir)"
     local counter="${BATS_TEST_TMPDIR}/idle-call-count"

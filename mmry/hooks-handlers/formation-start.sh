@@ -22,7 +22,7 @@ objective="${1:-}"
 task_id="${2:-}"
 
 if [[ -z "$objective" ]]; then
-    echo "What is the job? Usage: /mmry:formation start \"what the formation is for\""
+    echo "What is the job? Usage: $(mmry_host_formation_ref start '"what the formation is for"')"
     exit 1
 fi
 if [[ "${#objective}" -lt 10 ]]; then
@@ -30,7 +30,7 @@ if [[ "${#objective}" -lt 10 ]]; then
     exit 1
 fi
 
-session_id="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
+session_id="$(mmry_session_id)"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is nothing to enrol as the lead. This needs to run inside a session."
     exit 1
@@ -38,7 +38,7 @@ fi
 
 existing="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 if [[ -n "$existing" ]]; then
-    echo "This session is already in formation ${existing%% *}. Run /mmry:formation leave first, or use that one."
+    echo "This session is already in formation ${existing%% *}. Run $(mmry_host_formation_ref leave) first, or use that one."
     exit 1
 fi
 
@@ -51,13 +51,22 @@ fi
 
 # The server refuses a session it has never seen, which would otherwise read as a permission
 # problem. Same ordering as formation-join.sh.
-mmry_register_session "$session_id" "claude-code" "$PWD" 2>/dev/null || true
+# #31245 QA round 3: the client name is the HOST's, not the constant "claude-code". A Codex session
+# registered as claude-code is a session the customer cannot find in their own session list - and
+# docs/codex.md tells them, in as many words, that Codex sessions are listed as `codex`. The
+# resolver is reached through mmry-client.sh; the fallback keeps the old literal if it is not.
+if declare -F mmry_host_client_name >/dev/null 2>&1; then
+    _mmry_client_name="$(mmry_host_client_name)"
+else
+    _mmry_client_name="claude-code"
+fi
+mmry_register_session "$session_id" "$_mmry_client_name" "$PWD" 2>/dev/null || true
 
 if ! mmry_create_formation "$objective" "$session_id" "$task_id"; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
         400) echo "The server refused the objective. ${MMRY_RESPONSE:-}" ;;
-        409) echo "This session already belongs to an active formation. Run /mmry:formation leave first." ;;
+        409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
         *)   echo "Could not start a formation (HTTP ${code}). Nothing has been changed locally." ;;
     esac
     exit 1
@@ -71,12 +80,12 @@ fi
 # Without an id there is nothing to record, and a formation the session cannot address is worse than
 # a clean failure: the hook would never poll it and the lead would believe they were coordinating.
 if ! [[ "$formation_id" =~ ^[0-9]+$ ]]; then
-    echo "The formation was created but the server did not return an id this client could read, so this session has not been put in it. Run /mmry:formation list and join it by id."
+    echo "The formation was created but the server did not return an id this client could read, so this session has not been put in it. Run $(mmry_host_formation_ref list) and join it by id."
     exit 1
 fi
 
 bash "${HANDLER_DIR}/formation-state.sh" set "$formation_id" "$session_id"
 
 echo "Started formation ${formation_id}: ${objective}"
-echo "You are the lead. Tell the others to run /mmry:formation join ${formation_id}, then use /mmry:formation say to keep them posted."
+echo "You are the lead. Tell the others to run $(mmry_host_formation_ref join "${formation_id}"), then use $(mmry_host_formation_ref say) to keep them posted."
 exit 0

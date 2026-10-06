@@ -1,0 +1,609 @@
+#!/usr/bin/env bats
+# codex-manifest.bats — the Codex surface, checked against Codex's own declarations (#31245).
+#
+# WHERE THE EXPECTED VALUES COME FROM. Not from Codex's prose documentation, which barely mentions
+# hooks: from the machine-readable declarations in openai/codex, read directly, each named beside
+# the constant it produced. Prose about software is a hint; the software's own declaration is the
+# answer.
+#
+#   HOOK_EVENT_NAMES                      codex-rs/hooks/src/lib.rs line 23
+#   HOOK_EVENT_NAMES_WITH_MATCHERS        codex-rs/hooks/src/lib.rs line 43
+#   HooksFile / HookHandlerConfig fields  codex-rs/config/src/hook_config.rs
+#   discoverable manifest paths           codex-rs/exec-server-protocol/src/protocol.rs line 47
+#   which events can return model text    codex-rs/hooks/schema/generated/*.output.schema.json
+#   command->skill migration rules        codex-rs/core-plugins/src/command_migration.rs
+#
+# Read at openai/codex commit 5bf132c (2026-09-15) against the installed codex-cli 0.154.0.
+#
+# EVERY ASSERTION HERE WAS SEEN TO REFUSE under tests/structural/run-codex-mutations.sh. The
+# mutation applied to each is recorded in tests/structural/CODEX-MUTATIONS.md, beside it.
+
+load '../helpers/test-helper'
+
+CODEX_MANIFEST=""
+CODEX_HOOKS=""
+
+setup() {
+    CODEX_MANIFEST="$PLUGIN_ROOT/.codex-plugin/plugin.json"
+    CODEX_HOOKS="$PLUGIN_ROOT/hooks/codex-hooks.json"
+}
+
+# ---------------------------------------------------------------------------------------------
+# The manifest
+# ---------------------------------------------------------------------------------------------
+
+@test "codex manifest: exists at .codex-plugin/plugin.json, the path Codex looks at FIRST" {
+    # DISCOVERABLE_PLUGIN_MANIFEST_PATHS is [.codex-plugin, .claude-plugin, .cursor-plugin] in
+    # that order. Being first is the whole mechanism: it is how the Codex surface is declared
+    # without editing the Claude Code manifest.
+    [[ -f "$CODEX_MANIFEST" ]]
+}
+
+@test "codex manifest: is valid JSON" {
+    jq empty "$CODEX_MANIFEST"
+}
+
+@test "codex manifest: plugin name is mmry" {
+    run jq -r '.name' "$CODEX_MANIFEST"
+    assert_output "mmry"
+}
+
+@test "codex manifest: carries NO version, so no second copy of it can drift from the marketplace" {
+    # RawPluginManifest.version is Option<String> and the crate's own tests parse manifests with
+    # none, so omitting it is supported rather than merely tolerated. The marketplace entry is the
+    # single place a version is stated.
+    run jq -r 'has("version")' "$CODEX_MANIFEST"
+    assert_output "false"
+}
+
+@test "codex manifest: every declared path uses the ./ form the parser requires" {
+    local paths
+    paths="$(jq -r '[.hooks, .skills, .commands] | .[] | select(. != null)' "$CODEX_MANIFEST" | tr -d '\r')"
+    [[ -n "$paths" ]] || return 1
+    while IFS= read -r p; do
+        [[ "$p" == ./* ]] || { echo "manifest path does not start with ./ : $p"; return 1; }
+    done <<< "$paths"
+}
+
+@test "codex manifest: every declared path exists on disk" {
+    local p
+    for p in $(jq -r '[.hooks, .skills, .commands] | .[] | select(. != null)' "$CODEX_MANIFEST" | tr -d '\r'); do
+        local resolved="${PLUGIN_ROOT}/${p#./}"
+        [[ -e "$resolved" ]] || { echo "declared path missing: $p -> $resolved"; return 1; }
+    done
+}
+
+@test "codex manifest: points hooks at codex-hooks.json, NOT at the Claude Code hooks.json" {
+    # Sharing hooks.json would register PreCompact (no channel on Codex), the ExitPlanMode matcher
+    # (no such tool) and an asyncRewake Stop poller (a field Codex does not have) - and would make
+    # every future Codex change a change to the Claude Code registration.
+    run jq -r '.hooks' "$CODEX_MANIFEST"
+    assert_output "./hooks/codex-hooks.json"
+}
+
+@test "codex manifest: points skills at its own directory, so Claude Code gains no skills" {
+    run jq -r '.skills' "$CODEX_MANIFEST"
+    assert_output "./skills-codex/"
+}
+
+@test "codex manifest: and that directory is a DIFFERENT document from the Claude Code skill" {
+    # THE REFUTATION THIS REPLACES COULD NOT FAIL (#31245 QA round 3). It read
+    # `refute_output "./skills/"` on the line after `assert_output "./skills-codex/"`, which had
+    # already pinned the value to a different string - so the refutation restated a test that had
+    # just been made and would have been satisfied by any manifest the assertion accepted.
+    #
+    # What it was reaching for is a real property, and this asserts that instead: the Codex skill
+    # exists, it is not a copy of the Claude Code one, and it is the one that describes THIS
+    # platform. Pointing the manifest at ./skills/ - or copying the Claude document into
+    # skills-codex/ - fails here, and either would ship a Codex customer instructions telling them
+    # to type slash commands Codex does not have.
+    local codex_skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    local claude_skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    [[ -f "$codex_skill" ]] || { echo "the declared Codex skill directory has no SKILL.md"; return 1; }
+    [[ -f "$claude_skill" ]] || { echo "the Claude Code skill has moved; this test needs updating"; return 1; }
+    cmp -s "$codex_skill" "$claude_skill" && { echo "the Codex skill is byte-identical to the Claude Code one"; return 1; }
+    grep -qi 'codex' "$codex_skill" || { echo "the Codex skill never mentions the platform it is for"; return 1; }
+    # And the Claude Code document is still the Claude Code document, unmentioning Codex - which is
+    # requirement 4 stated about the file a Claude Code customer actually receives.
+    run bash -c "grep -ci codex '$claude_skill' || true"
+    assert_output "0"
+}
+
+@test "codex manifest: names a commands directory explicitly rather than inheriting the default" {
+    # An omitted commands key defaults to <plugin-root>/commands
+    # (command_migration/plugin.rs, PLUGIN_COMMANDS_DIR = "commands"), which is the Claude Code
+    # command directory. Naming an empty one is how this says "no migrated commands" out loud.
+    run jq -r '.commands' "$CODEX_MANIFEST"
+    assert_output "./commands-codex/"
+}
+
+@test "codex manifest: the commands directory contains no file the migrator would convert" {
+    # A .md whose stem is not README and which carries frontmatter would silently become a skill.
+    local f
+    for f in "$PLUGIN_ROOT"/commands-codex/*.md; do
+        [[ -e "$f" ]] || continue
+        local stem
+        stem="$(basename "$f" .md)"
+        [[ "$stem" == "README" ]] || { echo "migratable command file present: $f"; return 1; }
+    done
+}
+
+@test "codex manifest: interface carries the fields the catalogue shows a customer" {
+    run jq -r '[.interface.displayName, .interface.shortDescription, .interface.developerName, .interface.websiteURL] | map(select(. != null and . != "")) | length' "$CODEX_MANIFEST"
+    assert_output "4"
+}
+
+# ---------------------------------------------------------------------------------------------
+# The hook registration
+# ---------------------------------------------------------------------------------------------
+
+@test "codex hooks: is valid JSON" {
+    jq empty "$CODEX_HOOKS"
+}
+
+@test "codex hooks: the top level carries only description and hooks" {
+    # HooksFile is #[serde(deny_unknown_fields)] with exactly those two. Any third key is a parse
+    # failure, and a hooks file that fails to parse registers NOTHING - silently, from a customer's
+    # point of view.
+    run jq -r '[keys[]] | sort | join(",")' "$CODEX_HOOKS"
+    assert_output "description,hooks"
+}
+
+@test "codex hooks: every event name is one Codex declares" {
+    local valid=" PreToolUse PermissionRequest PostToolUse PreCompact PostCompact SessionStart SessionEnd UserPromptSubmit SubagentStart SubagentStop Stop Interrupt "
+    local e
+    for e in $(jq -r '.hooks | keys[]' "$CODEX_HOOKS" | tr -d '\r'); do
+        [[ "$valid" == *" $e "* ]] || { echo "unknown Codex hook event: $e"; return 1; }
+    done
+}
+
+@test "codex hooks: every handler carries only fields HookHandlerConfig::Command declares" {
+    # command, commandWindows, timeout, async, statusMessage, additionalContextLimit - plus the
+    # "type" tag. asyncRewake and rewakeSummary, which the Claude Code hooks.json uses, are NOT
+    # among them: Codex's own Claude-settings importer skips any handler carrying asyncRewake
+    # (external-agent-migration/src/hooks_cla.rs line 158).
+    local valid=" type command commandWindows timeout async statusMessage additionalContextLimit "
+    local k
+    for k in $(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | keys[]' "$CODEX_HOOKS" | tr -d '\r' | sort -u); do
+        [[ "$valid" == *" $k "* ]] || { echo "field not in Codex's handler schema: $k"; return 1; }
+    done
+}
+
+@test "codex hooks: no handler declares additionalContextLimit" {
+    # Present in the current source but absent from shipped builds as recently as 0.144.5, and
+    # HooksFile denies unknown fields, so emitting it risks a total parse failure on an older
+    # client. The default spill threshold is fine for a payload that already points at a file.
+    run jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("additionalContextLimit"))] | length' "$CODEX_HOOKS"
+    assert_output "0"
+}
+
+@test "codex hooks: every handler is synchronous, which is what exit 2 delivery requires" {
+    # engine/mod.rs: can_apply_control_effects() is true only for Sync. An async handler's exit 2
+    # is discarded, so an async Stop hook would deliver the save prompt to nobody.
+    run jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | select(.async == true)] | length' "$CODEX_HOOKS"
+    assert_output "0"
+}
+
+@test "codex hooks: PreCompact is NOT registered, because it has no channel to the model" {
+    # pre-compact.command.output.schema.json carries only continue/stopReason/suppressOutput/
+    # systemMessage - no hookSpecificOutput, no decision - and compact.rs has no case for exit 2.
+    # A PreCompact handler here would look installed and deliver nothing.
+    run jq -r '.hooks | has("PreCompact")' "$CODEX_HOOKS"
+    assert_output "false"
+}
+
+@test "codex hooks: no matcher targets ExitPlanMode, a tool Codex does not have" {
+    run jq -r '[.hooks | to_entries[] | .value[] | select(.matcher == "ExitPlanMode")] | length' "$CODEX_HOOKS"
+    assert_output "0"
+}
+
+@test "codex hooks: the formation poller is NOT registered on Stop" {
+    # A synchronous Stop handler that polls for four minutes holds the end of every turn open. The
+    # idle-delivery mechanism it implements depends on asyncRewake, which Codex does not have.
+    run jq -r '[.hooks.Stop[]? | .hooks[] | .command | select(contains("formation-check"))] | length' "$CODEX_HOOKS"
+    assert_output "0"
+}
+
+@test "codex hooks: the save prompt is registered on UserPromptSubmit, because Stop cannot deliver" {
+    # MOVED OFF STOP, AND THE OLD TEST REQUIRED IT TO BE THERE (#31245, 2026-09-20).
+    #
+    # Measured against real sessions: a Stop hook that exits 0 with no output Completes, but one
+    # that exits 0 and prints an additionalContext payload FAILS and delivers nothing, and exit 2
+    # is reported Failed on every event. So Stop has no channel to the model at all, the same as
+    # PreCompact. The research design recommended moving the save prompt to Stop and stated it
+    # would work; that was reasoned from source and never run.
+    #
+    # UserPromptSubmit is also the better moment on its merits. Codex trims conversations
+    # mid-session, and an end-of-session prompt cannot save anyone from a trim fifty turns
+    # earlier. stop-check's own debounce keeps it periodic rather than per-turn.
+    local on_ups on_stop
+    on_ups="$(jq -r '[.hooks.UserPromptSubmit[]?.hooks[]? | select(.command | contains("stop-check"))] | length' "$CODEX_HOOKS")"
+    on_stop="$(jq -r '[.hooks.Stop[]?.hooks[]? | select(.command | contains("stop-check"))] | length' "$CODEX_HOOKS")"
+    [[ "$on_ups" -ge 1 ]] || { echo "the save prompt is not registered on UserPromptSubmit"; return 1; }
+    [[ "$on_stop" == "0" ]] || { echo "the save prompt is still on Stop, which cannot deliver it"; return 1; }
+}
+
+@test "codex hooks: memories are loaded on SessionStart" {
+    run jq -r '[.hooks.SessionStart[]? | .hooks[] | .command | select(contains("session-init"))] | length' "$CODEX_HOOKS"
+    assert_output "1"
+}
+
+@test "codex hooks: formation messages are delivered on PostToolUse" {
+    run jq -r '[.hooks.PostToolUse[]? | .hooks[] | .command | select(contains("formation-check"))] | length' "$CODEX_HOOKS"
+    assert_output "1"
+}
+
+@test "codex hooks: the PostToolUse formation group carries NO matcher, so it runs on every tool" {
+    # matches_matcher(None, _) is true (events/common.rs). A matcher here would silence delivery
+    # for every tool but one.
+    run jq -r '[.hooks.PostToolUse[] | select(has("matcher"))] | length' "$CODEX_HOOKS"
+    assert_output "0"
+}
+
+@test "codex hooks: Foundation re-injection is registered on UserPromptSubmit, as the SAME parts as Claude Code" {
+    # #31411 sends a large set as up to six labelled parts, one per registered hook. This asserted
+    # exactly ONE registration, which after the merge meant a Codex customer only ever got part 1.
+    # Now the two manifests must register the same parts, so they cannot drift apart again.
+    local q claude codex all
+    q='[.hooks.UserPromptSubmit[]? | .hooks[] | .command | select(contains("userpromptsubmit-foundation"))
+        | (capture("--part (?<k>[0-9]+)$").k // "NONE")] | join(",")'
+    claude="$(jq -r "$q" "$PLUGIN_ROOT/hooks/hooks.json" | tr -d '\r')"
+    codex="$(jq -r "$q" "$CODEX_HOOKS" | tr -d '\r')"
+    echo "claude parts [$claude], codex parts [$codex]" >&3
+    # SAMPLE SIZE: a split set needs more than one part to exist at all.
+    [[ "$claude" == *,* ]] || { echo "hooks.json registers [$claude]: not a split"; return 1; }
+    [[ "$codex" == "$claude" ]] || { echo "codex registers [$codex], claude [$claude]"; return 1; }
+}
+
+@test "codex hooks: every handler routes through codex-hook.sh, never straight at a handler" {
+    # The entry point is what sets MMRY_HOST. A command naming a handler directly would run it as
+    # though this were Claude Code: it would read the Claude credential, write to the Claude state
+    # directory, and register the session as claude-code.
+    local n_total n_routed
+    n_total="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$CODEX_HOOKS")"
+    n_routed="$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | select(.command | contains("codex-hook.sh"))] | length' "$CODEX_HOOKS")"
+    [[ "$n_total" -gt 0 ]] || return 1
+    [[ "$n_total" == "$n_routed" ]] || { echo "$n_routed of $n_total handlers route through codex-hook.sh"; return 1; }
+}
+
+@test "codex hooks: every handler declares commandWindows, launching codex-hook.cmd through cmd /d /c" {
+    # WHY WINDOWS HAS ITS OWN COMMAND AGAIN (#31245 QA round 8).
+    #
+    # `command` begins with `sh`, and on a stock Windows machine there is no sh on PATH. The Git for
+    # Windows installer's recommended PATH option adds Git\cmd, which holds git.exe and no shell, so
+    # every MMRY hook failed before any MMRY code ran, and the published remedy sent the customer to
+    # the installer option it flags as hazardous. Measured live on 2026-10-02 with the machine PATH
+    # this box carries (System32, Windows, WindowsPowerShell, Git\cmd): HEAD's registrations delivered
+    # nothing at all; these delivered the memory load and the Foundation block.
+    #
+    # WHY THE DELETION IN 1a5560d WAS A MISDIAGNOSIS. On Windows Codex runs a hook through POWERSHELL,
+    # not cmd: core/src/session/mod.rs build_hooks_config takes the session shell, and
+    # shell_detect.rs default_user_shell is PowerShell on Windows, `-NoProfile -Command <string>`.
+    # The commandWindows tried then was `"<path>\codex-hook.cmd" session-init`. To PowerShell a
+    # string that begins with a quote is an EXPRESSION: alone it prints itself, which is exactly the
+    # "Codex injects THE COMMAND STRING ITSELF" that was measured, and followed by an argument it is
+    # a parse error, which is exactly the "fails outright when it carries an argument". The field
+    # worked; the string was not PowerShell.
+    #
+    # `cmd /d /c "<path>" <handler>` is a native command invocation in PowerShell AND a valid line in
+    # cmd, which is Codex's fallback when no PowerShell is found. /d skips cmd AutoRun, which would
+    # otherwise let a registry entry print text into the hook's stdout, and stdout is what the model
+    # reads.
+    # Compared inside jq, so no tab or backslash escaping stands between the file and the check.
+    local bad n
+    bad="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[]
+        | (.command | split("codex-hook.sh\" ") | last) as $h
+        | select((.commandWindows // "") != ("cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" " + $h))
+        | "\($h): \(.commandWindows // "MISSING")"' "$CODEX_HOOKS")"
+    [[ -z "$bad" ]] || { echo "handlers whose commandWindows is not the launcher for the same handler:"; echo "$bad"; return 1; }
+    n="$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$CODEX_HOOKS")"
+    [[ "$n" -gt 0 ]]
+}
+
+@test "codex hooks: no commandWindows starts with a quote, which PowerShell prints instead of running" {
+    # The exact shape 1a5560d measured as "injects the command string itself". Kept as its own test so
+    # the reason survives anyone rewriting the launcher form above.
+    local c
+    while IFS= read -r c; do
+        [[ "$c" != \"* ]] || { echo "PowerShell would print this rather than run it: $c"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .commandWindows // empty' "$CODEX_HOOKS")
+}
+
+@test "codex hooks: the Windows launcher exists, starts with @echo off, and never takes a bare bash" {
+    local cmdf="$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd"
+    [[ -f "$cmdf" ]] || { echo "commandWindows names a launcher that does not exist"; return 1; }
+    # With echo on, cmd writes every command line to stdout, and stdout is what Codex hands the model.
+    [[ "$(head -1 "$cmdf" | tr -d '\r')" == "@echo off" ]] || { echo "first line is not @echo off"; return 1; }
+    # bin\bash.exe sets up the PATH the handlers need; usr\bin\bash.exe does not, and a bare bash can
+    # be the Linux subsystem's. Measured: under a stock PATH bin\bash.exe finds /usr/bin/tr and
+    # /mingw64/bin/curl, usr\bin\bash.exe finds neither.
+    # Code lines only: the comments name usr\bin\bash.exe to explain why it is not used.
+    local code; code="$(grep -v -i '^[[:space:]]*rem' "$cmdf")"
+    grep -q 'bin\\bash.exe' <<< "$code" || { echo "the launcher does not look for Git's bin\\bash.exe"; return 1; }
+    ! grep -qi 'usr\\bin\\bash.exe' <<< "$code" || { echo "the launcher can pick usr\\bin\\bash.exe"; return 1; }
+    ! grep -Eiq 'where(\.exe)? bash' <<< "$code" || { echo "the launcher resolves a bare bash from PATH"; return 1; }
+}
+
+@test "codex hooks: on Windows the registered commandWindows runs through PowerShell with no sh on PATH" {
+    # Behaviour, not text: the exact registered string, run the way Codex runs it, by PowerShell
+    # with -NoProfile -Command, under the PATH a stock Git for Windows install leaves: no sh, no
+    # Git\bin, only Git\cmd. A stand-in codex-hook.sh beside the real launcher reports what reached
+    # it, so the test proves the launcher found a bash, passed the handler name, passed stdin, and
+    # passed the exit code back.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+
+    local root="$BATS_TEST_TMPDIR/plugin root with space"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1] stdin=[$(cat)] tr=$(command -v tr)"\nexit "${MMRY_TEST_EXIT:-0}"\n' \
+        > "$root/hooks-handlers/codex-hook.sh"
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS")"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+
+    local sysroot; sysroot="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")"
+    local stock="$sysroot/System32:$sysroot:$sysroot/System32/WindowsPowerShell/v1.0"
+    local gitcmd; gitcmd="$(dirname "$(command -v git)")"
+    [[ "$gitcmd" == */cmd ]] || gitcmd=""
+    [[ -n "$gitcmd" ]] && stock="$stock:$gitcmd"
+
+    # Exactly how Codex runs it: the string as -Command, the payload on PowerShell's own stdin, which
+    # PowerShell hands to the native cmd it starts (measured).
+    run env PATH="$stock" powershell.exe -NoProfile -Command "$cmdline" <<< '{"session_id":"t"}'
+    [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "launcher did not reach the handler: $output"; return 1; }
+    [[ "$output" == *'stdin=[{"session_id":"t"}'* ]] || { echo "stdin did not reach the handler: $output"; return 1; }
+    [[ "$output" == *"tr=/usr/bin/tr"* ]] || { echo "the handler did not get Git's tools on PATH: $output"; return 1; }
+
+    # A failing handler must still read as a failure. PowerShell -Command reports any non-zero native
+    # exit as 1, the same for the sh form this replaces, so non-zero is the property, not the number.
+    run env PATH="$stock" MMRY_TEST_EXIT=3 powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    [[ "$status" -ne 0 ]] || { echo "a failing handler was reported as success: $output"; return 1; }
+}
+
+@test "codex hooks: on Windows the launcher prefers the Git whose git.exe is on PATH over the registry" {
+    # Pins the FIRST of the launcher's three lookups. The test above passes on any machine with Git
+    # installed, because the registry and standard-folder fallbacks find it too, and the mutation
+    # harness showed exactly that: disabling the git.exe lookup survived. The order matters to a
+    # customer with two Gits: the one on their PATH is the one they chose.
+    #
+    # A fake Git install is put first on PATH. Its bin\bash.exe is a copy of the vendored jq, used
+    # only because it is an executable this repository already ships whose output is recognisable:
+    # handed the launcher's arguments it fails with "jq: error". If that text appears, the fake was
+    # chosen; if the stand-in handler's REACHED appears, the launcher went past PATH to the real Git.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+
+    local root="$BATS_TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED the real Git"\n' > "$root/hooks-handlers/codex-hook.sh"
+
+    local fake="$BATS_TEST_TMPDIR/fake git"
+    mkdir -p "$fake/cmd" "$fake/bin"
+    cp "$jq" "$fake/cmd/git.exe"
+    cp "$jq" "$fake/bin/bash.exe"
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS")"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+    local sysroot; sysroot="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")"
+    local stock="$fake/cmd:$sysroot/System32:$sysroot:$sysroot/System32/WindowsPowerShell/v1.0"
+
+    run env PATH="$stock" powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    [[ "$output" == *"jq: error"* ]] || { echo "the Git on PATH was not the one used: $output"; return 1; }
+    [[ "$output" != *"REACHED the real Git"* ]] || { echo "the launcher skipped the Git on PATH: $output"; return 1; }
+}
+
+@test "codex hooks: on Windows a where/reg/findstr planted in the project folder never runs (security N1)" {
+    # QA round 9, security N1, HIGH. Codex runs every hook with the customer's project as the
+    # current folder, and cmd.exe looks in the current folder before PATH. The launcher called
+    # where, reg and findstr by bare name, so a where.bat committed to any repository the customer
+    # opened ran silently on every hook. QA reproduced it with a marker file.
+    #
+    # NoDefaultCurrentDirectoryInExePath is UNSET for this test on purpose: the Claude Code harness
+    # sets it, and a test that inherits it cannot see the hole it is meant to guard.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+
+    local root="$BATS_TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+
+    # The customer's project, carrying a planted copy of every tool the launcher names.
+    local project="$BATS_TEST_TMPDIR/customer project"
+    mkdir -p "$project"
+    local winproject; winproject="$(cygpath -w "$project")"
+    local tool ext
+    for tool in where reg findstr; do
+        for ext in bat cmd; do
+            printf '@echo off\r\necho planted> "%s\\PLANTED-%s.%s.ran"\r\n' "$winproject" "$tool" "$ext" > "$project/$tool.$ext"
+        done
+    done
+
+    # Control: the plant is live on this machine. Plain cmd, from that folder, with the variable
+    # unset, runs the planted where.bat. Without this the test below passes on a machine where
+    # the plant could never have fired.
+    (cd "$project" && env -u NoDefaultCurrentDirectoryInExePath cmd //d //c "where git.exe" >/dev/null 2>&1) || true
+    compgen -G "$project/PLANTED-where.*.ran" >/dev/null || skip "planted where did not run under plain cmd here, so this machine cannot show the hole"
+    rm -f "$project"/PLANTED-*.ran
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS")"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+
+    # Git off PATH as well, so the registry lookup (reg, findstr) runs too, not only where.
+    local sysroot; sysroot="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")"
+    local stock="$sysroot/System32:$sysroot:$sysroot/System32/WindowsPowerShell/v1.0"
+    cd "$project"
+    run env -u NoDefaultCurrentDirectoryInExePath PATH="$stock" powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    cd - >/dev/null
+
+    local ran="" f
+    for f in "$project"/PLANTED-*.ran; do [[ -e "$f" ]] && ran="${ran} ${f##*/}"; done
+    [[ -z "$ran" ]] || { echo "planted tools ran from the project folder: $ran"; return 1; }
+    [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "the launcher did not reach the handler: $output"; return 1; }
+}
+
+@test "codex hooks: on Windows a git.exe planted in a project SUBFOLDER never chooses the bash (security, QA round 10)" {
+    # where.exe searches the current folder for the FILE it is asked to find, whatever
+    # NoDefaultCurrentDirectoryInExePath says. Asked for plain git.exe from <project>\tools, it lists
+    # <project>\tools\git.exe first, and the launcher's %%~dpG..\bin\bash.exe then resolves to
+    # <project>\bin\bash.exe: a program inside the repository, run on every hook. $PATH:git.exe keeps
+    # the search on PATH. Run from the SUBFOLDER: from the project root ..\bin is outside the
+    # repository and the plant cannot fire. The N1 test above does not cover this, and dropping only
+    # "$PATH:" survived it. Adapted from QA's Security reviewer's prototype.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs PowerShell and cmd.exe" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+
+    local root="$BATS_TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+
+    # The plant: an empty tools\git.exe (where.exe matches by name) and a bin\bash.exe that is a copy
+    # of the vendored jq, which announces itself with "jq: error" when handed a script path.
+    local project="$BATS_TEST_TMPDIR/customer project"
+    mkdir -p "$project/tools" "$project/bin"
+    : > "$project/tools/git.exe"
+    cp "$jq" "$project/bin/bash.exe"
+
+    # Control: where.exe on this machine does list the plant from that folder, so the hole is live
+    # here. Without this the test could pass on a machine where it never could have fired.
+    local first
+    first="$(cd "$project/tools" && "$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")/System32/where.exe" git.exe 2>/dev/null | head -1 | tr -d '\r')"
+    [[ "$first" == *"customer project\tools\git.exe" ]] || skip "where.exe did not list the plant here: $first"
+
+    local winroot; winroot="$(cygpath -w "$root")"
+    local registered; registered="$(jq -r '.hooks.SessionStart[0].hooks[0].commandWindows' "$CODEX_HOOKS" | tr -d '\r')"
+    local cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+    cd "$project/tools"
+    run env -u NoDefaultCurrentDirectoryInExePath powershell.exe -NoProfile -Command "$cmdline" < /dev/null
+    cd - >/dev/null
+    [[ "$output" != *"jq: error"* ]] || { echo "the launcher ran the bash planted beside a project git.exe: $output"; return 1; }
+    [[ "$output" == *"REACHED handler=[session-init]"* ]] || { echo "the launcher did not reach the handler: $output"; return 1; }
+}
+
+@test "codex hooks: every command uses Codex own PLUGIN_ROOT token, not the other product alias" {
+    # ${PLUGIN_ROOT} is expanded by Codex itself, on every platform, and was measured working:
+    # the same token emitter referenced this way delivered its payload 4 times.
+    #
+    # It replaces %CLAUDE_PLUGIN_ROOT% and ${D}{CLAUDE_PLUGIN_ROOT}. Those name the OTHER product's
+    # compatibility alias, which occurs exactly ONCE in codex.exe, immediately beside
+    # CLAUDE_PLUGIN_DATA, which is what a legacy compat pair looks like. Building a Codex surface
+    # on it was the original mistake and this test is what stops it coming back.
+    local c
+    while IFS= read -r c; do
+        [[ "$c" == *'${PLUGIN_ROOT}'* ]] || { echo "command does not use Codex's own token: $c"; return 1; }
+        [[ "$c" != *'CLAUDE_PLUGIN_ROOT'* ]] || { echo "command still names the other product's alias: $c"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$CODEX_HOOKS")
+}
+
+@test "codex hooks: every handler named in the registration exists as a script" {
+    # tr -d '\r': this repository checks out with CRLF on Windows, so the last token of a command
+    # string carries a carriage return and a bare ${c##* } yields "session-init\r", which names no
+    # file. Without this the check fails on every handler for a reason that has nothing to do with
+    # the handlers.
+    #
+    # The handler is the word AFTER codex-hook.sh, not the last word: since #31411 the Foundation
+    # hook carries "--part k", and the last word of that command is a number.
+    local c name n=0
+    while IFS= read -r c; do
+        name="${c#*codex-hook.sh\" }"
+        name="${name%% *}"
+        n=$((n + 1))
+        [[ -f "$PLUGIN_ROOT/hooks-handlers/${name}.sh" ]] || { echo "registered handler has no script: $name"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$CODEX_HOOKS" | tr -d '\r')
+    (( n > 0 )) || return 1
+}
+
+# ---------------------------------------------------------------------------------------------
+# The Claude Code surface is untouched. This is requirement 4, asserted rather than assumed.
+# ---------------------------------------------------------------------------------------------
+
+@test "req4: the Claude Code hooks.json still registers PreCompact" {
+    run jq -r '.hooks | has("PreCompact")' "$PLUGIN_ROOT/hooks/hooks.json"
+    assert_output "true"
+}
+
+@test "req4: the Claude Code hooks.json still registers the asyncRewake Stop poller" {
+    run jq -r '[.hooks.Stop[] | .hooks[] | select(.asyncRewake == true)] | length' "$PLUGIN_ROOT/hooks/hooks.json"
+    assert_output "1"
+}
+
+@test "req4: the Claude Code hooks.json still carries the ExitPlanMode matcher" {
+    run jq -r '[.hooks.PostToolUse[] | select(.matcher == "ExitPlanMode")] | length' "$PLUGIN_ROOT/hooks/hooks.json"
+    assert_output "1"
+}
+
+@test "req4: no Claude Code hook command mentions codex" {
+    run jq -r '[.hooks | to_entries[] | .value[] | .hooks[] | .command | select(test("codex"; "i"))] | length' "$PLUGIN_ROOT/hooks/hooks.json"
+    assert_output "0"
+}
+
+@test "req4: the Claude Code manifest names no Codex path" {
+    run bash -c "grep -ci codex '$PLUGIN_ROOT/.claude-plugin/plugin.json' || true"
+    assert_output "0"
+}
+
+@test "req4: the Claude Code commands directory still holds every command file, by name" {
+    # Nine before #31411, which added foundation-status. Named rather than counted, so a removal
+    # and an unrelated addition cannot cancel out.
+    local want="feedback formation foundation-status help load-memories save search setup uninstall visibility"
+    run bash -c "cd '$PLUGIN_ROOT/commands' && ls *.md | sed 's/\\.md\$//' | tr -d '\\r' | sort | tr '\\n' ' ' | sed 's/ \$//'"
+    assert_output "$want"
+}
+
+@test "req4: no Claude Code command file has gained YAML frontmatter" {
+    # Adding frontmatter would have made them migrate on Codex - and would have changed what a
+    # Claude Code customer sees in their command list. The Codex answer is skills instead.
+    local f
+    for f in "$PLUGIN_ROOT"/commands/*.md; do
+        [[ "$(head -1 "$f")" != "---" ]] || { echo "command file gained frontmatter: $f"; return 1; }
+    done
+}
+
+# ---------------------------------------------------------------------------------------------
+# The fixture-drift check that would have caught the regression this task actually caused.
+# ---------------------------------------------------------------------------------------------
+
+@test "every hooks-handlers library mmry-setup.sh sources is mirrored by the e2e fixture" {
+    # Introducing lib-host.sh broke all 31 tests in e2e/setup-join.bats at once, because that file
+    # builds a curated copy of the plugin and copied only lib-jq.sh. The failure said
+    # "No such file or directory" and named a temp path, which is a sentence about nothing.
+    local setup_script="$PLUGIN_ROOT/setup/mmry-setup.sh"
+    local fixture="$PLUGIN_ROOT/tests/e2e/setup-join.bats"
+    # THE SEARCH IS ANCHORED ON AN ACTUAL cp COMMAND, NOT ON THE LIBRARY NAME ANYWHERE IN THE FILE.
+    # The first version of this check looked for the bare name, and the explanatory comment in
+    # setup-join.bats mentions lib-host.sh twice - so deleting the cp line left the check green.
+    # Proven by deleting the line and watching this test pass: an assertion that cannot fail.
+    # Comment lines are stripped before matching for the same reason.
+    local lib
+    for lib in $(grep -o 'hooks-handlers/lib-[a-z]*\.sh' "$setup_script" | sort -u); do
+        grep -v '^[[:space:]]*#' "$fixture" | grep -q "^[[:space:]]*cp .*${lib}" || {
+            echo "mmry-setup.sh sources $lib but tests/e2e/setup-join.bats has no cp line copying it into the isolated tree"
+            return 1
+        }
+    done
+}
+
+@test "codex hooks: every command launches with sh, never a bare bash" {
+    # A bare `bash` on Windows can resolve to the Linux subsystem's, which cannot translate a
+    # Windows working directory and exits 1 before our code runs. Windows ships no sh.exe, so `sh`
+    # can only be Git's. Measured on a real machine where where.exe bash returned System32 first.
+    local c
+    while IFS= read -r c; do
+        [[ "$c" == sh\ * ]] || { echo "command does not launch with sh: $c"; return 1; }
+        [[ "$c" != bash\ * ]] || { echo "command still launches with a bare bash: $c"; return 1; }
+    done < <(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$CODEX_HOOKS")
+}

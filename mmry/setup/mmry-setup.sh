@@ -7,6 +7,13 @@
 #   bash mmry-setup.sh
 #   bash mmry-setup.sh --email user@acme.com --password "Pass1234!"
 #   bash mmry-setup.sh --api-url http://localhost:5291
+#   bash mmry-setup.sh --host codex
+#
+# #31245: --host names the assistant being set up. It defaults to claude, so an existing customer
+# running this script with no arguments gets byte-for-byte what they got before: the credential in
+# ~/.claude/mmry-config.json, the Claude Code settings permissions written, and the Claude Code
+# plugin install path taken. --host codex changes where the credential goes and skips the two steps
+# that are Claude Code's alone.
 
 set -euo pipefail
 
@@ -17,6 +24,16 @@ PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 API_URL="https://mmryai.com"
 EMAIL=""
 PASSWORD=""
+# INITIALISED, SO THAT ONLY THE FLAG CAN SET IT (#31245 QA round 6).
+#
+# MMRY_HOST_ARG was only ever assigned by `--host`, and then read as "${MMRY_HOST_ARG:-}". An
+# exported MMRY_HOST_ARG in the customer's environment was therefore honoured exactly as though
+# the flag had been typed, from a variable nothing documents and nobody would think to look at.
+# The allowlist below still constrains the VALUE, so the blast radius is small - but it is the
+# same shape as the case-folding defect this script already carries a fix for: a value arriving
+# from somewhere nobody expected, deciding which product's account file gets the credential.
+# Clearing it here means the flag is the only way in.
+MMRY_HOST_ARG=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -25,15 +42,61 @@ while [[ $# -gt 0 ]]; do
         --email)       EMAIL="$2"; shift 2 ;;
         --password)    PASSWORD="$2"; shift 2 ;;
         --api-url)     API_URL="$2"; shift 2 ;;
+        --host)        MMRY_HOST_ARG="$2"; shift 2 ;;
         --help|-h)
             echo "Usage:"
             echo "  Setup (browser):     bash mmry-setup.sh"
             echo "  Setup (CI/automation): bash mmry-setup.sh --email EMAIL --password PASS"
-            echo "  Options:             [--api-url URL]"
+            echo "  Options:             [--api-url URL] [--host claude|codex]"
             exit 0 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+# Resolve the host BEFORE anything writes a path.
+#
+# MMRY_HOST IS DELIBERATELY NOT DEFAULTED HERE. Forcing it to "claude" before sourcing the resolver
+# is a bug, and it shipped in the first draft of this task: session-init.sh copies this script into
+# ~/.codex/mmry/setup/, the published Codex instructions tell a customer to run it from there with
+# no arguments, and a forced default made it write the credential to ~/.claude/mmry-config.json.
+# Silently, on the one command a new Codex customer runs.
+#
+# Leaving it unset lets lib-host.sh answer from this script's own install location, which is right
+# for both hosts: a copy under ~/.claude resolves to claude, a copy under a Codex home resolves to
+# codex, and an explicit --host still outranks both.
+#
+# BUT AN EXPLICIT VALUE IS VALIDATED, AND AN UNRECOGNISED ONE IS REFUSED (#31245 QA round 4).
+#
+# The previous version handed --host straight to the resolver, where mmry_host() maps anything
+# that is not exactly "codex" to "claude". So `--host Codex` - the capitalisation a customer
+# reading prose would naturally type - wrote the Codex credential into
+# ${HOME}/.claude/mmry-config.json, the OTHER product's account file, and said nothing. So did
+# `--host codx`, and `--host CODEX`.
+#
+# An ABSENT --host and an UNRECOGNISED one are not the same question and must not get the same
+# answer. Absent means "work it out from where I am installed", which the resolver does well.
+# Unrecognised means the customer stated an intent this script could not honour, and the only
+# safe response to that is to stop, because every alternative writes a credential somewhere the
+# customer did not ask for.
+#
+# Case is folded rather than rejected: "Codex" and "CODEX" are not ambiguous, they are the same
+# instruction in different shift states, and refusing them would be pedantry. A value that is
+# neither host after folding is refused by name.
+if [[ -n "${MMRY_HOST_ARG:-}" ]]; then
+    case "$(printf '%s' "$MMRY_HOST_ARG" | tr '[:upper:]' '[:lower:]')" in
+        claude) MMRY_HOST="claude" ;;
+        codex)  MMRY_HOST="codex" ;;
+        *)
+            echo "Unrecognised --host value: ${MMRY_HOST_ARG}" >&2
+            echo "  --host takes 'claude' or 'codex'." >&2
+            echo "  Refusing to continue: guessing here writes your credential into the wrong" >&2
+            echo "  product's account file." >&2
+            exit 1 ;;
+    esac
+fi
+[[ -n "${MMRY_HOST:-}" ]] && export MMRY_HOST
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh"
 
 # Check dependencies
 if ! command -v curl &>/dev/null; then
@@ -43,7 +106,19 @@ fi
 
 # jq is required for setup; it ships bundled with the plugin (#30624). Resolve a
 # usable one (system or bundled) and stop with a clear message if none works.
+# THIS SCRIPT IS THE ONE THAT CREATES THE CREDENTIAL, so it is the one program that must be able
+# to run before one exists. lib-jq.sh refuses on Codex when the host's own credential file is
+# absent, to stop the client borrowing the other product's account (#31245 QA round 2); without
+# this opt-out that refusal would make setup impossible to run, which is the opposite of the fix.
+#
+# IT IS NOT EXPORTED, AND IT IS UNSET AS SOON AS IT HAS DONE ITS JOB (#31245 QA round 3). The only
+# consumer is lib-jq.sh, which is SOURCED into this same shell on the next line, so a plain shell
+# variable reaches it. Exporting it handed a credential-check override to every process this script
+# spawns afterwards - including the installers at the end of it - for the rest of the run, which is
+# a much longer life than the one line of work it exists for.
+MMRY_ALLOW_NO_CREDENTIAL=1
 source "${PLUGIN_ROOT}/hooks-handlers/lib-jq.sh"
+unset MMRY_ALLOW_NO_CREDENTIAL
 if ! mmry_resolve_jq; then
     mmry_jq_unavailable_message
     exit 1
@@ -147,6 +222,44 @@ print_url_block() {
     echo ""
 }
 
+# A REQUEST THAT REACHES NOTHING IS NAMED, NOT FATAL TO THE SCRIPT (#31245, Mac live run 2026-10-04).
+#
+# Every request below is `VAR=$(curl ...)`, and this script runs under set -euo pipefail, so when
+# curl could not connect the script ended right there with curl's own status, before the HTTP
+# checks that would have said why. Asked to run setup inside the Codex desktop app, whose default
+# sandbox has no network, the customer saw "Requesting authorization..." and an exit status of 6,
+# and nothing else. The same was true on released master.
+#
+# So each request captures curl's status instead, and a failed one ends here: what happened, the
+# likely reason, and the one thing that works, which is running the same command in a terminal
+# where no assistant sandbox applies. Exit 1, like every other setup error. Nothing has been
+# written at any point this can be reached from.
+_mmry_setup_unreachable() {
+    local rc="$1" what="$2" why host="${API_URL#*://}"
+    host="${host%%/*}"
+    case "$rc" in
+        6)  why="the name ${host} could not be resolved" ;;
+        7)  why="the connection was refused" ;;
+        28) why="the connection timed out" ;;
+        35|60|77) why="a secure connection could not be established" ;;
+        *)  why="curl stopped with status ${rc}" ;;
+    esac
+    echo ""
+    echo "Error: could not reach MMRY AI at ${API_URL} while ${what}: ${why}."
+    echo "Nothing was set up and nothing was written."
+    echo ""
+    echo "If an assistant ran this for you, its sandbox may not allow network access."
+    echo "Run the same command yourself in a terminal:"
+    echo "  $(mmry_host_setup_hint)"
+    # On Codex the assistant can ask for that access instead (#31245 A'). Setup also writes the
+    # credential file, which sits beside the mmry folder rather than inside it.
+    if [[ "$(mmry_host)" == "codex" ]] && declare -F mmry_host_codex_access_hint >/dev/null 2>&1; then
+        echo ""
+        mmry_host_codex_access_hint "$(mmry_host_config_file)"
+    fi
+    exit 1
+}
+
 echo ""
 echo "=== MMRY AI Setup ==="
 echo ""
@@ -160,11 +273,13 @@ if [[ -n "$EMAIL" && -n "$PASSWORD" ]]; then
     LOGIN_BODY="{\"email\":\"$(json_escape "$EMAIL")\",\"password\":\"$(json_escape "$PASSWORD")\"}"
 
     LOGIN_TMP="$(mktemp)"
+    _rc=0
     LOGIN_CODE=$(curl -s -o "$LOGIN_TMP" -w '%{http_code}' \
         --connect-timeout 10 --max-time 25 \
         -X POST "${API_URL}/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d "$LOGIN_BODY")
+        -d "$LOGIN_BODY") || _rc=$?
+    if (( _rc != 0 )); then rm -f "$LOGIN_TMP"; _mmry_setup_unreachable "$_rc" "signing in"; fi
 
     LOGIN_RESP="$(cat "$LOGIN_TMP")"
     rm -f "$LOGIN_TMP"
@@ -191,12 +306,14 @@ if [[ -n "$EMAIL" && -n "$PASSWORD" ]]; then
     KEY_BODY="{\"label\":\"${MACHINE_LABEL}\"}"
 
     KEY_TMP="$(mktemp)"
+    _rc=0
     KEY_CODE=$(curl -s -o "$KEY_TMP" -w '%{http_code}' \
         --connect-timeout 10 --max-time 25 \
         -X POST "${API_URL}/api/auth/apikey" \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "$KEY_BODY")
+        -d "$KEY_BODY") || _rc=$?
+    if (( _rc != 0 )); then rm -f "$KEY_TMP"; _mmry_setup_unreachable "$_rc" "creating this machine's API key"; fi
 
     KEY_RESP="$(cat "$KEY_TMP")"
     rm -f "$KEY_TMP"
@@ -227,9 +344,11 @@ else
     # Step 1: Request device code
     echo "Requesting authorization..."
     DEVICE_TMP="$(mktemp)"
+    _rc=0
     DEVICE_CODE_HTTP=$(curl -s -o "$DEVICE_TMP" -w '%{http_code}' \
         --connect-timeout 10 --max-time 25 \
-        -X POST "${API_URL}/api/auth/device")
+        -X POST "${API_URL}/api/auth/device") || _rc=$?
+    if (( _rc != 0 )); then rm -f "$DEVICE_TMP"; _mmry_setup_unreachable "$_rc" "requesting authorization"; fi
 
     DEVICE_RESP="$(cat "$DEVICE_TMP")"
     rm -f "$DEVICE_TMP"
@@ -270,6 +389,7 @@ else
     # Step 3: Poll for authorization
     ELAPSED=0
     NEXT_STATUS_AT=30   # emit a 'still waiting' line every 30 elapsed seconds
+    POLL_FAILURES=0     # consecutive polls that reached nothing (#31245)
     while (( ELAPSED < EXPIRES_IN )); do
         sleep "$POLL_INTERVAL"
         ELAPSED=$(( ELAPSED + POLL_INTERVAL ))
@@ -283,9 +403,18 @@ else
         fi
 
         STATUS_TMP="$(mktemp)"
+        _rc=0
         STATUS_CODE=$(curl -s -o "$STATUS_TMP" -w '%{http_code}' \
             --connect-timeout 10 --max-time 15 \
-            "${API_URL}/api/auth/device/${DEVICE_CODE}/status")
+            "${API_URL}/api/auth/device/${DEVICE_CODE}/status") || _rc=$?
+        if (( _rc != 0 )); then
+            # A customer may be signing in for minutes; one dropped poll should not undo that.
+            rm -f "$STATUS_TMP"
+            POLL_FAILURES=$(( POLL_FAILURES + 1 ))
+            (( POLL_FAILURES < 3 )) && continue
+            _mmry_setup_unreachable "$_rc" "waiting for you to authorize in the browser"
+        fi
+        POLL_FAILURES=0
 
         STATUS_RESP="$(cat "$STATUS_TMP")"
         rm -f "$STATUS_TMP"
@@ -328,11 +457,29 @@ fi
 
 # --- Write config and configure plugin ---
 
-# Write config file
-CONFIG_DIR="${HOME}/.claude"
-CONFIG_FILE="${CONFIG_DIR}/mmry-config.json"
+# Write config file. On Claude Code these two lines resolve to ${HOME}/.claude and
+# ${HOME}/.claude/mmry-config.json, which is what they were literally before #31245.
+CONFIG_DIR="$(mmry_host_config_dir)"
+CONFIG_FILE="$(mmry_host_config_file)"
 
 mkdir -p "$CONFIG_DIR"
+
+# THE FILE IS CREATED PRIVATE BEFORE THE KEY GOES INTO IT (#31245 QA round 4).
+#
+# This file holds a long-lived API key that can read and write every memory on the account.
+# It was created with whatever the invoking umask happened to be - commonly 022, which is
+# world-readable - and nothing ever narrowed it. On a shared or multi-user machine that is the
+# credential readable by every account on the box.
+#
+# ORDER MATTERS. The permissions are set on an EMPTY file first, so there is no instant at which
+# the key exists on disk while the file is still world-readable. Doing it afterwards leaves a
+# window, and a window is all a credential leak needs.
+#
+# BEST EFFORT, NEVER FATAL. Windows filesystems under Git Bash do not implement POSIX modes and
+# chmod is a no-op there; failing setup over that would break the platform this plugin is most
+# used on, to no benefit. The write below is what must succeed.
+: > "$CONFIG_FILE" 2>/dev/null || true
+chmod 600 "$CONFIG_FILE" 2>/dev/null || true
 
 "$MMRY_JQ" -n --arg url "$API_URL" --arg key "$API_KEY" '{
     apiUrl: $url,
@@ -342,8 +489,15 @@ mkdir -p "$CONFIG_DIR"
 
 echo "  Config written to ${CONFIG_FILE}"
 
-# Auto-approve MMRY AI scripts in Claude Code settings
-SETTINGS_FILE="${HOME}/.claude/settings.json"
+# Auto-approve MMRY AI scripts in Claude Code settings.
+#
+# CLAUDE CODE ONLY, AND DELIBERATELY SO (#31245). This block writes a Claude Code settings file in
+# Claude Code's own permission schema. Codex has no equivalent: it gates a hook through the startup
+# trust review (codex-rs/tui/src/startup_hooks_review.rs), which is a prompt the customer answers
+# and which nothing here can pre-answer. Writing this file during a Codex setup would silently
+# modify the customer's Claude Code configuration on a run that has nothing to do with Claude Code.
+if [[ "$(mmry_host)" == "claude" ]]; then
+SETTINGS_FILE="$(mmry_host_config_dir)/settings.json"
 MMRY_PERMISSIONS=(
     "Bash(*save-memory.sh*)"
     "Bash(*reinforce-memory.sh*)"
@@ -369,10 +523,17 @@ done
 "$MMRY_JQ" "$JQ_FILTER" "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" \
     && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
 echo "  Script permissions configured."
+fi
 
-# Install plugin (skip for marketplace/stable installs — already handled by Claude Code)
+# Install plugin (skip for marketplace/stable installs — already handled by the host).
+#
+# On Codex this whole block is skipped: the plugin arrives through "codex plugin add", the hooks
+# are declared by .codex-plugin/plugin.json, and install.sh / install.ps1 write Claude Code's
+# settings.json. There is nothing here for Codex to do, and plenty for it to break.
 SCRIPT_DIR_RESOLVED="$(cd "$SCRIPT_DIR" && pwd)"
-if [[ "$SCRIPT_DIR_RESOLVED" == *"/.claude/plugins/cache/"* || "$SCRIPT_DIR_RESOLVED" == *"/.claude/mmry/"* ]]; then
+if [[ "$(mmry_host)" == "codex" ]]; then
+    echo "  Plugin installed by Codex; nothing further to install."
+elif [[ "$SCRIPT_DIR_RESOLVED" == *"/.claude/plugins/cache/"* || "$SCRIPT_DIR_RESOLVED" == *"/.claude/mmry/"* ]]; then
     echo "  Plugin already installed via marketplace."
 else
     echo "Installing plugin..."
@@ -413,6 +574,27 @@ echo ""
 echo "MMRY AI will remember your decisions, conventions, and context across every"
 echo "session. You don't need to do anything special — it works in the background."
 echo ""
-echo "Restart Claude Code to get started."
+echo "Restart $(mmry_host_label) to get started."
 echo ""
-echo "Anytime you need help, type: /mmry:help"
+if [[ "$(mmry_host)" == "codex" ]]; then
+    # #31245: there is no slash command to type on Codex. Telling a Codex customer to type
+    # /mmry:help is telling them to do something the platform does not support - it converts a
+    # plugin's commands into skills the model chooses, so nothing is typed.
+    echo "There are no slash commands to type on Codex. Just ask in plain words:"
+    echo "  \"remember this\", \"what do you know about X\", \"make that private\"."
+    echo ""
+    # Not every Codex asks (#31245, Mac live run 2026-10-04): the CLI shows a hook review on
+    # start, the desktop app showed none. Both record trust the same way, in config.toml.
+    echo "One more step the first time: Codex runs MMRY's hooks only once you trust them."
+    echo "  - Codex CLI: it asks when it starts. Choose \"Trust all and continue\"."
+    echo "  - Codex desktop app: it does not ask. Trust MMRY's hooks in the app before your"
+    echo "    first conversation."
+    echo "Until they are trusted, MMRY appears installed and does nothing."
+    echo ""
+    # A URL that exists TODAY. mmryai.com has no /docs/codex page yet, and printing one would be
+    # the v1.18 failure again: an announcement promising something a customer cannot reach.
+    echo "What is and is not available on Codex:"
+    echo "  https://github.com/MMRY-AI/mmry-plugin/blob/master/docs/codex.md"
+else
+    echo "Anytime you need help, type: /mmry:help"
+fi

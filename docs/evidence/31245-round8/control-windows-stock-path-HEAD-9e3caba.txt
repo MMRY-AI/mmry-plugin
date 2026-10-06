@@ -1,0 +1,5 @@
+== CONTROL: the same stock PATH, registrations as at 9e3caba (sh only). No MMRY line reaches the model.
+codex cli_version: 0.154.0
+rollout file: rollout-2026-10-02T18-48-51-01a0ff73-2757-72c1-80bf-178e8e1e316b.jsonl
+  2026-10-03T01:48:53.981Z  user             : Reply with the single word READY.
+  2026-10-03T01:48:55.405Z  assistant        : READY

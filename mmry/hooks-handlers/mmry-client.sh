@@ -60,6 +60,29 @@ _mmry_urlencode() {
         -e 's|@|%40|g'
 }
 
+# THE OTHER PRODUCT'S CREDENTIAL IS NEVER A FALLBACK ON CODEX (#31245 TC6).
+#
+# ~/.claude/mmry-config.json is the Claude Code credential. On Codex, lib-host.sh points
+# MMRY_CONFIG_FILE at the Codex home and refuses when that file is missing, but two doors stay
+# open past the refusal by design: MMRY_ALLOW_NO_CREDENTIAL=1 (mmry-setup.sh, which runs before a
+# Codex credential exists) and a key given in the environment. Through either, a missing Codex
+# file fell through to this one, and Codex setup on a machine that also runs Claude Code loaded
+# the Claude account's key. tests/unit/codex-claude-config-isolation.bats plants a sentinel there.
+#
+# MMRY_HOST is the answer, and reading it costs no process. codex-hook.sh exports it for every
+# hook. For anything else, lib-host.sh sets it in this shell when it is sourced and can tell it is
+# on Codex: the .mmry-host marker beside the running copy (the state directory, and since #31245 QA
+# the plugin root too), a script inside an exported CODEX_HOME, or a script under a .codex
+# directory. A copy outside all three is not recognised as Codex. That was a plugin-cache copy with
+# CODEX_HOME unset, which no shipped instruction leads to, and which the plugin-root marker now
+# covers. The resolver keys on MMRY_HOST alone (_mmry_host_resolve), so asking it as well added
+# nothing. The mutation
+# harness proved that: a mutant that dropped the resolver branch survived every test, because no
+# reachable state tells the two apart.
+_mmry_claude_config_fallback_ok() {
+    [[ "${MMRY_HOST:-}" != "codex" ]]
+}
+
 mmry_load_config() {
     # Idempotent per process (#31434). Every entry-point handler sources this file - which
     # runs mmry_load_config once at AUTO-INIT - and then calls mmry_load_config again. That
@@ -80,7 +103,7 @@ mmry_load_config() {
         config_file="$MMRY_CONFIG_FILE"
     elif [[ -n "$plugin_root" && -f "${plugin_root}/mmry-config.json" ]]; then
         config_file="${plugin_root}/mmry-config.json"
-    elif [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
+    elif _mmry_claude_config_fallback_ok && [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
         config_file="${HOME}/.claude/mmry-config.json"
     fi
 
@@ -633,13 +656,34 @@ mmry_refresh_foundation_cache() {
 # 2. AUTHENTICATION
 # ============================================================================
 
+# THE SETUP COMMAND THIS CLIENT NAMES BELONGS TO THE HOST IT IS SERVING (#31245 QA round 6).
+#
+# Two messages in this file told every customer to "Run /mmry:setup": the one printed when there
+# is no credential at all, and the one printed when the stored credential is rejected with a 401.
+# Both are reachable on Codex - lib-host.sh's own header names the first of them as the defect it
+# was written to fix - and Codex has no typed slash commands, so both handed a stuck customer a
+# string that does nothing on their machine. Round 5 fixed the credential RESOLUTION underneath
+# these messages and left the messages themselves.
+#
+# GUARDED, BECAUSE THIS CLIENT IS SOURCED FROM DIRECTORIES SOMEBODY ELSE ASSEMBLED. lib-jq.sh
+# sources lib-host.sh and this file sources lib-jq.sh, so a real install always has the resolver -
+# but hook-guard.sh documents why curated handler copies exist, and one lives in the test suite
+# today. Without the resolver the literal is exactly what this file printed before #31245, which
+# is the right floor for a message whose only job is to be followable.
+_mmry_setup_ref() {
+    if declare -F mmry_host_command_ref >/dev/null 2>&1; then
+        mmry_host_command_ref setup && return 0
+    fi
+    printf '/mmry:setup'
+}
+
 _mmry_get_auth_header() {
     if [[ "$MMRY_AUTH_METHOD" == "apikey" && -n "$MMRY_API_KEY" ]]; then
         echo "X-Api-Key: ${MMRY_API_KEY}"
         return 0
     fi
 
-    MMRY_RESPONSE="No API key configured. Run /mmry:setup to configure your account."
+    MMRY_RESPONSE="No API key configured. Run $(_mmry_setup_ref) to configure your account."
     return 1
 }
 
@@ -713,9 +757,18 @@ _mmry_format_error() {
         # MMRY_RESPONSE is "No API key configured. Run /mmry:setup ...") stays in the generic
         # branch below and keeps its own setup direction.
         echo "MMRY AI: your saved credential is invalid or expired. Memories may not be saved or loaded." >&2
-        echo "Run /mmry:setup to re-authenticate." >&2
+        echo "Run $(_mmry_setup_ref) to re-authenticate." >&2
     else
         echo "Error (HTTP ${MMRY_HTTP_CODE}): ${MMRY_RESPONSE}" >&2
+        # THE SANDBOX, NAMED WHERE THE ASSISTANT SEES IT (#31245 A'). A curl that reached nothing
+        # on Codex is, in the desktop app's default sandbox, no network; say what to ask for.
+        # "curl failed" only: HTTP 000 is also the no-credential case, which has its own words.
+        # Claude Code prints exactly what it always has.
+        if [[ "$MMRY_HTTP_CODE" == "000" && "$MMRY_RESPONSE" == "curl failed" ]] \
+            && declare -F mmry_host_codex_access_hint >/dev/null 2>&1 \
+            && [[ "$(mmry_host)" == "codex" ]]; then
+            mmry_host_codex_access_hint >&2
+        fi
     fi
 }
 
