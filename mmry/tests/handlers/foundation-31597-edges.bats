@@ -192,6 +192,16 @@ _EMPTY_WORDS='this account has no Foundation directives'
     [[ "$(cat "$TEST_TMPDIR/prompt.json")" == *"$_EMPTY_WORDS"* ]] || { echo "session 2 not told"; return 1; }
 }
 
+# Only part 1 speaks about the set as a whole. A record whose byte count reaches part 3 while saying
+# the set is empty makes part 3 run its loader, which finds the set empty; it must not tell as well.
+@test "#31597 TC4: only part 1 gives the empty notice" {
+    fnd_set_with 'mmry-foundation v2 entries=0 bytes=40000 cksum=4294967295' ''
+    run bash "$HOOK" --part 3 < "$(_payload tc4f)"
+    [ -z "$output" ] || { echo "part 3 said: $output"; return 1; }
+    run bash "$HOOK" --part 1 < "$(_payload tc4f)"
+    [[ "$output" == *"$_EMPTY_WORDS"* ]]
+}
+
 # ============================================================================
 # TC5
 # ============================================================================

@@ -769,7 +769,7 @@ targets_m71="$EDGES_TESTS"
 desc_m71="#31597 r2 TC4 the empty notice is repeated on every prompt"
 
 # TC4. The per-prompt notice is never given.
-mutate_m72() { _mrep "$1/$HANDLER_REL" '        if [[ "$_FND_KIND" == *" empty" ]]; then' '        if false; then'; }
+mutate_m72() { _mrep "$1/$HANDLER_REL" '[[ "$_FND_KIND" == *" empty" ]]; then' 'false; then'; }
 targets_m72="$EDGES_TESTS"
 desc_m72="#31597 r2 TC4 the first prompt never tells the customer the set is empty"
 
@@ -820,7 +820,12 @@ mutate_m80() { _mrep "$1/$HANDLER_REL" '{ mmry_foundation_restore_nul "$content"
 targets_m80="$EDGES_TESTS"
 desc_m80="#31597 r2 TC5 the by-reference copy holds byte 0xFF where the service sent a NUL"
 
-ALL_MUTATIONS="$ALL_MUTATIONS m60 m61 m62 m63 m64 m65 m66 m67 m68 m69 m70 m71 m72 m73 m74 m75 m76 m77 m78 m79 m80"
+# TC4. A part other than part 1 tells the customer too, so one prompt can say it more than once.
+mutate_m81() { _mrep "$1/$HANDLER_REL" '        if (( MMRY_FND_PART == 1 )) && [[ "$_FND_KIND" == *" empty" ]]; then' '        if [[ "$_FND_KIND" == *" empty" ]]; then'; }
+targets_m81="$EDGES_TESTS"
+desc_m81="#31597 r2 TC4 parts 2-6 give the empty notice as well as part 1"
+
+ALL_MUTATIONS="$ALL_MUTATIONS m60 m61 m62 m63 m64 m65 m66 m67 m68 m69 m70 m71 m72 m73 m74 m75 m76 m77 m78 m79 m80 m81"
 
 # A mutation this harness deliberately does NOT claim to cover, stated rather than omitted:
 # the config-loading teardown (#31434 QA). Removing it leaks a file into the working tree

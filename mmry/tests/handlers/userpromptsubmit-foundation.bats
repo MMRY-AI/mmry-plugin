@@ -103,9 +103,15 @@ manifest_now() {
     [ -z "$output" ]
 }
 
-@test "userpromptsubmit-foundation: empty cache emits nothing and exits 0" {
+# #31597 r2, TC4 (Lead/PM decision 2026-10-06): an empty set is told to the customer once a session,
+# so the first prompt that finds one says so on the customer's channel, and later prompts are silent.
+@test "userpromptsubmit-foundation: an empty set tells the customer once, frames nothing, and exits 0" {
     : > "$CACHE"
     manifest_now
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.hookSpecificOutput.additionalContext' <<<"$output")" = "" ] || return 1
+    [[ "$(jq -r '.systemMessage' <<<"$output")" == *'this account has no Foundation directives'* ]] || return 1
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
@@ -322,10 +328,17 @@ _big_foundation_set() {
     [[ "$output" != *'Eric builds MMRY'* ]]
 }
 
-@test "userpromptsubmit-foundation: #31583 an account with genuinely NO Foundation memories is silent, not warned" {
+# #31597 r2, TC4: told once a session, not warned. It is not a fault, so none of the refusal words, and
+# not on every prompt, which #31583 removed.
+@test "userpromptsubmit-foundation: #31583 an account with genuinely NO Foundation memories is told once, not warned" {
     : > "$CACHE"
     manifest_now "$CACHE" 0    # a real empty set: record says none, body empty (#31597)
 
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'this account has no Foundation directives'* ]] || return 1
+    [[ "$output" != *'could not verify'* ]] || return 1
+    [[ "$output" != *'NOT applied'* ]] || return 1
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
@@ -913,9 +926,12 @@ manifest_now
 @test "userpromptsubmit-foundation: #31583 the empty-set path still stays silent when the cache really is empty" {
     # The control for the test above: this must not become "warn whenever entries=0".
     # Sealed for real (#31597): a set file whose record says no directives and whose body is empty.
+    # #31597 r2, TC4: SessionStart has already told this session the set is empty, as it does when it
+    # stores one, so the prompt has nothing to add.
     : > "$CACHE"
     manifest_now "$CACHE" 0
     [[ "$(fnd_set_record)" == 'mmry-foundation v2 entries=0 bytes=0 '* ]] || return 1
+    printf 'session-under-test' > "$TEST_TMPDIR/.mmry-foundation-empty-told"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]

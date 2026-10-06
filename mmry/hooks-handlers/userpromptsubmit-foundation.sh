@@ -757,7 +757,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # SessionStart writes when it told them first, so it is never repeated on later prompts:
         # #31583 removed the warning on every prompt and that stays removed. With no session id and
         # no token the marker holds a fixed word, so even then it is said once, not every prompt.
-        if [[ "$_FND_KIND" == *" empty" ]]; then
+        # Part 1 only: it owns everything said about the set as a whole.
+        if (( MMRY_FND_PART == 1 )) && [[ "$_FND_KIND" == *" empty" ]]; then
             _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
             [[ -z "$_etok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _etok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _etok=""; }
             _etok="${_etok:-no-session}"
