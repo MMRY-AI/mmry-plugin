@@ -26,13 +26,14 @@ codex plugin add mmry@mmry-plugin
 **2. Restart Codex, and trust the hooks.**
 
 Codex runs a plugin's hooks only once you have trusted them, and MMRY does nothing without its
-hooks: no memories load and nothing is saved. Where you trust them depends on which Codex you use.
+hooks: no memories load and nothing is saved.
 
-- **Codex CLI:** the first time it starts after installing, it shows a hook review listing MMRY's
-  handlers. Choose **Trust all and continue**. If you chose "Continue without trusting" by accident,
-  remove and re-add the plugin to see the review again.
-- **Codex desktop app:** it does not show that review when it starts (seen on macOS, 2026-10-04).
-  Trust MMRY's hooks in the app before your first conversation.
+MMRY has been tested in the Codex command-line tool. Trusting MMRY's hooks in the Codex desktop app
+could not be confirmed in this release.
+
+The first time the Codex CLI starts after installing, it shows a hook review listing MMRY's
+handlers. Choose **Trust all and continue**. If you chose "Continue without trusting" by accident,
+remove and re-add the plugin to see the review again.
 
 **To check that they are trusted,** open `config.toml` in your Codex home
 (`${CODEX_HOME:-$HOME/.codex}/config.toml`). Codex records each trusted hook there as a table named
@@ -148,12 +149,13 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 
 ## Where this works
 
-MMRY is a Codex plugin, so it reaches you wherever Codex runs plugins.
+MMRY is a Codex plugin. MMRY has been tested in the Codex command-line tool. Trusting MMRY's hooks in
+the Codex desktop app could not be confirmed in this release.
 
 | Surface | MMRY |
 |---|---|
-| Codex CLI | yes, this is what the instructions above install |
-| Codex in the ChatGPT desktop app | yes according to OpenAI's plugin documentation, which says plugins run there. We have run MMRY in the Codex CLI, not in the desktop app |
+| Codex CLI | yes, this is where MMRY has been tested, and what the instructions above install |
+| Codex in the ChatGPT desktop app | not confirmed. OpenAI's plugin documentation says plugins run there, but trusting MMRY's hooks in the Codex desktop app could not be confirmed in this release, and MMRY does nothing until its hooks are trusted |
 | The Codex IDE extension | no. OpenAI's plugin documentation states plainly that "the IDE extension doesn't support plugins", so no plugin reaches it, not only ours. Use the Codex CLI in a terminal beside your editor instead |
 | Codex cloud tasks | not established. OpenAI's plugin documentation does not name it either way, and we have not run a cloud task to find out. Treat it as unsupported until we say otherwise |
 
@@ -262,7 +264,7 @@ separate credentials and separate directories on purpose.
 
 | Symptom | First thing to check |
 |---|---|
-| No memories at session start | MMRY's hooks are probably not trusted, or changed in an update and need trusting again. Check `config.toml` as described in step 2, then trust them (CLI: the review on start; desktop app: in the app). |
+| No memories at session start | MMRY's hooks are probably not trusted, or changed in an update and need trusting again. Check `config.toml` as described in step 2, then trust them in the review the Codex CLI shows on start. Trusting MMRY's hooks in the Codex desktop app could not be confirmed in this release. |
 | Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |

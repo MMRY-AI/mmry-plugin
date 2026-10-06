@@ -2,7 +2,7 @@
 
 Persistent memory for Claude Code and OpenAI Codex. On Claude Code it loads memories at session start and prompts to save at session end, before context compression, and when plans are accepted. On Codex the session-start load, the Foundation memories restated each prompt and coordination-group messages all work; the save prompt arrives with your next message when something is unsaved, and there is no prompt at context compression or plan acceptance because Codex gives a plugin no moment for either. See [docs/codex.md](../docs/codex.md).
 
-Claude Code: Windows (Git Bash), macOS and Linux. OpenAI Codex: verified in live sessions on Windows; installation and hooks verified on Linux; macOS not yet verified in a live Codex session.
+Claude Code: Windows (Git Bash), macOS and Linux. OpenAI Codex: MMRY has been tested in the Codex command-line tool, in live sessions on Windows; installation and hooks verified on Linux; macOS not yet verified in a live Codex session. Trusting MMRY's hooks in the Codex desktop app could not be confirmed in this release.
 
 ## Which assistant are you using?
 
