@@ -442,7 +442,9 @@ desc_m27="#31411 R1, #31583 R3 by reference points at the live shared cache agai
 # REPOINTED (#31597): the copy is written from the set this turn verified, so the check that a file
 # copy matched it is gone. The mutation takes the copy from the file again, which hands the assistant
 # the record line and trailer as well, and bytes a refresh may have replaced since the check.
-mutate_m28() { _mrep "$1/$HANDLER_REL" '        && { printf '"'"'%s\n\n%s\n'"'"' "$content" "$_fnd_end" > "$_fnd_snaptmp"; } 2>/dev/null \' '        && { cp -f "$CACHE" "$_fnd_snaptmp" && printf '"'"'\n%s\n'"'"' "$_fnd_end" >> "$_fnd_snaptmp"; } 2>/dev/null \'; }
+# RE-ANCHORED (#31597 QA round 3): round 2 rewrote the line to restore NULs, so the old anchor
+# matched nothing and the no-op guard aborted a full run here.
+mutate_m28() { _mrep "$1/$HANDLER_REL" '        && { mmry_foundation_restore_nul "$content" && printf '"'"'\n\n%s\n'"'"' "$_fnd_end"; } > "$_fnd_snaptmp" 2>/dev/null \' '        && { cp -f "$CACHE" "$_fnd_snaptmp" && printf '"'"'\n%s\n'"'"' "$_fnd_end" >> "$_fnd_snaptmp"; } 2>/dev/null \'; }
 targets_m28="$PARTS_TESTS"
 desc_m28="#31583 R3, #31597 the by-reference copy is taken from the file again, not from the set this turn verified"
 
@@ -573,9 +575,10 @@ targets_m50="$PARTS_TESTS"
 desc_m50="#31583 QA r3 R4(b) a loader that cannot load the client leaves in silence"
 
 # R4(b): a part whose loader finds an empty set leaves without saying so.
-mutate_m51() { _mrep "$1/$HANDLER_REL" '> "$STATUS_OUT" 2>/dev/null || true
-    _mmry_fnd_nothing' '> "$STATUS_OUT" 2>/dev/null || true
-    exit 0'; }
+# RE-ANCHORED (#31597 QA round 3): round 2 replaced the _mmry_fnd_nothing call with an "empty"
+# NONE answer, so the old anchor matched nothing. The mutant now drops that answer and just exits.
+mutate_m51() { _mrep "$1/$HANDLER_REL" "    printf '@@MMRY-NONE %s 0 empty@@' \"\$MMRY_FND_PART\"
+    exit 0" "    exit 0"; }
 targets_m51="$PARTS_TESTS"
 desc_m51="#31583 QA r3 R4(b) a part whose loader finds an empty set records nothing"
 
@@ -825,7 +828,16 @@ mutate_m81() { _mrep "$1/$HANDLER_REL" '        if (( MMRY_FND_PART == 1 )) && [
 targets_m81="$EDGES_TESTS"
 desc_m81="#31597 r2 TC4 parts 2-6 give the empty notice as well as part 1"
 
-ALL_MUTATIONS="$ALL_MUTATIONS m60 m61 m62 m63 m64 m65 m66 m67 m68 m69 m70 m71 m72 m73 m74 m75 m76 m77 m78 m79 m80 m81"
+# TC4 (#31597 QA round 3, Q4). SessionStart does not write the token-form told-marker, so a session with
+# no session id is told about the empty set at SessionStart and again on its first prompt.
+mutate_m82() {
+    _mrep "$1/$SESSION_START_REL" '    printf '"'"'%s'"'"' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true' '    :'
+}
+file_m82="$SESSION_START_REL"
+targets_m82="$EDGES_TESTS"
+desc_m82="#31597 r3 TC4 SessionStart leaves no token-form told-marker, so a session with no id is told twice"
+
+ALL_MUTATIONS="$ALL_MUTATIONS m60 m61 m62 m63 m64 m65 m66 m67 m68 m69 m70 m71 m72 m73 m74 m75 m76 m77 m78 m79 m80 m81 m82"
 
 # A mutation this harness deliberately does NOT claim to cover, stated rather than omitted:
 # the config-loading teardown (#31434 QA). Removing it leaks a file into the working tree
