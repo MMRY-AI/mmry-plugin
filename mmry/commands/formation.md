@@ -324,8 +324,10 @@ import bug turned out to be the date format, follow-up filed as #12345"`.
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-debrief.sh" "<summary>"
 ```
 
-This is how a formation ends properly. The summary is consolidated into lasting memories that
-someone who was never in the formation can read later, and the running chatter stops being served.
+This is how a formation ends properly. The account and the summary are saved as a lasting memory,
+the durable outcomes in them are extracted into memories of their own, and someone who was never in
+the formation can read both later. The running chatter stops being served. A group with nothing
+durable to say still closes out (#31738).
 Only the lead, the creator or an administrator may do it; the script translates a refusal.
 
 **The summary is no longer the whole record.** The close-out account goes with it - every member,
@@ -336,8 +338,12 @@ finished never reported anything.
 **Check `/mmry:formation report` first and write the summary against it.** The account says what
 happened; the summary says what it meant.
 
-If it reports that nothing was recorded, the formation is still active and retrying is safe. Do
-not tell the user it was closed out unless the script said so.
+If the close-out could not complete, the script prints the server's own reason, and that reason
+says whether retrying will help. Pass it through as it is. A formation that is already closed out or
+stood down is not active and cannot be closed again; the script clears its local state. Otherwise
+the formation may still be active, or, when the answer was lost, may already be closed: closing it
+out again is safe either way and says which. Do not tell the user it was closed out unless the
+script said so.
 
 ### leave
 
