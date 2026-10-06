@@ -1,18 +1,24 @@
 #!/usr/bin/env bats
-# bash 3.2 is the floor (#31245 QA round 8).
+# bash 3.2 is the floor (#31245 QA round 8), and the macOS sed is too (#31737).
 #
 # macOS ships bash 3.2 and this product says so in its own code comments, and the CI matrix runs
 # macos-latest to honour it. QA round 8 still found a bash 4 builtin, mapfile, in a test file
 # (codex-docs-and-eol.bats), where only a live macOS runner would have said so. This is the check
 # QA proposed: the constructs bash 3.2 does not have, refused across every shipped handler, setup
-# script and test file, in seconds and on any machine.
+# script and test file, on any machine. It is not quick on Windows, where every grep starts a new
+# process: one grep over every file first keeps most files to a single pass.
 #
-# What it cannot see, stated rather than implied: behaviour that differs between GNU and BSD tools
-# (sed, date, stat, touch), which is not a bash question. The sentence splitter that used a GNU sed
-# extension was fixed by hand in the same round.
+# It also refuses the sed programs a stock Mac cannot run, by reading them the way bash and sed
+# will (sed-program-scan.awk, #31737 QA round 1), because the 2.9.1 line join passed every regex
+# over its text once it was written in double quotes.
+#
+# What it still cannot see, stated rather than implied: other GNU and BSD differences (date, stat,
+# touch, grep), which no scan of a bash construct answers, and a sed program held in a variable or
+# a file. The macOS CI leg is the check that sees those.
 
 # One pattern per construct, so a refusal names what it found. Comment lines are ignored, because a
-# comment explaining why mapfile is not used is not a use of mapfile.
+# comment explaining why mapfile is not used is not a use of mapfile. Each name is unique and none
+# contains another, so the control below can tell which pattern found a line.
 _BASH4_PATTERNS=(
     'mapfile or readarray (bash 4)|(^|[^[:alnum:]_])(mapfile|readarray)([^[:alnum:]_]|$)'
     'associative array (bash 4)|(declare|local|typeset)[[:space:]]+-[a-zA-Z]*A'
@@ -25,38 +31,75 @@ _BASH4_PATTERNS=(
     # Not bash, but the same macOS failure: BSD sed rejects the label, exits 0 and passes the text
     # through unescaped (#31245 QA round 10, session-start.sh setup message, found on a Mac).
     'GNU-only sed label loop :a;N;$!ba|:a;N;[$]!ba'
+    # Other spellings, kept as quick literal checks. sed-program-scan.awk is what reads them all.
+    # The separate -e spelling runs on BSD sed (QA #2's Mac probe), so it is not called GNU-only. It is
+    # still refused, by the Lead's ruling (2026-10-05): under POSIX, N on the last line prints nothing,
+    # so a one-line input comes out empty on a Mac, and the shipped code uses the bash join anyway.
+    'sed line join written as separate -e parts, which BSD sed empties for one-line input|-e[[:space:]]*.?:a.?[[:space:]]+-e'
+    'GNU-only sed branch written $!b a|[$]!b[[:space:]]+a([^[:alnum:]_]|$)'
+    'GNU-only sed -z (NUL-separated input)|sed[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*z([[:space:]]|$)'
 )
 
-# Prints "file:line: construct: text" for every hit under the given root.
+# Every file the two scans read: shipped handlers, setup scripts and tests. This file is the one
+# place that must name every construct, so it is the one file not scanned.
+_portability_files() {
+    local root="$1"
+    find "$root" -path "$root/tests/libs" -prune -o -type f \
+        \( -name '*.sh' -o -name '*.bats' -o -name '*.bash' \) ! -name 'bash32-portability.bats' -print
+}
+
+# Prints "file:line: construct" for every hit under the given root.
+# -e before the pattern, because a pattern that starts with "-e" is otherwise read by grep as an
+# option and a different pattern runs (#31737 QA round 1).
 _scan_bash4() {
-    local root="$1" f entry name re
+    local root="$1" f entry name re all=()
+    for entry in "${_BASH4_PATTERNS[@]}"; do all+=(-e "${entry#*|}"); done
     while IFS= read -r f; do
         for entry in "${_BASH4_PATTERNS[@]}"; do
             name="${entry%%|*}"
             re="${entry#*|}"
-            grep -n -E "$re" "$f" 2>/dev/null | grep -v -E '^[0-9]+:[[:space:]]*#' | while IFS= read -r hit; do
+            grep -n -E -e "$re" "$f" 2>/dev/null | grep -v -E '^[0-9]+:[[:space:]]*#' | while IFS= read -r hit; do
                 printf '%s:%s: %s\n' "${f#$root/}" "${hit%%:*}" "$name"
             done
         done
-    # This file is the one place that must name every construct, so it is the one file not scanned.
-    done < <(find "$root" -path "$root/tests/libs" -prune -o -type f \
-                \( -name '*.sh' -o -name '*.bats' -o -name '*.bash' \) ! -name 'bash32-portability.bats' -print)
+    # One grep over every file first, so only a file holding some pattern is read pattern by pattern:
+    # the same output from a fraction of the processes (#31737 QA round 1, performance review). The
+    # extra /dev/null keeps grep off stdin if the list is ever empty.
+    done < <(_portability_files "$root" | tr '\n' '\0' | xargs -0 grep -l -E "${all[@]}" /dev/null 2>/dev/null)
 }
 
-@test "portability: no handler, setup script or test uses a construct bash 3.2 does not have" {
+# Prints "file:line: finding" for every sed program a stock Mac will not run as the author meant.
+_scan_sed_programs() {
+    local root="$1"
+    _portability_files "$root" | awk -v root="$root" -f "${BATS_TEST_DIRNAME}/sed-program-scan.awk"
+}
+
+@test "portability: no handler, setup script or test uses a construct bash 3.2 or the macOS sed does not have" {
     local plugin; plugin="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
-    local hits; hits="$(_scan_bash4 "$plugin")"
+    local hits; hits="$(_scan_bash4 "$plugin"; _scan_sed_programs "$plugin")"
     [[ -z "$hits" ]] || {
-        echo "bash 3.2, the floor macOS ships, does not have these:" >&2
+        echo "bash 3.2 and the sed macOS ships do not have these:" >&2
         echo "$hits" >&2
         return 1
     }
 }
 
-@test "control: the scanner finds each construct it claims to refuse" {
-    # Without this the test above passes on a scanner that matches nothing.
+@test "control: the scanners name each construct they claim to refuse, at its line, and nothing else" {
+    # Without this the test above passes on a scanner that matches nothing. Every expectation is a
+    # whole output line, file:line: name, so a finding cannot be credited to the wrong pattern: the
+    # 2.9.1 line is held to the name of the pattern written for it, and a broken pattern fails here
+    # even when another pattern still catches the same line (#31737 QA round 1).
     local root="${BATS_TEST_TMPDIR}/sample"
     mkdir -p "$root/hooks-handlers"
+    # Lines 11 to 14 are the round 1 spellings. Lines 15 to 21 are QA's U1 to U7, each of which got
+    # past round 1 and each of which fails on a stock Mac (QA #2's probe). Line 15 is the 2.9.1
+    # program exactly, written in double quotes. Lines 22 and 23 are comments, line 24 is an
+    # ordinary sed program, line 25 is what pattern 28 would match if grep read its leading -e as an
+    # option (QA round 1, software-engineer review), and line 26 carries U1 in a trailing comment.
+    # None of those five may be refused. Lines 27 to 30 are QA round 2's: the Mac's in-place form,
+    # sed -i '' PROGRAM FILE, which the scanner read the GNU way and took '' for the program, and its
+    # GNU twin; an abbreviated long option, --null; and a $'...' program. Each got past or survived a
+    # scanner mutant.
     cat > "$root/hooks-handlers/bad.sh" <<'BAD'
 mapfile -t lines < f
 readarray x < f
@@ -69,17 +112,66 @@ echo "${v@Q}"
 echo "$EPOCHSECONDS"
 wait -n
 printf x | sed ':a;N;$!ba;s/\n/ /g'
+printf x | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g'
+printf x | sed ':a;N;$!b a;s/\n/ /g'
+printf x | sed -z 's/\n/ /g'
+printf x | sed ":a;N;\$!ba;s/\n/ /g"
+printf x | sed ':a; N; $!ba; s/\n/ /g'
+printf x | sed ':x;N;$!bx;s/\n/ /g'
+printf x | sed ':a;$!{N;ba};s/\n/ /g'
+printf x | sed -zE 's/\n/ /g'
+printf x | sed --null-data 's/\n/ /g'
+printf x | sed -n 'H;${x;s/\n/ /g;p}'
 # mapfile in a comment is not a use
+# printf x | sed ':a;N;$!ba;s/\n/ /g' in a comment is not a use either
+printf x | sed 's/a/b/g; s/c/d/'
+echo host:a -e x
+echo ok # sed ":a;N;\$!ba;s/\n/ /g" in a trailing comment is not a use either
+sed -i '' ':x;N;$!bx;s/\n/ /g' FILE
+sed -i ':x;N;$!bx;s/\n/ /g' FILE
+sed --null 's/\n/ /g'
+sed $':x;N;$!bx;s/\\n/ /g'
 BAD
-    local hits; hits="$(_scan_bash4 "$root")"
-    local expect
-    for expect in "mapfile or readarray" "associative array" "case-modification" "&>>" \
-                  "case fall-through" "transformation expansion" "EPOCHSECONDS" "wait -n" \
-                  "GNU-only sed label loop"; do
-        [[ "$hits" == *"$expect"* ]] || { echo "the scanner missed: $expect"; echo "$hits"; return 1; }
+    local hits; hits="$(_scan_bash4 "$root"; _scan_sed_programs "$root")"
+    local label="sed reads a label or branch that runs into ; or } (GNU-only: BSD sed takes the rest of the line as the label)"
+    local null="sed reads -z or --null-data (GNU-only: BSD sed has no NUL-separated mode)"
+    local join="sed reads a line join (N, H, G or -z, then a newline in s or y): use the bash join. BSD sed's N prints nothing on the last line, so a one-line input comes out empty"
+    local brace="sed reads a } with no ; or newline before it (BSD sed rejects it; write ;})"
+    local want=(
+        "1: mapfile or readarray (bash 4)"
+        "2: mapfile or readarray (bash 4)"
+        "3: associative array (bash 4)"
+        "4: associative array (bash 4)"
+        "5: case-modification expansion (bash 4)"
+        "6: append-both redirection &>> (bash 4)"
+        "7: case fall-through ;& or ;;& (bash 4)"
+        "8: transformation expansion \${x@Q} (bash 4.4)"
+        "9: EPOCHSECONDS or EPOCHREALTIME (bash 5)"
+        "10: wait -n (bash 4.3)"
+        "11: GNU-only sed label loop :a;N;\$!ba" "11: $label" "11: $join"
+        "12: sed line join written as separate -e parts, which BSD sed empties for one-line input" "12: $join"
+        "13: GNU-only sed branch written \$!b a" "13: $label" "13: $join"
+        "14: GNU-only sed -z (NUL-separated input)" "14: $null" "14: $join"
+        "15: $label" "15: $join"
+        "16: $label" "16: $join"
+        "17: $label" "17: $join"
+        "18: $label" "18: $join" "18: $brace"
+        "19: $null" "19: $join"
+        "20: $null" "20: $join"
+        "21: $join" "21: $brace"
+        "27: $label" "27: $join"
+        "28: $label" "28: $join"
+        "29: $null" "29: $join"
+        "30: $label" "30: $join"
+    )
+    local w
+    for w in "${want[@]}"; do
+        grep -Fxq -e "hooks-handlers/bad.sh:$w" <<< "$hits" || {
+            echo "the scanners did not report: hooks-handlers/bad.sh:$w"; echo "$hits"; return 1; }
     done
-    [[ "$(grep -c 'mapfile or readarray' <<< "$hits")" -eq 2 ]] || {
-        echo "the comment line was counted, or a real use was missed:"; echo "$hits"; return 1; }
+    # Exactly these and nothing more: no comment line, no ordinary program, no double count.
+    [[ "$(printf '%s\n' "$hits" | grep -c .)" -eq "${#want[@]}" ]] || {
+        echo "expected ${#want[@]} findings, got:"; echo "$hits"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
