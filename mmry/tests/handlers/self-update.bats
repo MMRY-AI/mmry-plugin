@@ -179,3 +179,64 @@ EOF
     [[ "$status" -eq 0 ]] || return 1
     [ -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ]
 }
+
+# ---------------------------------------------------------------------------------------------
+# NEVER REPLACE AN INSTALLED PLUGIN WITH AN OLDER ONE (#31245 UAT, 2026-10-06)
+#
+# The update decision was `local == remote`, so any difference meant "update", in either
+# direction. On the Mac a Codex install of the 2.10.0 branch build was replaced, on the first
+# session after sign-in, with released master 2.9.1: 44 files reverted, and the customer got the
+# known 2.9.1 macOS hook defect on every prompt. The same happens to anyone whose installed copy is
+# ahead of master's marketplace.json, for example during the minutes a CDN still serves the old one.
+#
+# These use the real copy path with a fabricated archive, as the tests above do.
+# ---------------------------------------------------------------------------------------------
+
+_mock_remote_version() {
+    _mock_remote
+    sed -i.bak "s/9\.9\.9/$1/" "$TEST_TMPDIR/mock-bin/curl" && rm -f "$TEST_TMPDIR/mock-bin/curl.bak"
+}
+
+_set_local_version() {
+    printf '{ "name": "mmry", "version": "%s" }' "$2" > "$1/.claude-plugin/plugin.json"
+}
+
+@test "no-downgrade: an installed 2.10.0 is not replaced by a published 2.9.1" {
+    _mock_remote_version "2.9.1"
+    mkdir -p "$HOME/.codex/mmry/hooks-handlers"
+    local root="$TEST_TMPDIR/codex-cache/mmry"
+    _updatable_plugin "$root"
+    _set_local_version "$root" "2.10.0"
+
+    run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || return 1
+    [ ! -f "$root/hooks-handlers/updated-marker.txt" ] || return 1
+    [ ! -f "$HOME/.codex/mmry/hooks-handlers/updated-marker.txt" ] || return 1
+    grep -q '"2.10.0"' "$root/.claude-plugin/plugin.json" || return 1
+    [[ "$output" != *"plugin updated"* ]]
+}
+
+@test "no-downgrade: versions compare as numbers, so 2.9.1 installed still updates to 2.10.0" {
+    # A string comparison would rank 2.9.1 above 2.10.0 and refuse this update.
+    _mock_remote_version "2.10.0"
+    mkdir -p "$HOME/.codex/mmry/hooks-handlers"
+    local root="$TEST_TMPDIR/codex-cache/mmry"
+    _updatable_plugin "$root"
+    _set_local_version "$root" "2.9.1"
+
+    run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || return 1
+    [ -f "$root/hooks-handlers/updated-marker.txt" ] || return 1
+    [[ "$output" == *"plugin updated: 2.9.1 -> 2.10.0"* ]]
+}
+
+@test "no-downgrade: an unparseable version is left alone rather than guessed at" {
+    _mock_remote_version "2.9.1"
+    local root="$TEST_TMPDIR/codex-cache/mmry"
+    _updatable_plugin "$root"
+    _set_local_version "$root" "banana"
+
+    run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || return 1
+    [ ! -f "$root/hooks-handlers/updated-marker.txt" ]
+}
