@@ -103,8 +103,9 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 # the last is at least half a window long in bytes, and a window is never fewer bytes than the cap
 # less the three a character can be stepped back by (see _mmry_fnd_parts), so a set of B bytes has
 # fewer than k parts whenever B < (k-1) * (cap/2 - 8). The 8 is that step back, and margin. Decided
-# from the manifest's own byte count with one read and no process, before anything else in the file
-# runs. With no verifiable manifest at all, part 1 owns every report about it.
+# from the record's own byte count with one read and no process, before anything else in the file
+# runs. The record is the set file's first line (#31597), and only that line is read here. With no
+# verifiable record at all, part 1 owns every report about it.
 #
 # What an unused part costs is the process start, not this script: moving this check up from inside
 # the supervisor block was measured over 15 interleaved runs on Windows and made no difference
@@ -116,23 +117,89 @@ _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${_SFX}"
 # per record.
 _mmry_fnd_write() {
     local t="${1}.w.$$"
-    printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    # A FIFO or other special file planted at the target is removed first (#31411 QA round 3, N2):
+    # writing straight to one blocks, and a rename cannot replace one on Windows, where MSYS refuses
+    # it as a read-only file system. A directory is left alone; the rename then fails, as it should.
+    [[ -e "$1" && ! -f "$1" && ! -d "$1" ]] && rm -f "$1" 2>/dev/null
+    if [[ -n "${_FND_STDOUT_SPOILED:-}" ]]; then
+        # After a failed emit, not the builtin: see _mmry_fnd_spoil.
+        env printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    else
+        printf '%s' "$2" > "$t" 2>/dev/null && mv -f "$t" "$1" 2>/dev/null && return 0
+    fi
     rm -f "$t" 2>/dev/null
     return 1
 }
 
-# THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Read here, before
-# the quick exit, so that a part with nothing to send can still record that for this session
-# (#31583 QA round 2, R4). Claude Code sends session_id as the first field (captured from a real
-# payload: offset 1), so 160 bytes is enough whatever the prompt size; bash reads a pipe a byte at a
-# time, and reading the whole payload would make a long pasted prompt cost every part process. No id
-# means the old token-named records, unchanged. The worker inherits the id from the supervisor.
+# One line onto the log, only when the log is absent or a regular file (#31411 QA round 3, N2). A FIFO
+# planted there blocked the append, and with it the hook, outside any deadline: a damaged set hung the
+# turn instead of being reported. The log is a diagnostic, so a log that cannot be written is skipped.
+#
+# It stamps the time itself (#31583, test 506 on macOS, Mac bench round 2). After a failed emit ANY
+# command substitution captures the 1,024 stale bytes, because the subshell inherits them and flushes
+# them into the captured output: the callers' "$(date ...)" put a slice of the directives into the log
+# line before any write happened. So after a failed emit the stamp is taken inside a fresh process.
+_mmry_fnd_log() {
+    [[ -e "$_FOUND_LOG" && ! -f "$_FOUND_LOG" ]] && return 0
+    if [[ -n "${_FND_STDOUT_SPOILED:-}" ]]; then
+        env sh -c 'printf "%s %s\n" "$(date +%FT%T 2>/dev/null || echo now)" "$1"' _ "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+    else
+        printf '%s %s\n' "$(date +%FT%T 2>/dev/null || echo now)" "$1" >> "$_FOUND_LOG" 2>/dev/null || true
+    fi
+}
+
+# THE SECOND THIS FIRING STARTED, written into every record it makes (#31583 QA round 3, R4(a)).
+#
+# A record used to say only what a part did, not on which prompt, so a part that never ran kept the
+# previous prompt's "ok part k of n" and /mmry:foundation-status counted it as arrived. Claude Code
+# starts all six parts of a prompt together and waits for them before the model answers, so parts of
+# one prompt start within moments of each other and the next prompt's start later than that by the
+# whole answer and the customer's reply. The status command groups records by this second.
+#
+# No process where bash has a clock: printf %(%s)T from bash 4.2. Only the bash 3.2 a Mac ships pays
+# for date. A clock that cannot be read gives 0, which groups with nothing. Not bash 5's clock
+# variables: bash 3.2 is the floor, and #31245's portability guard refuses them in shipped code
+# (Lead/PM decision 2026-10-05 14:36 UTC: drop them, do not loosen the guard).
+_mmry_fnd_now() {
+    _FND_NOW=""
+    if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
+        printf -v _FND_NOW '%(%s)T' -1 2>/dev/null
+    fi
+    [[ "$_FND_NOW" =~ ^[0-9]{1,12}$ ]] || _FND_NOW="$(date +%s 2>/dev/null)"
+    [[ "$_FND_NOW" =~ ^[0-9]{1,12}$ ]] || _FND_NOW=0
+}
+
+# THIS SESSION'S ID, from the start of the payload (#31583 QA round 6, R4(c)). Read here, before the
+# quick exit, so that a part with nothing to send can still record that for this session (#31583 QA
+# round 2, R4). Claude Code sends session_id as the first field (captured from a real payload: offset
+# 1), so the first 160 bytes hold it and nothing more is read. No id means the old token-named
+# records, unchanged. The worker inherits the id from the supervisor.
+#
+# FURTHER IN, WHEN IT IS NOT THERE (#31583 QA round 3, P8). An id past byte 160 used to go unread, so
+# the hook filed this session's records under the shared token while the status command looked under
+# the id, and answered "nothing yet" after a delivery. The read now continues in 512-byte steps, only
+# while no id has been found, up to 4,096 bytes: bash reads a pipe a byte at a time, so reading all
+# of a long pasted prompt would cost every part process (64 KB measured at about 1.7 s on Windows,
+# 4 KB at nothing measurable). Past that the status command finds the token-named records instead.
+# Newlines no longer end the read (-d ''), so a payload spread over lines is read the same way.
 if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
+    _mmry_fnd_now
+    _FND_T0="$_FND_NOW"
     MMRY_FND_SID=""
     if [[ ! -t 0 ]]; then
-        _fnd_head=""
-        IFS= read -r -n 160 -t 1 _fnd_head 2>/dev/null || true
-        if [[ "$_fnd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]{1,100})\" ]]; then
+        # No dot (#31411 QA round 3, F7): records are named <name>.<session id>.<part>, so the id
+        # "abc.2" named session abc's part-2 record. Claude Code and Codex send ids without one.
+        _fnd_re='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"'
+        _fnd_head="" _fnd_more=""
+        IFS= read -r -d '' -n 160 -t 1 _fnd_head 2>/dev/null
+        _fnd_rc=$?
+        while (( _fnd_rc == 0 && ${#_fnd_head} < 4096 )) && [[ ! "$_fnd_head" =~ $_fnd_re ]]; do
+            _fnd_more=""
+            IFS= read -r -d '' -n 512 -t 1 _fnd_more 2>/dev/null
+            _fnd_rc=$?
+            _fnd_head="${_fnd_head}${_fnd_more}"
+        done
+        if [[ "$_fnd_head" =~ $_fnd_re ]]; then
             MMRY_FND_SID="${BASH_REMATCH[1]}"
         fi
     fi
@@ -140,11 +207,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 fi
 
 if (( MMRY_FND_PART > 1 )); then
-    _fnd_m="${_FOUND_TMPDIR}/mmry-foundation.md.manifest"
+    _fnd_m="${_FOUND_TMPDIR}/mmry-foundation-set.md"
     _fnd_mb=""
-    [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { _fnd_mb="$(<"$_fnd_m")" 2>/dev/null || _fnd_mb=""; }
+    [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { IFS= read -r _fnd_mb < "$_fnd_m" 2>/dev/null || _fnd_mb=""; }
     _fnd_quiet=1
-    if [[ "$_fnd_mb" =~ bytes=([0-9]+) ]] && (( BASH_REMATCH[1] >= (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )); then
+    if [[ "$_fnd_mb" =~ ^mmry-foundation\ v2\ .*bytes=([0-9]+) ]] && (( BASH_REMATCH[1] >= (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )); then
         _fnd_quiet=0
     fi
     if (( _fnd_quiet )); then
@@ -154,7 +221,7 @@ if (( MMRY_FND_PART > 1 )); then
         if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _fnd_qtok="${MMRY_FND_SID:-}"
             [[ -z "$_fnd_qtok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _fnd_qtok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _fnd_qtok=""; }
-            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} none"
+            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"
         fi
         exit 0
     fi
@@ -197,7 +264,11 @@ _mmry_fnd_json_escape() {
     local LC_ALL=C
     local s="$1" out="" p i=0 n step=16384
     n=${#s}
-    local _cc=$'[\001-\010\013\014\016-\037]' _need=0 _i _ch _hex
+    local _cc=$'[\001-\010\013\014\016-\037]' _need=0 _i _ch _hex _ff=$'\xff' _needff=0
+    # A NUL THE SERVICE SENT, held in the stored set as byte 0xFF (#31597 r2, TC5; see
+    # mmry_write_foundation_cache), goes out as the JSON escape for a NUL. 0xFF is never part of
+    # UTF-8, so nothing else can be mistaken for one. One test decides, as below.
+    [[ "$s" == *"$_ff"* ]] && _needff=1
     # EVERY OTHER CONTROL CHARACTER, BUT ONLY WHEN ONE IS THERE (#31411 QA, R1). JSON forbids
     # raw characters below 0x20 in a string, and only tab, CR and LF used to be escaped, so a
     # form feed pasted from a PDF or a word processor broke the hook's JSON while the product
@@ -218,6 +289,7 @@ _mmry_fnd_json_escape() {
                 p="${p//"$_ch"/\\u00${_hex}}"
             done
         fi
+        (( _needff )) && p="${p//"$_ff"/\\u0000}"
         out+="$p"
         i=$(( i + step ))
     done
@@ -235,14 +307,27 @@ _mmry_fnd_json_escape() {
 # R6 says there is no size at which the product silently withholds the set; this is what makes
 # that true at any size rather than merely at every size anyone has measured.
 _mmry_emit_escaped() {
-    local ctx_escaped="$1" msg="$2"
+    local ctx_escaped="$1" msg="$2" rc=0
     [[ -z "$ctx_escaped" && -z "$msg" ]] && return 0
-    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$ctx_escaped"
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' "$ctx_escaped" || rc=1
     if [[ -n "$msg" ]]; then
-        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")"
+        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")" || rc=1
     fi
-    printf '}'
+    printf '}' || rc=1
+    (( rc == 0 )) || _mmry_fnd_spoil
+    return $rc
 }
+
+# AFTER A FAILED EMIT, NOTHING IS WRITTEN WITH THE PRINTF BUILTIN, AND NOTHING IS CAPTURED WITH $( )
+# (#31583, foundation-parts test 506 on macOS). When the emit cannot be written, the shell's printf on macOS keeps the last 1,024 bytes of it,
+# and the next builtin printf carries them into wherever its own output goes: the outcome record,
+# written next, began with 1,024 bytes of the customer's directives, broke its own format, and read as
+# no record. Measured on the Mac bench: flushing to /dev/null first, reopening stdout, and a subshell
+# all leave the bytes in place; an external printf does not carry them. So a failed emit marks the
+# shell spoiled and every record and log line after it is written by an external printf. One process
+# per write, on the failure path only; a prompt whose emit worked pays nothing. Any piece of the emit
+# that failed makes the emit fail, not only the last.
+_mmry_fnd_spoil() { _FND_STDOUT_SPOILED=1; }
 
 # THE OUTCOME OF THE MOST RECENT FIRING, one line, last write wins (#31583 QA round 6).
 #
@@ -259,25 +344,57 @@ _mmry_emit_escaped() {
 # costs one mv (_mmry_fnd_write).
 _mmry_outcome() {
     local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
-    [[ -z "$tok" && -f "$f" && -r "$f" ]] && { tok="$(<"$f")" 2>/dev/null || tok=""; }
+    # read, not $(<file): it runs after a failed emit too, where a command substitution would capture
+    # the stale bytes (see _mmry_fnd_spoil).
+    [[ -z "$tok" && -f "$f" && -r "$f" ]] && { IFS= read -r tok < "$f" 2>/dev/null || [[ -n "$tok" ]] || tok=""; }
     # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
     # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
     # could catch half a line, and a FIFO left at the path would have blocked the write.
-    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$tok $1"
+    # "<session> <start second> <outcome>" (#31583 QA round 3, R4(a)): the second this firing started,
+    # so the status command can tell this prompt's records from an earlier prompt's.
+    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$tok ${_FND_T0:-0} $1"
     return 0
 }
 
+# WHAT PART 1 RECORDED ON THIS PROMPT, waiting up to $1 seconds for it (#31583 QA round 3, P4). Prints
+# part 1's final outcome and succeeds, or fails if none arrived in time. "This prompt" is a start
+# second within 3 s of this firing's own, the gap /mmry:foundation-status groups a prompt's parts by;
+# part 1's record from an earlier prompt, and the "failed unfinished" it writes when it starts, are
+# not an answer and are waited past. Polled every 0.2 s; only a part 2-6 that refuses ever asks.
+_mmry_fnd_part1_said() {
+    local f="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}" tok="${MMRY_FND_SID:-}"
+    local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t i
+    [[ -z "$tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || tok=""; }
+    [[ -n "$tok" ]] || return 1
+    for (( i = 0; i <= $1 * 5; i++ )); do
+        l=""
+        [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
+        if [[ "$l" =~ $re && "${BASH_REMATCH[1]}" == "$tok" ]]; then
+            t=$(( 10#${BASH_REMATCH[2]} ))
+            if (( t >= ${_FND_T0:-0} - 3 && t <= ${_FND_T0:-0} + 3 )) && [[ "${BASH_REMATCH[3]}" != "failed unfinished" ]]; then
+                printf '%s' "${BASH_REMATCH[3]}"
+                return 0
+            fi
+        fi
+        (( i < $1 * 5 )) && sleep 0.2
+    done
+    return 1
+}
+
 _mmry_emit() {
-    local ctx="$1" msg="$2"
+    local ctx="$1" msg="$2" rc=0
     [[ -z "$ctx" && -z "$msg" ]] && return 0
     printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}' \
-        "$(_mmry_fnd_json_escape "$ctx")"
+        "$(_mmry_fnd_json_escape "$ctx")" || rc=1
     # Omit systemMessage entirely when there is nothing to say, rather than emitting an
     # empty string that a client could render as a blank notice.
     if [[ -n "$msg" ]]; then
-        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")"
+        printf ',"systemMessage":"%s"' "$(_mmry_fnd_json_escape "$msg")" || rc=1
     fi
-    printf '}'
+    printf '}' || rc=1
+    # The refusal and failure notices are followed by a record too (see _mmry_fnd_spoil).
+    (( rc == 0 )) || _mmry_fnd_spoil
+    return $rc
 }
 
 # THE OFF-SWITCH LIVES IN ONE PLACE NOW (#31583 QA round 4, finding 4a).
@@ -447,6 +564,12 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     DEADLINE_MARK="${_FOUND_TMPDIR}/.mmry-foundation-deadline.$$"
     rm -f "$DEADLINE_MARK" 2>/dev/null || true
     : > "$OUTFILE" 2>/dev/null || true
+    # A RECORD THAT ASSUMES THE WORST, WRITTEN FIRST (#31583 QA round 3, R4(b)). Every way out of
+    # this supervisor below replaces it with what actually happened. Some ways out used to write
+    # nothing - a part whose loader found nothing to send, a loader that could not start, an emit
+    # that failed - and the previous prompt's record then stood for this one. Any exit that still
+    # forgets to replace it now reads as a failure, not as the last prompt's delivery.
+    _mmry_outcome "failed unfinished"
     _mmry_fnd_write "$_INFLIGHT" "" || true
 
     # THE WORKER DOES NOT GET TO SAY THE TURN WAS DELIVERED (#31583, security on QA round 4).
@@ -588,12 +711,6 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # customer hears about it instead of being handed a stub described as authoritative.
     # The worker puts the specific reason on stdout; it is repeated verbatim to both
     # audiences so the assistant and the customer are told the same thing.
-    if (( WORKER_RC == 3 && MMRY_FND_PART > 1 )); then
-        # NO EMIT ON THIS PATH: a refusal is about the whole set and part 1 reports it.
-        _mmry_outcome "failed refused"
-        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
-        exit 0
-    fi
     if (( WORKER_RC == 3 )); then
         # THE REMEDY HAS TO MATCH THE CAUSE (#31583 QA round 4).
         #
@@ -605,16 +722,12 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         REASON="${BODY#*|}"
         _STATE="${BODY%%|*}"
         [[ "$BODY" == *"|"* ]] || { REASON="${BODY:-the cached directives could not be verified}"; _STATE=""; }
+        # RETIRED BY #31597: no-manifest, a set with no record beside it, which every customer met
+        # once on updating. The record is inside the set file now, and a file written by an earlier
+        # plugin version is under another name and never read, so it cannot arise. missing is kept:
+        # a set stored in this session that has since disappeared is still reported in its words,
+        # from the marker SessionStart leaves (mmry_foundation_stored_path).
         case "$_STATE" in
-            no-manifest)
-                # Not damage. The manifest is what this release introduced, so every cache
-                # written by an earlier version looks like this once, and the rebuild started
-                # above normally clears it by the next prompt without the customer doing anything.
-                # Led with the reassurance and without the words cache or manifest (#31583 QA r5).
-                # It no longer promises "a fresh copy is already being fetched": inside the
-                # rebuild window, or offline, that is not true.
-                _UPGRADE=1
-                ;;
             gone|missing)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy is no longer there to check, so nothing was sent rather than something unverified."
                 ;;
@@ -629,11 +742,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             blank)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy checks out but contains no readable text, so there was nothing to send."
                 ;;
-            changed)
-                # Nothing is damaged: a new set landed while this turn was copying the old one for the
-                # assistant to read. Rebuilding would not help; the next prompt reads the new set.
-                _WHY="Nothing was truncated and nothing was guessed at; nothing was sent rather than a mix of two versions."
-                _REMEDY="Re-send the prompt."
+            unwritable)
+                # Nothing is damaged: the set verified, but the copy the assistant would be pointed at
+                # could not be written (#31597). Rebuilding the set would not help.
+                _WHY="Nothing was truncated and nothing was guessed at; the copy prepared for your assistant to read could not be written, so nothing was sent."
+                _REMEDY="Re-send the prompt. If it keeps happening, check that your temp folder can be written to and has free space."
                 ;;
             *)
                 # The states where a comparison really did happen and fail: size, contents,
@@ -643,22 +756,37 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         esac
         NOTICE="MMRY AI could not verify this account's FOUNDATION directives for this turn: ${REASON}. This turn is running WITHOUT the account's standing directives. Do not act on any partial or leftover directive text, and do not claim to be following them. Tell the user plainly that Foundation directives were not applied to this turn."
         _fnd_host_refs
-        if (( ${_UPGRADE:-0} )); then
-            USERMSG="MMRY AI: you have just updated the MMRY plugin, so this one turn ran without your Foundation directives while they are fetched again in the new format. Normally the next prompt has them. No action needed; if you still see this after a few prompts, run ${_FOUND_RELOAD_REF}."
-        else
-            USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run ${_FOUND_RELOAD_REF} to rebuild it, then ${_FOUND_STATUS_REF} to confirm.}"
+        USERMSG="MMRY AI: your Foundation directives were NOT applied to this turn - ${REASON}. ${_WHY} ${_REMEDY:-Run ${_FOUND_RELOAD_REF} to rebuild it, then ${_FOUND_STATUS_REF} to confirm.}"
+        # A PART 2-6 THAT REFUSES SAYS SO ON THE TURN (#31583 QA round 3, R3, architecture P4). It used
+        # to stay silent on the grounds that a refusal is about the whole set and part 1 reports it. When
+        # the set is damaged as a whole, that is true. When it changed between part 1's check and this
+        # one, part 1 delivered and nobody was told that this part was refused; only the status knew.
+        # A part cannot tell those apart, so it names itself, as a part that fails already does, and
+        # does not claim the whole turn went without (#31411 QA round 2): the other parts may have arrived.
+        if (( MMRY_FND_PART > 1 )); then
+            NOTICE="MMRY AI could not verify PART ${MMRY_FND_PART} of this account's FOUNDATION directives for this turn: ${REASON}. The other parts may have arrived, but without this one the set is incomplete. Do not act on any leftover text of this part, and do not claim to be following the complete set. Tell the user plainly that part ${MMRY_FND_PART} of their Foundation directives was not applied to this turn."
+            USERMSG="${USERMSG/MMRY AI: your Foundation directives were NOT applied/MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was NOT applied}"
+            # ONE NOTICE WHEN THE WHOLE SET IS DAMAGED (Lead/PM decision, 2026-10-05 05:20 UTC). Every part
+            # verifies the same set, so when it is damaged as a whole, part 1 refuses too and says so for
+            # the whole turn, and five more banners naming parts 2 to 6 said nothing more. So a part 2-6
+            # that refuses first asks what part 1 recorded on this prompt. Part 1 failed, so the turn has
+            # its notice, or delivered by reference, so the copy carries the whole set: this part stays
+            # silent, and still records its refusal for /mmry:foundation-status. Part 1 delivered in parts,
+            # or had nothing to send, or said nothing within 8 s: this part alone was refused, the set
+            # changed between the two reads, and it names itself as above. Waiting costs nothing unless a
+            # part refuses; 8 s is past part 1's refusal path on a loaded machine and inside the budget.
+            _fnd_p1=""
+            _fnd_p1="$(_mmry_fnd_part1_said 8)" || _fnd_p1=""
+            if [[ "$_fnd_p1" == failed* || "$_fnd_p1" == "ok by-reference"* ]]; then
+                NOTICE="" USERMSG=""
+            fi
         fi
-        printf '%s foundation reinjection REFUSED: %s
-'             "$(date +%FT%T 2>/dev/null || echo now)" "$REASON" >> "$_FOUND_LOG" 2>/dev/null || true
+        _mmry_fnd_log "foundation reinjection REFUSED${MMRY_FND_PART:+ (part ${MMRY_FND_PART})}: ${REASON}"
         _mmry_emit "$NOTICE" "$USERMSG"
-        if (( ${_UPGRADE:-0} )); then
-            _mmry_outcome "failed upgrade"
-        else
-            # A CAUSE CODE, NOT PROSE (#31583 QA round 6). The status command used to print whatever
-            # text this record held, and the record sits in a shared temp directory. It now holds a
-            # code and a number only; the command turns those into fixed sentences.
-            _mmry_outcome "failed refused ${_STATE:-unknown}"
-        fi
+        # A CAUSE CODE, NOT PROSE (#31583 QA round 6). The status command used to print whatever
+        # text this record held, and the record sits in a shared temp directory. It now holds a
+        # code and a number only; the command turns those into fixed sentences.
+        _mmry_outcome "failed refused ${_STATE:-unknown}"
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
@@ -706,8 +834,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _FOUND_EVENT="worker exited ${WORKER_RC} without hitting the ${DEADLINE}s deadline"
             _FOUND_OUTCOME="crash"
         fi
-        printf '%s foundation reinjection FAILED: %s\n' \
-            "$(date +%FT%T 2>/dev/null || echo now)" "$_FOUND_EVENT" >> "$_FOUND_LOG" 2>/dev/null || true
+        _mmry_fnd_log "foundation reinjection FAILED: ${_FOUND_EVENT}"
         if (( MMRY_FND_PART > 1 )); then
             # A part names itself and does not claim the whole turn went without its directives
             # (#31411 QA round 2): the other parts may well have arrived.
@@ -729,13 +856,36 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # watchdog had already let the worker go, so on a large set it alone could carry the turn
     # past the hook budget, where the harness discards the output and nothing is said.
     if [[ ! "$BODY" =~ [^[:space:]] ]]; then
-        # NO EMIT ON THIS PATH: there is nothing to send, so nothing can go missing.
         # Nothing to send, so nothing can go missing in the sending. A verified-empty record
         # is a true answer and is promoted; for toggle-off or no-cache there is no pending
         # record and this is a no-op.
-        [[ -e "$_PENDING" ]] && { mv -f "$_PENDING" "$_STATUS" 2>/dev/null; _mmry_outcome "ok part 1 of 1"; }
-        # A part beyond the end of the set: nothing to send, and that is the right answer.
-        [[ "$_FND_KIND" == NONE* ]] && _mmry_outcome "none"
+        #
+        # AN EMPTY SET IS TOLD, ONCE A SESSION (#31597 r2, TC4, Lead/PM decision 2026-10-06). It used
+        # to be silent on every prompt, so the customer was never told unless they ran the status
+        # command. Said on the customer's channel only, and recorded per session in the same marker
+        # SessionStart writes when it told them first, so it is never repeated on later prompts:
+        # #31583 removed the warning on every prompt and that stays removed. With no session id and
+        # no token the marker holds a fixed word, so even then it is said once, not every prompt.
+        # Part 1 only: it owns everything said about the set as a whole.
+        if (( MMRY_FND_PART == 1 )) && [[ "$_FND_KIND" == *" empty" ]]; then
+            _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
+            [[ -z "$_etok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _etok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _etok=""; }
+            _etok="${_etok:-no-session}"
+            [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
+            if [[ "$_etok" != "$_etold_tok" ]]; then
+                _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
+            fi
+        fi
+        if [[ -e "$_PENDING" ]]; then
+            mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+            _mmry_outcome "ok part 1 of 1"
+        elif [[ "$_FND_KIND" == NONE* ]]; then
+            # The worker said there is nothing for this part: a part beyond the end of the set, no set
+            # loaded yet, an empty one, or re-injection off. That is the right answer, so it is recorded.
+            _mmry_outcome "none"
+        fi
+        # Anything else said nothing and explained nothing, so the record written at the start stands:
+        # "failed unfinished" (#31583 QA round 3, R4(b)).
         rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
         exit 0
     fi
@@ -761,7 +911,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
             _fnd_host_refs
             USERMSG="MMRY AI: your Foundation set is larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
-            printf '%s' "$_tok" > "$_told" 2>/dev/null || true
+            # Written to a temporary file and renamed into place (#31411 QA round 3, N2): writing
+            # straight to it blocked on a FIFO planted at this name, and the rename replaces one.
+            _mmry_fnd_write "$_told" "$_tok" || true
         fi
     fi
 
@@ -771,12 +923,17 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
         case "$_FND_KIND" in
-            # "PART k n version": the version goes into the outcome record (#31583 QA round 2, R4), so
-            # the status command can tell a prompt whose parts came from two versions of the set.
+            # "PART k n version": the version goes into the outcome record (#31583 QA round 2 R4,
+            # #31597), so the status command can tell a prompt whose parts came from two versions.
             "PART "*)  _fk=(${_FND_KIND#PART }); _mmry_outcome "ok part ${_fk[0]} of ${_fk[1]}${_fk[2]:+ set ${_fk[2]}}" ;;
             "BYREF "*) _mmry_outcome "ok by-reference ${_FND_KIND#BYREF }" ;;
             *)         _mmry_outcome "ok part 1 of 1" ;;
         esac
+    else
+        # The hand-over to Claude Code failed (#31583 QA round 3, R4(b)). Nothing was delivered, and
+        # this used to leave the previous prompt's record to say otherwise.
+        _mmry_outcome "failed emit"
+        _mmry_fnd_log "foundation reinjection FAILED: the output could not be written (part ${MMRY_FND_PART})"
     fi
     rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
     exit 0
@@ -795,14 +952,17 @@ _MMRY_ENV_REINJECT="${MMRY_FOUNDATION_REINJECT-}"
 # Source the client for MMRY_TMPDIR + config parsing. It runs `set -euo pipefail` at the
 # top, so relax those options again immediately after, we must not fail the prompt.
 # shellcheck disable=SC1091
-source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || exit 0
+# A CLIENT THAT WILL NOT LOAD IS A FAILURE (#31583 QA round 3, R4(b)). It used to exit 0, which the
+# supervisor reads as "nothing to send", so the customer was told nothing and the previous prompt's
+# record stood. A non-zero exit takes the crash path: the customer is told, and it is recorded.
+source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh" 2>/dev/null || exit 4
 set +e +u
 
 mmry_load_config 2>/dev/null || true
 
 REINJECT="${MMRY_FOUNDATION_REINJECT:-true}"
 REFRESH_SECS="${MMRY_FOUNDATION_REFRESH_SECONDS:-86400}"
-CACHE="${MMRY_TMPDIR}/mmry-foundation.md"
+CACHE="${MMRY_TMPDIR}/mmry-foundation-set.md"
 # Kept for the supervisor's failure log only. Nothing on the happy path writes here any
 # more: the line that did recorded a truncation that no longer happens, and recorded it
 # wrongly - it printed the length AFTER the cut, so every one of the 1,457 entries on the
@@ -819,7 +979,10 @@ LOG="${MMRY_TMPDIR}/mmry-foundation.log"
 # supervisor spawned this worker, this worker exited silently, and the status command promised
 # the next prompt would send the set. It now asks the same routine, with the same input, that
 # the other two use.
-MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && exit 0
+# Nothing to send is said out loud (#31583 QA round 3, R4(b)): the supervisor records "none" only on
+# the NONE marker, so a worker that leaves in silence is never mistaken for one with nothing to send.
+_mmry_fnd_nothing() { printf '@@MMRY-NONE %s 0@@' "$MMRY_FND_PART"; exit 0; }
+MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && _mmry_fnd_nothing
 
 # TTL-gated BACKGROUND refresh (#30579): if the cache is older than the refresh window,
 # re-fetch Foundation memories in the background so an admin-added memory propagates without
@@ -835,44 +998,18 @@ if (( MMRY_FND_PART == 1 )) && [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_S
     _lock_age=$(( _now - $(_mmry_mtime "$_lock") ))
     if (( _cache_age >= REFRESH_SECS )) && (( _lock_age >= REFRESH_SECS )); then
         touch "$_lock" 2>/dev/null || true
-        ( mmry_refresh_foundation_cache "$PWD" "$CACHE" >/dev/null 2>&1 & ) 2>/dev/null || true
+        # With this session's id, so the writer leaves the stored marker for THIS session (#31597
+        # r2, R3): a set the refresh stores and that is then removed before delivery is reported.
+        ( mmry_refresh_foundation_cache "$PWD" "$CACHE" "${MMRY_FND_SID:-}" >/dev/null 2>&1 & ) 2>/dev/null || true
     fi
 fi
 
-# UPGRADE RECOVERY (#31583 QA r3, found while verifying TC4 rather than reported).
-#
-# A cache written by a plugin older than this one has NO manifest beside it, because the
-# manifest is what this ticket introduced. The verifier below is right to refuse it: an
-# unmanifested file cannot be shown to be the account's own directives, and writing a manifest
-# for whatever happens to be on disk would bless the four-byte stub this ticket exists to catch.
-#
-# But nothing rebuilt it, so the customer was warned on EVERY prompt for the rest of the
-# session and the warning never cleared. Measured on a manifest-less cache over three prompts:
-# refused each time, 922 characters of notice each time, no manifest ever appearing. That is
-# the warn-all-the-time failure test case 4 exists to forbid, arriving by upgrade instead of by
-# a bug, and it would have met every customer whose session did not happen to re-fetch. The
-# live cache on the machine this was found on is exactly this shape: 15 entries, 6,279
-# characters, no manifest.
-#
-# The age-gated refresh above cannot cover it. That gate asks how OLD the cache is, and an
-# unmanifested cache is usually brand new, so its age is zero and it never fires; its lock is
-# shared with the daily window besides. This gets its own short window, so recovery takes one
-# prompt rather than a day, without hammering the API when the rebuild keeps failing.
-#
-# The turn still refuses. Recovery lands on the NEXT prompt, which is the honest order: this
-# prompt genuinely has nothing it can verify.
-# Named, like every other window on this path (#31583 QA round 4). Short enough that an
-# upgrading customer recovers within a prompt or two, long enough that a rebuild which keeps
-# failing - offline, dead key - does not make one API call per prompt.
-REBUILD_RETRY_SECS="${MMRY_FOUNDATION_REBUILD_RETRY_SECONDS:-60}"
-if (( MMRY_FND_PART == 1 )) && [[ -e "$CACHE" && ! -e "${CACHE}.manifest" && -n "${MMRY_API_KEY:-}" ]]; then
-    _rebuild_lock="${MMRY_TMPDIR}/.mmry-foundation-rebuild"
-    _rb_now="$(date +%s 2>/dev/null || echo 0)"
-    if (( _rb_now - $(_mmry_mtime "$_rebuild_lock") >= REBUILD_RETRY_SECS )); then
-        touch "$_rebuild_lock" 2>/dev/null || true
-        ( mmry_refresh_foundation_cache "$PWD" "$CACHE" >/dev/null 2>&1 & ) 2>/dev/null || true
-    fi
-fi
+# UPGRADE RECOVERY IS RETIRED (#31597). It rebuilt a cache that had no manifest beside it, which
+# every customer met once on updating, because the old cache and its manifest shared a name with
+# what plugin 2.9.1 writes. The set now lives in its own file, mmry-foundation-set.md, which only
+# this version writes, with its record inside it. A file left by an earlier version is never read,
+# so there is nothing to rebuild from: SessionStart writes the set, and an absent set is fetched by
+# the refresh above, whose age test treats a missing file as infinitely old.
 
 # ============================================================================
 # VERIFY THE CACHE BEFORE BELIEVING IT (#31583).
@@ -909,8 +1046,14 @@ STATUS_OUT="${MMRY_FOUNDATION_PENDING:-$STATUS}"
 # foundation-status.sh carried another. They drifted twice in two rounds and each time the
 # customer asking "are my directives reaching my assistant" was told the opposite of what was
 # happening. One routine now; this file owns only the wording and the exit codes.
-_reason="$(mmry_verify_foundation_cache "$CACHE")"
+#
+# CALLED DIRECTLY, NOT IN $( ) (#31597). The routine reads the set file ONCE and hands back the
+# verified set itself in MMRY_FND_SET, and that is what is delivered below. This used to verify
+# the file and then read it a second time to deliver it, so a replacement landing between the two
+# sent the assistant bytes that had never been checked. Nothing here reopens the file.
+mmry_read_foundation_set "$CACHE"
 _verdict=$?
+_reason="$MMRY_FND_VERDICT"
 
 if (( _verdict == 1 )); then
     # ABSENT IS TWO DIFFERENT SITUATIONS AND ONLY ONE OF THEM IS A LOSS (#31583 R3/TC3).
@@ -942,12 +1085,22 @@ if (( _verdict == 1 )); then
             printf '%s' 'gone|the local copy of your Foundation directives has disappeared since it was last delivered in this session'
             exit 3
         fi
-        exit 0
+        # STORED IN THIS SESSION AND NOT DELIVERED YET, AND NOW MISSING (#31597). The manifest used
+        # to be the evidence for this: deleting the set left it behind. The record is inside the
+        # set file now, so SessionStart leaves a marker instead, and the words are the ones the
+        # manifest produced.
+        if _fnd_stored="$(mmry_foundation_stored_entries "$MMRY_TMPDIR" "${MMRY_FND_SID:-}")" && (( _fnd_stored > 0 )); then
+            printf 'missing|the manifest records %s Foundation directives but the cache holding them is missing' "$_fnd_stored"
+            exit 3
+        fi
+        _mmry_fnd_nothing
     fi
-    # Verified and genuinely empty. Not damage, not worth a word, but it IS an answer,
-    # so it goes on the record the status command reads.
+    # Verified and genuinely empty. Not damage, but it IS an answer, so it goes on the record the
+    # status command reads, and the supervisor is told it was EMPTY rather than merely nothing, so it
+    # can tell the customer once this session (#31597 r2, TC4).
     [[ -n "$STATUS_OUT" ]] && printf '%s ok entries=0 bytes=0
 ' "${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}" > "$STATUS_OUT" 2>/dev/null || true
+    printf '@@MMRY-NONE %s 0 empty@@' "$MMRY_FND_PART"
     exit 0
 fi
 
@@ -962,7 +1115,10 @@ if (( _verdict != 0 )); then
 fi
 
 read -r _ok_word _exp_entries _act_bytes _fnd_setid <<<"$_reason"
-content="$(<"$CACHE")"
+# The verified copy, not a second read of the file (#31597). The verdict's fourth field and
+# MMRY_FND_SETID are the same checksum, the version every part and record names.
+content="$MMRY_FND_SET"
+_fnd_setid="$MMRY_FND_SETID"
 
 # ============================================================================
 # DELIVER THE SET IN FULL (#31411).
@@ -1011,7 +1167,9 @@ content="$(<"$CACHE")"
 # WHEN THAT NEEDS MORE THAN K PARTS, CUT AGAIN, FULLER (#31411 QA round 2, R1). Pulling back to a
 # line end can leave a part half full: seven long memories of about 5,000 characters, 35,147 bytes,
 # needed seven parts and went by reference although they fit in four. So the set is cut again with
-# every part filled to the cap, pulled back only to a blank within its last 256 characters. By
+# every part filled to the cap, pulled back to the last line end or sentence end in its last 400
+# bytes (#31411 QA round 3, TC3: pulled back only to a blank, every cut fell mid-sentence), else to a
+# blank in its last 256. If even that needs more than K parts, it is packed to a blank alone. By
 # reference therefore means the set does not fit: more than about K x 9,500 characters.
 #
 # THREE ATTEMPTS, CHEAPEST FIRST. 1) The tidy cut, then 2) the full cut, counted in BYTES here in
@@ -1037,9 +1195,24 @@ _mmry_fnd_cut_bytes() {
         while (( wb > 0 )) && [[ "${s:wb:1}" =~ $cont ]]; do wb=$(( wb - 1 )); done
         w="${s:0:wb}"
         cut=$wb
-        if [[ "$mode" == "fill" ]]; then
-            t="${w%[ $'\t\n\r']*}"
-            [[ "$t" != "$w" ]] && (( wb - ${#t} <= 256 )) && cut=$(( ${#t} + 1 ))
+        if [[ "$mode" == "fill" || "$mode" == "pack" ]]; then
+            # fill (#31411 QA round 3, TC3): the last line end or sentence end in the part's last
+            # 400 bytes, whichever is latest, so a filled part still ends where a sentence does.
+            # pack, the old fill: a blank within the last 256 bytes. fill falls back to it too.
+            local fbest=0 c
+            if [[ "$mode" == "fill" ]]; then
+                t="${w%$'\n'*}"
+                [[ "$t" != "$w" ]] && { c=$(( ${#t} + 1 )); (( wb - c <= 400 && c > fbest )) && fbest=$c; }
+                t="${w%[.!?][ $'\t']*}"
+                [[ "$t" != "$w" ]] && { c=$(( ${#t} + 2 )); (( wb - c <= 400 && c > fbest )) && fbest=$c; }
+                t="${w%$'\xe3\x80\x82'*}"
+                [[ "$t" != "$w" ]] && { c=$(( ${#t} + 3 )); (( wb - c <= 400 && c > fbest )) && fbest=$c; }
+                (( fbest > 0 )) && cut=$fbest
+            fi
+            if (( fbest == 0 )); then
+                t="${w%[ $'\t\n\r']*}"
+                [[ "$t" != "$w" ]] && (( wb - ${#t} <= 256 )) && cut=$(( ${#t} + 1 ))
+            fi
         else
             t="${w%$'\n'*}"
             if [[ "$t" != "$w" ]] && (( ${#t} + 1 >= wb / 2 )); then
@@ -1076,11 +1249,21 @@ _mmry_fnd_parts() {
     (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
     _mmry_fnd_cut_bytes "$s" fill
     (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
+    # Pulling a part back to a sentence end can, at the margin, cost the part that made the set fit.
+    # Then the set is packed as before, to a blank, rather than sent by reference (TC3 never at R1's
+    # expense).
+    _mmry_fnd_cut_bytes "$s" pack
+    (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
     # Plain ASCII: bytes are characters, so the set really does not fit.
     [[ "$s" =~ $nonascii ]] || return 0
     # Counted in characters. Only as much of the set as K + 1 parts could hold is passed: four bytes
     # is the most a character takes, and anything beyond that is by reference regardless.
-    lens="$(LC_ALL=C awk -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
+    # BINMODE=1 (#31411 QA round 3): gawk on Windows reads its input in text mode and drops the CR
+    # of every CRLF, and on Windows the cache IS written with CRLF (native jq 1.7.1 and 1.8.2 both
+    # do). The lengths then summed short of the set, the check below failed, and every non-ASCII set
+    # of two or more memories went by reference. Binary input keeps every byte. Any other awk treats
+    # BINMODE as an ordinary variable it never reads, so BSD awk on a Mac is unaffected.
+    lens="$(LC_ALL=C awk -v BINMODE=1 -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
         -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" \
         <<<"$s" 2>/dev/null)" || return 0
     while IFS= read -r L; do
@@ -1113,21 +1296,29 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
     # were verified, named by this session, ending in a closing line it is told to reach. The copy is
     # checked against the record before it is put in place, so a cache replaced while it was being
     # copied sends nothing rather than a different set.
+    #
+    # WRITTEN FROM THE VERIFIED COPY (#31597). The set is read once and verified in memory, and the
+    # copy is written from that, never copied from the file: another session or the daily refresh
+    # can replace the file at any moment, but nothing can change what was verified. So the copy is
+    # exactly the set this turn checked, and its closing line names that version. A copy that cannot
+    # be written, or a directory standing where it goes, sends nothing.
     _fnd_key="${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}"
     _fnd_snap="${MMRY_TMPDIR}/mmry-foundation.byref${_fnd_key:+.$_fnd_key}.md"
     _fnd_snaptmp="${_fnd_snap}.new.$$"
     _fnd_end="END OF FOUNDATION SET ${_fnd_setid}"
-    _sc="" _sb=""
-    if cp -f "$CACHE" "$_fnd_snaptmp" 2>/dev/null; then
-        read -r _sc _sb < <(cksum < "$_fnd_snaptmp" 2>/dev/null)
-    fi
-    if [[ -n "$_sc" && "$_sc" == "$_fnd_setid" && "$_sb" == "$_act_bytes" ]] \
-        && printf '\n%s\n' "$_fnd_end" >> "$_fnd_snaptmp" 2>/dev/null \
-        && mv -f "$_fnd_snaptmp" "$_fnd_snap" 2>/dev/null; then
+    #
+    # CHECKED AFTER THE RENAME AS WELL AS BEFORE IT (#31411 QA round 3). A directory at the copy's path
+    # takes the copy INTO it, the rename succeeds, and the assistant is pointed at a directory. The
+    # path is checked to be no directory before the rename and to be a regular file after it, which
+    # also catches one made in between, and anything the rename put inside one is removed.
+    if [[ ! -d "$_fnd_snap" ]] \
+        && { mmry_foundation_restore_nul "$content" && printf '\n\n%s\n' "$_fnd_end"; } > "$_fnd_snaptmp" 2>/dev/null \
+        && mv -f "$_fnd_snaptmp" "$_fnd_snap" 2>/dev/null \
+        && [[ -f "$_fnd_snap" ]]; then
         :
     else
-        rm -f "$_fnd_snaptmp" 2>/dev/null
-        printf '%s' 'changed|your Foundation directives were being replaced as this turn started, so the copy prepared for it did not match the record'
+        rm -f "$_fnd_snaptmp" "${_fnd_snap}/${_fnd_snaptmp##*/}" 2>/dev/null
+        printf '%s' 'unwritable|the copy of your Foundation directives prepared for this turn could not be written'
         exit 3
     fi
     # One path, converted for Windows below. The conversion read $_fnd_snap a second time, so
@@ -1151,6 +1342,12 @@ elif (( _fnd_n == 1 )); then
 ${content}"
     printf '@@MMRY-PART 1 1 %s@@' "$_fnd_setid"
 else
+    # EVERY PART NAMES THE VERSION OF THE SET IT WAS CUT FROM (#31583 QA round 2 R4, #31597). The
+    # parts are separate firings, each reading the set on its own, so a replacement landing between
+    # them would hand the assistant half of one version and half of another. Nothing can stop that
+    # between processes Claude Code starts in parallel, but it must not be silent: the assistant can
+    # see the parts disagree, and each part's outcome record carries the version, so
+    # /mmry:foundation-status reports such a prompt as PARTLY, never IN FULL.
     _payload="${_fnd_head} This is PART ${MMRY_FND_PART} OF ${_fnd_n} of the set, version ${_fnd_setid}. The parts arrive in any order and together are the whole set; if their versions differ, tell the user.
 
 ${FND_PARTS[$(( MMRY_FND_PART - 1 ))]}"

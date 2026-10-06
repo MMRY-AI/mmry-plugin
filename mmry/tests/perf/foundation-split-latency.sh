@@ -23,6 +23,9 @@ make_set() { # $1 = lines
     awk -v n="$1" -v l="$line" 'BEGIN { for (i = 0; i < n; i++) print l }' > "$d/mmry-foundation.md"
     read -r s b < <(cksum < "$d/mmry-foundation.md")
     printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "$1" "$b" "$s" > "$d/mmry-foundation.md.manifest"
+    # Both formats (#31597), so either side of the comparison finds its own: the two-file pair an
+    # older hook reads, and the single set file, record line first and trailer last, that 31597 reads.
+    { printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$1" "$b" "$s"; cat "$d/mmry-foundation.md"; printf 'END OF FOUNDATION SET'; } > "$d/mmry-foundation-set.md"
     printf '%s' "$d"; }
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
 

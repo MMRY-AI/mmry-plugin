@@ -151,7 +151,9 @@ if [[ "$HOOK_READ_STATUS" == "empty" || "$HOOK_READ_STATUS" == "timeout" ]]; the
 fi
 
 # stdin may not be JSON outside a hook context; jq returns empty and we fall
-# back to the env var, then "unknown". This is a data fallback, not a jq one.
+# back to the env vars, then "unknown". This is a data fallback, not a jq one.
+# CLAUDE_CODE_SESSION_ID is what the Bash tool sets: /mmry:load-memories runs this script there with
+# no payload, and its Foundation marker must be filed under the real session (#31597 QA round 3, R3).
 SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
 
 # AND IF THE PAYLOAD ARRIVED BUT DID NOT CARRY session_id, SAY SO (#31245 QA round 2).
@@ -171,7 +173,7 @@ if [[ -z "$SESSION_ID" && "$HOOK_READ_STATUS" == "ok" ]]; then
     MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: the $(mmry_host_label) hook payload was read successfully but carried no 'session_id' field (fields present: ${_mmry_keys:-none - it did not parse as JSON}). MMRY assumes the Claude Code payload field names; this session is being registered without a real id, so coordination features will not work. Tell the user and ask them to report it. "
 fi
 
-SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-unknown}}"
+SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
 
 # SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
 #
@@ -208,7 +210,7 @@ rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
 # Records named by session id (#31583 QA round 6) are never cleared by the session that wrote them,
 # because it cannot know it has ended. They are a few dozen bytes each; anything a week old is from
 # a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
-find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
@@ -286,7 +288,12 @@ count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 
 # Two things are therefore true of the line below. It cannot kill the hook, and it cannot be
 # silent. `if !` is exempt from errexit, and the fault note is the channel this file already
 # uses to put a warning in front of the model before it decides anything about the turn.
-if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundation.md"; then
+#
+# The session id goes to the writer, which on success leaves the evidence that a set was stored for
+# this session, so a set deleted before its first delivery is reported as missing (#31597, and r2:
+# the writer does it, so the per-prompt refresh does it too). See mmry_foundation_stored_path.
+EMPTY_SYSMSG=""
+if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$(mmry_foundation_set_path "$MMRY_TMPDIR")" "$SESSION_ID"; then
     # The remedy is the host's own (#31245 merged onto #31411): on Codex there is nothing to type,
     # so the assistant is told it can run the script itself, as the other Codex hints here do.
     if [[ "$(mmry_host)" == "codex" ]]; then
@@ -295,6 +302,17 @@ if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "${MMRY_TMPDIR}/mmry-foundatio
         _mmry_fnd_retry_hint="ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check"
     fi
     MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: your Foundation directives could not be stored for this session, so they will NOT be applied on each prompt. Nothing partial was kept and nothing was guessed at. Tell the user, and ${_mmry_fnd_retry_hint}. "
+elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
+    # AN EMPTY SET IS TOLD TO THE CUSTOMER, ONCE A SESSION (#31597 r2, TC4). systemMessage is the
+    # channel the customer sees. The marker stops the per-prompt hook saying it again this session;
+    # it is written in both the session-id form and the token form the hook falls back to.
+    # shellcheck source=/dev/null
+    source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
+    EMPTY_SYSMSG=",\"systemMessage\":\"$(_mmry_json_escape "$MMRY_FND_EMPTY_NOTICE")\""
+    _fnd_esid="$(mmry_foundation_sid "$SESSION_ID")"
+    _fnd_ekey="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$SESSION_ID" || true)"
+    [[ -n "$_fnd_esid" ]] && { printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true; }
+    printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true
 fi
 
 # Register session — uses session_id read from hook stdin (see top of file).
@@ -342,7 +360,7 @@ if [[ "$count" == "0" ]]; then
     else
         _mmry_onboard_hint="they can always say remember this to save something new, or /mmry:help for a quick reference"
     fi
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know %s."}}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_hint"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know %s."}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_hint" "$EMPTY_SYSMSG"
 else
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path" "$EMPTY_SYSMSG"
 fi

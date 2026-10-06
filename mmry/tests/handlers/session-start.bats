@@ -125,8 +125,8 @@ setup() {
 # ============================================================================
 
 @test "session-start: #31411 a Foundation cache write failure does not kill the hook" {
-    # Deterministic failure with nothing stubbed: a DIRECTORY where the writer must create the
-    # manifest file, so the real writer takes its real failure path.
+    # Deterministic failure: a copy of the plugin whose writer returns failure and writes nothing
+    # (see _plugin_with_failing_writer below), so session-start's handling of it is what is tested.
     _plugin_with_failing_writer
 
     run bash -c "bash '$FAILING_ROOT/hooks-handlers/session-start.sh' 2>/dev/null"

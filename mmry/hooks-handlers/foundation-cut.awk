@@ -42,17 +42,28 @@ function has_stop(w) {
     return index(w, ". ") || index(w, "! ") || index(w, "? ") || index(w, ".\t") || index(w, "!\t") || index(w, "?\t")
 }
 
-function cut(mode,    pos, n_out, wb, w, half, a, best) {
+function cut(mode,    pos, n_out, wb, w, half, a, best, c) {
     n_out = 0; pos = 1
     while (pos <= N && n_out <= max) {
         wb = window(pos)
         if (pos + wb > N) { P[++n_out] = N - pos + 1; break }
         w = substr(S, pos, wb); best = wb
-        if (mode == "fill") {
-            # Every part filled to the cap, pulled back only to a blank within its last 256 bytes.
-            a = -1
-            if (has_blank(w) || index(w, "\n") || index(w, "\r")) a = after_last(w, "^.*[ \t\n\r]")
-            if (a >= 0 && a + 1 <= 256) best = wb - a
+        if (mode == "fill" || mode == "pack") {
+            # fill (#31411 QA round 3, TC3): the latest line end or sentence end in the part's last
+            # 400 bytes. pack, and fill when there is none: a blank within the last 256 bytes. The
+            # hook's bash cut follows the same rules; foundation-parts.bats checks the two agree.
+            c = 0
+            if (mode == "fill") {
+                if (index(w, "\n")) { a = after_last(w, "^.*\n"); if (a >= 0 && a <= 400 && wb - a > c) c = wb - a }
+                if (has_stop(w)) { a = after_last(w, "^.*[.!?][ \t]"); if (a >= 0 && a <= 400 && wb - a > c) c = wb - a }
+                if (index(w, JSTOP)) { a = after_last(w, "^.*" JSTOP); if (a >= 0 && a <= 400 && wb - a > c) c = wb - a }
+                if (c > 0) best = c
+            }
+            if (c == 0) {
+                a = -1
+                if (has_blank(w) || index(w, "\n") || index(w, "\r")) a = after_last(w, "^.*[ \t\n\r]")
+                if (a >= 0 && a + 1 <= 256) best = wb - a
+            }
         } else {
             # The last line end in the second half, else the last sentence end, else the Japanese
             # full stop, else the last blank; failing all of those, hard, between characters.
@@ -90,5 +101,6 @@ END {
     N = length(S)
     n = cut("tidy")
     if (n > max) n = cut("fill")
+    if (n > max) n = cut("pack")
     for (k = 1; k <= n; k++) print P[k]
 }

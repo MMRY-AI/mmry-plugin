@@ -15,22 +15,21 @@
 # Windows jq adds when it writes text, never anything the set contained.
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    SET="$TEST_TMPDIR/mmry-foundation-set.md"
     # SessionStart writes this in every real session; see userpromptsubmit-foundation.bats.
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
     HEAD_ONE="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
 }
 
-# Record the manifest for whatever is in the cache, as the writer would.
+# Seal whatever is staged in $CACHE into the set file the hook reads, as the writer would (#31597).
 _seal() {
-    local s b n
-    read -r s b < <(cksum < "$CACHE")
-    n="$(grep -c '^- ' "$CACHE" || true)"
-    printf 'mmry-foundation v1 entries=%s bytes=%s cksum=%s\n' "${n:-0}" "$b" "$s" > "${CACHE}.manifest"
+    fnd_seal "$CACHE" "" "$SET"
 }
 
 # A set of $1 numbered directives, 89 bytes each. awk, not yes: BSD yes prints "--".
@@ -49,7 +48,62 @@ _fire() {
         bash "$HOOK" --part "$k" < /dev/null > "$TEST_TMPDIR/part$k.json" 2>/dev/null
     fi
 }
-_fire_all() { local k; for k in 1 2 3 4 5 6; do _fire "$k" "${1:-}"; done; }
+# All six at once, as Claude Code fires them (#31583 QA round 3, R4(a)): the status counts a part only if
+# it started with the other parts of the most recent prompt.
+_fire_all() { local k; for k in 1 2 3 4 5 6; do _fire "$k" "${1:-}" & done; wait; }
+
+_outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "$( (( $2 > 1 )) && printf '.%s' "$2")"; }
+
+# Fire part $1 with the payload $2, exactly as given.
+_fire_payload() { printf '%s' "$2" | bash "$HOOK" --part "$1" > "$TEST_TMPDIR/part$1.json" 2>/dev/null; }
+
+# The records of session $1, parts 1 to 6, whichever exist.
+_records() {
+    local f
+    for f in "$TEST_TMPDIR/mmry-foundation.outcome.$1" "$TEST_TMPDIR"/mmry-foundation.outcome."$1".[2-6]; do
+        [[ -f "$f" ]] && printf '%s\n' "$f"
+    done
+}
+
+# The latest second any record of session $1 says its part started, or nothing.
+_latest_start() {
+    local f l max=""
+    while IFS= read -r f; do
+        l="$(cat "$f")"
+        [[ "$l" =~ ^[^[:space:]]+[[:space:]]([0-9]+)[[:space:]] ]] || continue
+        [[ -z "$max" || "${BASH_REMATCH[1]}" -gt "$max" ]] && max="${BASH_REMATCH[1]}"
+    done < <(_records "$1")
+    printf '%s' "$max"
+}
+
+# Move every record of session $1 back by $2 seconds: they now belong to an earlier prompt.
+_age() {
+    local f l
+    while IFS= read -r f; do
+        l="$(cat "$f")"
+        [[ "$l" =~ ^([^[:space:]]+)[[:space:]]([0-9]+)[[:space:]](.*)$ ]] || continue
+        printf '%s %s %s' "${BASH_REMATCH[1]}" "$(( BASH_REMATCH[2] - $2 ))" "${BASH_REMATCH[3]}" > "$f"
+    done < <(_records "$1")
+}
+
+# Stage one prompt out of firings made one at a time (#31583 QA round 3, R4(a)). Claude Code starts the
+# six parts together; a test that changes the set between two of them cannot, so it fires them in turn
+# and then gives every record the same start, which is what they would have had.
+_one_prompt() {
+    local f l t; t="$(_latest_start "$1")"
+    [[ -n "$t" ]] || return 0
+    while IFS= read -r f; do
+        l="$(cat "$f")"
+        [[ "$l" =~ ^([^[:space:]]+)[[:space:]]([0-9]+)[[:space:]](.*)$ ]] || continue
+        printf '%s %s %s' "${BASH_REMATCH[1]}" "$t" "${BASH_REMATCH[3]}" > "$f"
+    done < <(_records "$1")
+}
+
+# Write part $2's record for session $1 as the hook would on the most recent prompt.
+_rec() {
+    local t; t="$(_latest_start "$1")"; [[ -n "$t" ]] || t="$(date +%s)"
+    printf '%s %s %s' "$1" "$t" "$3" > "$(_outcome_file "$1" "$2")"
+}
 
 # The decoded additionalContext of part $1 into PART_TEXT, trailing newlines kept: a part cut after
 # a newline ends in one, and $( ) would drop it.
@@ -177,7 +231,7 @@ _pointed() {
     snap="$(_pointed)"
     [ "$snap" -ef "$TEST_TMPDIR/mmry-foundation.byref.S1.md" ] || { echo "the assistant was pointed at [$snap], not this session's copy"; return 1; }
     [ -f "$snap" ] || { echo "no copy was made for this turn"; return 1; }
-    v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
+    v="$(fnd_set_record)"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
     # The closing line names this version of the set, and the assistant is told to reach it.
     [ "$(tail -n 1 "$snap")" = "END OF FOUNDATION SET $v" ] || { echo "last line: [$(tail -n 1 "$snap")]"; return 1; }
     [[ "$PART_TEXT" == *"Its last line is \"END OF FOUNDATION SET $v\""* ]] || { echo "the assistant is not told the closing line"; return 1; }
@@ -212,20 +266,22 @@ _pointed() {
     cmp -s "$TEST_TMPDIR/mmry-foundation.byref.SA.md" "$TEST_TMPDIR/sa-before" || { echo "session B rewrote session A's copy"; return 1; }
 }
 
-@test "parts: a set replaced while its copy is being made sends nothing, and says to re-send" {
+# #31597: the copy is written from the set this turn verified, so a set replaced at any moment after
+# the read cannot reach it, and there is no longer a copy that can fail to match. What can still fail
+# is the write itself, and then nothing is sent.
+@test "parts: #31597 a by-reference copy that cannot be written sends nothing, and says so" {
     _seed_lines 800
-    # A cp that copies something other than what was verified: the case of a new set landing between
-    # the check and the copy, made deterministic.
-    mkdir -p "$TEST_TMPDIR/shim"
-    # The shim takes its own directory off PATH first, or its cp would find itself and never return.
-    printf '%s\n' '#!/usr/bin/env bash' 'PATH="${PATH#*:}"' 'src="${@: -2:1}"; dst="${@: -1}"' 'cp "$src" "$dst" && printf "%s\n" "- Directive 9999: appended by the shim." >> "$dst"' > "$TEST_TMPDIR/shim/cp"
-    chmod +x "$TEST_TMPDIR/shim/cp"
-    PATH="$TEST_TMPDIR/shim:$PATH" _fire 1 S9
+    # A directory standing where the copy goes, so no file can be put there.
+    mkdir -p "$TEST_TMPDIR/mmry-foundation.byref.S9.md"
+    _fire 1 S9
     _ctx 1
-    [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "it pointed the assistant at a copy that did not match"; return 1; }
-    jq -e '.systemMessage | test("NOT applied") and test("Re-send the prompt")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "$(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
-    if jq -e '.systemMessage | test("load-memories")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "it prescribed a rebuild for a set that was only being replaced"; return 1; fi
-    [ ! -e "$TEST_TMPDIR/mmry-foundation.byref.S9.md" ] || { echo "a mismatched copy was left in place"; return 1; }
+    [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "it pointed the assistant at a copy that was never written"; return 1; }
+    jq -e '.systemMessage | test("NOT applied") and test("could not be written") and test("Re-send the prompt")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "$(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
+    if jq -e '.systemMessage | test("load-memories")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "it prescribed a rebuild for a set that verified"; return 1; fi
+    # And nothing was written into the directory (#31411 QA round 3).
+    [ -z "$(ls -A "$TEST_TMPDIR/mmry-foundation.byref.S9.md")" ] || { echo "the copy was written into the directory"; return 1; }
+    CLAUDE_CODE_SESSION_ID=S9 run bash "$STATUSCMD"
+    [[ "$output" == *"NOT on the most recent prompt - the copy prepared for your assistant to read could not be written"* ]] || { echo "$output"; return 1; }
 }
 
 @test "parts: the status says IN FULL in four parts only while all four arrived, and PARTLY when one did not" {
@@ -234,7 +290,7 @@ _pointed() {
     CLAUDE_CODE_SESSION_ID=S2 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    IN FULL on the most recent prompt, in 4 parts."* ]] || { echo "$output"; return 1; }
     # Part 3 of the next prompt runs out of time.
-    printf 'S2 failed deadline 10' > "$TEST_TMPDIR/mmry-foundation.outcome.S2.3"
+    _rec S2 3 'failed deadline 10'
     CLAUDE_CODE_SESSION_ID=S2 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: loading them took longer than the 10s limit and was stopped."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
@@ -342,6 +398,50 @@ _assert_inline_whole() {
     _assert_inline_whole 3
 }
 
+# The decoded additionalContext of part $1, carriage returns KEPT. For a fixture that holds them on
+# purpose: _ctx strips them, because a native Windows jq adds one to every newline it prints, so
+# here jq is asked not to (-b, binary output; jq builds on other platforms accept it and print the
+# same bytes either way).
+_ctx_raw() {
+    PART_TEXT="$( { jq -b -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part$1.json" 2>/dev/null \
+        || jq -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part$1.json"; } && printf '.')" || return 1
+    PART_TEXT="${PART_TEXT%.}"
+}
+
+@test "parts: #31411 R1 a non-ASCII set written with CRLF, as Windows jq writes it, goes inline and loses no byte" {
+    # QA round 3 (2026-10-05): on Windows both the bundled jq 1.7.1 and the system jq 1.8.2 write the
+    # cache with CRLF. gawk, reading foundation-cut.awk's input in text mode, dropped every CR, so
+    # the cut lengths summed short of the set, the whole-set check failed, and the hook fell back to
+    # the byte cut, which needs more than six parts for non-ASCII text: every non-ASCII set of two or
+    # more memories went BY REFERENCE on every Windows install. Five memories of Japanese, about
+    # 24,500 characters and 73,500 bytes, each line ending CRLF.
+    awk 'BEGIN { for (m = 1; m <= 5; m++) { printf "- M%d: ", m; for (i = 0; i < 4900; i++) { if (i % 31 == 30) printf "\343\200\202"; else printf "\346\227\245" } printf "\r\n" } }' > "$CACHE"
+    _seal
+    _stored
+    [[ "$STORED" == *$'\r\n- M2'* ]] || { echo "control: the fixture does not hold CRLF line ends"; return 1; }
+
+    _fire_all
+    local k joined="" n=0
+    for k in 1 2 3 4 5 6; do
+        [ -s "$TEST_TMPDIR/part$k.json" ] || continue
+        _ctx_raw "$k"
+        [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "went by reference"; return 1; }
+        (( $(_units "$PART_TEXT") < 10000 )) || { echo "part $k is over 10,000 characters"; return 1; }
+        joined="${joined}${PART_TEXT#*$'\n\n'}"
+        n=$(( n + 1 ))
+    done
+    (( n >= 2 && n <= 6 )) || { echo "expected 2 to 6 parts inline, got $n"; return 1; }
+    # Every byte compared, the internal CRs included, except a CR at the very end: the set ends in a
+    # line end, and whether its CR is delivered depends on how the reader strips that line end
+    # (bash's $(<) in Git Bash drops CR and LF together; #31597's set file drops the LF alone).
+    joined="${joined%$'\r'}"; STORED="${STORED%$'\r'}"
+    [ "$(printf '%s' "$joined" | LC_ALL=C tr -cd '\r' | wc -c)" -ge 4 ] || { echo "the CRs between memories were not delivered"; return 1; }
+    [ "$joined" = "$STORED" ] || {
+        echo "the parts do not rejoin to the stored set: $(printf '%s' "$joined" | LC_ALL=C wc -c) of $(printf '%s' "$STORED" | LC_ALL=C wc -c) bytes"
+        return 1
+    }
+}
+
 @test "parts: #31411 R1 a character outside the Basic Multilingual Plane counts as two" {
     # 15,000 emoji: 60,000 bytes, too many for six parts counted in bytes, so they are counted in
     # characters - and an emoji is two characters to Claude Code, as to JavaScript. Counted as one,
@@ -365,6 +465,35 @@ _assert_inline_whole() {
         [[ "$PART_TEXT" == *'long enough. ' ]] || { echo "part $k ends mid-sentence: [${PART_TEXT: -40}]"; return 1; }
     done
     (( n >= 2 )) || { echo "control: the memory was not long enough to need two parts"; return 1; }
+}
+
+@test "parts: #31411 TC3 when parts are filled to fit, each is still cut at a sentence end" {
+    # QA round 3 (2026-10-05): QA's seven memories of about 5,000 characters need the fill cut to fit
+    # in four parts, and the fill cut pulled back only to a space, so every boundary fell
+    # mid-sentence, including inside a memory, with a sentence end 70 characters back. It now takes
+    # the last line end or sentence end in a part's last 400 bytes before falling back to a space.
+    awk 'BEGIN { for (m = 1; m <= 7; m++) { printf "- Memory %d: ", m; for (j = 0; j < 95; j++) printf "This is sentence %d of memory %d and it has words. ", j, m; printf "\n" } }' > "$CACHE"
+    _seal
+    _assert_inline_whole 4
+    local k
+    for k in 1 2 3; do
+        _ctx "$k"
+        [[ "$PART_TEXT" == *'has words. ' || "$PART_TEXT" == *$'\n' ]] \
+            || { echo "part $k ends mid-sentence: [${PART_TEXT: -60}]"; return 1; }
+    done
+}
+
+@test "parts: #31411 TC3 the same holds for a non-ASCII set, cut by foundation-cut.awk" {
+    # The same seven memories with one accented word each, so the hook hands them to the awk cut.
+    awk 'BEGIN { for (m = 1; m <= 7; m++) { printf "- Memory %d caf\303\251: ", m; for (j = 0; j < 95; j++) printf "This is sentence %d of memory %d and it has words. ", j, m; printf "\n" } }' > "$CACHE"
+    _seal
+    _assert_inline_whole 4
+    local k
+    for k in 1 2 3; do
+        _ctx "$k"
+        [[ "$PART_TEXT" == *'has words. ' || "$PART_TEXT" == *$'\n' ]] \
+            || { echo "part $k ends mid-sentence: [${PART_TEXT: -60}]"; return 1; }
+    done
 }
 
 @test "parts: #31411 the cut in bash and the cut in foundation-cut.awk agree, part for part" {
@@ -404,8 +533,11 @@ _assert_inline_whole() {
     _fire 2 S8
     _ctx 2
     [[ "$PART_TEXT" == *'PREVIOUS turn'* ]] || { echo "control: the cut-short note was not added"; return 1; }
-    local worst; worst="$(_units "$PART_TEXT")"
-    echo "part 2: ${plain} characters plain, ${worst} with the note" >&3
+    # The label carries the set's version, a checksum of up to ten digits (#31597). A shorter one
+    # here is padded in the arithmetic, so the margin holds for every version.
+    local v; v="$(_version)"
+    local worst; worst="$(( $(_units "$PART_TEXT") + 10 - ${#v} ))"
+    echo "part 2: ${plain} characters plain, ${worst} with the note and a ten-digit version" >&3
     (( plain >= 9500 )) || { echo "control: part 2 was not a full-size part ($plain)"; return 1; }
     (( worst < 10000 ))
 }
@@ -416,19 +548,18 @@ _assert_inline_whole() {
 # say IN FULL when a part did not arrive, or when the parts came from two versions.
 # ============================================================================
 
-_version() { local v; v="$(cat "${CACHE}.manifest")"; v="${v##*cksum=}"; printf '%s' "${v%%[!0-9]*}"; }
-_outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "$( (( $2 > 1 )) && printf '.%s' "$2")"; }
+_version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v%%[!0-9]*}"; }
 
 @test "parts: #31583 R4 every part names the version of the set it was cut from, and so does its record" {
     _seed_lines 380
     local v; v="$(_version)"
-    [[ "$v" =~ ^[0-9]+$ ]] || { echo "no checksum in the manifest"; return 1; }
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "no checksum in the record: $(fnd_set_record)"; return 1; }
     _fire_all S6
     local k
     for k in 1 2 3 4; do
         _ctx "$k"
         [[ "$PART_TEXT" == *"This is PART $k OF 4 of the set, version $v."* ]] || { echo "part $k does not name version $v: ${PART_TEXT:0:420}"; return 1; }
-        [ "$(cat "$(_outcome_file S6 "$k")")" = "S6 ok part $k of 4 set $v" ] || { echo "part $k record: $(cat "$(_outcome_file S6 "$k")")"; return 1; }
+        [[ "$(cat "$(_outcome_file S6 "$k")")" =~ ^S6\ [0-9]+\ ok\ part\ $k\ of\ 4\ set\ $v$ ]] || { echo "part $k record: $(cat "$(_outcome_file S6 "$k")")"; return 1; }
     done
 }
 
@@ -439,6 +570,7 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     awk 'BEGIN { for (i = 1; i <= 380; i++) printf "- Directive %04d: a REPLACED set, every line of it different from the first one.\n", i }' > "$CACHE"
     _seal
     _fire 3 S7; _fire 4 S7
+    _one_prompt S7
     _ctx 3
     [[ "$PART_TEXT" == *'REPLACED'* ]] || { echo "control: part 3 did not come from the new set"; return 1; }
     CLAUDE_CODE_SESSION_ID=S7 run bash "$STATUSCMD"
@@ -458,7 +590,8 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     _fire 1 S10; _fire 2 S10
     printf -- '- Identity: a small set now.\n' > "$CACHE"; _seal
     _fire 3 S10; _fire 4 S10
-    [ "$(cat "$(_outcome_file S10 3)")" = "S10 none" ] || { echo "part 3 record: $(cat "$(_outcome_file S10 3)")"; return 1; }
+    _one_prompt S10
+    [[ "$(cat "$(_outcome_file S10 3)")" =~ ^S10\ [0-9]+\ none$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S10 3)")"; return 1; }
     CLAUDE_CODE_SESSION_ID=S10 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 2 of 4 parts arrived; part 3 has no record of arriving; part 4 has no record of arriving."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
@@ -477,7 +610,7 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     _seed_lines 380
     _fire_all S12
     local v; v="$(_version)"
-    printf 'S12 ok part 1 of 7 set %s' "$v" > "$(_outcome_file S12 1)"
+    _rec S12 1 "ok part 1 of 7 set $v"
     CLAUDE_CODE_SESSION_ID=S12 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    UNKNOWN for the most recent prompt"* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
@@ -487,7 +620,7 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     _seed_lines 380
     _fire_all S13
     # Part 3's loader crashed: the hook tells the customer re-sending will not help, and so must this.
-    printf 'S13 failed crash' > "$(_outcome_file S13 3)"
+    _rec S13 3 'failed crash'
     CLAUDE_CODE_SESSION_ID=S13 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: the loader failed before it finished"* ]] || { echo "$output"; return 1; }
     [[ "$output" == *"Action:       re-sending will not help."* ]] || { echo "$output"; return 1; }
@@ -564,7 +697,349 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
     MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S17
+    _one_prompt S17
     CLAUDE_CODE_SESSION_ID=S17 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: loading them took longer than the 1s limit and was stopped."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"has no record"* ]] || { echo "$output"; return 1; }
+}
+
+# ---- #31411 QA round 3: N2 (a FIFO where the hook writes) and F7 (a dot in a session id) -------
+
+# Runs "$@" in the background and waits up to $1 seconds. 0 if it finished, 1 if it was still running,
+# in which case it is killed. Portable: no timeout(1), which a stock Mac does not have.
+_finishes_within() {
+    local secs="$1" pid i; shift
+    "$@" & pid=$!
+    for (( i = 0; i < secs * 10; i++ )); do
+        if ! kill -0 "$pid" 2>/dev/null; then wait "$pid" 2>/dev/null; return 0; fi
+        sleep 0.1
+    done
+    kill "$pid" 2>/dev/null
+    return 1
+}
+
+# Opens a FIFO for reading and writing at once, which never blocks, so a hook stuck on it is released.
+_release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
+
+@test "parts: #31411 N2 a FIFO at the by-reference marker does not hang the hook, and the customer is still told" {
+    # QA round 3: by reference records that the customer has been told this session. A FIFO planted
+    # at that marker blocked the write, and with it the whole hook, outside any deadline.
+    _seed_lines 800
+    local fifo="$TEST_TMPDIR/.mmry-foundation-byref-told.N2S"
+    mkfifo "$fifo"
+    _finishes_within 25 _fire 1 N2S || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
+    _ctx 1
+    [[ "$PART_TEXT" == *"BEFORE YOU ANSWER"* ]] || { echo "part 1 lost the reference: ${PART_TEXT:0:200}"; return 1; }
+    jq -e '.systemMessage | test("larger than Claude Code lets a plugin show")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "the customer was not told"; return 1; }
+    [[ -f "$fifo" && ! -p "$fifo" ]] || { echo "the marker is still not a regular file"; _release_fifo "$fifo"; return 1; }
+}
+
+@test "parts: #31411 N2 a FIFO at the log does not hang a refusal, and the refusal still reaches the customer" {
+    # The log is written when the cache is refused or the loader fails. A FIFO there blocked that
+    # write, so a damaged set hung the hook instead of being reported.
+    _seed_lines 3
+    printf -- '- x\n' > "$SET"        # the stub #31583 is about, in place of the sealed set (#31597)
+    local fifo="$TEST_TMPDIR/mmry-foundation.log"
+    mkfifo "$fifo"
+    _finishes_within 25 _fire 1 N2L || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
+    jq -e '.systemMessage | test("NOT applied")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "the refusal did not reach the customer: $(cat "$TEST_TMPDIR/part1.json")"; _release_fifo "$fifo"; return 1; }
+    [[ -p "$fifo" ]] || { echo "control: the FIFO was replaced, so this proves nothing about writing past it"; return 1; }
+    _release_fifo "$fifo"
+}
+
+@test "parts: #31411 F7 a session id with a dot is no session id, so it cannot name another session's part" {
+    # QA round 3: records are named <name>.<session id>.<part>, so the session "S7.2" wrote its part 1
+    # record to exactly the file session "S7" uses for part 2. A dot is not accepted in a session id;
+    # Claude Code and Codex send ids without one.
+    _seed_lines 3
+    _fire 1 S7.2
+    [ ! -e "$TEST_TMPDIR/mmry-foundation.outcome.S7.2" ] || { echo "S7.2 wrote S7's part-2 record"; return 1; }
+    # CONTROL: an ordinary id names its own record.
+    _fire 1 S7
+    [ -f "$TEST_TMPDIR/mmry-foundation.outcome.S7" ] || { echo "control: S7 did not write its own record"; return 1; }
+    # And the shared helper agrees.
+    run bash -c 'source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1; printf "[%s][%s]" "$(mmry_foundation_sid S7.2)" "$(mmry_foundation_sid S7)"' _ "$PLUGIN_ROOT"
+    [ "$output" = "[][S7]" ] || { echo "mmry_foundation_sid gave $output"; return 1; }
+}
+
+# ============================================================================
+# #31583 QA round 3: every record tied to its prompt (R4(a)), every exit recorded (R4(b)), a part 2-6
+# refusal told on the turn (R3, architecture P4), the by-reference copy (a directory at its path, a copy
+# that cannot be written), and a session id the hook finds late in the payload (P8).
+# ============================================================================
+
+@test "parts: #31583 R4(a) a part that never runs on the most recent prompt is not counted from an earlier one" {
+    _seed_lines 380
+    _fire_all S40
+    _age S40 60
+    # The next prompt: part 3 never runs. Its record still says "ok part 3 of 4" for the same set.
+    _fire 1 S40 & _fire 2 S40 & _fire 4 S40 & _fire 5 S40 & _fire 6 S40 & wait
+    CLAUDE_CODE_SESSION_ID=S40 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3 has no record of arriving."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 R4(a) a prompt on which part 1 never runs is not delivered, whatever part 1 recorded before" {
+    _seed_lines 380
+    _fire_all S41
+    _age S41 60
+    _fire 2 S41 & _fire 3 S41 & _fire 4 S41 & _fire 5 S41 & _fire 6 S41 & wait
+    CLAUDE_CODE_SESSION_ID=S41 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    NOT on the most recent prompt - part 1 of your directives has no record of arriving on it."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]]
+}
+
+@test "parts: #31583 R4(a) the hook's own start times tell two prompts apart" {
+    # No record is edited here: the second prompt starts more than the status's 3 s apart from the first.
+    _seed_lines 380
+    _fire_all S42
+    CLAUDE_CODE_SESSION_ID=S42 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    IN FULL on the most recent prompt, in 4 parts."* ]] || { echo "control: $output"; return 1; }
+    sleep 5
+    _fire 1 S42 & _fire 2 S42 & _fire 4 S42 & wait
+    CLAUDE_CODE_SESSION_ID=S42 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3 has no record of arriving."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 R4(b) a part whose loader cannot even start records a failure, and the customer is told" {
+    _seed_lines 380
+    _fire_all S43
+    # A plugin install missing its client: the worker could not load it and used to leave in silence.
+    local broken="$TEST_TMPDIR/broken-plugin"
+    mkdir -p "$broken"
+    cp -R "$PLUGIN_ROOT/hooks-handlers" "$broken/"
+    rm -f "$broken/hooks-handlers/mmry-client.sh"
+    printf '{"session_id":"S43","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | bash "$broken/hooks-handlers/userpromptsubmit-foundation.sh" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
+    jq -e '.systemMessage | test("part 3 of your Foundation directives was NOT applied")' "$TEST_TMPDIR/part3.json" >/dev/null \
+        || { echo "the customer was not told: $(cat "$TEST_TMPDIR/part3.json")"; return 1; }
+    # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
+    # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).
+    _one_prompt S43
+    CLAUDE_CODE_SESSION_ID=S43 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: the loader failed before it finished."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 R4(b) a part whose loader finds an empty set replaces its record, so the previous prompt's never stands" {
+    _seed_lines 380
+    _fire_all S44
+    # Architecture's 2b: the set is now verified empty, under a record whose byte count still reaches
+    # part 3, so part 3 runs its loader, which finds nothing to send. That exit used to write nothing.
+    fnd_set_with 'mmry-foundation v2 entries=0 bytes=40000 cksum=0' ''
+    _fire 3 S44
+    [[ "$(cat "$(_outcome_file S44 3)")" =~ ^S44\ [0-9]+\ none$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S44 3)")"; return 1; }
+}
+
+@test "parts: #31583 R4(b) a loader that leaves in silence leaves a failure on the record, not the previous prompt's delivery" {
+    _seed_lines 380
+    _fire_all S52
+    # Any loader that exits cleanly having said nothing: here the bash it is started with does exactly
+    # that. The record written when the part started has to stand.
+    local real_bash shim
+    real_bash="$(command -v bash)"
+    shim="$TEST_TMPDIR/silent-bash"
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nexit 0\n' > "$shim/bash"
+    chmod +x "$shim/bash"
+    printf '{"session_id":"S52","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | PATH="$shim:$PATH" "$real_bash" "$HOOK" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
+    [[ "$(cat "$(_outcome_file S52 3)")" =~ ^S52\ [0-9]+\ failed\ unfinished$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S52 3)")"; return 1; }
+    # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
+    # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).
+    _one_prompt S52
+    CLAUDE_CODE_SESSION_ID=S52 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: the loader ended without recording what it sent."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 R4(b) a part whose output cannot be handed over records that, never the previous delivery" {
+    _seed_lines 380
+    _fire_all S45
+    # Standard output closed: the part prepares its text and the hand-over to Claude Code fails.
+    printf '{"session_id":"S45","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | bash "$HOOK" --part 3 >&- 2>/dev/null
+    [[ "$(cat "$(_outcome_file S45 3)")" =~ ^S45\ [0-9]+\ failed\ emit$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S45 3)")"; return 1; }
+    # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
+    # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).
+    _one_prompt S45
+    CLAUDE_CODE_SESSION_ID=S45 run bash "$STATUSCMD"
+    [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: they were prepared but could not be handed to Claude Code."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 R3 a part 2-6 that refuses tells the assistant and the customer on that turn, naming the part" {
+    # Part 3 finds a stub where the set was, against the record of the real set.
+    _seed_lines 380
+    fnd_set_with "$(fnd_set_record)" $'- x\n'
+    _fire 3 S46
+    local ctx msg
+    ctx="$(jq -r '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part3.json")"
+    msg="$(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part3.json")"
+    [[ "$ctx" == *"could not verify PART 3 of this account's FOUNDATION directives"* ]] || { echo "assistant: $ctx"; return 1; }
+    [[ "$ctx" != *"running WITHOUT the account's standing directives"* ]] || { echo "part 3 told the assistant the whole turn went without"; return 1; }
+    [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
+    [[ "$(cat "$(_outcome_file S46 3)")" =~ ^S46\ [0-9]+\ failed\ refused\ [a-z-]+$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S46 3)")"; return 1; }
+}
+
+@test "parts: #31583 P8 a session id past byte 160 still names this session's records" {
+    _seed_lines 380
+    local pad payload k
+    pad="$(printf '%0300d' 0)"
+    payload='{"hook_event_name":"UserPromptSubmit","transcript_path":"/tmp/'"$pad"'.jsonl","session_id":"S49","prompt":"MMRY TEST DATA"}'
+    for k in 1 2 3 4 5 6; do _fire_payload "$k" "$payload" & done; wait
+    [ -f "$(_outcome_file S49 1)" ] || { echo "part 1 did not file its record under the session"; ls -a "$TEST_TMPDIR"; return 1; }
+    CLAUDE_CODE_SESSION_ID=S49 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    IN FULL on the most recent prompt, in 4 parts."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 P8 a payload spread over lines still names this session's records" {
+    _seed_lines 3
+    _fire_payload 1 $'{\n  "hook_event_name": "UserPromptSubmit",\n  "session_id": "S50",\n  "prompt": "MMRY TEST DATA"\n}\n'
+    [ -f "$(_outcome_file S50 1)" ] || { echo "part 1 did not file its record under the session"; return 1; }
+}
+
+@test "parts: #31583 P8 a session id the hook cannot reach still gets its delivery reported" {
+    # After a 5,000-character prompt: beyond what the hook reads. It files under the session token, and
+    # the status, finding nothing under this session's id, reads those.
+    _seed_lines 3
+    local long payload k
+    long="$(printf '%05000d' 0)"
+    payload='{"hook_event_name":"UserPromptSubmit","prompt":"'"$long"'","session_id":"S51"}'
+    for k in 1 2 3 4 5 6; do _fire_payload "$k" "$payload" & done; wait
+    [ ! -e "$(_outcome_file S51 1)" ] || { echo "control: the hook did find the id, so this proves nothing about the fallback"; return 1; }
+    CLAUDE_CODE_SESSION_ID=S51 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    IN FULL on the most recent prompt."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"Last sent:    nothing yet"* ]] || { echo "$output"; return 1; }
+}
+
+# ---- #31411 QA round 3: the status's own wording (compliance) ------------------------------------
+
+@test "parts: #31411 the status does not say 'nothing is trimmed or cut' of a set it sent in parts" {
+    _seed_lines 380
+    _fire_all S60
+    CLAUDE_CODE_SESSION_ID=S60 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    IN FULL on the most recent prompt, in 4 parts. Every part arrived; together they are the whole set."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"trimmed or cut"* ]] || { echo "$output"; return 1; }
+    # In full, the size is the size of what arrived.
+    [[ "$output" == *"Last sent:    "*" (380 directives, 33820 bytes)."* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31411 under PARTLY the last-sent line does not give the full set's size" {
+    _seed_lines 380
+    _fire_all S61
+    _rec S61 3 'failed deadline 10'
+    CLAUDE_CODE_SESSION_ID=S61 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    PARTLY"* ]] || { echo "control: $output"; return 1; }
+    [[ "$output" == *"Last sent:    "*", in part (see above)."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"(380 directives, 33820 bytes)"* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31411 under BY REFERENCE nothing says the set was re-sent, or gives the size of what was only pointed to" {
+    _seed_lines 800
+    _fire_all S62
+    CLAUDE_CODE_SESSION_ID=S62 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    BY REFERENCE on the most recent prompt"* ]] || { echo "control: $output"; return 1; }
+    [[ "$output" != *"re-sent on every prompt"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Last sent:    "*", by reference to a copy (see above)."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"(800 directives"* ]] || { echo "$output"; return 1; }
+}
+
+# ---- P4: ONE notice when the whole set is damaged (Lead/PM decision, 2026-10-05) --------------------
+
+# The set damaged under its own record, the stub #31583 is about, in whichever layout this branch keeps
+# it: a cache beside its manifest, or (#31597) one file holding both.
+_damage_set() {
+    if [[ -n "${SET:-}" ]]; then fnd_set_with "$(fnd_set_record)" $'- x\n'; else printf -- '- x\n' > "$CACHE"; fi
+}
+
+@test "parts: #31583 P4 whole-set damage gives the turn ONE notice, part 1's, not one per part" {
+    # 380 directives: every one of the six parts reaches its loader, and every one refuses the stub.
+    _seed_lines 380
+    _damage_set
+    _fire_all S70
+    local k shown=0
+    for k in 1 2 3 4 5 6; do
+        [ -s "$TEST_TMPDIR/part$k.json" ] && shown=$(( shown + 1 ))
+    done
+    [ "$shown" -eq 1 ] || { echo "$shown parts spoke; expected part 1 alone"; for k in 2 3 4 5 6; do [ -s "$TEST_TMPDIR/part$k.json" ] && echo "part $k: $(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part$k.json")"; done; return 1; }
+    jq -e '.systemMessage | test("your Foundation directives were NOT applied")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "part 1 did not give the whole-set notice: $(cat "$TEST_TMPDIR/part1.json")"; return 1; }
+    jq -e '.hookSpecificOutput.additionalContext | test("running WITHOUT the account")' "$TEST_TMPDIR/part1.json" >/dev/null \
+        || { echo "the assistant was not told: $(cat "$TEST_TMPDIR/part1.json")"; return 1; }
+    # The silent parts still record their refusal, so the status names them.
+    for k in 2 3 4 5 6; do
+        [[ "$(cat "$(_outcome_file S70 "$k")")" =~ ^S70\ [0-9]+\ failed\ refused\ [a-z-]+$ ]] || { echo "part $k record: $(cat "$(_outcome_file S70 "$k")")"; return 1; }
+    done
+    # And the status says the copy is refused, not that anything arrived.
+    CLAUDE_CODE_SESSION_ID=S70 run bash "$STATUSCMD"
+    [[ "$output" == *"It is being REFUSED, not used."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"IN FULL"* ]] || { echo "$output"; return 1; }
+}
+
+@test "parts: #31583 P4 a part 2-6 refused on a prompt whose part 1 delivered still names itself" {
+    _seed_lines 380
+    # Part 1 delivers; the set is then damaged before part 3 reads it.
+    _fire 1 S71
+    _damage_set
+    _fire 3 S71
+    local ctx msg
+    ctx="$(jq -r '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part3.json")"
+    msg="$(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part3.json")"
+    [[ "$ctx" == *"could not verify PART 3 of this account's FOUNDATION directives"* ]] || { echo "assistant: $ctx"; return 1; }
+    [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
+}
+
+@test "parts: #31411 after a by-reference prompt and then a failed one, the last-sent line gives no size" {
+    # QA #2, round 4: "Last sent: ... (8 directives, 70009 bytes)" after the set went by reference and
+    # the next prompt failed, the full size of something that was never sent in full.
+    _seed_lines 800
+    _fire_all S80
+    CLAUDE_CODE_SESSION_ID=S80 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    BY REFERENCE"* ]] || { echo "control: $output"; return 1; }
+    # The next prompt: part 1's loader fails.
+    _rec S80 1 'failed crash'
+    CLAUDE_CODE_SESSION_ID=S80 run bash "$STATUSCMD"
+    [[ "$output" == *"Delivered:    NOT on the most recent prompt"* ]] || { echo "control: $output"; return 1; }
+    [[ "$output" == *"Last sent:    "* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"(800 directives"* ]] || { echo "the size of a set never sent in full: $output"; return 1; }
+}
+
+@test "parts: #31411 the shipped hook keeps to bash 3.2: no bash 5 clock variable" {
+    # #31245's portability guard refuses bash 5's clock variables in shipped code; this branch had one
+    # in the hook and two in hook-budgets.bats. Checked here on the files this ticket changed, with the
+    # guard's own pattern, comment lines skipped as the guard skips them.
+    local f hits=""
+    for f in "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh" \
+             "$PLUGIN_ROOT/tests/structural/hook-budgets.bats"; do
+        hits="${hits}$(grep -n -E 'EPOCH(SECONDS|REALTIME)' "$f" | grep -v -E '^[0-9]+:[[:space:]]*#' | sed "s|^|${f##*/}:|")"
+    done
+    [ -z "$hits" ] || { echo "$hits"; return 1; }
+}
+
+# Test 506 on macOS (#31583): after a failed emit the shell's printf there carried 1,024 bytes of the
+# payload into the next record it wrote. Only the Mac shows the bytes; this checks, on any platform, the
+# thing that prevents them: once an emit has failed, records are written by an external printf, and on a
+# prompt whose emit worked they are not (no process on the path every prompt takes).
+@test "parts: #31583 506 after a failed emit the record is written by an external printf, and only then" {
+    _seed_lines 380
+    _fire_all S90
+    local shim="$TEST_TMPDIR/printf-shim" calls="$TEST_TMPDIR/printf-calls" real
+    real="$(type -P printf)"
+    mkdir -p "$shim"
+    printf '#!/bin/sh\necho x >> "%s"\nexec "%s" "$@"\n' "$calls" "$real" > "$shim/printf"
+    chmod +x "$shim/printf"
+    # CONTROL: an emit that works writes its records with the builtin.
+    printf '{"session_id":"S90","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | PATH="$shim:$PATH" bash "$HOOK" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
+    [ ! -s "$calls" ] || { echo "a working emit used an external printf $(wc -l < "$calls") time(s)"; return 1; }
+    # Standard output closed: the emit fails, and what follows must not go through the builtin.
+    printf '{"session_id":"S90","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | PATH="$shim:$PATH" bash "$HOOK" --part 3 >&- 2>/dev/null
+    [ -s "$calls" ] || { echo "after a failed emit the record was still written with the builtin"; return 1; }
+    [[ "$(cat "$(_outcome_file S90 3)")" =~ ^S90\ [0-9]+\ failed\ emit$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S90 3)")"; return 1; }
+    # And the log line it adds is that line alone: on macOS a "$(date)" taken after the failed emit
+    # carried 1,024 bytes of the directives into it (Mac bench, fc6a954).
+    local last; last="$(tail -n 1 "$TEST_TMPDIR/mmry-foundation.log")"
+    [[ "$last" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}\ foundation\ reinjection\ FAILED:\ the\ output\ could\ not\ be\ written\ \(part\ 3\)$ ]] \
+        || { echo "log line: ${last:0:200} ($(printf '%s' "$last" | wc -c) bytes)"; return 1; }
 }

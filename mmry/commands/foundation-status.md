@@ -4,11 +4,13 @@ Usage: `/mmry:foundation-status`
 
 ## What This Does
 
-Foundation memories are your standing directives, re-sent to the assistant on every prompt.
-This reports, in plain words, whether that is really happening: whether re-injection is
-switched on, whether the locally stored copy still matches the record MMRY wrote when it
-last fetched your directives, how many directives and characters it holds, and how long ago
-it was last sent.
+Foundation memories are your standing directives, applied to every prompt: sent with it, in up
+to six parts, or, when the set is too large for Claude Code to show, pointed to as a copy the
+assistant is asked to read. This reports, in plain words, whether that is really happening:
+whether re-injection is switched on, whether the locally stored copy still matches the
+record MMRY wrote when it last fetched your directives, how many directives and bytes it holds,
+whether the most recent prompt received them in full, in part or by reference, and how long ago
+they were last sent.
 
 It is a LOCAL integrity check and makes no network call. That is worth being precise about,
 because the two questions are different. It can tell you your copy is intact and is being
@@ -40,10 +42,6 @@ specific numbers.
 If it reports the stored copy as DAMAGED, MISSING, DISAPPEARED, INCONSISTENT, EMPTY OF TEXT or
 UNVERIFIABLE, tell the user to run `/mmry:load-memories`, and say plainly that until they do,
 their directives are not being applied.
-
-If it reports the copy as FROM AN EARLIER PLUGIN VERSION, that is the expected one-off effect of
-updating the plugin. Nothing is needed; it is fetched again automatically, normally by the next
-prompt.
 
 If it says the most recent prompt was NOT delivered, say so plainly: that prompt ran without the
 user's directives, even though the stored copy itself is sound.

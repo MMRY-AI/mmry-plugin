@@ -574,6 +574,9 @@ LATECURL
             bash '${HANDLERS}/formation-check.sh' \
             < '${BATS_TEST_TMPDIR}/payload.json' 2>&1"
 
+    # 8 s, not 3 (#31411 QA round 3, item 8): with two other suites on the machine one request took
+    # most of 3 s, so the poller had time to ask only once and this read as "did not poll". A handler
+    # that does not poll asks once in any budget; the control below shows exactly that at 8 s.
     [ "$status" -eq 0 ] || { echo "the poller woke the model with nothing to say: ${status} ${output}"; return 1; }
     [ -z "$output" ]
 

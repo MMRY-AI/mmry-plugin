@@ -22,7 +22,8 @@ setup() {
 # machine it was written on and failed in a fresh checkout; CI covers ubuntu and macos, so
 # CI never saw it (#31583 QA). The .gitattributes rule is widened in the same change, and
 # this stays anyway, because a test should not depend on how the tree was checked out.
-_flat() { tr -d '' < "$1" | tr '
+_flat() { tr -d '
+' < "$1" | tr '
 ' ' '; }
 
 @test "command: /mmry:foundation-status exists and is advertised in help" {
@@ -126,7 +127,7 @@ _flat() { tr -d '' < "$1" | tr '
 # #31583 R4, QA round 3 item 3. Three customer-facing surfaces told the customer that
 # /mmry:foundation-status compares their local copy with what MMRY holds for their account.
 # The command makes no network call at all, so that claim could never be true: the check is
-# local, between the cache and the manifest the writer recorded beside it. A customer reading
+# local, between the set and the record the writer put on its first line. A customer reading
 # any of those three would take a healthy report as confirmation that their portal edits are
 # in force, which it cannot be.
 #
@@ -164,4 +165,16 @@ _flat() { tr -d '' < "$1" | tr '
     grep -q 'record MMRY wrote' "$CMDS/help.md"
     grep -q 'record MMRY wrote' "$CMDS/foundation-status.md"
     grep -q 'record MMRY wrote' "$HANDLERS/userpromptsubmit-foundation.sh"
+}
+
+@test "docs: the status is described in the unit it prints, bytes, and as more than a re-send (#31411 QA round 3)" {
+    # Compliance, round 3: the README, the command page and help said the command reports "how many
+    # directives and characters", and it prints bytes. And the command page said the set is re-sent on
+    # every prompt, which a set sent by reference is not.
+    local f
+    for f in "$PLUGIN_ROOT/README.md" "$CMDS/help.md" "$CMDS/foundation-status.md"; do
+        ! grep -q 'directives and characters' "$f" || { echo "$f still says characters"; return 1; }
+        grep -q 'directives and bytes' "$f" || { echo "$f does not say bytes"; return 1; }
+    done
+    ! grep -q 're-sent to the assistant on every prompt' "$CMDS/foundation-status.md" || { echo "the command page still says re-sent on every prompt"; return 1; }
 }

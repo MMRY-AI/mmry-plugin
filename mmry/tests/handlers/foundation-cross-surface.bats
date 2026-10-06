@@ -14,11 +14,13 @@
 #      had disappeared when it had never had any
 
 load '../helpers/test-helper'
+load '../helpers/foundation-set'
 
 setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    SET="$TEST_TMPDIR/mmry-foundation-set.md"
     CFG="$TEST_TMPDIR/mmry-config.json"
     export MMRY_CONFIG_FILE="$CFG"
     printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
@@ -26,9 +28,7 @@ setup() {
 
 _seed_valid_cache() {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity.\n' > "$CACHE"
-    local s b
-    read -r s b < <(cksum < "$CACHE")
-    printf 'mmry-foundation v1 entries=2 bytes=%s cksum=%s\n' "$b" "$s" > "${CACHE}.manifest"
+    fnd_seal "$CACHE" 2 "$SET"
 }
 
 # Does the hook actually inject? Bytes, not prose, so no wording change can soften it.
@@ -125,7 +125,7 @@ _assert_agree() {
     [ "$status" -eq 0 ]
     [[ "$output" == *'Eric builds MMRY'* ]] || return 1
 
-    rm -f "$CACHE" "${CACHE}.manifest"
+    rm -f "$CACHE" "$SET"
 
     run bash "$HOOK"
     [[ "$output" == *disappeared* ]] || return 1
@@ -138,7 +138,7 @@ _assert_agree() {
 
 @test "cross-surface: #31583 4c CONTROL a brand new session with nothing on disk is silent on both" {
     printf '{"foundationReinject": true}\n' > "$CFG"
-    rm -f "$CACHE" "${CACHE}.manifest" "$TEST_TMPDIR/mmry-foundation.status"
+    rm -f "$CACHE" "$SET" "$TEST_TMPDIR/mmry-foundation.status"
 
     run bash "$HOOK"
     [ "$status" -eq 0 ]
@@ -151,7 +151,7 @@ _assert_agree() {
 
 @test "cross-surface: #31583 4c a record left by an EARLIER session is not this session own" {
     printf '{"foundationReinject": true}\n' > "$CFG"
-    rm -f "$CACHE" "${CACHE}.manifest"
+    rm -f "$CACHE" "$SET"
 
     # Exactly the state of any new session whose SessionStart fetch failed on a machine an
     # earlier session used. Before the fix this produced 932 characters of "your directives
@@ -335,18 +335,19 @@ _slow_jq() {
 }
 
 
-# #31583 QA round 5: on an upgraded copy the hook said "No action needed" while this command said
-# "run /mmry:load-memories to rebuild it". The two surfaces now say the same thing.
-@test "cross-surface: #31583 an upgraded copy gets the same answer from the hook and the command" {
+# #31597. The upgrade answer is retired with the state behind it. A file left by plugin 2.9.1 is
+# under another name now and is never read, so both surfaces agree by saying nothing about it: the
+# hook is silent and the command says nothing is loaded, and neither calls it an upgrade.
+@test "cross-surface: #31597 a file left by plugin 2.9.1 gets the same answer from the hook and the command" {
     printf '{"foundationReinject": true}\n' > "$CFG"
-    printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
-    rm -f "${CACHE}.manifest"
+    printf -- '- Identity: the OLD 2.9.1 copy.\n' > "$TEST_TMPDIR/mmry-foundation.md"
+    rm -f "$SET"
 
     run bash "$HOOK"
-    [[ "$output" == *'No action needed'* ]] || return 1
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || return 1
 
     run bash "$STATUSCMD"
-    [[ "$output" == *'FROM AN EARLIER PLUGIN VERSION'* ]] || return 1
-    [[ "$output" == *'none needed'* ]] || return 1
-    [[ "$output" != *'run /mmry:load-memories to rebuild it'* ]]
+    [[ "$output" == *'NOT LOADED YET'* ]] || return 1
+    [[ "$output" != *'FROM AN EARLIER PLUGIN VERSION'* ]]
 }
