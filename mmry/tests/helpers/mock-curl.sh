@@ -51,6 +51,10 @@ done
 # Log the call
 echo "${METHOD} ${URL} ${BODY}" >> "$LOG_FILE"
 
+# An optional delay, in whole seconds (#31597 r2). A test that drives the per-prompt hook's background
+# refresh uses it so the refresh cannot land before the prompt that started it has read the set.
+[[ "${MOCK_CURL_DELAY:-}" =~ ^[0-9]+$ ]] && sleep "$MOCK_CURL_DELAY"
+
 # Determine response based on URL pattern
 HTTP_CODE="500"
 RESPONSE_BODY='{"error":"Unexpected request"}'
