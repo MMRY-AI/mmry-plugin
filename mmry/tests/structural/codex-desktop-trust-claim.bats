@@ -64,7 +64,7 @@ customer_files() {
     local files=()
     while IFS= read -r f; do [[ -f "$f" ]] && files+=("$f"); done < <(customer_files)
     run desktop_trust_offenders "${files[@]}"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
     if [[ -n "$output" ]]; then
         echo "Text instructs trusting hooks in the Codex desktop app, which is unconfirmed:" >&2
         echo "$output" >&2
@@ -75,7 +75,7 @@ customer_files() {
 @test "desktop trust: the sweep is reading the files that matter, not an empty set" {
     local files=()
     while IFS= read -r f; do [[ -f "$f" ]] && files+=("$f"); done < <(customer_files)
-    [[ "${#files[@]}" -ge 20 ]]
+    [[ "${#files[@]}" -ge 20 ]] || return 1
     printf '%s\n' "${files[@]}" | grep -q '/setup/mmry-setup.sh$'
     printf '%s\n' "${files[@]}" | grep -q '/skills-codex/memory-system/SKILL.md$'
     printf '%s\n' "${files[@]}" | grep -q '/docs/codex.md$'
@@ -88,7 +88,7 @@ customer_files() {
     echo "    first conversation."
 EOF
     run desktop_trust_offenders "$tmp"
-    [[ -n "$output" ]]
+    [[ -n "$output" ]] || return 1
 
     cat > "$tmp" <<'EOF'
     echo "  - Codex desktop app: it does not ask."
