@@ -3,7 +3,9 @@
 Persistent memory system that gives your assistant long-term recall across sessions.
 
 Using **OpenAI Codex**? Start at **[docs/codex.md](docs/codex.md)** - installation, setup, the
-supported surface, and uninstall all differ from the Claude Code instructions below.
+supported surface, and uninstall all differ from the Claude Code instructions below. MMRY has been
+tested in the Codex command-line tool. Trusting MMRY's hooks in the Codex desktop app could not be
+confirmed in this release.
 
 | What happens | Claude Code | OpenAI Codex |
 |---|---|---|
