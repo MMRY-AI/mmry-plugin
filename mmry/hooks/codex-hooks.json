@@ -72,7 +72,7 @@
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       },

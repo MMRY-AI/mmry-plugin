@@ -60,7 +60,7 @@
           {
             "type": "command", 
             "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check\"", 
-            "timeout": 10
+            "timeout": 15
           }
         ]
       }
