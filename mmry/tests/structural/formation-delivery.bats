@@ -711,7 +711,8 @@ _mutant_handler_dir() {
             ;;
         # DEFECT 2: read last-seen BEFORE taking the delivery mutex, restoring the round 1 order.
         read-before-lock)
-            perl -0777 -pi -e 's{(\r?\n[ ]+_acquire "\$_mutex_dir" 120 \|\| return 1\r?\n[ ]+_held_mutex=1\r?\n)(\r?\n[ ]+local last_seen\r?\n[ ]+last_seen="\$\(bash[^\n]*\r?\n[ ]+last_seen="\$\{last_seen[^\n]*\r?\n)}{$2$1}s' "$f"
+            # Since #31746 the read is the in-process mmry_formation_state_read, not a `bash` call.
+            perl -0777 -pi -e 's{(\r?\n[ ]+_acquire "\$_mutex_dir" 120 \|\| return 1\r?\n[ ]+_held_mutex=1\r?\n)(\r?\n[ ]+local last_seen\r?\n[ ]+mmry_formation_state_read[^\n]*\r?\n[ ]+last_seen="\$MMRY_FS_LAST_SEEN"\r?\n)}{$2$1}s' "$f"
             ;;
         # DEFECT 3: take a lock's mtime with the GNU-only `date -r PATH`.
         date-r-mtime)
@@ -800,15 +801,17 @@ _lagged_handler_dir() {
     mv "${dir}/formation-state.sh" "${dir}/formation-state-real.sh"
     cat > "${dir}/formation-state.sh" <<'DOUBLE'
 #!/usr/bin/env bash
-out="$(bash "$(dirname "${BASH_SOURCE[0]}")/formation-state-real.sh" "$@" 2>/dev/null || true)"
-if [ "${1:-}" = "get" ] && [ -n "${MMRY_TEST_GET_COUNT_FILE:-}" ]; then
+# Counts each read of the state and stalls the configured one. Announce that the read has happened,
+# then WAIT TO BE RELEASED rather than sleeping for a fixed period. A fixed sleep makes the overlap a
+# bet that the other reader finishes inside it, and that bet is lost on a loaded machine - which
+# silently turns a real double delivery into a passing test. Both ends of the window are now
+# events, not durations.
+_fsd_after_get() {
+    [ -n "${MMRY_TEST_GET_COUNT_FILE:-}" ] || return 0
+    local n w
     n=$(( $(cat "$MMRY_TEST_GET_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
     printf '%s' "$n" > "$MMRY_TEST_GET_COUNT_FILE"
     if [ "$n" -eq "${MMRY_TEST_GET_LAG_ON_CALL:-2}" ]; then
-        # Announce that the read has happened, then WAIT TO BE RELEASED rather than sleeping for a
-        # fixed period. A fixed sleep makes the overlap a bet that the other reader finishes
-        # inside it, and that bet is lost on a loaded machine - which silently turns a real double
-        # delivery into a passing test. Both ends of the window are now events, not durations.
         [ -n "${MMRY_TEST_GET_SIGNAL_FILE:-}" ] && : > "$MMRY_TEST_GET_SIGNAL_FILE"
         w=0
         while [ ! -f "${MMRY_TEST_GET_RELEASE_FILE:-/nonexistent}" ] \
@@ -817,7 +820,24 @@ if [ "${1:-}" = "get" ] && [ -n "${MMRY_TEST_GET_COUNT_FILE:-}" ]; then
             w=$(( w + 1 ))
         done
     fi
+    return 0
+}
+# SOURCED, which is how formation-check.sh reads its state since #31746: wrap the in-process read so
+# the real read happens at the real moment and the answer is then held back, exactly as the command
+# form below does for a caller that runs the file.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    source "${BASH_SOURCE[0]%/*}/formation-state-real.sh"
+    eval "_fsd_real_read() $(declare -f mmry_formation_state_read | sed 1d)"
+    mmry_formation_state_read() {
+        local rc=0
+        _fsd_real_read "$@" || rc=$?
+        _fsd_after_get
+        return "$rc"
+    }
+    return 0
 fi
+out="$(bash "$(dirname "${BASH_SOURCE[0]}")/formation-state-real.sh" "$@" 2>/dev/null || true)"
+[ "${1:-}" = "get" ] && _fsd_after_get
 printf '%s\n' "$out"
 DOUBLE
     chmod +x "${dir}/formation-state.sh"
@@ -917,7 +937,7 @@ _run_overlap() {
     [ -s "$body" ]
     local acquire_line read_line
     acquire_line="$(grep -n '_acquire "\$_mutex_dir"' "$body" | head -1 | cut -d: -f1)"
-    read_line="$(grep -n 'formation-state.sh" get' "$body" | head -1 | cut -d: -f1)"
+    read_line="$(grep -n 'mmry_formation_state_read' "$body" | head -1 | cut -d: -f1)"
     [ -n "$acquire_line" ]
     [ -n "$read_line" ]
     [ "$acquire_line" -lt "$read_line" ]

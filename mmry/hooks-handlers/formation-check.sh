@@ -284,6 +284,14 @@ mmry_load_config 2>/dev/null || exit 0
 # finish leaves every message pending for the next one, which is the only outcome that loses
 # nothing. SECONDS is used because it costs no process and bash 3.2 has it.
 #
+# ONE BUDGET FOR THE ONE CHECK. SessionStart, UserPromptSubmit and PostToolUse run the same check and
+# do the same work, so they get the same 15 seconds. PostToolUse had 8, and a 4 second deadline
+# inside 8 was shorter than a loaded Windows machine's preparation: the check would have declined to
+# ask on exactly the machines this task is for. What differs is the REQUEST: the tool route holds up
+# the next step of the turn, so it waits on the service for 3 seconds where the others wait 6. A slow
+# service therefore holds a tool call about 3 seconds past preparation, against the full 8 it could
+# hold before; the longer budget only gives slow preparation room.
+#
 # The idle poller is not on this clock. It runs in the background on a 300 second budget, its own
 # loop stops it at MMRY_IDLE_POLL_SECONDS, and each of its requests keeps the client's defaults.
 _fc_budget=0
@@ -291,7 +299,7 @@ _fc_reserve=4
 _fc_request=0
 case "$mode" in
     prompt|start) _fc_budget=15; _fc_request=6 ;;
-    tool)         _fc_budget=8;  _fc_request=3 ;;
+    tool)         _fc_budget=15; _fc_request=3 ;;
 esac
 _fc_deadline=$(( _fc_budget - _fc_reserve ))
 
