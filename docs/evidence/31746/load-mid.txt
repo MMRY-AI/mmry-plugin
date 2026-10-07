@@ -1,0 +1,13 @@
+load: 8 spinners + 50 idle workers (3 s nap), plus ambient
+msys bash processes: 73
+bash.exe (Windows): 82
+CPU % samples: 46, 45, 53, 51, 38
+Free RAM GB: 5.3
+bash -c true: 109 ms
+bash -c true: 122 ms
+bash -c true: 126 ms
+bash -c true: 105 ms
+bash -c true: 107 ms
+after:
+msys bash processes: 81
+CPU % samples: 62, 66, 39
