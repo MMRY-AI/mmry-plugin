@@ -126,7 +126,16 @@ _kt_point() {
     rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
 
-    _kt_fire "$hdir" "$mode" "$point" "${KT_DIR}/killed.out" &
+    # The hook ITSELF goes in the background, not a function that runs it. A backgrounded function
+    # is a subshell, and on bash 3.2 - the macOS bash - $! is that subshell: killing it leaves the
+    # check running and holding the lock, and the next check is silenced by a live holder. Bash 5
+    # execs the last command of the subshell, which is why only the Mac leg caught this. `env` execs
+    # bash, so here $! is the check on every platform.
+    env PATH="${KT_BIN}:${PATH}" MMRY_JQ="${KT_BIN}/jq" KT_REAL_JQ="$KT_REAL_JQ" \
+        KT_DIR="$KT_DIR" KT_BODY="$BODY" KT_STALL="$point" \
+        MMRY_FORMATION_MODE="$mode" MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key \
+        MMRY_API_URL="http://fake.invalid" \
+        bash "${hdir}/formation-check.sh" </dev/null >"${KT_DIR}/killed.out" 2>&1 &
     local hook=$! w=0
     while [[ ! -s "${KT_DIR}/stalled" && $w -lt 600 ]]; do sleep 0.1; w=$((w + 1)); done
     if [[ ! -s "${KT_DIR}/stalled" ]]; then
@@ -138,6 +147,11 @@ _kt_point() {
     kill -9 "$(cat "${KT_DIR}/stalled")" 2>/dev/null || true
     : > "${KT_DIR}/release"
     wait "$hook" 2>/dev/null || true
+    # If the check outlived the kill, what follows would measure a live lock holder, not a stop.
+    if kill -0 "$hook" 2>/dev/null; then
+        printf 'hook-survived-the-kill'
+        return 0
+    fi
 
     rm -f "${KT_DIR}/asked" "${KT_DIR}/jq-count"
     _kt_fire "$hdir" "$mode" "" "${KT_DIR}/next1.out" || true
@@ -194,6 +208,7 @@ _mark_first_handler_dir() {
     local result; result="$(_kt_all_points "$HANDLERS" prompt)"
     echo "$result" >&3
     [[ "$result" != *calibration-failed* ]] || { echo "$result"; return 1; }
+    [[ "$result" != *hook-survived* ]] || { echo "a stopped check outlived its kill, so nothing here was measured: $result"; return 1; }
     [[ "$result" != *never-reached* ]] || { echo "a point was never reached: $result"; return 1; }
     # The prompt route has at least the request, the parse, and the write-out.
     local points="${result##*points=}"
@@ -207,6 +222,7 @@ _mark_first_handler_dir() {
     local result; result="$(_kt_all_points "$HANDLERS" tool)"
     echo "$result" >&3
     [[ "$result" != *calibration-failed* ]] || { echo "$result"; return 1; }
+    [[ "$result" != *hook-survived* ]] || { echo "a stopped check outlived its kill, so nothing here was measured: $result"; return 1; }
     [[ "$result" != *never-reached* ]] || { echo "a point was never reached: $result"; return 1; }
     local points="${result##*points=}"
     (( points >= 2 )) || { echo "only ${points} points covered: $result"; return 1; }
@@ -224,6 +240,7 @@ _mark_first_handler_dir() {
     local result; result="$(_kt_all_points "$mutant" prompt)"
     echo "$result" >&3
     [[ "$result" != *calibration-failed* ]] || { echo "$result"; return 1; }
+    [[ "$result" != *hook-survived* ]] || { echo "a stopped check outlived its kill, so nothing here was measured: $result"; return 1; }
     printf '%s\n' "$result" | grep -q ' 0,0$' || {
         echo "the mark-first mutant lost nothing at any point, so the stop test proves nothing: $result"
         return 1
