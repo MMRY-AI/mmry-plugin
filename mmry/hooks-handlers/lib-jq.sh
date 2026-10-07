@@ -127,15 +127,24 @@ _mmry_jq_bundle_name() {
 
 # Resolve a usable jq into MMRY_JQ. Returns 0 on success, 1 if none is usable.
 mmry_resolve_jq() {
+    # Already verified by THIS process (#31746)? A hook that sources lib-jq.sh and then
+    # mmry-client.sh resolves twice, and the second `jq --version` was a whole process spent
+    # re-proving what the first had just proved, on the per-prompt path where every process comes
+    # out of a hook budget. The memo is deliberately not exported, so a child process still checks
+    # for itself, and it is keyed by the value, so pointing MMRY_JQ somewhere else re-verifies.
+    if [[ -n "${MMRY_JQ:-}" && "${_MMRY_JQ_VERIFIED:-}" == "$MMRY_JQ" ]]; then
+        return 0
+    fi
     # Already resolved and still working?
     if [[ -n "${MMRY_JQ:-}" ]] && "$MMRY_JQ" --version >/dev/null 2>&1; then
+        _MMRY_JQ_VERIFIED="$MMRY_JQ"
         return 0
     fi
     # 1. Prefer a working system jq. (MMRY_JQ_SKIP_SYSTEM=1 forces the bundled
     #    path; test seam only, unset in production.)
     if [[ "${MMRY_JQ_SKIP_SYSTEM:-}" != "1" ]] \
         && command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
-        MMRY_JQ="jq"; export MMRY_JQ; return 0
+        MMRY_JQ="jq"; export MMRY_JQ; _MMRY_JQ_VERIFIED="$MMRY_JQ"; return 0
     fi
     # 2. Bundled binary for this platform.
     local name path
@@ -145,11 +154,11 @@ mmry_resolve_jq() {
         if [[ -f "$path" ]]; then
             [[ -x "$path" ]] || chmod +x "$path" 2>/dev/null || true
             if "$path" --version >/dev/null 2>&1; then
-                MMRY_JQ="$path"; export MMRY_JQ; return 0
+                MMRY_JQ="$path"; export MMRY_JQ; _MMRY_JQ_VERIFIED="$MMRY_JQ"; return 0
             fi
         fi
     fi
-    MMRY_JQ=""; export MMRY_JQ; return 1
+    MMRY_JQ=""; export MMRY_JQ; _MMRY_JQ_VERIFIED=""; return 1
 }
 
 # Print a clear, platform-specific message when no usable jq is available.
