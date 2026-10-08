@@ -65,16 +65,20 @@ verify() { # the six parts rejoin into the set, whole and in order
     echo "rejoined: $n parts, ${#got} bytes, in order"
 }
 
-base_all=""; hook_all=""; ms_all=""
+base_all=""; hook_all=""; ms_all=""; first_all=""
 i=1
 while (( i <= RUNS )); do
     seed "$W/b"; rb="$(driver "bash -c 'exit 0'" "$W/b")"
-    seed "$W/h"; t0=$(now_ms); rh="$(driver "bash \"$HOOK\" --part @K@" "$W/h")"; t1=$(now_ms)
-    nb=$(num "$rb"); nh=$(num "$rh")
-    line="prompt $i: hooks $(( nh - nb + 6 )) processes (driver+hooks $nh, driver+6 empty bash $nb), ${rh##* }, $(( t1 - t0 )) ms"
+    # The first prompt on a freshly written set, then the next prompt on the same set: the first is
+    # the one a session pays once (and whenever the set changes), the next is every other prompt.
+    seed "$W/h"; rf="$(driver "bash \"$HOOK\" --part @K@" "$W/h")"
+    t0=$(now_ms); rh="$(driver "bash \"$HOOK\" --part @K@" "$W/h")"; t1=$(now_ms)
+    nb=$(num "$rb"); nh=$(num "$rh"); nf=$(num "$rf")
+    first_all+=" $(( nf - nb + 6 ))"
+    line="prompt $i: first prompt on the set $(( nf - nb + 6 )) processes; next prompt $(( nh - nb + 6 )) processes (driver+hooks $nh, driver+6 empty bash $nb), ${rh##* }, $(( t1 - t0 )) ms"
     [[ "${MMRY_COUNT_VERIFY:-}" == 1 ]] && line="$line | $(verify "$W/h")"
     echo "$line"
     base_all+=" $nb"; hook_all+=" $(( nh - nb + 6 ))"; ms_all+=" $(( t1 - t0 ))"
     i=$(( i + 1 ))
 done
-echo "median processes started by the six Foundation hooks per prompt: $(printf '%s\n' $hook_all | median) (runs:$hook_all); median wall clock $(printf '%s\n' $ms_all | median) ms"
+echo "median processes started by the six Foundation hooks: first prompt on a set $(printf '%s\n' $first_all | median) (runs:$first_all); every next prompt $(printf '%s\n' $hook_all | median) (runs:$hook_all); median wall clock of a next prompt $(printf '%s\n' $ms_all | median) ms"

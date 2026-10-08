@@ -152,7 +152,11 @@ desc_m05="orphaned out-file sweep disabled"
 # a lost one, which is the entire feature. Kept as a regression: this one was found by
 # mutation during the build and closed then.
 # REPOINTED (#31411 QA round 2): the marker is written by temp and rename now, _mmry_fnd_write.
-mutate_m06() { _mrep "$1/$HANDLER_REL" '    _mmry_fnd_write "$_INFLIGHT" "" || true' '    :'; }
+# REPOINTED (#31893): an empty marker on a free path is made with a redirect, no process; both writes go.
+mutate_m06() {
+    _mrep "$1/$HANDLER_REL" '        _mmry_fnd_write "$_INFLIGHT" "" || true' '        :'
+    _mrep "$1/$HANDLER_REL" '        : > "$_INFLIGHT" 2>/dev/null || true' '        :'
+}
 targets_m06="$HANDLER_TESTS"
 desc_m06="in-flight marker is never written"
 
@@ -618,8 +622,9 @@ targets_m54="$WRITER_TESTS"
 desc_m54="#31597 the writer drops the trailer, so the set's last newline is lost to the read"
 
 # The part label stops naming the version, so the assistant cannot see the parts disagree.
+# REPOINTED (#31893): the framing is written once, in _mmry_fnd_payload, for both paths.
 mutate_m55() {
-    _sedi 's|of the set, version \${_fnd_setid}\. The parts arrive|of the set. The parts arrive|' "$1/$HANDLER_REL"
+    _sedi 's|of the set, version \$3\. The parts arrive|of the set. The parts arrive|' "$1/$HANDLER_REL"
 }
 targets_m55="$PARTS_TESTS"
 desc_m55="#31597 the part label no longer names the version of the set"

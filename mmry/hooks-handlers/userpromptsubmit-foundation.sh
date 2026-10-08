@@ -1080,7 +1080,15 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # that failed - and the previous prompt's record then stood for this one. Any exit that still
     # forgets to replace it now reads as a failure, not as the last prompt's delivery.
     _mmry_outcome "failed unfinished"
-    _mmry_fnd_write "$_INFLIGHT" "" || true
+    # The marker is empty, so there is no half a line to read, and it is made with no process when the
+    # path is free or a regular file (#31893): this was a temp file and a rename, two processes on
+    # Windows on every part of every prompt. Anything else at the path, a FIFO or a directory, still goes
+    # through _mmry_fnd_write, which never opens one for writing (#31411 QA round 3, N2).
+    if [[ -e "$_INFLIGHT" && ! -f "$_INFLIGHT" ]]; then
+        _mmry_fnd_write "$_INFLIGHT" "" || true
+    else
+        : > "$_INFLIGHT" 2>/dev/null || true
+    fi
 
     # THE WORKER DOES NOT GET TO SAY THE TURN WAS DELIVERED (#31583, security on QA round 4).
     #
