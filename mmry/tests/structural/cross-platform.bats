@@ -93,12 +93,38 @@ load '../helpers/test-helper'
     done
 }
 
-@test "hooks.json contains no single quotes in hook commands" {
-    local hooks_file="$PLUGIN_ROOT/hooks/hooks.json"
-    # Extract only command lines and check for single quotes
-    local commands
-    commands="$(grep '"command"' "$hooks_file")"
-    ! echo "$commands" | grep -q "'"
+@test "hooks.json: no hook command carries a cmd.exe operator outside double quotes" {
+    # This test used to forbid single quotes outright (c4fba61, February 2026). Its reason was that
+    # Claude Code then ran hook commands through cmd.exe on Windows, and cmd split a line like
+    # bash -c '[ -f x ] && y' at the && before bash ever saw it. What broke those lines was the
+    # operator cmd acted on, never the quote character itself.
+    #
+    # The formation membership gate (#31746) needs single quotes: it is an `sh -c '...'` whose
+    # $f must reach sh unexpanded, and a double-quoted form would hand $f to the host's shell. So the
+    # rule is now the property the old one stood for: nothing cmd.exe acts on (& | < > ^) may sit
+    # outside a double-quoted span. Current Claude Code runs hooks with Git Bash, where this does
+    # not matter; it is kept so an older Windows client still runs every line in one piece.
+    local hooks_file="$PLUGIN_ROOT/hooks/hooks.json" bad
+    bad="$(node -e '
+        const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        const out = [];
+        for (const gs of Object.values(d.hooks)) for (const g of gs) for (const h of g.hooks) {
+            const bare = h.command.replace(/"[^"]*"/g, "");
+            if (/[&|<>^]/.test(bare)) out.push(h.command);
+        }
+        console.log(out.join("\n"));
+    ' "$hooks_file")"
+    [[ -z "$bad" ]] || { echo "cmd.exe would split these:"; echo "$bad"; return 1; }
+    # CONTROL: the check finds the shape c4fba61 removed, so a pass above is not a check that
+    # cannot fail.
+    local probe="${BATS_TEST_TMPDIR}/probe-hooks.json"
+    printf '%s' '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bash -c '"'"'[ -f x ] && y'"'"'"}]}]}}' > "$probe"
+    bad="$(node -e '
+        const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        for (const gs of Object.values(d.hooks)) for (const g of gs) for (const h of g.hooks)
+            if (/[&|<>^]/.test(h.command.replace(/"[^"]*"/g, ""))) console.log(h.command);
+    ' "$probe")"
+    [[ -n "$bad" ]] || { echo "control: the old single-quoted && shape was not caught"; return 1; }
 }
 
 @test "SessionStart hook uses CLAUDE_PLUGIN_ROOT variable" {

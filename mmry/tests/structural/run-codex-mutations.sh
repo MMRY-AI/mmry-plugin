@@ -635,6 +635,18 @@ mutate "the launcher drops the PATH: prefix from the where.exe lookup [QA r10 se
 mutate "the README table loses the idle-wake gap row [QA r10]" ../README.md   's = s.replace("| A message that arrives while your assistant is idle wakes it | yes | not available: it arrives with the next thing that happens in the session |" + chr(10), "", 1)'   structural/codex-docs-and-eol.bats "not-available row for every gap"
 mutate "the Windows uninstaller calls findstr by bare name again [QA r10 security]" setup/uninstall.bat   's = s.replace("%SystemRoot%" + chr(92) + "System32" + chr(92) + "findstr.exe /i /l /c:" + chr(34) + "codex" + chr(34), "findstr /i /l /c:" + chr(34) + "codex" + chr(34), 1)'   structural/codex-docs-and-eol.bats "bare name"
 
+# ---- #31746 round 2: the formation membership gate ------------------------------------------
+# Each break is one way the gate could stop doing its job; formation-gate.bats must refuse every
+# one. The first is the gate removed outright: every registration put back as it was before it.
+# The one marked Windows can only refuse on Windows, where the cmd launcher runs.
+mutate "hooks.json loses the gate: the pre-gate registrations come back [31746 gate]" hooks/hooks.json   's = s.replace("sh -c " + chr(39) + "for f in " + chr(92) + chr(34) + "${TMPDIR:-/tmp}" + chr(92) + chr(34) + "/.mmry-formation-*; do if [ -f " + chr(92) + chr(34) + "$f" + chr(92) + chr(34) + " ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; exit 0; fi; done; exit 0" + chr(39), "bash -c " + chr(92) + chr(34) + "[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check" + chr(92) + chr(34))'   structural/formation-gate.bats "gate 1 claude"
+mutate "codex-hooks.json loses the gate: the pre-gate registrations come back [31746 gate]" hooks/codex-hooks.json   's = s.replace("sh -c " + chr(39) + "for f in " + chr(92) + chr(34) + "${TMPDIR:-/tmp}" + chr(92) + chr(34) + "/.mmry-formation-*; do if [ -f " + chr(92) + chr(34) + "$f" + chr(92) + chr(34) + " ]; then exec sh " + chr(92) + chr(34) + "$@" + chr(92) + chr(34) + "; fi; done; exit 0" + chr(39) + " mmry-formation-gate ", "sh ")'   structural/formation-gate.bats "gate 1 codex"
+mutate "the Claude Code gate opens without a membership file [31746 gate]" hooks/hooks.json   's = s.replace("do if [ -f " + chr(92) + chr(34) + "$f" + chr(92) + chr(34) + " ]; then", "do if true; then")'   structural/formation-gate.bats "gate 1 claude"
+mutate "one Claude Code registration's gate drifts to a hard-coded /tmp [31746 gate]" hooks/hooks.json   's = s.replace("${TMPDIR:-/tmp}", "/tmp", 1)'   structural/formation-gate.bats "gate 4: every formation-check"
+mutate "the gate takes a lock directory for a membership file [31746 gate]" hooks/hooks.json   's = s.replace("[ -f " + chr(92) + chr(34) + "$f" + chr(92) + chr(34), "[ -e " + chr(92) + chr(34) + "$f" + chr(92) + chr(34))'   structural/formation-gate.bats "lock DIRECTORY"
+mutate "the Windows launcher no longer exits when there is no membership file [31746 gate]" hooks-handlers/codex-hook.cmd   's = s.replace("if not defined MMRY_MEMBER exit /b 0" + chr(10), "", 1)'   structural/formation-gate.bats "launcher's first step"
+mutate "the Windows launcher ignores TMPDIR [31746 gate, Windows]" hooks-handlers/codex-hook.cmd   's = s.replace("if not defined TMPDIR goto :gate_usertemp", "goto :gate_usertemp", 1)'   structural/formation-gate.bats "gate 3 windows codex"
+
 echo
 if [[ -n "${MMRY_MUTATION_DRYRUN:-}" ]]; then
     echo "=== DRY RUN: patterns that still apply: $DRYRUN_OK   stale or broken: $ERRORS   (checked $RUN of $TOTAL) ==="
