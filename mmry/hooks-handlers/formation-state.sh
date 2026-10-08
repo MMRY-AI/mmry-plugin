@@ -66,6 +66,9 @@ _MMRY_STATE_DIR="${BASH_SOURCE[0]%/*}"
 #   MMRY_FS_PATH       the state file for a session
 #   MMRY_FS_FORMATION  line 1 of the state file, the formation id
 #   MMRY_FS_LAST_SEEN  line 2, the newest message already surfaced (may be empty)
+#   MMRY_FS_SHOWN      line 3, comma-separated ids of DIRECTED messages already printed and not yet
+#                      reported to the service as read (#31721). Usually absent. The next poll
+#                      carries them, and they are cleared once the service has answered it.
 # ---------------------------------------------------------------------------------------------
 
 # The session id with every byte outside A-Za-z0-9._- replaced by "_", exactly as
@@ -99,22 +102,38 @@ mmry_formation_state_path() {
 mmry_formation_state_read() {
     MMRY_FS_FORMATION=""
     MMRY_FS_LAST_SEEN=""
+    MMRY_FS_SHOWN=""
     mmry_formation_state_path "${1:-}"
     [[ -f "$MMRY_FS_PATH" ]] || return 1
-    { IFS= read -r MMRY_FS_FORMATION || true; IFS= read -r MMRY_FS_LAST_SEEN || true; } \
+    { IFS= read -r MMRY_FS_FORMATION || true; IFS= read -r MMRY_FS_LAST_SEEN || true
+      IFS= read -r MMRY_FS_SHOWN || true; } \
         < "$MMRY_FS_PATH" 2>/dev/null || true
-    [[ -n "$MMRY_FS_FORMATION" ]] || { MMRY_FS_LAST_SEEN=""; return 1; }
+    # Only digits and commas are ids; a stray CR from a file written across a line-ending boundary
+    # is not part of one.
+    MMRY_FS_SHOWN="${MMRY_FS_SHOWN//[!0-9,]/}"
+    [[ -n "$MMRY_FS_FORMATION" ]] || { MMRY_FS_LAST_SEEN=""; MMRY_FS_SHOWN=""; return 1; }
     return 0
 }
 
 # Record the newest message already surfaced. A session in no formation records nothing.
+#
+# The optional third argument (#31721) REPLACES the list of directed ids printed and not yet
+# reported to the service. When it is not passed at all, the list already on file is kept, so a
+# caller that only knows about "seen" - the `seen` command below - cannot erase reports still owed.
 mmry_formation_state_seen() {
-    local iso="${1:-}" fid=""
+    local iso="${1:-}" fid="" seen_line="" shown="" keep_shown=1
+    if (( $# >= 3 )); then keep_shown=0; shown="${3:-}"; fi
     mmry_formation_state_path "${2:-}"
     [[ -f "$MMRY_FS_PATH" ]] || return 0
-    { IFS= read -r fid || true; } < "$MMRY_FS_PATH" 2>/dev/null || true
+    { IFS= read -r fid || true; IFS= read -r seen_line || true
+      if (( keep_shown )); then IFS= read -r shown || true; fi; } < "$MMRY_FS_PATH" 2>/dev/null || true
     [[ -n "$fid" ]] || return 0
-    { printf '%s\n' "$fid"; printf '%s\n' "$iso"; } > "$MMRY_FS_PATH" 2>/dev/null || true
+    shown="${shown//[!0-9,]/}"
+    if [[ -n "${shown//,/}" ]]; then
+        { printf '%s\n' "$fid"; printf '%s\n' "$iso"; printf '%s\n' "$shown"; } > "$MMRY_FS_PATH" 2>/dev/null || true
+    else
+        { printf '%s\n' "$fid"; printf '%s\n' "$iso"; } > "$MMRY_FS_PATH" 2>/dev/null || true
+    fi
     return 0
 }
 

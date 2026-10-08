@@ -81,8 +81,8 @@
             "type": "command", 
             "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check\"", 
             "asyncRewake": true, 
-            "rewakeSummary": "Formation transmission", 
-            "timeout": 300
+            "rewakeSummary": "MMRY formation", 
+            "timeout": 1800
           }
         ]
       }
