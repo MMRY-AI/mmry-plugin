@@ -168,6 +168,9 @@ fi
 # one, or the reverse. Neither is recoverable once the sender has moved on.
 if [[ -n "$recipient_member_id" ]]; then
     echo "Sent to member ${recipient_member_id} in formation ${formation_id}, and to nobody else. They will see it after their next tool call, marked as directed at them."
+    # #31721. The sender can now find out whether it was read, and has to be told where to look,
+    # or the feature is one nobody finds.
+    echo "It reads as not read yet until it has been shown to them. $(mmry_host_formation_ref roster) shows whether it has been read."
 else
     echo "Sent to formation ${formation_id}. The other members will see it after their next tool call."
 fi

@@ -91,6 +91,36 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
       + (if .leftDate != null then "   (has left; cannot be addressed)" else "" end)
 ' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
 
+# WHETHER WHAT THIS SESSION SENT HAS BEEN READ (#31721). A sender used to have no way to tell "I sent
+# it" from "they have read it", and on 2026-10-04 that cost a formation an hour of unread questions
+# and assignments. Each directed message this session sent is listed with whether its recipient
+# has been shown it yet, newest first, read back from the service rather than remembered here.
+#
+# Supplementary to the roster, so it never stands in its way: if the service cannot answer, or is
+# too old to have the route, the section is left out and the roster above stands on its own. An
+# empty list prints nothing, because most sessions have sent no directed message.
+_mmry_sender_sid="$(mmry_session_id 2>/dev/null || true)"
+if [[ -n "$_mmry_sender_sid" ]] && mmry_get_formation_sent "$formation_id" "$_mmry_sender_sid" 2>/dev/null \
+    && [[ "${MMRY_HTTP_CODE:-}" =~ ^2[0-9][0-9]$ ]]; then
+    _mmry_sent_lines="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r '
+        if type == "object" and .member == true and ((.messages // []) | length) > 0 then
+            "Directed messages this session sent, newest first:",
+            (.messages[]
+             | "  to member " + (.recipientMemberId | tostring)
+               + (if .recipientRole then " (" + .recipientRole + ")" else "" end)
+               + "  " + (if .read == true then "READ " + ((.readDate // "") | tostring | .[0:19] | sub("T"; " ")) + " UTC"
+                         else "NOT READ YET" end)
+               + (if .recipientHasLeft == true then "  (has since left)" else "" end)
+               + "  \"" + ((.preview // "") | tostring) + "\"")
+        else empty end' 2>/dev/null || true)"
+    if [[ -n "$_mmry_sent_lines" ]]; then
+        # jq.exe on Windows writes CRLF; the CRs go so the lines read the same on every platform.
+        printf '\n%s\n' "${_mmry_sent_lines//$'\r'/}"
+        printf 'Read means it has been shown to that member: printed into their session, or attached to\n'
+        printf 'one of their tool responses. Not read yet means they have not been shown it.\n'
+    fi
+fi
+
 # THE RECIPIENT IS SPELLED DIFFERENTLY ON EACH HOST, AND THIS LINE USED TO GET IT WRONG
 # (#31245, 2026-09-21).
 #
