@@ -65,10 +65,30 @@ so a polite stop would be logged. The registration of each probe is in `*.settin
   still a member (`GET /api/formations/{id}/transmissions/sent`). Only an affirmative answer renews:
   exit 2 with a short notice, which wakes the session, which replies "Still listening.", and the
   next Stop starts a fresh watch. Anything else stops the watch quietly, as it always did.
+- A turn that ends while a watch is live hands over: the new Stop asks the live watch to stand
+  down, the old one exits within one 3 s slice of its sleep without renewing, and the new one starts
+  a fresh window at the fast end. So a renewal wake only ever follows 28 genuinely idle minutes.
 
 ## Live test: idle longer than three hook windows, still receives (requirement 1)
 
-See `live/` once run. Recorded below.
+Run 2026-10-08 01:41 to 03:08 UTC, Windows 11, Claude Code 2.1.285, against the local API built
+from the API branch (`bf3ec72`) on mnemo_DEV with migration 063 applied. Harness `live/live.js`,
+prepared by `live/setup.sh`; raw logs `live/run-2026-10-08.live.txt` and `.watch.txt`. The Stop
+registration and window were the shipped ones (1800 s, 1680 s), with no overrides.
+
+| Time (UTC) | What happened |
+|---|---|
+| 01:41:33 | R joins formation 4959 and goes idle. Nobody writes to R again |
+| 02:09:38 | watch 1 renews (exit 2); R replies "Still listening."; watch 2 starts 02:09:41 |
+| 02:37:53 | watch 2 renews; R replies "Still listening."; watch 3 starts 02:37:57 |
+| 03:06:08 | watch 3 renews; watch 4 starts 03:06:09 |
+| 03:07:55 | S, a second real session, sends a directed message to R with `formation-say.sh` |
+| 03:08:22 | watch 4 delivers it (26 s after the send); R repeats it, 5165 s after it last had input |
+| 03:08:28 | the service records it read; S's sender view shows `"read":true` |
+
+Requirement 1 (idle longer than three windows, still receives) and requirement 2 end to end both
+passed. Note: this run used the handler as of `c851aa7`, before the handover (DD-101 decision 4)
+was added; the handover is covered by the structural suite on Windows, Linux and macOS.
 
 ## Human steps: the same live test on macOS, and in the interactive Claude Code window
 

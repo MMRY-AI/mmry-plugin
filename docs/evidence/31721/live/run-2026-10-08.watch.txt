@@ -1,0 +1,11 @@
+2026-10-08T01:41:29Z start pid=1045488
+2026-10-08T01:41:33Z start pid=1045594
+2026-10-08T01:41:34Z end pid=1045594 rc=0 said=
+2026-10-08T02:09:38Z end pid=1045488 rc=2 said=MMRY FORMATION WATCH RENEWED (formation 4959). No message arrived in the last 28 minutes. 
+2026-10-08T02:09:41Z start pid=1082328
+2026-10-08T02:37:53Z end pid=1082328 rc=2 said=MMRY FORMATION WATCH RENEWED (formation 4959). No message arrived in the last 28 minutes. 
+2026-10-08T02:37:57Z start pid=1121524
+2026-10-08T03:06:08Z end pid=1121524 rc=2 said=MMRY FORMATION WATCH RENEWED (formation 4959). No message arrived in the last 28 minutes. 
+2026-10-08T03:06:09Z start pid=1150531
+2026-10-08T03:08:22Z end pid=1150531 rc=2 said=FORMATION TRANSMISSION (1 new, formation 4959)    [Wingman ?] DIRECTED TO YOU: LIVE-31721-
+2026-10-08T03:08:24Z start pid=1152971
