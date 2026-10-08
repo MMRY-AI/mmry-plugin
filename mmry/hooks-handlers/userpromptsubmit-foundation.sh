@@ -1089,12 +1089,6 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         kill -0 "$_stale_pid" 2>/dev/null || rm -f "$_stale" 2>/dev/null || true
     done
 
-    # A RECORD THAT ASSUMES THE WORST, WRITTEN FIRST (#31583 QA round 3, R4(b)). Every way out of
-    # this supervisor below replaces it with what actually happened. Some ways out used to write
-    # nothing - a part whose loader found nothing to send, a loader that could not start, an emit
-    # that failed - and the previous prompt's record then stood for this one. Any exit that still
-    # forgets to replace it now reads as a failure, not as the last prompt's delivery.
-    _mmry_outcome "failed unfinished"
     # The marker is empty, so there is no half a line to read, and it is made with no process when the
     # path is free or a regular file (#31893): this was a temp file and a rename, two processes on
     # Windows on every part of every prompt. Anything else at the path, a FIFO or a directory, still goes
@@ -1128,7 +1122,22 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # ONCE A VERSION" above. Only what it hands back as "worker" takes the worker below.
     WORKER_RC=0 HIT_DEADLINE=0 BODY="" _FND_KIND="" _FND_ROUTE=worker
     _mmry_fnd_key
+    if _mmry_fnd_serve_prepared; then
+        # Served from the prepared set, with nothing left that can run long or leave in silence: the
+        # emit and the record below are all that remain, and a kill before them leaves the in-flight
+        # marker. The pessimistic record that follows is for every other path, which still has a
+        # preparation, a wait or a worker ahead of it; here it would be one more process on every part
+        # of every ordinary prompt and say nothing the marker does not (#31893).
+        _FND_ROUTE=done
+    else
+    # A RECORD THAT ASSUMES THE WORST, WRITTEN FIRST (#31583 QA round 3, R4(b)). Every way out of
+    # this supervisor below replaces it with what actually happened. Some ways out used to write
+    # nothing - a part whose loader found nothing to send, a loader that could not start, an emit
+    # that failed - and the previous prompt's record then stood for this one. Any exit that still
+    # forgets to replace it now reads as a failure, not as the last prompt's delivery.
+    _mmry_outcome "failed unfinished"
     _mmry_fnd_prepared_path
+    fi
     [[ "$_FND_ROUTE" == "done" ]] && _mmry_fnd_refresh_check
 
     # THE WORKER, for what the prepared path hands back. Its body keeps the supervisor's indentation,
