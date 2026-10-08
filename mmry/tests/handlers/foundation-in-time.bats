@@ -295,3 +295,25 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     _rejoin; _want
     [ "$JOINED" = "$WANT" ]
 }
+
+@test "in-time R3: a firing the harness kills outright while it verifies LEAVES the marker, and the next turn is told" {
+    # The #31434 end-to-end kill test, on the path an ordinary prompt takes since #31893: the supervisor
+    # verifies the set itself, so it is killed while its cksum runs, with no worker in the picture.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"; fnd_seal "$CACHE" "" "$SET"
+    _cksum_shim 20
+    printf '{"session_id":"S1","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
+        | bash "$HOOK" --part 1 >/dev/null 2>&1 &
+    local victim=$! i
+    for (( i = 0; i < 300; i++ )); do [[ -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ]] && break; sleep 0.1; done
+    sleep 1
+    kill -9 "$victim" 2>/dev/null || true
+    wait "$victim" 2>/dev/null || true
+    [ -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ] || { echo "the kill left no marker"; return 1; }
+    _cksum_shim 0
+    _fire 1
+    _ctx 1
+    [[ "$PART_TEXT" == *"PREVIOUS turn"* ]] || { echo "the next turn was not told: ${PART_TEXT:0:200}"; return 1; }
+    [[ "$PART_TEXT" == *"never overstate evidence"* ]] || { echo "the next turn did not deliver"; return 1; }
+    [ -z "$(_sysmsg 1)" ] || { echo "the person was shown: $(_sysmsg 1)"; return 1; }
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ]
+}

@@ -913,32 +913,6 @@ EOF
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
 }
 
-@test "userpromptsubmit-foundation: #31893 a firing killed outright on the prepared path LEAVES the marker, and the next is told" {
-    # The same kill, on the path an ordinary prompt takes since #31893: the supervisor verifies the
-    # set itself, so it is killed while its cksum runs, with no worker in the picture.
-    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
-    manifest_now
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
-    local slow; slow="$(_make_slow_cksum 20)"
-    PATH="$slow:$PATH" bash "$HANDLER" >/dev/null 2>&1 </dev/null &
-    local victim=$! i
-    for (( i = 0; i < 300; i++ )); do
-        [[ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]] && break
-        sleep 0.1
-    done
-    sleep 1
-    kill -9 "$victim" 2>/dev/null || true
-    wait "$victim" 2>/dev/null || true
-    [ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
-
-    run bash "$HANDLER"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *'PREVIOUS turn'* ]] || return 1
-    [[ "$output" != *'systemMessage'* ]] || return 1
-    [[ "$output" == *'never overstate evidence'* ]] || return 1
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
-}
-
 # ============================================================================
 # #31434 QA - the off switch the failure notices recommend.
 #
