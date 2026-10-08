@@ -49,7 +49,7 @@ _sid() { printf '%s' "$CLAUDE_SESSION_ID" | tr -c 'A-Za-z0-9._-' '_'; }
 
 _reset_locks() {
     rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)" \
-           "${TMPDIR}/.mmry-formation-renewed-$(_sid)"
+           "${TMPDIR}/.mmry-formation-renewed-$(_sid)" "${TMPDIR}/.mmry-formation-handover-$(_sid)"
 }
 
 # A curl that ROUTES: the membership-and-read-status route answers with FAKE_SENT_*, everything else
@@ -68,13 +68,18 @@ for arg in "$@"; do
     case "$arg" in http*) url="$arg" ;; esac
     prev="$arg"
 done
-[[ -n "${FAKE_URL_LOG:-}" ]] && printf '%s\n' "$url" >> "$FAKE_URL_LOG"
+[[ -n "${FAKE_URL_LOG:-}" ]] && printf '%s%s\n' "${FAKE_TAG:+${FAKE_TAG} }" "$url" >> "$FAKE_URL_LOG"
 case "$url" in
     */transmissions/sent*)
         body="${FAKE_SENT_BODY:-}"; code="${FAKE_SENT_CODE:-200}" ;;
     *)
         body="${FAKE_BODY:-[]}"; code="${FAKE_CODE:-200}"
         if [[ -n "${FAKE_READY_AT:-}" ]] && (( $(date +%s) < FAKE_READY_AT )); then body='[]'; fi
+        # The same, with the release time read from a file at request time, so a test can set it
+        # after the process asking has already started. No file yet means not released yet.
+        if [[ -n "${FAKE_READY_FILE:-}" ]]; then
+            if [[ ! -f "$FAKE_READY_FILE" ]] || (( $(date +%s) < $(cat "$FAKE_READY_FILE") )); then body='[]'; fi
+        fi
         if [[ -n "${FAKE_SEQ_DIR:-}" ]]; then
             n=$(( $(cat "${FAKE_SEQ_DIR}/n" 2>/dev/null || echo 0) + 1 ))
             printf '%s' "$n" > "${FAKE_SEQ_DIR}/n"
@@ -102,15 +107,16 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
 
 @test "renew: a window that ends with nothing to say renews the watch while the service confirms membership" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    # 4 s, so that a loaded host still fits more than one ask into the window.
     run env FAKE_BODY='[]' FAKE_SENT_BODY="$_member_true" \
-        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=4 MMRY_IDLE_POLL_INTERVAL=1 \
         bash "${HANDLERS}/formation-check.sh"
 
     [ "$status" -eq 2 ] || { echo "expected a renewal wake (exit 2), got ${status}: ${output}"; return 1; }
     [[ "$output" == *"MMRY FORMATION WATCH RENEWED (formation 4242)"* ]] || { echo "no renewal notice: ${output}"; return 1; }
-    [[ "$output" == *"Reply with exactly: Still listening."* ]]
+    [[ "$output" == *"Reply with exactly: Still listening."* ]] || return 1
     # A renewal is not a message, and must never be dressed as one.
-    [[ "$output" != *"FORMATION TRANSMISSION"* ]]
+    [[ "$output" != *"FORMATION TRANSMISSION"* ]] || return 1
     # It polled first, and asked about membership exactly once, at the end.
     [ "$(_count_polls)" -ge 2 ]
     [ "$(_count_sent)" -eq 1 ]
@@ -145,8 +151,8 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
         MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
         bash "${HANDLERS}/formation-check.sh"
     [ "$status" -eq 2 ]
-    [[ "$output" == *"LS-DIRECTED take the validator"* ]]
-    [[ "$output" != *"WATCH RENEWED"* ]]
+    [[ "$output" == *"LS-DIRECTED take the validator"* ]] || return 1
+    [[ "$output" != *"WATCH RENEWED"* ]] || return 1
 }
 
 @test "stop: leaving the formation mid-watch stops it at once, quietly, without asking to renew" {
@@ -253,7 +259,7 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     # First check: delivers both lines. Nothing is owed yet, so nothing is reported.
     run env FAKE_BODY="$DIRECTED" bash "${HANDLERS}/formation-check.sh"
     [ "$status" -eq 2 ]
-    [[ "$output" == *"LS-DIRECTED"* ]]
+    [[ "$output" == *"LS-DIRECTED"* ]] || return 1
     run grep -c 'shownIds=' "$URLS"
     [ "$output" -eq 0 ]
 
@@ -297,7 +303,7 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     # The response arrives, then the deadline has passed: _fc_in_time refuses to hand over the block.
     perl -0777 -pi -e 's{_fc_in_time \|\| \{ _release_mutex; return 1; \}}{SECONDS=999; _fc_in_time || { _release_mutex; return 1; }}' "${mutant}/formation-check.sh"
-    ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh"
+    ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
 
     run env FAKE_BODY="$DIRECTED" MMRY_FORMATION_MODE=prompt bash "${mutant}/formation-check.sh"
     [ "$status" -eq 0 ]
@@ -313,8 +319,8 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     run env FAKE_BODY='[]' bash "${HANDLERS}/formation-check.sh"
     [ "$status" -eq 0 ]
     run cat "$URLS"
-    [[ "$output" == *"since=2026-10-07T00%3A00%3A00"* ]]
-    [[ "$output" != *"shownIds"* ]]
+    [[ "$output" == *"since=2026-10-07T00%3A00%3A00"* ]] || return 1
+    [[ "$output" != *"shownIds"* ]] || return 1
 }
 
 _ROSTER='{"formation":{"id":4242,"objective":"migrate the billing schema"},"members":[{"id":5,"role":"Wingman","email":"dev@example.com","leftDate":null},{"id":3,"role":"Lead","email":"lead@example.com","leftDate":null}]}'
@@ -326,16 +332,16 @@ _ROSTER='{"formation":{"id":4242,"objective":"migrate the billing schema"},"memb
 
     run env FAKE_BODY="$_ROSTER" FAKE_SENT_BODY="$unread" bash "${HANDLERS}/formation-roster.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"dev@example.com"* ]]
+    [[ "$output" == *"dev@example.com"* ]] || return 1
     [[ "$output" == *"Directed messages this session sent"* ]] || { echo "${output}"; return 1; }
     [[ "$output" == *"to member 5 (Wingman)  NOT READ YET  \"take the validator\""* ]] || { echo "${output}"; return 1; }
 
     run env FAKE_BODY="$_ROSTER" FAKE_SENT_BODY="$read" bash "${HANDLERS}/formation-roster.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *"to member 5 (Wingman)  READ 2026-10-07 01:02:03 UTC  \"take the validator\""* ]] || { echo "${output}"; return 1; }
-    [[ "$output" != *"NOT READ YET"* ]]
+    [[ "$output" != *"NOT READ YET"* ]] || return 1
     # The footer is still last, and unchanged in substance.
-    [[ "$(printf '%s\n' "$output" | tail -1)" == "with /mmry:formation report." ]]
+    [[ "$(printf '%s\n' "$output" | tail -1)" == "with /mmry:formation report." ]] || return 1
 }
 
 @test "sender: the roster stands on its own when read status cannot be had" {
@@ -344,8 +350,8 @@ _ROSTER='{"formation":{"id":4242,"objective":"migrate the billing schema"},"memb
     for code in 404 500; do
         run env FAKE_BODY="$_ROSTER" FAKE_SENT_CODE="$code" FAKE_SENT_BODY='{}' bash "${HANDLERS}/formation-roster.sh"
         [ "$status" -eq 0 ]
-        [[ "$output" == *"dev@example.com"* ]]
-        [[ "$output" != *"Directed messages this session sent"* ]]
+        [[ "$output" == *"dev@example.com"* ]] || return 1
+        [[ "$output" != *"Directed messages this session sent"* ]] || return 1
     done
 }
 
@@ -354,9 +360,9 @@ _ROSTER='{"formation":{"id":4242,"objective":"migrate the billing schema"},"memb
     run env FAKE_CODE=201 FAKE_BODY='{"transmissionId":41,"formationId":4242,"recipientMemberId":5,"stored":1}' \
         bash "${HANDLERS}/formation-say.sh" "take the validator" 5
     [ "$status" -eq 0 ] || { echo "${output}"; return 1; }
-    [[ "$output" == *"Sent to member 5"* ]]
-    [[ "$output" == *"not read yet until it has been shown to them"* ]]
-    [[ "$output" == *"/mmry:formation roster shows whether it has been read"* ]]
+    [[ "$output" == *"Sent to member 5"* ]] || return 1
+    [[ "$output" == *"not read yet until it has been shown to them"* ]] || return 1
+    [[ "$output" == *"/mmry:formation roster shows whether it has been read"* ]] || return 1
 }
 
 # =============================================================================================
@@ -402,45 +408,129 @@ _reply_latency() {
     (( s > 15 )) || { echo "a 20 s early interval still surfaced it in ${s} s, so the test above proves nothing"; return 1; }
 }
 
+# A watch already running and already slow, then a turn that ends: the case a single-watch test
+# cannot reach. Watch A starts after a renewal, so it asks once a minute. Five seconds later a turn
+# ends and watch B starts; the reply is held back until 10 s after B started. Echoes
+# "<B status> <B seconds> <A status> <A output bytes>" and leaves the tagged request log in $URLS.
+_handover_run() {
+    local hdir="$1" t0 a_out="${BATS_TEST_TMPDIR}/a.out" b_out="${BATS_TEST_TMPDIR}/b.out"
+    local a_rc=0 b_rc=0 tb0 tb1 ready="${BATS_TEST_TMPDIR}/ready-at"
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    _reset_locks
+    : > "$URLS"
+    rm -f "$ready"
+    mkdir -p "${TMPDIR}/.mmry-formation-renewed-$(_sid)"
+    env FAKE_TAG=A FAKE_BODY="$DIRECTED" FAKE_READY_FILE="$ready" FAKE_SENT_BODY="$_member_false" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=600 \
+        bash "${hdir}/formation-check.sh" </dev/null >"$a_out" 2>&1 &
+    BG_PID=$!
+    local waited=0
+    while ! grep -q '^A ' "$URLS" 2>/dev/null && [ "$waited" -lt 300 ]; do sleep 0.1; waited=$(( waited + 1 )); done
+    # A has asked once and is now in its once-a-minute sleep. The turn ends now: B starts, and the
+    # reply is released exactly 10 s after it.
+    sleep 4
+    tb0="$(date +%s)"
+    printf '%s' "$(( tb0 + 10 ))" > "$ready"
+    env FAKE_TAG=B FAKE_BODY="$DIRECTED" FAKE_READY_FILE="$ready" FAKE_SENT_BODY="$_member_false" \
+        MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=40 \
+        bash "${hdir}/formation-check.sh" </dev/null >"$b_out" 2>&1 || b_rc=$?
+    tb1="$(date +%s)"
+    # B has returned. If A is still running (the mutant case) it is stopped here, so the test never
+    # waits out A's 60 s interval: what A would have done later is not what is being measured.
+    kill "$BG_PID" 2>/dev/null || true
+    wait "$BG_PID" || a_rc=$?
+    BG_PID=""
+    grep -q "LS-DIRECTED" "$b_out" || b_rc="${b_rc}-silent"
+    printf "%s %s %s %s" "$b_rc" "$(( tb1 - tb0 ))" "$a_rc" "$(wc -c < "$a_out" | tr -d ' ')"
+}
+
+@test "handover: a turn that ends during a slow watch takes over, and a reply 10 s later is surfaced within 15 s" {
+    local b_rc b_s a_rc a_bytes
+    read -r b_rc b_s a_rc a_bytes <<< "$(_handover_run "$HANDLERS")"
+    echo "B exit ${b_rc} after ~${b_s} s; A exit ${a_rc}, ${a_bytes} bytes of output" >&3
+    [ "$b_rc" = "2" ] || { echo "the new watch did not deliver the reply (exit ${b_rc})"; return 1; }
+    (( b_s <= 15 )) || { echo "the reply took ${b_s} s after the turn ended"; return 1; }
+    # The old watch stood down quietly: no message, no renewal, and it was not still running.
+    [ "$a_rc" = "0" ] || { echo "the old watch ended with ${a_rc}, not a quiet exit"; return 1; }
+    [ "$a_bytes" = "0" ] || { echo "the old watch said something: $(cat "${BATS_TEST_TMPDIR}/a.out")"; return 1; }
+    # Never two watchers: once B has asked anything, A asks nothing more.
+    local first_b; first_b="$(grep -n '^B ' "$URLS" | head -1 | cut -d: -f1)"
+    [ -n "$first_b" ]
+    run awk -v n="$first_b" 'NR > n && /^A /' "$URLS"
+    [ -z "$output" ] || { echo "the old watch kept asking after the new one started: ${output}"; return 1; }
+    [ ! -d "${TMPDIR}/.mmry-formation-handover-$(_sid)" ] || { echo "the handover request was left behind"; return 1; }
+}
+
+@test "control: without the handover, the turn that ends during a slow watch is not answered within 15 s" {
+    # POSITIVE CONTROL. The same staging against a handler that exits when it finds the lock held,
+    # which is what the watch did before the handover: B says nothing, and the reply waits for A's
+    # next once-a-minute ask.
+    local mutant="${BATS_TEST_TMPDIR}/handlers-nohandover"
+    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    perl -0777 -pi -e 's{if ! _acquire_poller "\$_poller_dir" "\$_IDLE_LOCK_STALE"; then\n}{if ! _acquire_poller "\$_poller_dir" "\$_IDLE_LOCK_STALE"; then exit 0\n}' "${mutant}/formation-check.sh"
+    ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
+    bash -n "${mutant}/formation-check.sh"
+    local b_rc b_s a_rc a_bytes
+    read -r b_rc b_s a_rc a_bytes <<< "$(_handover_run "$mutant")"
+    echo "without handover: B exit ${b_rc} after ~${b_s} s" >&3
+    [ "$b_rc" != "2" ] || { echo "the mutant delivered through B anyway, so the handover test proves nothing"; return 1; }
+}
+
 # =============================================================================================
 # REQUIREMENT 4: fewer requests over a long wait
 # =============================================================================================
 
-# A clock that only moves when the handler sleeps, so the SHIPPED window - 28 minutes - runs in a
-# second or two. `date +%s` reads it and `sleep N` advances it; every other use of date goes to the
-# real one. Echoes the number of message polls the watch made over one full window.
+# A clock that only moves when the handler sleeps, so the SHIPPED window - 28 minutes - runs in
+# seconds. `date +%s` reads it and `sleep N` advances it; every other use of date goes to the real
+# one. Echoes the number of message polls the watch made over one full window, and the simulated
+# seconds that passed.
+#
+# FUNCTIONS, NOT SCRIPTS ON PATH. The watch sleeps in 3 s slices (the handover), so one window is
+# several hundred sleeps; as scripts each was a process, and on a loaded Windows host a single
+# window took over a quarter of an hour. An exported function shadows the external command in the
+# handler's bash and costs no process. `export -f` works on the bash 3.2 a Mac ships.
+_fake_sleep() {
+    local n="${1%%.*}" now=0
+    n="${n:-0}"
+    { IFS= read -r now || true; } < "$FAKE_CLOCK"
+    printf '%s' "$(( now + n ))" > "$FAKE_CLOCK"
+}
+_fake_date() {
+    if [ "$*" = "+%s" ]; then
+        local now=0
+        { IFS= read -r now || true; } < "$FAKE_CLOCK"
+        printf '%s\n' "$now"
+        return 0
+    fi
+    command date "$@"
+}
+
 _polls_over_window() {
     local hdir="$1" interval="${2:-}"
-    local clock="${BATS_TEST_TMPDIR}/clock" shim="${BATS_TEST_TMPDIR}/clock-bin"
-    local real_date; real_date="$(command -v date)"
-    mkdir -p "$shim"
-    cat > "${shim}/date" <<SHIM
-#!/usr/bin/env bash
-if [ "\$*" = "+%s" ]; then cat "${clock}"; exit 0; fi
-exec "${real_date}" "\$@"
-SHIM
-    cat > "${shim}/sleep" <<SHIM
-#!/usr/bin/env bash
-n="\${1%%.*}"; n="\${n:-0}"
-printf '%s' "\$(( \$(cat "${clock}") + n ))" > "${clock}"
-SHIM
-    chmod +x "${shim}/date" "${shim}/sleep"
-    local start; start="$("$real_date" +%s)"
-    printf '%s' "$start" > "$clock"
+    local start; start="$(command date +%s)"
+    export FAKE_CLOCK="${BATS_TEST_TMPDIR}/clock"
+    printf '%s' "$start" > "$FAKE_CLOCK"
 
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     _reset_locks
     : > "$URLS"
-    if [ -n "$interval" ]; then
-        env PATH="${shim}:${PATH}" FAKE_BODY='[]' FAKE_SENT_BODY="$_member_false" \
-            MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_INTERVAL="$interval" \
-            bash "${hdir}/formation-check.sh" </dev/null >/dev/null 2>&1 || true
-    else
-        env PATH="${shim}:${PATH}" FAKE_BODY='[]' FAKE_SENT_BODY="$_member_false" \
-            MMRY_FORMATION_MODE=idle \
-            bash "${hdir}/formation-check.sh" </dev/null >/dev/null 2>&1 || true
-    fi
-    printf '%s %s' "$(_count_polls)" "$(( $(cat "$clock") - start ))"
+    (
+        eval "sleep() { _fake_sleep \"\$@\"; }"
+        eval "date() { _fake_date \"\$@\"; }"
+        export -f _fake_sleep _fake_date sleep date
+        if [ -n "$interval" ]; then
+            env FAKE_BODY='[]' FAKE_SENT_BODY="$_member_false" \
+                MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_INTERVAL="$interval" \
+                bash "${hdir}/formation-check.sh" </dev/null >/dev/null 2>&1 || true
+        else
+            env FAKE_BODY='[]' FAKE_SENT_BODY="$_member_false" \
+                MMRY_FORMATION_MODE=idle \
+                bash "${hdir}/formation-check.sh" </dev/null >/dev/null 2>&1 || true
+        fi
+    )
+    local end=0
+    { IFS= read -r end || true; } < "$FAKE_CLOCK"
+    printf '%s %s' "$(_count_polls)" "$(( end - start ))"
 }
 
 @test "fewer: over one full shipped window the watch asks fewer times than the flat 15 s rate" {
@@ -471,7 +561,7 @@ SHIM
     local hdir="${BATS_TEST_TMPDIR}/handlers-plant"
     rm -rf "$hdir"; mkdir -p "$hdir"; cp "${HANDLERS}"/*.sh "$hdir"/
     perl -0777 -pi -e 's{(_renew_marker="\$\{MMRY_TMPDIR\}/\.mmry-formation-renewed-\$\{_safe_sid\}"\n)}{$1        mkdir "\$_renew_marker" 2>/dev/null || true\n}' "${hdir}/formation-check.sh"
-    ! cmp -s "${hdir}/formation-check.sh" "${HANDLERS}/formation-check.sh"
+    ! cmp -s "${hdir}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "plant did not apply"; return 1; }
     read -r renewed elapsed <<< "$(_polls_over_window "$hdir")"
     echo "fresh watch: ${fresh} requests; after a renewal: ${renewed}" >&3
     (( renewed < fresh - 20 )) || { echo "a renewed watch made ${renewed}, a fresh one ${fresh}"; return 1; }
@@ -504,6 +594,9 @@ SHIM
     [ "$status" -eq 0 ] || { echo "a second watcher started beside a live one: ${status} ${output}"; return 1; }
     [ -z "$output" ]
     [ "$(_count_polls)" -eq 0 ]
+    # It asked the live watcher to stand down, waited, and on giving up WITHDREW the request, so the
+    # live watcher carries on rather than standing down with nobody to take over.
+    [ ! -d "${TMPDIR}/.mmry-formation-handover-$(_sid)" ] || { echo "a withdrawn handover request was left behind"; return 1; }
 }
 
 @test "lock: a dead watcher's lock is reclaimed at once, however fresh it is" {
@@ -518,7 +611,7 @@ SHIM
         MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
         bash "${HANDLERS}/formation-check.sh"
     [ "$status" -eq 2 ] || { echo "a dead watcher's lock silenced delivery: ${status} ${output}"; return 1; }
-    [[ "$output" == *"LS-DIRECTED"* ]]
+    [[ "$output" == *"LS-DIRECTED"* ]] || return 1
 }
 
 @test "lock: a lock with no pid goes by age, and the age is the one derived from the schedule" {
@@ -538,7 +631,7 @@ SHIM
     run env FAKE_BODY="$DIRECTED" MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
         bash "${HANDLERS}/formation-check.sh"
     [ "$status" -eq 2 ] || { echo "a ten-minute-old abandoned lock was not reclaimed: ${status} ${output}"; return 1; }
-    [[ "$output" == *"LS-DIRECTED"* ]]
+    [[ "$output" == *"LS-DIRECTED"* ]] || return 1
 }
 
 @test "budget: the Stop registration outlasts the window with room for one last poll and the renewal question" {
@@ -551,7 +644,7 @@ SHIM
     # one more retry (10) + margin: 120 s.
     (( stop - window >= 120 )) || { echo "only $(( stop - window )) s between the window and the registration"; return 1; }
     # And inside the ceiling measured on #31721: probes ran past an hour, so 3600 is a safe bound.
-    (( stop <= 3600 ))
+    (( stop <= 3600 )) || return 1
     # The lock's age rule is derived from the schedule, not the window.
     run grep -c '^_IDLE_LOCK_STALE=120$' "${HANDLERS}/formation-check.sh"
     [ "$output" -eq 1 ]

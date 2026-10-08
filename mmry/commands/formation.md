@@ -23,7 +23,8 @@ are four moments a member receives:
    arrives. This is the case that matters most, because a member is usually idle at exactly the
    moment the lead has something to tell it. The watch checks every few seconds for the first
    minute after a turn ends, when a reply is most likely, and less often the longer the member sits
-   idle, down to once a minute.
+   idle, down to once a minute. Every time a turn ends it starts again at its fastest, so a quick
+   reply to what the member just said arrives quickly however long it has been in the formation.
 3. **When its human comes back and types.** If the background watch could not run, anything
    outstanding is shown on the next prompt, before the member acts on it.
 4. **When that session next starts.** Anything still unread is shown then, marked as having

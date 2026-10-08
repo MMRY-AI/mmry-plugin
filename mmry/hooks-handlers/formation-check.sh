@@ -112,7 +112,7 @@ MMRY_TMPDIR="${TMPDIR:-/tmp}"
 # likeliest just after a member stops working, so the watch asks every 3 s for the first minute -
 # a reply sent 10 s after the turn ended is surfaced inside 15 s, where the flat rate surfaced it at
 # 15 s at best. After that it slows: every 15 s to five minutes, every 30 s to fifteen, then every
-# 60 s. Over one full 28-minute window that is about 69 requests where the flat rate made 113, and a
+# 60 s. Over one full 28-minute window that is 70 requests where the flat rate made 113, and a
 # watch that follows a renewal starts at the slow end, since nobody is about to reply to a renewal.
 MMRY_IDLE_POLL_SECONDS="${MMRY_IDLE_POLL_SECONDS:-1680}"
 MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-}"
@@ -130,6 +130,10 @@ _IDLE_MAX_INTERVAL=60
 # would have left an abandoned lock in force for 29 minutes. And a lock whose holder left its pid is
 # judged by the pid, not by age at all: alive holds it, dead releases it (#31746).
 _IDLE_LOCK_STALE=120
+# How long a turn that has just ended waits for the previous watch to stand down (see HANDOVER in
+# the idle mode). The old watch notices within one 3 s slice of its sleep, or once a request it is
+# already waiting on returns (25 s at the client's limit); 40 s covers both with margin.
+_IDLE_HANDOVER_WAIT=40
 
 # ---- 0. Resolve a jq BEFORE anything is parsed with it. ----
 # THIS MUST BE THE PROJECT'S OWN RESOLVER, NOT `command -v jq` (#31196 QA round 2).
@@ -719,6 +723,21 @@ _idle_interval() {
     fi
 }
 
+# Sleeps the given seconds in slices of at most 3, and returns 1 at once when a turn that has just
+# ended has asked this watch to stand down (the HANDOVER in the idle mode). 3 s bounds how long the
+# new watch waits; it costs one short-lived process per slice and nothing on the network.
+_idle_sleep() {
+    local left="${1:-0}" slice
+    while (( left > 0 )); do
+        [[ ! -d "$_handover_dir" ]] || return 1
+        slice=3
+        (( left < slice )) && slice=$left
+        sleep "$slice" || return 1
+        left=$(( left - slice ))
+    done
+    return 0
+}
+
 # Returns 0 only when this session is still in this formation by its own record AND the service
 # says, in so many words, that it is a member. Every other answer - not a member, an error, a 404 from
 # a service too old to have the route, no answer, a body that is not the expected object - returns 1,
@@ -852,8 +871,43 @@ case "$mode" in
             _mark_shown
             exit 2
         fi
-        _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE" || exit 0
+        # HANDOVER (#31721 requirement 3). A watch lives for up to 28 minutes, so a member that ends a
+        # later turn usually finds the previous watch still running - and by then that watch may be
+        # asking only once a minute, which would make a reply to the turn that just ended slower than
+        # the flat 15 s it replaced. So a turn that ends while a watch is LIVE asks it to stand down
+        # and takes over with a fresh window that starts at the fast end. The old watch notices
+        # within one 3 s slice of its sleep (or as soon as a request it is waiting on returns) and
+        # exits quietly, releasing the lock; this one waits for it rather than ever running beside
+        # it, so there is still exactly one watcher. Nothing is killed: a watch killed between
+        # printing and recording what it printed could lose or repeat a message (#31746).
+        #
+        # Only a holder whose pid is alive is asked. A pid-less lock is being taken this instant or
+        # was made by hand, and is left to the age rule as before.
+        _handover_dir="${MMRY_TMPDIR}/.mmry-formation-handover-${_safe_sid}"
+        if ! _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE"; then
+            _holder=""
+            if [[ -f "${_poller_dir}/pid" ]]; then
+                { IFS= read -r _holder || true; } < "${_poller_dir}/pid" 2>/dev/null || true
+            fi
+            if [[ "$_holder" =~ ^[0-9]+$ ]] && kill -0 "$_holder" 2>/dev/null; then
+                mkdir "$_handover_dir" 2>/dev/null || true
+                _waited=0
+                until _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE"; do
+                    # Giving up WITHDRAWS the request, or the old watch would stand down at its next
+                    # slice with nobody to take over, and the member would be watched by nobody.
+                    (( _waited < _IDLE_HANDOVER_WAIT )) || { rmdir "$_handover_dir" 2>/dev/null || true; exit 0; }
+                    sleep 1 || exit 0
+                    _waited=$(( _waited + 1 ))
+                done
+            else
+                # The holder went between the two looks, or has not written its pid yet. One more
+                # try; if somebody is taking the lock at this instant, they are the watcher.
+                _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE" || exit 0
+            fi
+        fi
         _held_poller=1
+        # Whatever asked a PREVIOUS holder to stand down is not addressed to this one.
+        rmdir "$_handover_dir" 2>/dev/null || true
 
         # A watch that follows a renewal starts at the slow end of the schedule: the renewal turn
         # asked nobody anything, so nothing is about to be answered (#31721 requirement 4). The
@@ -888,11 +942,17 @@ case "$mode" in
             (( _now + _fc_interval <= _deadline )) || _fc_interval=$(( _deadline - _now ))
             # Keep the poller lock's mtime honest so a live poller is never mistaken for a stale one.
             touch "$_poller_dir" 2>/dev/null || true
-            sleep "$_fc_interval" || exit 0
+            # Sleep in slices, so a turn that has just ended can take over within 3 s (see HANDOVER).
+            # A watch asked to stand down exits quietly: it does not renew, because the watch that
+            # asked is already listening.
+            _idle_sleep "$_fc_interval" || exit 0
+            [[ ! -d "$_handover_dir" ]] || exit 0
         done
 
         # The window is spent and nothing arrived. Renew only if this session is STILL in this
-        # formation and the service CONFIRMS it; otherwise stop quietly, as the watch always did.
+        # formation and the service CONFIRMS it; otherwise stop quietly, as the watch always did. A
+        # turn that ended meanwhile has a watch waiting to take over, and needs no wake from this one.
+        [[ ! -d "$_handover_dir" ]] || exit 0
         _idle_confirmed_member || exit 0
         mkdir "$_renew_marker" 2>/dev/null || true
         # TWO WORDS, NOT SILENCE. Asked to end its turn without replying, a model produced no output,
