@@ -97,3 +97,26 @@ Codex they would also have shown the timeout notice. This is the limit named in 
 
 To repeat: `bash measure.sh <develop hooks-handlers> <branch hooks-handlers> 10 out.txt` with
 `load2.sh SPIN IDLE STOPFILE NAP` running, then `node summarize.js out.txt 15000`.
+
+## Round 2: the membership gate (requirement added 2026-10-07)
+
+Every registered formation-check command now opens with a check for any `.mmry-formation-*`
+regular file in `${TMPDIR:-/tmp}`, and exits 0 with no output when there is none.
+
+| Host form | The gate |
+|---|---|
+| Claude Code, `hooks/hooks.json` (4 registrations) | `sh -c 'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; do if [ -f "$f" ]; then ...; fi; done; exit 0'` |
+| Codex `command`, `hooks/codex-hooks.json` (3) | the same opening and close, launching `codex-hook.sh` on a match |
+| Codex `commandWindows` (3) | first step of `codex-hook.cmd`: cmd `for` over `%TMPDIR%`, or `%TEMP%`, `%TMP%`, `%LOCALAPPDATA%\Temp` when TMPDIR is unset |
+
+Measured on Windows, 2026-10-07, no membership file, real handlers installed:
+
+- Processes the OS created per firing (Windows job object, `tests/helpers/count-processes.ps1`,
+  3 runs each): the old registration 13, the gate 3. The 3 are the host's bash and the gate's `sh`,
+  which Cygwin starts as a fork plus an exec; a host bash starting one no-op `sh` is also 3.
+- The Codex Windows launcher with no membership file: 1 process, the same as `cmd /d /c exit 0`.
+- Wall time, 10 runs each on a machine other work was loading: old median about 1,280 ms
+  (674 to 3,385), gate median about 514 ms (126 to 1,280). Both include the host bash's own start.
+
+`tests/structural/formation-gate.bats` is the proof for each test case, and seven breaks of the
+gate in `tests/structural/run-codex-mutations.sh` (label `31746 gate`) are each refused.
