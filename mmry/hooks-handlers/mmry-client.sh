@@ -847,11 +847,13 @@ _mmry_build_json() {
 # ============================================================================
 
 mmry_create_memory() {
-    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID]
+    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID] [AGENT_NAME]
     local tier="$1" category="$2" scope="$3" topic="$4" content="$5"
     local source="${6:-}" task_id="${7:-}" working_dir="${8:-}"
     local project_id="${9:-}" session_id="${10:-}" visibility="${11:-}"
     local permission_group_id="${12:-}" supersedes_id="${13:-}"
+    # #30320: the creating agent's name. Empty is omitted from the body, as every field here is.
+    local agent_name="${14:-}"
 
     local body
     body="$(_mmry_build_json \
@@ -867,7 +869,8 @@ mmry_create_memory() {
         "sessionID" "$session_id" \
         "visibility" "$visibility" \
         "#permissionGroupID" "$permission_group_id" \
-        "#supersedesId" "$supersedes_id")"
+        "#supersedesId" "$supersedes_id" \
+        "agentName" "$agent_name")"
 
     _mmry_request POST "/api/memories" "$body"
 }
@@ -1305,7 +1308,7 @@ mmry_process_context() {
     # Send session context to the server-side AI layer for processing.
     # Usage: mmry_process_context "context" "hookType" \
     #            ["workingDir" "sessionId" "projectId" "taskId" \
-    #             "visibility" "permissionGroupId"]
+    #             "visibility" "permissionGroupId" "agentName"]
     #
     # Visibility/permissionGroupId are forwarded uniformly to every memory
     # the server extracts from this single context (Option A -- no per-memory
@@ -1318,6 +1321,9 @@ mmry_process_context() {
     local task_id="${6:-}"
     local visibility="${7:-}"
     local permission_group_id="${8:-}"
+    # #30320: the creating agent's name, carried onto every memory the server extracts from this
+    # context. Resolve it with mmry_resolve_agent_name first; empty is omitted from the body.
+    local agent_name="${9:-}"
 
     local body
     body=$(_mmry_build_json \
@@ -1328,7 +1334,8 @@ mmry_process_context() {
         "projectId"           "$project_id" \
         "taskId"              "$task_id" \
         "visibility"          "$visibility" \
-        "#permissionGroupID"  "$permission_group_id")
+        "#permissionGroupID"  "$permission_group_id" \
+        "agentName"           "$agent_name")
 
     _mmry_request POST "/api/memories/process" "$body"
     local rc=$?
@@ -1358,6 +1365,72 @@ _mmry_mark_save_success() {
     local d="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
     date +%s > "${d}/.mmry-last-save" 2>/dev/null || true
     rm -f "${d}/.mmry-stop-count" 2>/dev/null || true
+}
+
+# ============================================================================
+# AGENT NAME (#30320, DD-102 in the API repository)
+# ============================================================================
+#
+# A memory records the name of the agent that created it. Where the name comes from, in order:
+#
+#   1. --agent-name on save-memory.sh / process-context.sh: the assistant names itself.
+#   2. MMRY_AGENT_NAME: a name the user configured in their own environment. This is the route
+#      on Codex, and anywhere else the host does not report an agent.
+#   3. MMRY_SESSION_AGENT_NAME: what Claude Code reported. Its hook payload carries agent_type
+#      when the session was started with `claude --agent <name>`; session-start.sh reads it there
+#      and exports it through CLAUDE_ENV_FILE, which Claude Code sources before every Bash tool
+#      command. That is how the name reaches save-memory.sh, which the assistant runs in a Bash
+#      tool shell, not in a hook.
+#
+# None of them set means no agent name, and the server stores none.
+
+MMRY_AGENT_NAME_MAX=100
+
+# Prints the agent name to send, or nothing. A name that cannot be sent as given - longer than
+# the server accepts, or carrying control characters - is NOT sent, and the save goes ahead
+# without one: losing the memory to its label would be the wrong trade, and cutting the name
+# short would store a name the agent does not have. A one-line note says so on stderr.
+mmry_resolve_agent_name() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && name="${MMRY_AGENT_NAME:-}"
+    [[ -z "$name" ]] && name="${MMRY_SESSION_AGENT_NAME:-}"
+    # Trim surrounding whitespace (bash 3.2 compatible: no extglob needed).
+    name="${name#"${name%%[![:space:]]*}"}"
+    name="${name%"${name##*[![:space:]]}"}"
+    [[ -z "$name" ]] && return 0
+    case "$name" in
+        *[[:cntrl:]]*)
+            echo "MMRY AI: the agent name contains control characters, so it was not sent; the memory is saved without one." >&2
+            return 0 ;;
+    esac
+    if (( ${#name} > MMRY_AGENT_NAME_MAX )); then
+        echo "MMRY AI: the agent name is longer than ${MMRY_AGENT_NAME_MAX} characters, so it was not sent; the memory is saved without one." >&2
+        return 0
+    fi
+    printf '%s' "$name"
+}
+
+# Writes this session's agent name to Claude Code's per-session environment file, so the Bash
+# tool shells the assistant runs save-memory.sh in can see it. Usage:
+#   mmry_record_session_agent "<agent_type from the SessionStart payload, or empty>"
+# Does nothing when CLAUDE_ENV_FILE is unset, which is every host other than Claude Code and every
+# run outside a SessionStart hook. An empty name writes an unset, so a resumed or cleared session
+# without --agent does not inherit a name from an earlier start that shared the file.
+mmry_record_session_agent() {
+    local agent="${1:-}"
+    [[ -n "${CLAUDE_ENV_FILE:-}" ]] || return 0
+    agent="${agent#"${agent%%[![:space:]]*}"}"
+    agent="${agent%"${agent##*[![:space:]]}"}"
+    case "$agent" in *[[:cntrl:]]*) agent="" ;; esac
+    if (( ${#agent} > MMRY_AGENT_NAME_MAX )); then agent=""; fi
+    if [[ -z "$agent" ]]; then
+        printf 'unset MMRY_SESSION_AGENT_NAME\n' >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+        return 0
+    fi
+    # Single-quoted, with any single quote closed, escaped and reopened, so the file sources to
+    # exactly this value whatever characters the name contains.
+    local q="'\\''"
+    printf "export MMRY_SESSION_AGENT_NAME='%s'\n" "${agent//\'/$q}" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
 }
 
 mmry_health() {

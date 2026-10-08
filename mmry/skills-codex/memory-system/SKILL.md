@@ -128,7 +128,10 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh" \
   --working-dir "$PWD"
 ```
 
-Optional: `--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`.
+Optional: `--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`,
+`--agent-name`. Each memory records the name of the agent that created it: the user's
+`MMRY_AGENT_NAME` setting is sent automatically when it is set, and `--agent-name` names a
+different agent. Never write the agent's name into the memory text to label it.
 It prints a one-line confirmation that MMRY AI received the memory. It does not print the new
 memory's id, so do not tell the customer one.
 
