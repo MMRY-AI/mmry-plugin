@@ -134,6 +134,15 @@ function sampleTmp() {
   const smoke = process.env.SMOKE_WINDOW ? { MMRY_IDLE_POLL_SECONDS: process.env.SMOKE_WINDOW } : {};
   const env = { MMRY_CONFIG_FILE: CFG, TMPDIR: TMP, ...smoke };
   sampleTmp();
+  // The API under test, once a minute: health and the revision it reports. The first run of this
+  // harness lost its API mid-run (another process took the shared port), and the watch then stopped
+  // quietly as designed; this line is what makes such a run recognisable from its logs alone.
+  setInterval(async () => {
+    let line;
+    try { const h = await rest('GET', '/api/health'); line = `${h.status} ${h.data.revision || JSON.stringify(h.data)}`; }
+    catch (e) { line = `DOWN ${e.message}`; }
+    fs.appendFileSync(path.join(L, 'api-health.log'), `${new Date().toISOString()} ${line}\n`);
+  }, 60000);
   // Which file each running watch is, from the OS process table (Windows): the handler path in a
   // watch's command line shows it was reached through hook-guard.sh in the prepared home.
   if (process.platform === 'win32') {
