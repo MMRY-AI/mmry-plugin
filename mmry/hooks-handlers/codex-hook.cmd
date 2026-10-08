@@ -29,6 +29,43 @@ rem `@echo off` is load-bearing. With echo on, cmd.exe writes each command line 
 rem stdout is what Codex hands the model.
 
 setlocal enableextensions
+rem THE FORMATION GATE, FIRST, BEFORE ANYTHING ELSE RUNS (#31746, Eric Barone 2026-10-07).
+rem
+rem The formation message check is registered on every prompt, tool call and session start, and
+rem nearly every session is in no formation. Such a session must pay one file lookup and nothing
+rem else: no where.exe, no reg.exe, no bash, no library, no payload read. So for the formation-check
+rem handler the first thing this file does is look for a membership file, .mmry-formation-<session>,
+rem and exit 0 with no output when there is none. hooks/hooks.json and the `command` form in
+rem hooks/codex-hooks.json open with the same check written for sh; this is that check in cmd,
+rem because commandWindows is run by PowerShell or cmd and cannot carry an sh line.
+rem
+rem SAME FOLDER AS formation-state.sh, which writes the file to ${TMPDIR:-/tmp}:
+rem   - TMPDIR set: Git Bash receives it as the same folder (Cygwin converts it in both directions,
+rem     measured), so it is checked as it stands. If it is not a drive or UNC path cmd can read, the
+rem     gate stands aside and the check runs as before: a gate that guesses must never drop a message.
+rem   - TMPDIR not set: Git Bash's /tmp is the "usertemp" mount, the user's Windows temp folder. TEMP,
+rem     TMP and %LOCALAPPDATA%\Temp are all looked in, because a stray extra match only costs a check
+rem     that would have run anyway, and a missed one loses a message.
+rem `for` with a wildcard matches FILES only, so the delivery locks (.mmry-formation-cs-*, -poll-*),
+rem which are directories, do not open the gate. Builtins only: set, if and for start no process.
+if /i not "%~1"=="formation-check" goto :after_formation_gate
+set "MMRY_MEMBER="
+if not defined TMPDIR goto :gate_usertemp
+set "MMRY_GATE_DIR=%TMPDIR%"
+set "MMRY_GATE_ABS="
+if "%MMRY_GATE_DIR:~1,1%"==":" set "MMRY_GATE_ABS=1"
+if "%MMRY_GATE_DIR:~0,2%"=="\\" set "MMRY_GATE_ABS=1"
+if not defined MMRY_GATE_ABS goto :after_formation_gate
+for %%F in ("%MMRY_GATE_DIR%\.mmry-formation-*") do set "MMRY_MEMBER=1"
+goto :gate_decide
+:gate_usertemp
+if defined TEMP for %%F in ("%TEMP%\.mmry-formation-*") do set "MMRY_MEMBER=1"
+if defined TMP for %%F in ("%TMP%\.mmry-formation-*") do set "MMRY_MEMBER=1"
+if defined LOCALAPPDATA for %%F in ("%LOCALAPPDATA%\Temp\.mmry-formation-*") do set "MMRY_MEMBER=1"
+:gate_decide
+if not defined MMRY_MEMBER exit /b 0
+:after_formation_gate
+
 rem NEVER RUN A PROGRAM FROM THE CUSTOMER'S PROJECT FOLDER (#31245 QA rounds 9 and 10, security).
 rem Codex runs this hook with the customer's project as the current folder, and cmd.exe looks
 rem in the current folder BEFORE PATH. Three safeguards, each closing something the others leave

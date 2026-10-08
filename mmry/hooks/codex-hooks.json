@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; exec sh \"$@\"' mmry-formation-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "statusMessage": "MMRY AI: checking for formation messages",
             "timeout": 15
@@ -70,7 +70,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; exec sh \"$@\"' mmry-formation-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "timeout": 15
           }
@@ -92,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; exec sh \"$@\"' mmry-formation-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "timeout": 15
           }

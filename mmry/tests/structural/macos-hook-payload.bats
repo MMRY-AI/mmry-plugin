@@ -871,8 +871,8 @@ _code_only() {
 # THE PAYLOAD HAS TO SURVIVE THE WHOLE REGISTRATION, not just the handler.
 #
 # Every test above runs formation-check.sh directly. Claude Code does not: it runs the command
-# string in hooks.json, which is a `bash -c` that tests for a file and then runs hook-guard.sh,
-# which runs the handler. Three processes stand between the runtime's stdin and the read. If any of
+# string in hooks.json, which is an `sh -c` that looks for a formation membership file (#31746)
+# and then runs hook-guard.sh, which runs the handler. Three processes stand between the runtime's stdin and the read. If any of
 # them consumed or dropped it, every assertion above would still pass and the product would still
 # be broken - which is the same shape of gap as testing only through MMRY_FORMATION_MODE.
 # ---------------------------------------------------------------------------------------------
@@ -901,9 +901,14 @@ _code_only() {
 
     local payload='{"session_id":"WIRE-1","hook_event_name":"Stop"}'
     printf '%s' "$payload" > "${BATS_TEST_TMPDIR}/wire.json"
+    # The registration opens only for a session in a formation (#31746), so this one is in one.
+    printf '1
+' > "${TMPDIR}/.mmry-formation-WIRE-1"
 
     local shim; shim="$(_macos_shim_dir)"
-    run bash -c "env HOME='${fake_home}' PATH='${shim}:${PATH}' bash -c \"${cmd//\"/\\\"}\" < '${BATS_TEST_TMPDIR}/wire.json' 2>&1"
+    # The command string is handed to bash -c exactly as it is, the way the host hands it to its
+    # shell. It used to be re-quoted into a second bash -c, which expanded its $ references early.
+    run env HOME="${fake_home}" PATH="${shim}:${PATH}" bash -c "$cmd" < "${BATS_TEST_TMPDIR}/wire.json"
 
     [[ "$output" == *"STATUS=ok"* ]] || {
         echo "the payload did not survive the registration chain: ${output}"
@@ -941,8 +946,10 @@ _code_only() {
     cmd="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.Stop||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check"));process.stdout.write(s[0].command);' \
         "${BATS_TEST_DIRNAME}/../../hooks/hooks.json")"
     printf '%s' '{"session_id":"WIRE-1","hook_event_name":"Stop"}' > "${BATS_TEST_TMPDIR}/wire.json"
+    printf '1
+' > "${TMPDIR}/.mmry-formation-WIRE-1"
 
-    run bash -c "env HOME='${fake_home}' bash -c \"${cmd//\"/\\\"}\" < '${BATS_TEST_TMPDIR}/wire.json' 2>&1"
+    run env HOME="${fake_home}" bash -c "$cmd" < "${BATS_TEST_TMPDIR}/wire.json"
 
     [[ "$output" != *"STATUS=ok"* ]] || {
         echo "a guard that eats stdin still reported a good read, so the wiring test proves nothing: ${output}"

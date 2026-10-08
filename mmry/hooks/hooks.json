@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command", 
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check\"", 
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; [ -f \"$1\" ] || exit 0; exec bash \"$@\"' mmry-formation-gate ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check", 
             "timeout": 15
           }
         ]
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command", 
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check\"", 
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; [ -f \"$1\" ] || exit 0; exec bash \"$@\"' mmry-formation-gate ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check", 
             "timeout": 15
           }
         ]
@@ -79,7 +79,7 @@
         "hooks": [
           {
             "type": "command", 
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check\"", 
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; [ -f \"$1\" ] || exit 0; exec bash \"$@\"' mmry-formation-gate ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check", 
             "asyncRewake": true, 
             "rewakeSummary": "Formation transmission", 
             "timeout": 300
@@ -112,7 +112,7 @@
       {
         "hooks": [
           {
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/formation-check.sh ] || exit 0; bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check\"", 
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do [ -f \"$f\" ] && break; f=; done; [ -n \"$f\" ] || exit 0; [ -f \"$1\" ] || exit 0; exec bash \"$@\"' mmry-formation-gate ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check", 
             "type": "command", 
             "timeout": 15
           }

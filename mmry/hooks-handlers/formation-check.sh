@@ -274,8 +274,9 @@ mmry_load_config 2>/dev/null || exit 0
 # structural/formation-check-timeout.bats refuses a tree where they disagree:
 #
 #   _fc_budget   the registered timeout for this event, in seconds
-#   _fc_reserve  what this process cannot see on its own clock: the `bash -c` and hook-guard.sh
-#                shells that ran before this one started, and writing the answer and exiting
+#   _fc_reserve  what this process cannot see on its own clock: the registration's `sh -c`
+#                membership gate and the hook-guard.sh shell that ran before this one started,
+#                and writing the answer and exiting
 #   _fc_request  the most the request alone may take, connecting included
 #
 # The deadline is _fc_budget - _fc_reserve on this shell's own clock. The request is given whatever
