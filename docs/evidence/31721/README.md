@@ -90,6 +90,74 @@ Requirement 1 (idle longer than three windows, still receives) and requirement 2
 passed. Note: this run used the handler as of `c851aa7`, before the handover (DD-101 decision 4)
 was added; the handover is covered by the structural suite on Windows, Linux and macOS.
 
+## TC1b at the branch head, through the shipped hook registration
+
+The run above used the handler as of `c851aa7`, and its harness called `formation-check.sh` through
+a wrapper. This one was run at the head after the merge of the #31746 branch, and every watch went
+through the registration `mmry/hooks/hooks.json` ships.
+
+**What ran.** Plugin `639e40d` (branch `31721/formation-listening`); its hooks and handlers are
+identical to `485a38f`, the merge, since `639e40d` only adds a harness log line. Claude Code
+**2.1.286** (the stream's `claude_code_version`; the client updated itself from 2.1.285 between the
+two attempts below). Windows 11 Pro 10.0.26200, Git Bash. API built from MMRY-AI/mmry
+`31721/read-status` at `80fc5a4`, run locally against mnemo_DEV (migration 063 present) on
+`http://localhost:5297`, a private port (see the first attempt). Harness `live-shipped/live.js`,
+prepared by `live-shipped/setup.sh`. No window or timeout override: registration timeout 1800 s,
+window 1680 s.
+
+**How the watch was started.** R's `.claude/settings.json` (`run-2026-10-08-b/R-settings.json`) is the
+four `formation-check` entries of `mmry/hooks/hooks.json`, copied verbatim by `setup.sh`: the Stop
+entry is the shipped gate `sh -c 'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; ...'` followed by
+`exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check`, with `asyncRewake` and
+`timeout: 1800`. R ran with `HOME` set to a prepared home whose `~/.claude/mmry/hooks-handlers` is a
+copy of the checkout's handlers (byte-identical, `diff -r`), and its config at that home's
+`.claude/mmry-config.json`, where an installed client keeps it. Nothing called `formation-check.sh`
+directly. The OS process table (`procs.txt`, sampled every 5 minutes) shows each running watch as
+`bash /e/claude-31721/run2/home/.claude/mmry/hooks-handlers/formation-check.sh`, a path only
+`hook-guard.sh` resolves: four different processes, one per window (pids 51244, 61292, 10108, 59260).
+
+**What is not the same as a customer install.** The plugin's other hooks (session-init, the
+foundation and stop checks) were not registered, because `--setting-sources project` loads only R's
+own settings, and the handlers were copied by `setup.sh` rather than by `session-init.sh`. Claude
+Code does not report Stop hooks in `stream-json`, so watches are timed from the lock the handler
+itself holds in TMPDIR (`.mmry-formation-poll-<sid>`) and renewals from its
+`.mmry-formation-renewed-<sid>` marker, sampled once a second (`watch.txt`), not from a hook log.
+
+**Result (run b, 2026-10-08 UTC): passed.**
+
+| Time (UTC) | What happened |
+|---|---|
+| 06:24:35.6 | R's last typed turn ends ("JOINED"). Nobody writes to R again |
+| 06:24:36.9 | watch 1 takes its poll lock |
+| 06:52:40.6 | watch 1 renews (28 min 4 s); R wakes and replies "Still listening." at 06:52:46.9 |
+| 06:52:49.7 | watch 2 takes its poll lock |
+| 07:20:52.8 | watch 2 renews (28 min 3 s); R replies "Still listening." at 07:20:56.5 |
+| 07:20:58.8 | watch 3 takes its poll lock |
+| 07:49:02.9 | watch 3 renews (28 min 4 s); R replies "Still listening." at 07:49:05.5 |
+| 07:49:07.0 | watch 4 takes its poll lock |
+| 07:50:48.9 | S, a second real session, sends a directed message to R with `formation-say.sh` (service `sentDate`) |
+| 07:51:05.4 | watch 4 releases its lock having delivered (16.4 s after the send) |
+| 07:51:06.0 | the service records the message read (`readDate`) |
+| 07:51:07.6 | R repeats `LIVE-31721-1791440661518 take the validator`, 18.6 s after the send |
+| 07:51:09.4 | a fresh watch starts after R's turn |
+| 07:51:13.6 | S's sender view: `"read":true`, `"readDate":"2026-10-08T07:51:06.0122162"`, `"recipientHasLeft":false` |
+
+R was idle 5,173 s (86 min 13 s) from the end of its last typed turn to the send, across three
+complete watches, each of which ran its full 1680 s window and renewed, before watch 4 delivered.
+That is longer than three 1680 s windows (5,040 s). It is not longer than three 1800 s registration
+timeouts (5,400 s); no watch runs to that timeout, since each renews at the end of its window.
+The API answered `200` with revision `80fc5a4` at every one of 87 minute-by-minute checks
+(`api-health.txt`).
+
+**The first attempt (run a) is recorded, not counted.** Same harness, plugin `485a38f`, Claude Code
+2.1.285, API on the shared DEV port 5291. Watch 1 renewed at 05:23:44 and watch 2 at 05:52:22, both
+through the shipped registration. Then the API process ended at about 05:53:35 (its log stops there;
+the cause was not recorded), and at 06:10:39 another session's API, built from a different branch
+(revision `99146f3`), took port 5291. Watch 3 reached the end of its window at 06:20:39 with no
+answer from the service to "is this session still a member?", and stopped quietly without renewing,
+as designed. Logs in `live-shipped/run-2026-10-08-a-aborted/`. Run b used a private port for that
+reason.
+
 ## Human steps: the same live test on macOS, and in the interactive Claude Code window
 
 The live test above was driven headless on Windows. Two legs remain for a person:

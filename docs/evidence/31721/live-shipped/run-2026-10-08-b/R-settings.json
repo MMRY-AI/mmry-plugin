@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do if [ -f \"$f\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; exit 0; fi; done; exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do if [ -f \"$f\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; exit 0; fi; done; exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do if [ -f \"$f\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; exit 0; fi; done; exit 0'",
+            "asyncRewake": true,
+            "rewakeSummary": "MMRY formation",
+            "timeout": 1800
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do if [ -f \"$f\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; exit 0; fi; done; exit 0'",
+            "type": "command",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
