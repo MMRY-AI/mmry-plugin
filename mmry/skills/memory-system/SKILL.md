@@ -223,12 +223,20 @@ Read the exit status, because it says whether the replacement happened:
 | 1 | Nothing saved | The message says why: memory 42 does not exist, is already retired or is not one this user can see; it is a Foundation memory; a different visibility was asked for; or MMRY AI could not save it at all. Say the correction was NOT saved, and act on the reason. |
 | 3 | Saved, but memory 42 may still be active | Both may be live. Say so plainly; do not claim the old one was replaced. |
 
-The replacement keeps the old memory's tier and visibility: a private memory stays private, and so
-does its correction. So do not pass `--visibility` with `--supersedes`, unless it is the visibility
-the old memory already has; a different one is refused. A Foundation memory cannot be replaced by a
-save at all; the account owner changes those in the MMRY AI portal.
+The replacement keeps the old memory's tier, visibility and group: a private memory stays private,
+a group memory stays with its group, and so does its correction. So do not pass `--visibility` or
+`--permission-group-id` with `--supersedes`, unless it is the one the old memory already has; a
+different one is refused. A Foundation memory cannot be replaced by a save at all; the account owner
+changes those in the MMRY AI portal.
 
-Use the id of a memory you actually loaded or found. Never guess one.
+**Where the id comes from.** Each memory loaded at session start carries an `id:` line; use that.
+Search results do not show ids. Never guess one. If the memory being corrected is not among the
+loaded ones, save the correction without `--supersedes` and tell the user the earlier memory is
+still active alongside it.
+
+**Corrections.** When the user says a remembered fact is wrong, or you find one that is out of date,
+this is how to fix it: save the corrected version with `--supersedes <id of the wrong one>`, so only
+the correction is recalled from then on.
 
 ## Search
 

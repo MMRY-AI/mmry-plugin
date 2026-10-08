@@ -223,7 +223,39 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/link-memories.sh" 42 87 "r
 ```
 
 Types: `related` and `contradicts` (symmetric), `supersedes` and `elaborates` (directional). When a
-decision changes, save the new one with `--supersedes <old-id>` rather than deleting anything.
+decision changes, save the new one with `--supersedes <old-id>` rather than deleting anything; see
+"Correcting a memory" below.
+
+## Correcting a memory
+
+When the customer says a remembered fact is wrong, or a decision has changed, save the corrected
+version with `--supersedes <id of the wrong one>`. MMRY AI saves it, retires the old memory so it
+stops being recalled, and links the two:
+
+```bash
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh" \
+  --context "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
+  --supersedes 42 --source "codex" --working-dir "$PWD"
+```
+
+Read the exit status, because it says whether the replacement happened:
+
+| Exit | Meaning | What to tell the customer |
+|------|---------|---------------------------|
+| 0 | Saved, and memory 42 is retired | The correction is saved and replaces the old memory. |
+| 1 | Nothing saved | The message says why: memory 42 does not exist, is already retired or is not one this customer can see; it is a Foundation memory; a different visibility was asked for; or MMRY AI could not save it at all. Say the correction was NOT saved, and act on the reason. |
+| 3 | Saved, but memory 42 may still be active | Both may be live. Say so plainly; do not claim the old one was replaced. |
+
+The replacement keeps the old memory's tier, visibility and group: a private memory stays private,
+a group memory stays with its group, and so does its correction. So do not pass `--visibility` or
+`--permission-group-id` with `--supersedes`, unless it is the one the old memory already has; a
+different one is refused. A Foundation memory cannot be replaced by a save at all; the account owner
+changes those in the MMRY AI portal.
+
+**Where the id comes from.** Each memory loaded at session start carries an `id:` line; use that.
+Search results do not show ids. Never guess one. If the memory being corrected is not among the
+loaded ones, save the correction without `--supersedes` and tell the customer the earlier memory is
+still active alongside it.
 
 ## Retiring a memory
 

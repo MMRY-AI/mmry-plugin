@@ -55,5 +55,5 @@ Save a memory to MMRY AI. If the user provided a description after the command, 
 ## Guidelines
 
 - Keep the context dense and specific. Aim for under 500 characters of substantive content unless the situation genuinely needs more.
-- If the user pushes back on what was saved, ask them what they'd like changed and save a follow-up memory with the correction. Do not try to override the server's decision from the client.
+- If the user pushes back on what was saved, or says a remembered fact is wrong, ask them what they'd like changed and save the correction with `--supersedes <id of the wrong memory>` so it replaces the old one rather than sitting beside it. The id is the `id:` line of the memory as loaded at session start. Read the exit status as the memory-system skill's "Supersedes Pattern" section describes (0 replaced, 1 nothing saved, 3 saved but the old one may still be active) and tell the user which happened. If you do not have the old memory's id, save without `--supersedes` and say the earlier memory is still active. Do not try to override the server's decision from the client.
 - Do not ask the user to confirm before saving. Just save it.
