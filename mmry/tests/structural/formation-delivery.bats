@@ -964,39 +964,47 @@ _run_overlap() {
     }
 }
 
-# A `date` and a `stat` with BSD/macOS semantics, which is where the round 1 staleness check broke.
-# On BSD `date -r` takes an epoch NUMBER, so handing it a path is an error, and `stat` has neither
-# --version nor -c. What is under test is the handler's choice of invocation, not an imitation of a
-# filesystem.
+# A `date` and a `stat` with strict BSD semantics, which is where the round 1 staleness check broke.
+# Strict BSD `date -r` takes an epoch NUMBER, so handing it a path is an error, and BSD `stat` has
+# neither --version nor -c. What is under test is the handler's choice of invocation, not an
+# imitation of a filesystem.
 #
-# On Darwin the host's own tools ARE the BSD tools, so the directory holds wrappers that exec them by
-# absolute path (/bin/date, /usr/bin/stat): a Homebrew GNU coreutils earlier on PATH cannot stand in
-# for them. The first cut of this helper emulated BSD everywhere by delegating to `/usr/bin/date -d @N`
-# and `/usr/bin/stat -c %Y`, which are GNU forms. On a real Mac /usr/bin/date does not exist and BSD
-# stat refuses -c, so the stub answered nothing, every lock read as fresh, and the reclaim test failed
-# against a handler that was correct (#31746, macOS CI run 37721380901).
+# The stubs refuse the GNU forms and pass every BSD form to the host's OWN tools in the host's OWN
+# form, resolved here rather than assumed to live at /usr/bin:
+#   * on Darwin, to the genuine /bin/date and /usr/bin/stat, unchanged. So `stat -f %m` - the call
+#     the handler's BSD branch makes - is answered by the real BSD stat, and no GNU form is ever
+#     called on a Mac. Absolute paths, so a Homebrew GNU coreutils on PATH cannot stand in.
+#   * elsewhere (Linux, Git Bash on Windows), translated onto the host's GNU binary.
+# `date -r PATH` is refused on Darwin too, deliberately. Current macOS date accepts a file there
+# (seen on macos-latest, CI run 37726808146), but strict BSD date and older macOS do not, and the
+# reclaim guard has to hold on the strictest one a customer may have.
 #
-# Elsewhere (Linux, Git Bash on Windows) the host has only GNU tools, so the stubs reject the GNU
-# forms exactly as BSD does and translate the BSD form onto the host's GNU binary, resolved here
-# rather than assumed to live at /usr/bin.
+# The first cut of this helper delegated to `/usr/bin/date -d @N` and `/usr/bin/stat -c %Y` on every
+# host. Those are GNU forms: on a real Mac /usr/bin/date does not exist and BSD stat refuses -c, so
+# the stub answered nothing, every lock read as fresh, and the reclaim test failed against a handler
+# that was correct (#31746, macOS CI run 37721380901).
 _bsd_tools_dir() {
     local dir="${BATS_TEST_TMPDIR}/bsd-bin"
     mkdir -p "$dir"
+    local host_date host_stat date_at stat_m
     if [ "$(uname -s)" = "Darwin" ]; then
-        printf '%s\n' '#!/bin/sh' 'exec /bin/date "$@"' > "${dir}/date"
-        printf '%s\n' '#!/bin/sh' 'exec /usr/bin/stat "$@"' > "${dir}/stat"
-        chmod +x "${dir}/date" "${dir}/stat"
-        printf '%s' "$dir"
-        return 0
+        host_date="/bin/date"
+        host_stat="/usr/bin/stat"
+        date_at='-r'      # BSD: date -r SECONDS
+        stat_m='-f %m'    # BSD: stat -f %m PATH
+    else
+        host_date="$(type -P date)"
+        host_stat="$(type -P stat)"
+        date_at='-d @'    # GNU: date -d @SECONDS
+        stat_m='-c %Y'    # GNU: stat -c %Y PATH
     fi
-    local host_date host_stat
-    host_date="$(type -P date)"
-    host_stat="$(type -P stat)"
     cat > "${dir}/date" <<BSDDATE
 #!/usr/bin/env bash
 if [ "\${1:-}" = "-r" ]; then
     case "\${2:-}" in ''|*[!0-9]*) echo "date: illegal time format" >&2; exit 1 ;; esac
-    a="\$2"; shift 2; exec "${host_date}" -d "@\$a" "\$@"
+    a="\$2"; shift 2
+    if [ "${date_at}" = "-r" ]; then exec "${host_date}" -r "\$a" "\$@"; fi
+    exec "${host_date}" -d "@\$a" "\$@"
 fi
 exec "${host_date}" "\$@"
 BSDDATE
@@ -1007,7 +1015,7 @@ case "\${1:-}" in
     -c)        echo "stat: illegal option -- c" >&2; exit 1 ;;
     -f)        fmt="\$2"; shift 2
                case "\$fmt" in
-                   %m) exec "${host_stat}" -c %Y "\$@" ;;
+                   %m) exec "${host_stat}" ${stat_m} "\$@" ;;
                    *)  echo "stat: bad format \$fmt" >&2; exit 1 ;;
                esac ;;
 esac
@@ -1024,8 +1032,8 @@ BSDSTAT
     # reclaimed - so delivery stays silenced for the rest of that session on every Mac, defeating
     # the mechanism this whole ticket is built on.
     #
-    # On Darwin this runs the real BSD /bin/date and /usr/bin/stat. On a Linux or Windows host it
-    # asserts the handler asks in a way BSD would answer, through stubs that refuse the GNU forms.
+    # The stubs refuse the GNU forms everywhere. On Darwin the BSD forms are answered by the real
+    # /usr/bin/stat and /bin/date; on a Linux or Windows host, by the GNU tools translated.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
     local bsd; bsd="$(_bsd_tools_dir)"
@@ -1040,11 +1048,11 @@ BSDSTAT
     # macOS when its stubs delegated to GNU forms the Mac does not have.
     run env PATH="${bsd}:${PATH}" bash -c "stat -f %m '${BATS_TEST_TMPDIR}'"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ ^[0-9]+$ ]]
+    [[ "$output" =~ ^[0-9]+$ ]] || return 1
     [ "$output" -gt 0 ]
     run env PATH="${bsd}:${PATH}" bash -c "date +%s"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ ^[0-9]+$ ]]
+    [[ "$output" =~ ^[0-9]+$ ]] || return 1
     [ "$output" -gt 0 ]
 
     local lock dir
