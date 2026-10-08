@@ -47,13 +47,17 @@ teardown() {
 # SINCE #31844 THE TWO HOSTS' GATES DIFFER BY DESIGN. Claude Code (2.1.285 and later) gives every hook
 # the session's id in CLAUDE_CODE_SESSION_ID, so its gate looks for THIS session's membership file
 # only, and a member elsewhere on the machine no longer opens it; with no usable id it falls back to
-# the scan. Codex gives no such variable, so its gate is the scan. Both scans skip the locks and
-# markers that share the prefix (GATE_SKIP), which used to open the gate on their own.
+# the scan. That variable and nothing else: formation-check.sh keys the session by the payload's
+# session_id, which is the id Claude Code puts there. CLAUDE_SESSION_ID is not set by the host, and a
+# value inherited from elsewhere can differ from the payload (macos-hook-payload.bats sets one),
+# which would shut a real member out. Codex gives no such variable, so its gate is the scan. Both
+# scans skip the locks and markers that share the prefix (GATE_SKIP), which used to open the gate
+# on their own.
 #
 # Each opens with the membership test and closes with the exit taken when nothing matched. Neither
 # contains & | < > ^ at all: a Claude Code that ran hooks through cmd.exe (it did until early 2026,
 # which is why this file once forbade single quotes) would split the line at any of them.
-CLAUDE_GATE_OPEN='sh -c '"'"'d="${TMPDIR:-/tmp}"; s="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"; '
+CLAUDE_GATE_OPEN='sh -c '"'"'d="${TMPDIR:-/tmp}"; s="${CLAUDE_CODE_SESSION_ID:-}"; '
 CODEX_GATE_OPEN='sh -c '"'"'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; do '
 GATE_SKIP='case "${f##*/}" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; '
 GATE_CLOSE='; exit 0'"'"
