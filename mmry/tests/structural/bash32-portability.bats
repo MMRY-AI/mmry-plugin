@@ -203,7 +203,7 @@ _INERT_PINNED=(
     "handlers/plan-accepted.bats 4"
     "handlers/precompact-check.bats 6"
     "handlers/reinforce-memory.bats 5"
-    "handlers/save-memory.bats 17"
+    "handlers/save-memory.bats 15"
     "handlers/search-memories.bats 8"
     "handlers/session-start-macos.bats 3"
     "handlers/visibility.bats 22"
