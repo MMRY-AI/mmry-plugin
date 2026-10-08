@@ -21,11 +21,11 @@ Each probe is a real Claude Code session, run headless with `driver.js`:
 `--setting-sources project` loads only the probe's own `.claude/settings.json`, so no installed
 plugin's hooks run. stdin is held open after the first prompt, which keeps the session alive and
 idle, and nothing more is written to it until the probe ends. Every assistant turn is logged with
-a timestamp (`*.session.log`).
+a timestamp (`*.session.txt`).
 
 The Stop hook is registered exactly as MMRY registers its idle watch: `"asyncRewake": true`, a
 `"timeout"` in seconds. The hook (`probe-hb.sh`) logs its start, then a heartbeat every 10 s, then
-sleeps out its time, prints a codeword on stderr and exits 2 (`*.hook.log`). It traps TERM and HUP
+sleeps out its time, prints a codeword on stderr and exits 2 (`*.hook.txt`). It traps TERM and HUP
 so a polite stop would be logged. The registration of each probe is in `*.settings.json`.
 
 ## Results
