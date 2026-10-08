@@ -208,6 +208,17 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     _rejoin; _want
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "after moving a cut: $NPARTS parts, ${#JOINED} of ${#WANT} bytes"; return 1; }
     local k; for k in 1 2 3 4 5 6; do _ctx "$k"; (( ${#PART_TEXT} < 10000 )) || { echo "part $k is ${#PART_TEXT} characters"; return 1; }; done
+    [ "$(_calls cksum)" -eq 1 ] || { echo "cuts over the cap were believed: $(_calls cksum) cksum"; return 1; }
+    # 3. The record names another version than the set it sits beside: not served under that name.
+    p="$(cat "$f")"; idx="${p%%$'\n'*}"
+    [[ "$idx" =~ ^mmry-fnd-prepared\ v1\ ([0-9]+)\ (.*)$ ]] || { echo "unexpected record: $idx"; return 1; }
+    printf 'mmry-fnd-prepared v1 %s %s\n%s' "4242" "${BASH_REMATCH[2]}" "${p#*$'\n'}" > "$f"
+    : > "$CALLS"
+    _fire_all
+    _rejoin; _want
+    [ "$JOINED" = "$WANT" ] || { echo "after renaming the version: ${#JOINED} of ${#WANT} bytes"; return 1; }
+    local v; for v in $VERSIONS; do [ "$v" = "$(_setid)" ] || { echo "a part named version $v"; return 1; }; done
+    [ "$(_calls cksum)" -eq 1 ] || { echo "a record naming another version was believed: $(_calls cksum) cksum"; return 1; }
 }
 
 @test "in-time R4: a one-part set is sent exactly as one hook always sent it, from the prepared copy too" {
