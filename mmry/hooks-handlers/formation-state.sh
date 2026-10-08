@@ -137,6 +137,113 @@ mmry_formation_state_seen() {
     return 0
 }
 
+# REFRESH WITHOUT A PROCESS (#31844). Rewrites the record exactly as it stands, which is the cheapest
+# way to bring its mtime up to date: a `touch` would be one more process on every member's check.
+# The mtime is how the sweep below tells a live member from a session that ended without leaving,
+# so every check a member makes calls this. The callers hold the delivery mutex while they do, the
+# same mutex every "seen" write is made under, so a refresh cannot write back a last-seen value
+# another reader has just advanced. A record that is not there is not created.
+mmry_formation_state_refresh() {
+    mmry_formation_state_read "${1:-}" || return 0
+    mmry_formation_state_seen "$MMRY_FS_LAST_SEEN" "${1:-}" || true
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------
+# LEFTOVER MEMBERSHIPS (#31844).
+#
+# A session that ends without leaving its formation - the window closed, the machine restarted, the
+# client crashed - leaves its record here for ever. Nothing else removes it, and until #31844 the
+# hooks' membership gate opened for any file in this folder, so one ended session made every later
+# session on the machine pay for the full formation check. Measured on one Windows machine on
+# 2026-10-08: 41 entries, the oldest five weeks old.
+#
+# THE RULE. Another session's record that has not been written for MMRY_FORMATION_STALE_SECONDS is
+# removed when a session starts, unless that session's idle watch is still running (its poll lock
+# holds a pid that is alive). A member that is alive keeps its record fresh without trying:
+#   - every check it makes (prompt, tool call, session start) refreshes it - see
+#     mmry_formation_state_refresh above, called from formation-check.sh;
+#   - its idle watch refreshes it at every pause, at most a minute apart, for as long as the
+#     service confirms the membership, renewing itself every 28 minutes.
+# So a record this old belongs to a session that has done nothing at all for three days, and has no
+# watch. The period is three days, not one, for the members that have no watch to keep them fresh: a
+# Codex session (Codex has no background hook), or a Claude Code session whose watch stopped because
+# the service could not be reached when it asked, then sat idle over a weekend. Those must not come
+# back on Monday to find they have silently left.
+#
+# The starting session's own record is never swept, however old: a resumed session keeps its id.
+#
+# The number is not a customer setting. The variable exists so the suite can name it, as with the
+# idle watch's window in formation-check.sh.
+# ---------------------------------------------------------------------------------------------
+MMRY_FORMATION_STALE_SECONDS="${MMRY_FORMATION_STALE_SECONDS:-259200}"
+
+# True when a name in this folder is a membership record and not one of the locks and markers that
+# share its prefix. Those belong to formation-check.sh and are judged by their own rules there.
+# hooks/hooks.json, hooks/codex-hooks.json and codex-hook.cmd carry this same list in their gates.
+mmry_formation_is_membership_name() {
+    case "$1" in
+        .mmry-formation-cs-*|.mmry-formation-poll-*|.mmry-formation-handover-*|.mmry-formation-renewed-*) return 1 ;;
+        .mmry-formation-?*) return 0 ;;
+    esac
+    return 1
+}
+
+# Remove other sessions' stale records. $1 = the calling session's id, whose record is never touched.
+# Best-effort on every path and silent: this runs at session start, and a session that fails to start
+# because a temp file could not be read is a far worse fault than a temp file left in place.
+# Costs nothing when there is no other record to look at. Otherwise one `stat` for all of them (two
+# on BSD, whose stat spells it differently), and one `rm` if anything is to go.
+mmry_formation_sweep() {
+    local own_name="" max="${MMRY_FORMATION_STALE_SECONDS:-}" f name
+    [[ "$max" =~ ^[0-9]+$ ]] || return 0
+    (( max > 0 )) || return 0
+    if [[ -n "${1:-}" ]]; then
+        mmry_formation_safe_sid "$1"
+        own_name=".mmry-formation-${MMRY_FS_SAFE}"
+    fi
+    local -a cands=()
+    for f in "${MMRY_TMPDIR}"/.mmry-formation-*; do
+        [[ -f "$f" ]] || continue
+        name="${f##*/}"
+        mmry_formation_is_membership_name "$name" || continue
+        [[ "$name" == "$own_name" ]] && continue
+        cands+=("$f")
+    done
+    (( ${#cands[@]} > 0 )) || return 0
+
+    local now=""
+    now="$(date +%s 2>/dev/null)" || now=""
+    [[ "$now" =~ ^[0-9]+$ ]] || return 0
+    local stats=""
+    stats="$(stat -c '%Y %n' -- "${cands[@]}" 2>/dev/null)" || true
+    [[ -n "$stats" ]] || { stats="$(stat -f '%m %N' -- "${cands[@]}" 2>/dev/null)" || true; }
+    [[ -n "$stats" ]] || return 0
+
+    local -a doomed=()
+    local line mtime path sid pid
+    while IFS= read -r line; do
+        mtime="${line%% *}"
+        path="${line#* }"
+        [[ "$mtime" =~ ^[0-9]+$ && "$path" != "$line" ]] || continue
+        (( now - mtime > max )) || continue
+        name="${path##*/}"
+        sid="${name#.mmry-formation-}"
+        # A watch that is still running is a live member, whatever the record's age says.
+        pid=""
+        if [[ -f "${MMRY_TMPDIR}/.mmry-formation-poll-${sid}/pid" ]]; then
+            { IFS= read -r pid || true; } < "${MMRY_TMPDIR}/.mmry-formation-poll-${sid}/pid" 2>/dev/null || true
+        fi
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+        doomed+=("$path")
+    done <<< "$stats"
+    (( ${#doomed[@]} > 0 )) || return 0
+    rm -f -- "${doomed[@]}" 2>/dev/null || true
+    return 0
+}
+
 # Sourced as a library: the functions above are all the caller wants. Run as a command: carry on.
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     return 0
@@ -175,8 +282,12 @@ case "$cmd" in
         rm -f "$MMRY_FS_PATH" 2>/dev/null || true
         exit 0
         ;;
+    sweep)
+        mmry_formation_sweep "${2:-}" || true
+        exit 0
+        ;;
     *)
-        echo "usage: formation-state.sh {set|get|seen|clear} ..." >&2
+        echo "usage: formation-state.sh {set|get|seen|clear|sweep} ..." >&2
         exit 1
         ;;
 esac
