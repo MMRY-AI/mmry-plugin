@@ -9,8 +9,9 @@
 #             credential file; the replacement must reach the API from there too (req 2).
 #   Guidance  the assistant is told to use the replacement when correcting, on both hosts, and
 #             told where the old memory's id comes from (req 1, req 2).
-#   Id source that guidance says the id is on each memory loaded at session start, so that has
-#             to be true of session-start.sh's output.
+#   Id source the memories loaded at session start are the Foundation set, which a save cannot
+#             replace, and plain search output carries no ids. search-memories.sh --ids is where
+#             the assistant finds the id; plain search output stays exactly as it was.
 #   Audience  a replacement never sends a visibility or group the caller did not give, so the
 #             server's rule "a replacement keeps the old memory's audience" decides (req 3).
 # =============================================================================================
@@ -84,15 +85,32 @@ _codex_install() {
 
 # --- the id the guidance points at is really there ---------------------------------------------
 
-@test "31847: each memory loaded at session start carries an id: line" {
+ONE_HIT='[{"id":42,"memoryTier":"Operational","scope":"global","topic":"Office","content":"Third floor."}]'
+
+@test "31847: search --ids prints each match's id before its tier, scope and topic" {
     create_test_config "http://localhost:5291" "test-api-key" "apikey" >/dev/null
-    export CLAUDE_SESSION_ID="test-session-31847"
-    export HOME="$TEST_TMPDIR/fakehome"
-    mkdir -p "$HOME/.claude/mmry/hooks-handlers" "$HOME/.claude/mmry/setup"
-    export MOCK_CURL_HTTP_CODE="200"
-    export MOCK_CURL_RESPONSE='[{"id":42,"memoryTier":"Operational","scope":"global","topic":"Office","content":"Third floor."}]'
-    bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" >/dev/null 2>&1 || true
-    grep -qx 'id: 42' "$TEST_TMPDIR/mmry-memories.md" || { cat "$TEST_TMPDIR/mmry-memories.md"; return 1; }
+    export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE="$ONE_HIT"
+    run bash "$PLUGIN_ROOT/hooks-handlers/search-memories.sh" --ids "office"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"id 42 | Operational | global | Office"* ]] || { echo "$output"; return 1; }
+    grep -q 'search?q=office' "$TEST_TMPDIR/curl-log.txt" || { echo "--ids was sent as the keywords"; cat "$TEST_TMPDIR/curl-log.txt"; return 1; }
+}
+
+@test "31847: search without --ids prints exactly what it always did, no id" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey" >/dev/null
+    export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE="$ONE_HIT"
+    run bash "$PLUGIN_ROOT/hooks-handlers/search-memories.sh" "office"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Operational | global | Office"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"id 42"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"42"* ]]
+}
+
+@test "31847: search --ids with no keywords is refused like a search with none" {
+    create_test_config "http://localhost:5291" "test-api-key" "apikey" >/dev/null
+    run bash "$PLUGIN_ROOT/hooks-handlers/search-memories.sh" --ids
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Keywords required"* ]]
 }
 
 # --- requirements 1 and 2: the assistant is told to replace, on both hosts ---------------------
@@ -101,6 +119,7 @@ _codex_install() {
     local f="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     grep -q -- '--supersedes <id of the wrong one>' "$f"
     grep -q 'Where the id comes from' "$f"
+    grep -q 'search-memories.sh" --ids' "$f"
     grep -q 'visibility and group' "$f"
 }
 
@@ -116,6 +135,7 @@ _codex_install() {
     grep -q -- '--supersedes 42' "$f"
     grep -q '| 3 | Saved, but memory 42 may still be active' "$f"
     grep -q 'Where the id comes from' "$f"
+    grep -q 'mmry/hooks-handlers/search-memories.sh" --ids' "$f"
     grep -q 'visibility and group' "$f"
 }
 

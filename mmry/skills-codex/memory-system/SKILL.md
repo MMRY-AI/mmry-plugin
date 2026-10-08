@@ -252,10 +252,15 @@ a group memory stays with its group, and so does its correction. So do not pass 
 different one is refused. A Foundation memory cannot be replaced by a save at all; the account owner
 changes those in the MMRY AI portal.
 
-**Where the id comes from.** Each memory loaded at session start carries an `id:` line; use that.
-Search results do not show ids. Never guess one. If the memory being corrected is not among the
-loaded ones, save the correction without `--supersedes` and tell the customer the earlier memory is
-still active alongside it.
+**Where the id comes from.** Search for the memory being corrected with `--ids`, which prints each
+match's id (`id 42 | tier | scope | topic`):
+```bash
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" --ids "primary product id"
+```
+Use the id of the match that says the wrong thing. Never guess one. The memories loaded at session
+start are the Foundation set, which a save cannot replace. If no match is clearly the wrong memory,
+save the correction without `--supersedes` and tell the customer the earlier memory is still active
+alongside it. Do not show ids to the customer unless they ask.
 
 ## Retiring a memory
 
