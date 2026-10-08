@@ -529,14 +529,14 @@ _poll_once() {
     _held_mutex=1
 
     local last_seen
-    # STILL HERE (#31844). Bring the record's time up to date before anything can fail, so a member
-    # whose service is unreachable still looks alive to the session-start sweep. Under the mutex,
-    # because the refresh writes back the last-seen value it reads. No process.
-    mmry_formation_state_refresh "$session_id" || true
     mmry_formation_state_read "$session_id" || true
     last_seen="$MMRY_FS_LAST_SEEN"
     # Directed messages already printed and not yet reported to the service as read (#31721).
     _fc_shown_owed="$MMRY_FS_SHOWN"
+    # STILL HERE (#31844). Bring the record's time up to date before anything can fail, so a member
+    # whose service is unreachable still looks alive to the session-start sweep. Under the mutex,
+    # because the refresh writes back the last-seen value it reads. No process.
+    mmry_formation_state_refresh "$session_id" || true
 
     # Not enough time left to ask and still answer inside the budget: ask nothing (#31746).
     _fc_limit_request || { _release_mutex; return 1; }
