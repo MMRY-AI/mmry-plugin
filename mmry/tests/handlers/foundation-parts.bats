@@ -57,6 +57,20 @@ _outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "
 # Fire part $1 with the payload $2, exactly as given.
 _fire_payload() { printf '%s' "$2" | bash "$HOOK" --part "$1" > "$TEST_TMPDIR/part$1.json" 2>/dev/null; }
 
+# SINCE #31893 a part is served from the set as one firing prepared it, with no worker and no jq, while
+# the set on disk is unchanged. A test that makes ONE part fail after a full prompt therefore removes
+# that preparation first, so the part has to verify the set again, and slows or breaks what that runs:
+# the cksum (_slow_cksum_dir) or, for the worker's own failures, the worker.
+_forget_prepared() { rm -f "$TEST_TMPDIR"/.mmry-foundation-prepared.* "$TEST_TMPDIR"/.mmry-foundation-claim.* "$TEST_TMPDIR"/.mmry-foundation-result.*; }
+_slow_cksum_dir() {
+    local d="$TEST_TMPDIR/slow-cksum" real
+    real="$(command -v cksum)"
+    mkdir -p "$d"
+    printf '#!/usr/bin/env bash\nsleep %s\nexec "%s" "$@"\n' "$1" "$real" > "$d/cksum"
+    chmod +x "$d/cksum"
+    printf '%s' "$d"
+}
+
 # The records of session $1, parts 1 to 6, whichever exist.
 _records() {
     local f
@@ -319,8 +333,10 @@ _pointed() {
     chmod +x "$slow"
 
     _fire 1 S4
-    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 1 S4
-    grep -q 'NOT applied' "$TEST_TMPDIR/part1.json" || { echo "control: the slow firing did not fail: $(head -c 300 "$TEST_TMPDIR/part1.json")"; return 1; }
+    _forget_prepared
+    PATH="$(_slow_cksum_dir 20):$PATH" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 1 S4
+    # #31893: a prompt that runs out of time tells the assistant only, so the control reads what it was told.
+    grep -q 'cut short' "$TEST_TMPDIR/part1.json" || { echo "control: the slow firing did not fail: $(head -c 300 "$TEST_TMPDIR/part1.json")"; return 1; }
     # The delivery record made to look newer than the failure.
     touch "$TEST_TMPDIR/mmry-foundation.status.S4"
     CLAUDE_CODE_SESSION_ID=S4 run bash "$STATUSCMD"
@@ -650,13 +666,14 @@ _version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v
     local slow="$TEST_TMPDIR/slow-jq.sh"
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
-    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S16
+    PATH="$(_slow_cksum_dir 20):$PATH" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S16
     local ctx msg
     ctx="$(jq -r '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part3.json")"
     msg="$(jq -r '.systemMessage // ""' "$TEST_TMPDIR/part3.json")"
     [[ "$ctx" == *"could not load PART 3 of this account"* ]] || { echo "assistant: $ctx"; return 1; }
     [[ "$ctx" != *"running WITHOUT the account's standing directives"* ]] || { echo "part 3 told the assistant the whole turn went without"; return 1; }
-    [[ "$msg" == *"part 3 of your Foundation directives was NOT applied"* ]] || { echo "customer: $msg"; return 1; }
+    # #31893 requirement 3: a part that ran out of time shows the person nothing; the assistant is told.
+    [[ -z "$msg" ]] || { echo "customer: $msg"; return 1; }
 }
 
 # #31411 QA round 2: the "customer was told" marker is named by the session. With one shared marker
@@ -696,7 +713,8 @@ _version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v
     local slow="$TEST_TMPDIR/slow-jq.sh"
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
-    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S17
+    _forget_prepared
+    PATH="$(_slow_cksum_dir 20):$PATH" MMRY_FOUNDATION_DEADLINE_SECS=1 _fire 3 S17
     _one_prompt S17
     CLAUDE_CODE_SESSION_ID=S17 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3: loading them took longer than the 1s limit and was stopped."* ]] || { echo "$output"; return 1; }
@@ -811,6 +829,8 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     mkdir -p "$broken"
     cp -R "$PLUGIN_ROOT/hooks-handlers" "$broken/"
     rm -f "$broken/hooks-handlers/mmry-client.sh"
+    # Its own preparation, so this part has to load the set itself (#31893, _forget_prepared).
+    _forget_prepared
     printf '{"session_id":"S43","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
         | bash "$broken/hooks-handlers/userpromptsubmit-foundation.sh" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
     jq -e '.systemMessage | test("part 3 of your Foundation directives was NOT applied")' "$TEST_TMPDIR/part3.json" >/dev/null \
@@ -837,6 +857,15 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     _fire_all S52
     # Any loader that exits cleanly having said nothing: here the bash it is started with does exactly
     # that. The record written when the part started has to stand.
+    #
+    # Since #31893 the supervisor verifies an ordinary set itself and starts no loader. With no
+    # preparation to read and no client to load the set with, it hands the part to the loader, the
+    # path this test is about; the loader is then the silent bash.
+    _forget_prepared
+    local broken="$TEST_TMPDIR/broken-plugin"
+    mkdir -p "$broken"
+    cp -R "$PLUGIN_ROOT/hooks-handlers" "$broken/"
+    rm -f "$broken/hooks-handlers/mmry-client.sh"
     local real_bash shim
     real_bash="$(command -v bash)"
     shim="$TEST_TMPDIR/silent-bash"
@@ -844,7 +873,7 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     printf '#!/bin/sh\nexit 0\n' > "$shim/bash"
     chmod +x "$shim/bash"
     printf '{"session_id":"S52","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
-        | PATH="$shim:$PATH" "$real_bash" "$HOOK" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
+        | PATH="$shim:$PATH" "$real_bash" "$broken/hooks-handlers/userpromptsubmit-foundation.sh" --part 3 > "$TEST_TMPDIR/part3.json" 2>/dev/null
     [[ "$(cat "$(_outcome_file S52 3)")" =~ ^S52\ [0-9]+\ failed\ unfinished$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S52 3)")"; return 1; }
     # Part 3 was fired after the other five to stage this prompt; on a busy machine that can be more
     # than the status's 3 s apart, so the firings are stood in for one prompt (#31411 QA round 4).

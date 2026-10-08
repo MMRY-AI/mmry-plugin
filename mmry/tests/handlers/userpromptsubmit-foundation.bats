@@ -81,10 +81,13 @@ manifest_now() {
     export MMRY_API_KEY="test-key"
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    # The lock is touched synchronously before the background fetch is spawned.
-    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ]
     # Still emitted the current (pre-refresh) cache this turn — non-blocking.
     [[ "$output" == *'Foundation fact'* ]]
+    # The lock is touched before the background fetch is spawned. Since #31893 the decision itself is
+    # made by a detached process, off the prompt's path, so the lock is waited for, up to 30 s.
+    local i
+    for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
+    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ]
 }
 
 @test "userpromptsubmit-foundation: toggle off emits nothing and exits 0" {
@@ -409,6 +412,26 @@ EOF
     printf '%s' "$shim"
 }
 
+# A cksum that takes $1 seconds, in a directory to put first on PATH (#31893). Since #31893 the
+# ordinary prompt starts no jq at all: the set is verified in the supervisor with one cksum, so that
+# is where slowness has to be injected to reach the deadline. The jq shim above still slows the
+# worker, which only the unusual states take.
+_make_slow_cksum() {
+    local d="$TEST_TMPDIR/slow-cksum" real
+    real="$(command -v cksum)"
+    mkdir -p "$d"
+    printf '#!/usr/bin/env bash\nsleep %s\nexec "%s" "$@"\n' "$1" "$real" > "$d/cksum"
+    chmod +x "$d/cksum"
+    printf '%s' "$d"
+}
+
+# A set over one part, with one part allowed: it goes by reference, which the worker still serves, so
+# a test of the worker's own failures can reach it (#31893).
+_seed_worker_only_set() {
+    awk 'BEGIN { for (i = 1; i <= 160; i++) printf "- Truthfulness %03d: never overstate evidence, and say what was run.\n", i }' > "$CACHE"
+    manifest_now
+}
+
 _make_config() {
     cat > "$MMRY_CONFIG_FILE" <<'EOF'
 {
@@ -447,14 +470,15 @@ _registered_timeout() {
     # The narrowed tolerance is a real consequence of the lower deadline and it is recorded
     # rather than papered over: see the residual-exposure note in hook-budgets.bats.
     local shim budget start elapsed
-    shim="$(_make_slow_jq 6)"
+    # Slowed where the ordinary prompt can still be slow since #31893: its one cksum.
+    shim="$(_make_slow_cksum 6)"
     budget="$(_registered_timeout)"
     # The premise of the test: 6s must be past the old budget and inside the new one.
     (( 6 > 5 )) || return 1
     (( 6 < budget )) || return 1
 
     start="$(date +%s)"
-    MMRY_JQ="$shim" run bash "$HANDLER"
+    PATH="$shim:$PATH" run bash "$HANDLER"
     elapsed=$(( $(date +%s) - start ))
 
     [ "$status" -eq 0 ]
@@ -467,7 +491,7 @@ _registered_timeout() {
     (( elapsed < budget ))
 }
 
-@test "userpromptsubmit-foundation: slowed past the DEADLINE, the turn proceeds and the customer is told" {
+@test "userpromptsubmit-foundation: slowed past the DEADLINE, the turn proceeds, the assistant is told and the person is shown nothing" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now
     _make_config
@@ -476,11 +500,11 @@ _registered_timeout() {
     # a machine two other suites were loading while the handler did the right thing. The jq now takes a
     # minute and the bound sits at 30 s: a handler with no working deadline waits the whole minute, and
     # the right path does not take 30 s however busy the machine.
-    shim="$(_make_slow_jq 60)"
+    shim="$(_make_slow_cksum 60)"
     budget="$(_registered_timeout)"
 
     start="$(date +%s)"
-    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+    PATH="$shim:$PATH" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
     elapsed=$(( $(date +%s) - start ))
 
     # Did not hang: stopped itself at its own deadline, well inside the hook budget.
@@ -489,17 +513,15 @@ _registered_timeout() {
     # Not waiting for the jq: a handler with no deadline takes the jq's 60 s.
     (( elapsed < 30 )) || return 1
     (( elapsed < budget )) || return 1
-    # The user is told, in terms they can act on.
-    [[ "$output" == *'systemMessage'* ]] || return 1
-    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
-    # The remedy must name a command that EXISTS. This assertion previously read
-    # '/mmry:reload-memories', which this plugin does not ship - so a green suite actively
-    # defended handing a confused customer an unknown command at the one moment their
-    # directives had just vanished. Now checked against commands/, not by eye.
-    [[ "$output" == *'/mmry:load-memories'* ]] || return 1
-    [ -f "$PLUGIN_ROOT/commands/load-memories.md" ]
-    # The model is told too, so it cannot claim to be following directives it never got.
+    # THE PERSON IS SHOWN NOTHING (#31893 requirement 3). This test used to require a banner here,
+    # naming /mmry:load-memories and the config file. On a busy machine that banner came prompt after
+    # prompt and was what customers reported as hook errors; a slow prompt is nothing the person can
+    # act on. The crash notice, which has a cause they can fix, is unchanged (the next test).
+    [[ "$output" != *'systemMessage'* ]] || return 1
+    [[ "$output" != *'/mmry:load-memories'* ]] || return 1
+    # The model is told, so it cannot claim to be following directives it never got.
     [[ "$output" == *'running WITHOUT the account'* ]] || return 1
+    [[ "$output" == *'cut short'* ]] || return 1
     # And it is still one valid JSON object.
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
     # It must NOT pretend to have delivered the Foundation set.
@@ -526,8 +548,12 @@ _registered_timeout() {
     # fails is exactly how the field produces a fast non-zero. 127 is the code the review
     # observed. The supervisor itself is invoked by absolute path so that only the WORKER
     # spawn is affected.
-    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
-    manifest_now
+    #
+    # A set that only the worker serves (#31893): since then the supervisor verifies and serves an
+    # ordinary set itself, with no worker to crash. A set over one part with one part allowed goes by
+    # reference, which is still the worker's.
+    _seed_worker_only_set
+    export MMRY_FOUNDATION_PARTS_MAX=1
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     local start elapsed shimdir real_bash
     real_bash="$(command -v bash)"
@@ -602,7 +628,9 @@ _registered_timeout() {
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'PREVIOUS turn'* ]] || return 1
-    [[ "$output" == *'previous turn'* ]] || return 1          # the user-facing half
+    # To the assistant only (#31893 requirement 3): a cut-short turn is not shown to the person, on
+    # that turn or the next. This line used to require a user-facing half.
+    [[ "$output" != *'systemMessage'* ]] || return 1
     # The miss is reported AND this turn's directives are still delivered.
     [[ "$output" == *'never overstate evidence'* ]] || return 1
     # The marker is consumed, so the report is not repeated forever.
@@ -665,47 +693,61 @@ EOF
     printf '%s' "$d"
 }
 
-@test "userpromptsubmit-foundation: a CONFIGURED Codex install past the deadline is told something it can do" {
+# A worker that fails at once: a `bash` first on PATH that exits 127, as test "a worker that CRASHES"
+# explains. Prints the directory; the handler itself must then be started by the real bash's path.
+_broken_bash_dir() {
+    local d="$TEST_TMPDIR/broken-bash"
+    mkdir -p "$d"
+    printf '#!/bin/sh\nexit 127\n' > "$d/bash"
+    chmod +x "$d/bash"
+    printf '%s' "$d"
+}
+
+@test "userpromptsubmit-foundation: a CONFIGURED Codex install past the deadline is shown nothing, and the assistant is told" {
+    # Rewritten for #31893. This test used to require a banner on Codex too, with Codex's own
+    # remedies in it. Requirement 3 of #31893 is that a prompt that runs out of time shows the person
+    # nothing, on every host; the remedies the Codex work fixed are still asserted where a notice is
+    # still shown, on a crash (two tests down).
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
     _make_config
     local shim codex
-    shim="$(_make_slow_jq 20)"
+    shim="$(_make_slow_cksum 20)"
     codex="$(_codex_home_with_credential)"
 
-    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 \
+    PATH="$shim:$PATH" MMRY_FOUNDATION_DEADLINE_SECS=3 \
         MMRY_HOST=codex CODEX_HOME="$codex" \
         run bash "$HANDLER"
 
     [ "$status" -eq 0 ]
     # It still fires: a configured install is NOT silenced by the round-4 unconfigured-install
     # guard, and a test that merely asserted silence here would pass against the defect.
-    [[ "$output" == *'systemMessage'* ]] || return 1
-    [[ "$output" == *'NOT applied to this turn'* ]] || return 1
-    [[ "$output" == *'exceeded'* ]] || return 1
-
-    # THE DEFECT, ASSERTED AS ABSENT.
+    [[ "$output" == *'additionalContext'* ]] || return 1
+    [[ "$output" == *'exceeded'* && "$output" == *'cut short'* ]] || return 1
+    [[ "$output" != *'systemMessage'* ]] || return 1
+    # Nothing in it names the other product's command or file.
     [[ "$output" != *'/mmry:load-memories'* ]] || return 1
     [[ "$output" != *'~/.claude/mmry-config.json'* ]] || return 1
-
-    # AND THE REMEDY, ASSERTED AS PRESENT. Absence alone is satisfied by a notice that stopped
-    # offering any remedy at all, which is worse for the customer, not better.
-    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]] || return 1
-    [[ "$output" == *"${codex}/mmry-config.json"* ]] || return 1
-    # The script it names is really there. A path that reads plausibly and is not on disk is the
-    # same failure in a nicer font.
-    [ -f "$PLUGIN_ROOT/hooks-handlers/session-start.sh" ]
 }
 
-@test "userpromptsubmit-foundation: req4 - and on Claude Code that deadline notice is unchanged" {
+@test "userpromptsubmit-foundation: req4 - on Claude Code the deadline shows the person nothing either, and the crash notice keeps its remedies" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
     _make_config
-    local shim
-    shim="$(_make_slow_jq 20)"
+    local shim real_bash broken
+    shim="$(_make_slow_cksum 20)"
 
-    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+    PATH="$shim:$PATH" MMRY_FOUNDATION_DEADLINE_SECS=3 run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'cut short'* ]] || return 1
+    [[ "$output" != *'systemMessage'* ]] || return 1
 
+    # The crash notice on Claude Code, byte for byte the remedies it always named.
+    _seed_worker_only_set
+    real_bash="$(command -v bash)"
+    broken="$(_broken_bash_dir)"
+    rm -f "$TEST_TMPDIR"/.mmry-foundation-inflight*
+    MMRY_FOUNDATION_PARTS_MAX=1 PATH="$broken:$PATH" run "$real_bash" "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'systemMessage'* ]] || return 1
     [[ "$output" == *'/mmry:load-memories'* ]] || return 1
@@ -716,30 +758,30 @@ EOF
 @test "userpromptsubmit-foundation: a CONFIGURED Codex install whose worker CRASHES gets the same treatment" {
     # The sibling branch. Round 4 fixed the notice's unconfigured case; this is the one three
     # lines below it in the same if/else, which round 5 shipped untouched.
-    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
-    manifest_now   # 31411 refuses a cache with no manifest beside it
+    #
+    # Since #31893 it is the one place the Codex remedies are still shown, so it no longer skips: the
+    # crash is made certain (a worker-only set and a bash that exits 127, as for the Claude crash
+    # test) and the remedies are asserted present, not only the Claude ones absent.
+    _seed_worker_only_set
     _make_config
-    local shim codex
-    shim="$TEST_TMPDIR/broken-jq.sh"
-    cat > "$shim" <<'EOF'
-#!/usr/bin/env bash
-for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done
-exit 9
-EOF
-    chmod +x "$shim"
+    local codex real_bash broken
     codex="$(_codex_home_with_credential)"
+    real_bash="$(command -v bash)"
+    broken="$(_broken_bash_dir)"
 
-    MMRY_JQ="$shim" MMRY_HOST=codex CODEX_HOME="$codex" run bash "$HANDLER"
+    MMRY_FOUNDATION_PARTS_MAX=1 PATH="$broken:$PATH" MMRY_HOST=codex CODEX_HOME="$codex" run "$real_bash" "$HANDLER"
 
     [ "$status" -eq 0 ]
-    if [[ "$output" != *'systemMessage'* ]]; then
-        # The crash branch is reached through the worker's exit status, which some environments
-        # swallow. Say so rather than passing silently on a test that checked nothing.
-        skip "the worker did not exit non-zero in this environment; the deadline branch above covers the same two strings"
-    fi
+    [[ "$output" == *'systemMessage'* ]] || return 1
+    [[ "$output" == *'exit code'* ]] || return 1
     [[ "$output" != *'/mmry:load-memories'* ]] || return 1
     [[ "$output" != *'~/.claude/mmry-config.json'* ]] || return 1
-    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]]
+    # AND THE REMEDY, ASSERTED AS PRESENT. Absence alone is satisfied by a notice that stopped
+    # offering any remedy at all, which is worse for the customer, not better.
+    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]] || return 1
+    [[ "$output" == *"${codex}/mmry-config.json"* ]] || return 1
+    # The script it names is really there.
+    [ -f "$PLUGIN_ROOT/hooks-handlers/session-start.sh" ]
 }
 
 @test "userpromptsubmit-foundation: an absurd deadline value falls back to the default rather than disabling the guard" {
@@ -818,8 +860,11 @@ EOF
     # and asserts it is READ. Deleting the line that WRITES it therefore changed nothing and the
     # whole suite stayed green - a handler that never records a firing can never report a lost
     # one, which is the entire feature. This drives the real sequence instead.
-    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
-    manifest_now
+    #
+    # On the worker's path since #31893 (a set only the worker serves), because the out-file this also
+    # checks is the worker's; the next test drives the same kill on the ordinary, prepared path.
+    _seed_worker_only_set
+    export MMRY_FOUNDATION_PARTS_MAX=1
     rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
     cat > "$MMRY_CONFIG_FILE" <<'EOF'
 {
@@ -857,15 +902,41 @@ EOF
     # the assertions were missing.
     [ -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
 
-    # And the next firing picks it up and says so, on both channels.
+    # And the next firing picks it up and tells the assistant (#31893: the assistant only), and still
+    # delivers: by reference, for this set.
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'PREVIOUS turn'* ]]
-    [[ "$output" == *'previous turn'* ]]
-    [[ "$output" == *'never overstate evidence'* ]]
+    [[ "$output" == *'too large to show here'* ]]
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
     # ...and that same firing reaps the orphan, because its supervisor no longer exists.
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
+}
+
+@test "userpromptsubmit-foundation: #31893 a firing killed outright on the prepared path LEAVES the marker, and the next is told" {
+    # The same kill, on the path an ordinary prompt takes since #31893: the supervisor verifies the
+    # set itself, so it is killed while its cksum runs, with no worker in the picture.
+    printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
+    manifest_now
+    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    local slow; slow="$(_make_slow_cksum 20)"
+    PATH="$slow:$PATH" bash "$HANDLER" >/dev/null 2>&1 </dev/null &
+    local victim=$! i
+    for (( i = 0; i < 300; i++ )); do
+        [[ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]] && break
+        sleep 0.1
+    done
+    sleep 1
+    kill -9 "$victim" 2>/dev/null || true
+    wait "$victim" 2>/dev/null || true
+    [ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+
+    run bash "$HANDLER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PREVIOUS turn'* ]] || return 1
+    [[ "$output" != *'systemMessage'* ]] || return 1
+    [[ "$output" == *'never overstate evidence'* ]] || return 1
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
 }
 
 # ============================================================================
@@ -909,9 +980,9 @@ EOF
 }
 
 @test "userpromptsubmit-foundation: foundationReinject=false in CONFIG silences the crash notice it recommends (#31434 QA)" {
-    printf -- '- Truthfulness: never overstate evidence.
-' > "$CACHE"
-manifest_now
+    # A set only the worker serves, so a broken worker is reached (#31893; see _seed_worker_only_set).
+    _seed_worker_only_set
+    export MMRY_FOUNDATION_PARTS_MAX=1
     local real_bash shimdir
     real_bash="$(command -v bash)"
     shimdir="$(_make_broken_bash)"
@@ -935,9 +1006,9 @@ manifest_now
 @test "userpromptsubmit-foundation: a JSON boolean false is honoured too, not just the string (#31434 QA)" {
     # The README documents `false`; mmry_load_config tostring's it into "false". The supervisor
     # reads the file without jq, so the bare boolean is the spelling most likely to be missed.
-    printf -- '- Truthfulness: never overstate evidence.
-' > "$CACHE"
-manifest_now
+    # A set only the worker serves, so a broken worker is reached (#31893; see _seed_worker_only_set).
+    _seed_worker_only_set
+    export MMRY_FOUNDATION_PARTS_MAX=1
     local real_bash shimdir
     real_bash="$(command -v bash)"
     shimdir="$(_make_broken_bash)"
@@ -955,9 +1026,9 @@ manifest_now
 }
 
 @test "userpromptsubmit-foundation: the ENVIRONMENT off switch silences the crash notice, and outranks the config (#31434 QA)" {
-    printf -- '- Truthfulness: never overstate evidence.
-' > "$CACHE"
-manifest_now
+    # A set only the worker serves, so a broken worker is reached (#31893; see _seed_worker_only_set).
+    _seed_worker_only_set
+    export MMRY_FOUNDATION_PARTS_MAX=1
     local real_bash shimdir
     real_bash="$(command -v bash)"
     shimdir="$(_make_broken_bash)"

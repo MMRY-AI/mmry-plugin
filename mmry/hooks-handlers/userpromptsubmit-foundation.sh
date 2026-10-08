@@ -706,6 +706,13 @@ _mmry_fnd_store_prepared() {
 ${MMRY_FND_RAW}"
 }
 
+# Leave the cut-short marker (see _CUTSHORT in the supervisor). Empty, so made by a redirect, and only
+# where nothing but a regular file stands (#31411 QA round 3, N2).
+_mmry_fnd_mark_cut() {
+    [[ -e "$_CUTSHORT" && ! -f "$_CUTSHORT" ]] && return 0
+    : > "$_CUTSHORT" 2>/dev/null || true
+}
+
 # What this firing's preparation came to, for the parts that waited on it: "<claim> <code> [detail]",
 # where <claim> is this firing's claim, "<pid> <start second>" with the space made a dot. A waiting part
 # believes a result only from the claim it saw held by a live process, so a result an earlier prompt
@@ -859,12 +866,14 @@ _mmry_fnd_prepared_path() {
                         if (( MMRY_FND_PART == 1 )); then WORKER_RC=3 BODY="$detail" _FND_ROUTE=done; return 0; fi
                         detail="${detail%%|*}"
                         _mmry_outcome "failed refused ${detail:-unknown}"
-                        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
+                        rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
                         exit 0 ;;
                     deadline)
                         if (( MMRY_FND_PART == 1 )); then WORKER_RC=124 HIT_DEADLINE=1 _FND_ROUTE=done; return 0; fi
-                        # The in-flight marker stays: the next turn's part is told this one was cut short.
+                        # The next turn's part is told this one was cut short.
                         _mmry_outcome "failed deadline ${DEADLINE}"
+                        _mmry_fnd_mark_cut
+                        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
                         exit 0 ;;
                     none)
                         if (( MMRY_FND_PART > 1 )); then _FND_KIND="NONE ${MMRY_FND_PART} 0" BODY="" WORKER_RC=0 _FND_ROUTE=done; return 0; fi
@@ -1038,6 +1047,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # this hook has always left all of it. No id means the old token-named records, unchanged.
     # This session's id was read at the top, before the quick exit (#31583 QA round 2, R4).
     _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    # A TURN CUT SHORT AT THE DEADLINE (#31893 TC3). It was reported to the assistant on that turn, and
+    # this tells the next turn too, as the in-flight marker does for a turn the harness killed. Kept
+    # apart from the in-flight marker so /mmry:foundation-status still reads the cause it recorded.
+    _CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
 
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
     # story: the supervisor still has to start, reap the worker, decide WHY it failed and
@@ -1055,7 +1068,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # exit, the harness killed the whole handler, so that turn ran without directives
     # and nobody was told. Report it now.
     MISSED_PREVIOUS=0
-    [[ -f "$_INFLIGHT" ]] && MISSED_PREVIOUS=1
+    [[ -f "$_INFLIGHT" || -f "$_CUTSHORT" ]] && MISSED_PREVIOUS=1
 
     # Sweep per-firing files whose supervisor no longer exists. When the harness SIGKILLs us
     # the worker survives briefly and keeps writing, so its out-file is orphaned. `kill -0` is
@@ -1335,7 +1348,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # text this record held, and the record sits in a shared temp directory. It now holds a
         # code and a number only; the command turns those into fixed sentences.
         _mmry_outcome "failed refused ${_STATE:-unknown}"
-        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
+        rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
         exit 0
     fi
 
@@ -1407,12 +1420,13 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         fi
         _mmry_emit "$NOTICE" "$USERMSG"
         _mmry_outcome "failed ${_FOUND_OUTCOME}"
-        # Cut short, the in-flight marker stays, so the next turn is told this one ran without the
-        # directives (#31893 TC3). A crash was reported in full here and clears it as before.
+        # Cut short, the next turn is told this one ran without the directives (#31893 TC3). A crash
+        # was reported in full here and needs no second telling.
         if (( HIT_DEADLINE == 1 )); then
-            [[ -e "$_PENDING" ]] && { rm -f "$_PENDING" 2>/dev/null || true; }
-        else
+            _mmry_fnd_mark_cut
             rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
+        else
+            rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
         fi
         exit 0
     fi
@@ -1457,7 +1471,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         fi
         # Anything else said nothing and explained nothing, so the record written at the start stands:
         # "failed unfinished" (#31583 QA round 3, R4(b)).
-        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
+        rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
         exit 0
     fi
 
@@ -1508,7 +1522,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         _mmry_outcome "failed emit"
         _mmry_fnd_log "foundation reinjection FAILED: the output could not be written (part ${MMRY_FND_PART})"
     fi
-    rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
+    rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
     exit 0
 fi
 
