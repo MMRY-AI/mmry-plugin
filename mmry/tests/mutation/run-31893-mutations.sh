@@ -60,9 +60,9 @@ add one-key "every session shares one prepared copy" \
 add refresh-unthrottled "the refresh decision is started on every prompt" \
     '[[ "$last" =~ ^[0-9]+$ ]] && (( _FND_NOW > 0 && _FND_NOW - last < every && _FND_NOW >= last )) && return 0' ':'
 add refresh-never "the refresh is never decided" \
-    '    (( MMRY_FND_PART == 1 )) || return 0
-    local every=300' '    return 0
-    local every=300'
+    '        (( MMRY_FND_PART == 1 )) || return 0
+        local every=300' '        return 0
+        local every=300'
 add no-store "the preparation is never stored, so every prompt prepares again" \
     '    _mmry_fnd_store_prepared "$_c" "$_e" "$_b" "$MMRY_FND_SET" || true' '    :'
 

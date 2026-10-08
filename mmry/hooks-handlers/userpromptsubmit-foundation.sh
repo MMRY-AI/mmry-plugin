@@ -900,32 +900,6 @@ _mmry_fnd_prepared_path() {
     done
 }
 
-# THE DAILY REFRESH, DECIDED OFF THE PROMPT'S PATH (#31893). Part 1's worker used to decide it on every
-# prompt: a date and four stats, five processes or more before the deadline. Part 1 now starts that
-# same code (the worker's refresh block, unchanged) detached, at most once every 300 s, or as often as
-# MMRY_FOUNDATION_REFRESH_SECONDS asks when that is shorter; 0 there turns it off, as it always did.
-# The stamp is a time inside a file, read and written with no process. Detached with every descriptor
-# it could inherit closed, so nothing that reads the hook waits for it (#31434). Since the refresh window
-# is a day by default, deciding at most five minutes late changes nothing a customer can see.
-_mmry_fnd_refresh_check() {
-    (( MMRY_FND_PART == 1 )) || return 0
-    local every=300 f="${_FOUND_TMPDIR}/.mmry-foundation-refresh-checked" last=""
-    if [[ -n "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" ]]; then
-        [[ "$MMRY_FOUNDATION_REFRESH_SECONDS" =~ ^[0-9]+$ ]] || return 0
-        (( MMRY_FOUNDATION_REFRESH_SECONDS == 0 )) && return 0
-        (( MMRY_FOUNDATION_REFRESH_SECONDS < every )) && every="$MMRY_FOUNDATION_REFRESH_SECONDS"
-    fi
-    [[ -e "$f" && ! -f "$f" ]] && return 0
-    [[ -f "$f" ]] && { last="$(<"$f")" 2>/dev/null || last=""; }
-    _mmry_fnd_now
-    [[ "$last" =~ ^[0-9]+$ ]] && (( _FND_NOW > 0 && _FND_NOW - last < every && _FND_NOW >= last )) && return 0
-    printf '%s' "$_FND_NOW" > "$f" 2>/dev/null || return 0
-    MMRY_FOUNDATION_WORKER=1 MMRY_FND_REFRESH_ONLY=1 \
-        bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 \
-        </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
-    return 0
-}
-
 # THE OFF-SWITCH LIVES IN ONE PLACE NOW (#31583 QA round 4, finding 4a).
 #
 # These three functions used to be defined here and the status command derived the same
@@ -1039,6 +1013,34 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if _mmry_reinject_is_off_here; then
         exit 0
     fi
+
+    # Defined here, after the off switch, so nothing that can start a worker comes before it (#31893;
+    # tests/structural/hook-budgets.bats checks the order). Indented as the supervisor is.
+    # THE DAILY REFRESH, DECIDED OFF THE PROMPT'S PATH (#31893). Part 1's worker used to decide it on every
+    # prompt: a date and four stats, five processes or more before the deadline. Part 1 now starts that
+    # same code (the worker's refresh block, unchanged) detached, at most once every 300 s, or as often as
+    # MMRY_FOUNDATION_REFRESH_SECONDS asks when that is shorter; 0 there turns it off, as it always did.
+    # The stamp is a time inside a file, read and written with no process. Detached with every descriptor
+    # it could inherit closed, so nothing that reads the hook waits for it (#31434). Since the refresh window
+    # is a day by default, deciding at most five minutes late changes nothing a customer can see.
+    _mmry_fnd_refresh_check() {
+        (( MMRY_FND_PART == 1 )) || return 0
+        local every=300 f="${_FOUND_TMPDIR}/.mmry-foundation-refresh-checked" last=""
+        if [[ -n "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" ]]; then
+            [[ "$MMRY_FOUNDATION_REFRESH_SECONDS" =~ ^[0-9]+$ ]] || return 0
+            (( MMRY_FOUNDATION_REFRESH_SECONDS == 0 )) && return 0
+            (( MMRY_FOUNDATION_REFRESH_SECONDS < every )) && every="$MMRY_FOUNDATION_REFRESH_SECONDS"
+        fi
+        [[ -e "$f" && ! -f "$f" ]] && return 0
+        [[ -f "$f" ]] && { last="$(<"$f")" 2>/dev/null || last=""; }
+        _mmry_fnd_now
+        [[ "$last" =~ ^[0-9]+$ ]] && (( _FND_NOW > 0 && _FND_NOW - last < every && _FND_NOW >= last )) && return 0
+        printf '%s' "$_FND_NOW" > "$f" 2>/dev/null || return 0
+        MMRY_FOUNDATION_WORKER=1 MMRY_FND_REFRESH_ONLY=1 \
+            bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 \
+            </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+        return 0
+    }
 
     # THIS SESSION'S ID, from the first bytes of the payload (#31583 QA round 6, R4(c)). Claude Code
     # sends session_id as the first field (captured from a real payload: offset 1), so 160 bytes is

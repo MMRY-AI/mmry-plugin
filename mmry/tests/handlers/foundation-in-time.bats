@@ -247,8 +247,10 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     _ctx 1
     [[ "$PART_TEXT" == *"cut short"* ]] || { echo "the assistant was not told: ${PART_TEXT:0:300}"; return 1; }
     [[ "$PART_TEXT" != *"Directive 0001"* ]] || { echo "an unverified set was sent"; return 1; }
-    # The next turn, with a machine that keeps up again.
-    _cksum_shim 0
+    # The next turn, on a machine that keeps up again. Its verification still takes two seconds, so the
+    # parts waiting on it read the result file in the meantime, where the cut-short turn left its own
+    # "deadline": they must not take that as this turn's.
+    _cksum_shim 2
     _fire_all
     _ctx 1
     [[ "$PART_TEXT" == *"PREVIOUS turn"*"cut short"* ]] || { echo "the next turn was not told: ${PART_TEXT:0:300}"; return 1; }
