@@ -9,7 +9,14 @@ set -euo pipefail
 # Resolve a usable jq (system or bundled) before anything parses JSON. #30624.
 # jq is guaranteed by setup; on an unsupported platform MMRY_JQ is empty and
 # jq-dependent steps are skipped (entry-point handlers fail fast with a message).
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-jq.sh"
+#
+# The directory comes from BASH_SOURCE without a fork (#31746). It was `$(cd "$(dirname ...)" && pwd)`,
+# two processes paid by every handler that sources this file, the per-prompt formation check among
+# them. Sourcing a sibling needs a path, not an absolute one; hook-guard.sh explains the idiom.
+_mmry_client_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_mmry_client_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_client_dir="."
+source "${_mmry_client_dir}/lib-jq.sh"
+unset _mmry_client_dir
 mmry_resolve_jq || true
 
 # ============================================================================
@@ -706,11 +713,20 @@ _mmry_request() {
         return 1
     }
 
+    # A CALLER MAY ASK FOR LESS TIME (#31746). 10 s to connect and 25 s in all is right for a command
+    # the person ran and is waiting on. It is wrong inside a hook with a 10 or 15 second budget:
+    # Claude Code kills the hook when the budget runs out, shows the person a timeout error, and
+    # throws away whatever it had. formation-check.sh sets these two, below its budget, before it
+    # asks the service anything. Unset, or not a positive whole number, means the defaults.
+    local connect_timeout="${MMRY_HTTP_CONNECT_TIMEOUT:-10}" max_time="${MMRY_HTTP_MAX_TIME:-25}"
+    [[ "$connect_timeout" =~ ^[1-9][0-9]*$ ]] || connect_timeout=10
+    [[ "$max_time" =~ ^[1-9][0-9]*$ ]] || max_time=25
+
     local tmp_resp
     tmp_resp="$(mktemp "${MMRY_TMPDIR}/mmry-resp-XXXXXX")"
 
     local curl_args=(-s -o "$tmp_resp" -w '%{http_code}'
-        --connect-timeout 10 --max-time 25
+        --connect-timeout "$connect_timeout" --max-time "$max_time"
         -X "$method"
         -H "$auth_header"
         -H "Content-Type: application/json; charset=utf-8")

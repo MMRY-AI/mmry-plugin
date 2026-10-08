@@ -1,0 +1,13 @@
+msys bash processes: 113
+bash.exe (Windows): 112
+CPU % samples: 37, 35, 40, 43, 39
+Free RAM GB: 4.6
+Logical CPUs: 24
+bash -c true: 900 ms
+bash -c true: 147 ms
+bash -c true: 195 ms
+bash -c true: 207 ms
+bash -c true: 743 ms
+after:
+msys bash processes: 68
+CPU % samples: 40, 50, 49, 50, 43

@@ -711,7 +711,8 @@ _mutant_handler_dir() {
             ;;
         # DEFECT 2: read last-seen BEFORE taking the delivery mutex, restoring the round 1 order.
         read-before-lock)
-            perl -0777 -pi -e 's{(\r?\n[ ]+_acquire "\$_mutex_dir" 120 \|\| return 1\r?\n[ ]+_held_mutex=1\r?\n)(\r?\n[ ]+local last_seen\r?\n[ ]+last_seen="\$\(bash[^\n]*\r?\n[ ]+last_seen="\$\{last_seen[^\n]*\r?\n)}{$2$1}s' "$f"
+            # Since #31746 the read is the in-process mmry_formation_state_read, not a `bash` call.
+            perl -0777 -pi -e 's{(\r?\n[ ]+_acquire "\$_mutex_dir" 120 \|\| return 1\r?\n[ ]+_held_mutex=1\r?\n)(\r?\n[ ]+local last_seen\r?\n[ ]+mmry_formation_state_read[^\n]*\r?\n[ ]+last_seen="\$MMRY_FS_LAST_SEEN"\r?\n)}{$2$1}s' "$f"
             ;;
         # DEFECT 3: take a lock's mtime with the GNU-only `date -r PATH`.
         date-r-mtime)
@@ -800,15 +801,17 @@ _lagged_handler_dir() {
     mv "${dir}/formation-state.sh" "${dir}/formation-state-real.sh"
     cat > "${dir}/formation-state.sh" <<'DOUBLE'
 #!/usr/bin/env bash
-out="$(bash "$(dirname "${BASH_SOURCE[0]}")/formation-state-real.sh" "$@" 2>/dev/null || true)"
-if [ "${1:-}" = "get" ] && [ -n "${MMRY_TEST_GET_COUNT_FILE:-}" ]; then
+# Counts each read of the state and stalls the configured one. Announce that the read has happened,
+# then WAIT TO BE RELEASED rather than sleeping for a fixed period. A fixed sleep makes the overlap a
+# bet that the other reader finishes inside it, and that bet is lost on a loaded machine - which
+# silently turns a real double delivery into a passing test. Both ends of the window are now
+# events, not durations.
+_fsd_after_get() {
+    [ -n "${MMRY_TEST_GET_COUNT_FILE:-}" ] || return 0
+    local n w
     n=$(( $(cat "$MMRY_TEST_GET_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
     printf '%s' "$n" > "$MMRY_TEST_GET_COUNT_FILE"
     if [ "$n" -eq "${MMRY_TEST_GET_LAG_ON_CALL:-2}" ]; then
-        # Announce that the read has happened, then WAIT TO BE RELEASED rather than sleeping for a
-        # fixed period. A fixed sleep makes the overlap a bet that the other reader finishes
-        # inside it, and that bet is lost on a loaded machine - which silently turns a real double
-        # delivery into a passing test. Both ends of the window are now events, not durations.
         [ -n "${MMRY_TEST_GET_SIGNAL_FILE:-}" ] && : > "$MMRY_TEST_GET_SIGNAL_FILE"
         w=0
         while [ ! -f "${MMRY_TEST_GET_RELEASE_FILE:-/nonexistent}" ] \
@@ -817,7 +820,24 @@ if [ "${1:-}" = "get" ] && [ -n "${MMRY_TEST_GET_COUNT_FILE:-}" ]; then
             w=$(( w + 1 ))
         done
     fi
+    return 0
+}
+# SOURCED, which is how formation-check.sh reads its state since #31746: wrap the in-process read so
+# the real read happens at the real moment and the answer is then held back, exactly as the command
+# form below does for a caller that runs the file.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    source "${BASH_SOURCE[0]%/*}/formation-state-real.sh"
+    eval "_fsd_real_read() $(declare -f mmry_formation_state_read | sed 1d)"
+    mmry_formation_state_read() {
+        local rc=0
+        _fsd_real_read "$@" || rc=$?
+        _fsd_after_get
+        return "$rc"
+    }
+    return 0
 fi
+out="$(bash "$(dirname "${BASH_SOURCE[0]}")/formation-state-real.sh" "$@" 2>/dev/null || true)"
+[ "${1:-}" = "get" ] && _fsd_after_get
 printf '%s\n' "$out"
 DOUBLE
     chmod +x "${dir}/formation-state.sh"
@@ -917,7 +937,7 @@ _run_overlap() {
     [ -s "$body" ]
     local acquire_line read_line
     acquire_line="$(grep -n '_acquire "\$_mutex_dir"' "$body" | head -1 | cut -d: -f1)"
-    read_line="$(grep -n 'formation-state.sh" get' "$body" | head -1 | cut -d: -f1)"
+    read_line="$(grep -n 'mmry_formation_state_read' "$body" | head -1 | cut -d: -f1)"
     [ -n "$acquire_line" ]
     [ -n "$read_line" ]
     [ "$acquire_line" -lt "$read_line" ]
@@ -944,34 +964,62 @@ _run_overlap() {
     }
 }
 
-# A `date` and a `stat` with BSD/macOS semantics, which is where the round 1 staleness check broke.
-# On BSD `date -r` takes an epoch NUMBER, so handing it a path is an error, and `stat` has neither
-# --version nor -c. Both stubs reject the GNU form exactly as the real tools do and delegate the
-# supported form to the host's own binary, so what is under test is the handler's choice of
-# invocation, not an imitation of a filesystem.
+# A `date` and a `stat` with strict BSD semantics, which is where the round 1 staleness check broke.
+# Strict BSD `date -r` takes an epoch NUMBER, so handing it a path is an error, and BSD `stat` has
+# neither --version nor -c. What is under test is the handler's choice of invocation, not an
+# imitation of a filesystem.
+#
+# The stubs refuse the GNU forms and pass every BSD form to the host's OWN tools in the host's OWN
+# form, resolved here rather than assumed to live at /usr/bin:
+#   * on Darwin, to the genuine /bin/date and /usr/bin/stat, unchanged. So `stat -f %m` - the call
+#     the handler's BSD branch makes - is answered by the real BSD stat, and no GNU form is ever
+#     called on a Mac. Absolute paths, so a Homebrew GNU coreutils on PATH cannot stand in.
+#   * elsewhere (Linux, Git Bash on Windows), translated onto the host's GNU binary.
+# `date -r PATH` is refused on Darwin too, deliberately. Current macOS date accepts a file there
+# (seen on macos-latest, CI run 37726808146), but strict BSD date and older macOS do not, and the
+# reclaim guard has to hold on the strictest one a customer may have.
+#
+# The first cut of this helper delegated to `/usr/bin/date -d @N` and `/usr/bin/stat -c %Y` on every
+# host. Those are GNU forms: on a real Mac /usr/bin/date does not exist and BSD stat refuses -c, so
+# the stub answered nothing, every lock read as fresh, and the reclaim test failed against a handler
+# that was correct (#31746, macOS CI run 37721380901).
 _bsd_tools_dir() {
     local dir="${BATS_TEST_TMPDIR}/bsd-bin"
     mkdir -p "$dir"
-    cat > "${dir}/date" <<'BSDDATE'
+    local host_date host_stat date_at stat_m
+    if [ "$(uname -s)" = "Darwin" ]; then
+        host_date="/bin/date"
+        host_stat="/usr/bin/stat"
+        date_at='-r'      # BSD: date -r SECONDS
+        stat_m='-f %m'    # BSD: stat -f %m PATH
+    else
+        host_date="$(type -P date)"
+        host_stat="$(type -P stat)"
+        date_at='-d @'    # GNU: date -d @SECONDS
+        stat_m='-c %Y'    # GNU: stat -c %Y PATH
+    fi
+    cat > "${dir}/date" <<BSDDATE
 #!/usr/bin/env bash
-if [ "${1:-}" = "-r" ]; then
-    case "${2:-}" in ''|*[!0-9]*) echo "date: illegal time format" >&2; exit 1 ;; esac
-    a="$2"; shift 2; exec /usr/bin/date -d "@$a" "$@"
+if [ "\${1:-}" = "-r" ]; then
+    case "\${2:-}" in ''|*[!0-9]*) echo "date: illegal time format" >&2; exit 1 ;; esac
+    a="\$2"; shift 2
+    if [ "${date_at}" = "-r" ]; then exec "${host_date}" -r "\$a" "\$@"; fi
+    exec "${host_date}" -d "@\$a" "\$@"
 fi
-exec /usr/bin/date "$@"
+exec "${host_date}" "\$@"
 BSDDATE
-    cat > "${dir}/stat" <<'BSDSTAT'
+    cat > "${dir}/stat" <<BSDSTAT
 #!/usr/bin/env bash
-case "${1:-}" in
+case "\${1:-}" in
     --version) echo "stat: illegal option -- -" >&2; exit 1 ;;
     -c)        echo "stat: illegal option -- c" >&2; exit 1 ;;
-    -f)        fmt="$2"; shift 2
-               case "$fmt" in
-                   %m) exec /usr/bin/stat -c %Y "$@" ;;
-                   *)  echo "stat: bad format $fmt" >&2; exit 1 ;;
+    -f)        fmt="\$2"; shift 2
+               case "\$fmt" in
+                   %m) exec "${host_stat}" ${stat_m} "\$@" ;;
+                   *)  echo "stat: bad format \$fmt" >&2; exit 1 ;;
                esac ;;
 esac
-exec /usr/bin/stat "$@"
+exec "${host_stat}" "\$@"
 BSDSTAT
     chmod +x "${dir}/date" "${dir}/stat"
     printf '%s' "$dir"
@@ -984,8 +1032,8 @@ BSDSTAT
     # reclaimed - so delivery stays silenced for the rest of that session on every Mac, defeating
     # the mechanism this whole ticket is built on.
     #
-    # Run on a Linux or Windows host this asserts the handler asks in a way BSD would answer. It is
-    # not a substitute for running on Darwin, which the QA statement says plainly.
+    # The stubs refuse the GNU forms everywhere. On Darwin the BSD forms are answered by the real
+    # /usr/bin/stat and /bin/date; on a Linux or Windows host, by the GNU tools translated.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"
     local bsd; bsd="$(_bsd_tools_dir)"
@@ -995,6 +1043,17 @@ BSDSTAT
     [ "$status" -ne 0 ]
     run env PATH="${bsd}:${PATH}" bash -c "stat --version"
     [ "$status" -ne 0 ]
+    # And they really do answer the BSD forms, or every lock reads as fresh and the failure below
+    # says "not reclaimed" about a handler that asked correctly. That is how this test failed on
+    # macOS when its stubs delegated to GNU forms the Mac does not have.
+    run env PATH="${bsd}:${PATH}" bash -c "stat -f %m '${BATS_TEST_TMPDIR}'"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9]+$ ]] || return 1
+    [ "$output" -gt 0 ]
+    run env PATH="${bsd}:${PATH}" bash -c "date +%s"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9]+$ ]] || return 1
+    [ "$output" -gt 0 ]
 
     local lock dir
     for lock in poll cs; do

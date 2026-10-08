@@ -222,7 +222,7 @@ _INERT_PINNED=(
     "structural/formation-progress.bats 22"
     "structural/formation-report.bats 10"
     "structural/formation-say.bats 28"
-    "structural/hooks-guards.bats 11"
+    "structural/hooks-guards.bats 5"
     "structural/hooks-json.bats 8"
     "structural/macos-hook-payload.bats 6"
     "structural/marketplace-sync.bats 2"
