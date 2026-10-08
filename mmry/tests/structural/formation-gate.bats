@@ -237,6 +237,10 @@ _run_counted() {
     # A lock left behind must not make every later session pay for the check.
     _standins
     mkdir -p "${TMPDIR}/.mmry-formation-cs-${SID}" "${TMPDIR}/.mmry-formation-poll-${SID}"
+    # Since #31844 the scan skips the known lock names before it looks at them, so those two alone
+    # no longer test the file check. A directory under a name the skip list does not know still
+    # must not count (#31844 mutation "the gate takes a lock directory for a membership file").
+    mkdir -p "${TMPDIR}/.mmry-formation-unlisted-dir-${SID}"
     _run_counted "$(_command_for "${HOOKS}/hooks.json" PostToolUse)"
     [[ "$status" -eq 0 && -z "$output" && "$LAUNCHES" -eq 1 ]] || {
         echo "a lock directory opened the gate: status $status, output [$output], launches $LAUNCHES"; return 1; }
