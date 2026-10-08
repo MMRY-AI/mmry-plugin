@@ -41,14 +41,22 @@ teardown() {
 }
 
 # The canonical first step, spelled once here so that a change to it is a deliberate change to the
-# test as well. Test 4 compares every registration to this AND to each other.
+# test as well. Test 4 compares every registration to these AND, within each hooks file, to each
+# other.
 #
-# It opens with the membership test and closes with the exit taken when no file matched; only what
-# runs on a match lies between, and that is the one part allowed to differ by host. It contains no
-# & | < > ^ at all: a Claude Code that ran hooks through cmd.exe (it did until early 2026, which is
-# why this file once forbade single quotes) would split the line at any of them.
-GATE_OPEN='sh -c '"'"'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; do if [ -f "$f" ]; then '
-GATE_CLOSE='; fi; done; exit 0'"'"
+# SINCE #31844 THE TWO HOSTS' GATES DIFFER BY DESIGN. Claude Code (2.1.285 and later) gives every hook
+# the session's id in CLAUDE_CODE_SESSION_ID, so its gate looks for THIS session's membership file
+# only, and a member elsewhere on the machine no longer opens it; with no usable id it falls back to
+# the scan. Codex gives no such variable, so its gate is the scan. Both scans skip the locks and
+# markers that share the prefix (GATE_SKIP), which used to open the gate on their own.
+#
+# Each opens with the membership test and closes with the exit taken when nothing matched. Neither
+# contains & | < > ^ at all: a Claude Code that ran hooks through cmd.exe (it did until early 2026,
+# which is why this file once forbade single quotes) would split the line at any of them.
+CLAUDE_GATE_OPEN='sh -c '"'"'d="${TMPDIR:-/tmp}"; s="${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"; '
+CODEX_GATE_OPEN='sh -c '"'"'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; do '
+GATE_SKIP='case "${f##*/}" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; '
+GATE_CLOSE='; exit 0'"'"
 
 # Every formation-check `command` in a hooks file, one per line, as "Event<TAB>command".
 _registrations() {
@@ -127,20 +135,22 @@ _run_counted() {
 # =============================================================================================
 
 @test "gate 4: every formation-check registration in BOTH hooks files opens with the same membership gate" {
-    local f ev cmd n_claude=0 n_codex=0 first=""
+    local f ev cmd n_claude=0 n_codex=0 first open
     for f in hooks.json codex-hooks.json; do
+        first=""
+        open="$CODEX_GATE_OPEN"; [[ "$f" == hooks.json ]] && open="$CLAUDE_GATE_OPEN"
         while IFS=$'\t' read -r ev cmd; do
             cmd="${cmd%$'\r'}"
             [[ -n "$cmd" ]] || continue
-            [[ "$cmd" == "$GATE_OPEN"* ]] || {
+            [[ "$cmd" == "$open"* ]] || {
                 echo "${f} ${ev} does not START with the membership gate:"; echo "  $cmd"; return 1; }
             [[ "$cmd" == *"$GATE_CLOSE"* ]] || {
                 echo "${f} ${ev} does not end the gate with its exit when no file matched:"; echo "  $cmd"; return 1; }
-            # Identical to each other, not merely each similar to the constants: the gate's opening,
-            # everything before the first `then`, and its close are compared across both files.
-            local gate="${cmd%%then *}then ...${GATE_CLOSE}"
-            [[ -z "$first" ]] && first="$gate"
-            [[ "$gate" == "$first" ]] || { echo "${f} ${ev} gate differs:"; echo "  $gate"; echo "  $first"; return 1; }
+            [[ "$cmd" == *"$GATE_SKIP"* ]] || {
+                echo "${f} ${ev} does not skip the locks and markers that share the prefix:"; echo "  $cmd"; return 1; }
+            # Identical to each other within the file, not merely each similar to the constants.
+            [[ -z "$first" ]] && first="$cmd"
+            [[ "$cmd" == "$first" ]] || { echo "${f} ${ev} gate differs:"; echo "  $cmd"; echo "  $first"; return 1; }
             # Nothing cmd.exe would act on, so an older Windows runner cannot split the line.
             [[ "$cmd" != *[\&\|\<\>^]* ]] || { echo "${f} ${ev} carries a cmd.exe operator: $cmd"; return 1; }
             if [[ "$f" == "hooks.json" ]]; then n_claude=$((n_claude + 1)); else n_codex=$((n_codex + 1)); fi
@@ -184,7 +194,7 @@ _run_counted() {
         [[ -z "$output" ]] || { echo "$ev printed: $output"; return 1; }
         # Exactly one launch, and it is the registration's own `sh -c`. No bash, no guard, nothing.
         [[ "$LAUNCHES" -eq 1 ]] || { echo "$ev started ${LAUNCHES} programs: $(cat "$GATE_LOG")"; return 1; }
-        grep -q '^sh -c for f in' "$GATE_LOG" || { echo "$ev: the one launch was not the gate: $(cat "$GATE_LOG")"; return 1; }
+        grep -q '^sh -c d=' "$GATE_LOG" || { echo "$ev: the one launch was not the gate: $(cat "$GATE_LOG")"; return 1; }
     done
 }
 

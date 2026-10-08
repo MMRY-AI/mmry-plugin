@@ -43,7 +43,8 @@ if [[ -z "$P" ]]; then
 fi
 
 # Clean old hooks dir, create target directories
-rm -rf "${MMRY_STATE_DIR}/hooks" 2>/dev/null
+# `|| true` (#31844): under set -e a failing rm ended the session start here, before memories loaded.
+rm -rf "${MMRY_STATE_DIR}/hooks" 2>/dev/null || true
 mkdir -p "${MMRY_STATE_DIR}/hooks-handlers" "${MMRY_STATE_DIR}/setup"
 
 # WRITE DOWN WHICH HOST THIS INSTALL BELONGS TO, BESIDE THE FILES (#31245 QA round 3).
@@ -161,6 +162,19 @@ if [[ "$(mmry_host)" == "codex" && -f "$P/vendor/jq/CHECKSUMS.txt" ]]; then
             && cp "$P"/vendor/jq/* "${MMRY_STATE_DIR}/vendor/jq/" 2>/dev/null \
             && chmod +x "${MMRY_STATE_DIR}"/vendor/jq/jq-* 2>/dev/null || true
     fi
+fi
+
+# LEFTOVER FORMATION MEMBERSHIPS (#31844). A session that ended without leaving its formation left
+# its membership record in the temp folder for ever, and that record kept the formation check
+# running for sessions that were in no formation at all. Each session start removes other sessions'
+# records that nobody has written for the stale period and whose idle watch is not running; the
+# rule, the period and why it is safe for a live member are in formation-state.sh. This session's
+# own record is never removed: a resumed session keeps its id. In-process and best-effort: nothing
+# here can stop memories loading.
+if [[ -f "$P/hooks-handlers/formation-state.sh" ]]; then
+    _mmry_own_sid="$(mmry_session_id 2>/dev/null)" || _mmry_own_sid=""
+    { source "$P/hooks-handlers/formation-state.sh" 2>/dev/null \
+        && mmry_formation_sweep "$_mmry_own_sid"; } 2>/dev/null || true
 fi
 
 # Delegate to the main session-start logic
