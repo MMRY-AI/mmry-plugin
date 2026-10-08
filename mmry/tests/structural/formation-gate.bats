@@ -42,7 +42,13 @@ teardown() {
 
 # The canonical first step, spelled once here so that a change to it is a deliberate change to the
 # test as well. Test 4 compares every registration to this AND to each other.
-GATE_PREFIX='sh -c '"'"'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; do [ -f "$f" ] && break; f=; done; [ -n "$f" ] || exit 0; '
+#
+# It opens with the membership test and closes with the exit taken when no file matched; only what
+# runs on a match lies between, and that is the one part allowed to differ by host. It contains no
+# & | < > ^ at all: a Claude Code that ran hooks through cmd.exe (it did until early 2026, which is
+# why this file once forbade single quotes) would split the line at any of them.
+GATE_OPEN='sh -c '"'"'for f in "${TMPDIR:-/tmp}"/.mmry-formation-*; do if [ -f "$f" ]; then '
+GATE_CLOSE='; fi; done; exit 0'"'"
 
 # Every formation-check `command` in a hooks file, one per line, as "Event<TAB>command".
 _registrations() {
@@ -126,13 +132,17 @@ _run_counted() {
         while IFS=$'\t' read -r ev cmd; do
             cmd="${cmd%$'\r'}"
             [[ -n "$cmd" ]] || continue
-            [[ "$cmd" == "$GATE_PREFIX"* ]] || {
+            [[ "$cmd" == "$GATE_OPEN"* ]] || {
                 echo "${f} ${ev} does not START with the membership gate:"; echo "  $cmd"; return 1; }
-            # Identical to each other, not merely each similar to the constant: the text up to and
-            # including the gate's exit is compared across every registration in both files.
-            local gate="${cmd%%'[ -n "$f" ] || exit 0; '*}"
+            [[ "$cmd" == *"$GATE_CLOSE"* ]] || {
+                echo "${f} ${ev} does not end the gate with its exit when no file matched:"; echo "  $cmd"; return 1; }
+            # Identical to each other, not merely each similar to the constants: the gate's opening,
+            # everything before the first `then`, and its close are compared across both files.
+            local gate="${cmd%%then *}then ...${GATE_CLOSE}"
             [[ -z "$first" ]] && first="$gate"
             [[ "$gate" == "$first" ]] || { echo "${f} ${ev} gate differs:"; echo "  $gate"; echo "  $first"; return 1; }
+            # Nothing cmd.exe would act on, so an older Windows runner cannot split the line.
+            [[ "$cmd" != *[\&\|\<\>^]* ]] || { echo "${f} ${ev} carries a cmd.exe operator: $cmd"; return 1; }
             if [[ "$f" == "hooks.json" ]]; then n_claude=$((n_claude + 1)); else n_codex=$((n_codex + 1)); fi
         done < <(_registrations "${HOOKS}/${f}")
     done
@@ -481,4 +491,20 @@ _deliver() {
     bash "${HANDLERS}/formation-state.sh" clear "$SID"
     _deliver "$(_command_for "${HOOKS}/hooks.json" PostToolUse)" PostToolUse
     [[ "$status" -eq 0 && -z "$output" ]] || { echo "no membership, yet: status $status, output [$output]"; return 1; }
+}
+
+@test "gate 1 windows: the Claude Code line also runs whole under cmd.exe, an older client's runner" {
+    # Claude Code runs hooks with Git Bash today. Until early 2026 it ran them through cmd.exe, which
+    # splits a line at & | < > ^; the gate carries none, and its ~ is expanded by sh, not the host.
+    # The line is run as cmd would run it: as a line of a batch file.
+    _is_windows || skip "Windows only: needs cmd.exe"
+    _standins
+    local cmd; cmd="$(_command_for "${HOOKS}/hooks.json" UserPromptSubmit)"
+    printf '@echo off\r\n%s\r\n' "$cmd" > "${BATS_TEST_TMPDIR}/line.cmd"
+    local w; w="$(cygpath -w "${BATS_TEST_TMPDIR}/line.cmd")"
+    run env HOME="$FAKE_HOME" TMPDIR="$TMPDIR" cmd //d //c "$w" < /dev/null
+    [[ "$status" -eq 0 && -z "$output" ]] || { echo "no membership under cmd: status $status, output [$output]"; return 1; }
+    printf '4242\n' > "${TMPDIR}/.mmry-formation-${SID}"
+    run env HOME="$FAKE_HOME" TMPDIR="$TMPDIR" cmd //d //c "$w" < /dev/null
+    [[ "$output" == *"GUARD-REACHED formation-check"* ]] || { echo "membership under cmd did not reach the guard: $output"; return 1; }
 }

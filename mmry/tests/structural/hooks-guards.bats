@@ -38,17 +38,22 @@ load '../helpers/test-helper'
 
 # ── hooks.json has no bash -c (Windows quoting fix) ──
 
-@test "hooks.json guard hooks use bash -c with existence check" {
+@test "hooks.json guard hooks use a shell -c with existence check" {
     local hooks_file="$PLUGIN_ROOT/hooks/hooks.json"
-    # Guard-based hooks (Stop, PreCompact, PostToolUse) intentionally use bash -c
-    # to check if the stable copy exists before running.
+    # Guard-based hooks (Stop, PreCompact, PostToolUse) intentionally use a `-c` wrapper
+    # to check if the stable copy exists before running. The formation-check registrations
+    # use `sh -c`, because their first step is the POSIX membership gate (#31746); the
+    # others use `bash -c`. Either way the guard's existence is tested before it is run.
     local guard_cmds
     guard_cmds="$(grep '"command"' "$hooks_file" | grep 'hook-guard.sh')"
-    [[ -n "$guard_cmds" ]]
-    echo "$guard_cmds" | while IFS= read -r line; do
-        [[ "$line" == *'bash -c'* ]]
-        [[ "$line" == *'[ -f'* ]]
-    done
+    [[ -n "$guard_cmds" ]] || return 1
+    local line n=0
+    while IFS= read -r line; do
+        [[ "$line" == *'bash -c'* || "$line" == *'sh -c'* ]] || { echo "no -c wrapper: $line"; return 1; }
+        [[ "$line" == *'[ -f'* ]] || { echo "no existence check: $line"; return 1; }
+        n=$((n + 1))
+    done <<< "$guard_cmds"
+    (( n > 0 )) || return 1
 }
 
 # This test used to require '|| true' on EVERY guard hook, and that requirement was itself the
@@ -68,14 +73,19 @@ load '../helpers/test-helper'
     run grep -c 'formation-check || true' "$hooks_file"
     [ "$output" -eq 0 ]
 
-    # ...and it still guards the missing-file case, which is the only thing that may map to 0.
-    local fc
+    # ...and it still guards the missing-file case, which is the only thing that may map to 0. Since
+    # #31746 the registration is the membership gate, which tests for the guard with `[ -f` and then
+    # EXECs it, so the guard's exit code - and the handler's 2 - is the registration's exit code.
+    local fc line n=0
     fc="$(grep '"command"' "$hooks_file" | grep 'formation-check')"
-    [[ -n "$fc" ]]
-    echo "$fc" | while IFS= read -r line; do
-        [[ "$line" == *'[ -f'* ]]
-        [[ "$line" == *'|| exit 0;'* ]]
-    done
+    [[ -n "$fc" ]] || return 1
+    while IFS= read -r line; do
+        [[ "$line" == *'[ -f'* ]] || { echo "no existence check: $line"; return 1; }
+        [[ "$line" == *'exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check'* ]] || {
+            echo "the guard is not exec'd, so its exit code may not survive: $line"; return 1; }
+        n=$((n + 1))
+    done <<< "$fc"
+    (( n == 4 )) || { echo "expected 4 formation-check registrations, found $n"; return 1; }
 }
 
 # ── hook-guard.sh behavior ──
