@@ -73,6 +73,15 @@ save_codex() {
     env -u CLAUDE_SESSION_ID -u MMRY_CONFIG_FILE HOME="$W/home" TMPDIR="$W/tmp" MMRY_HOST=codex CODEX_HOME="$CX" \
         MMRY_NO_SELF_UPDATE=1 bash "$CX/mmry/hooks-handlers/save-memory.sh" --source codex --working-dir "/live/31847" "$@" 2>&1
 }
+# The plugin's own search with --ids, on each host layout: how the assistant finds the id.
+search_claude() {
+    env -u CLAUDE_SESSION_ID HOME="$W/home" TMPDIR="$W/tmp" MMRY_CONFIG_FILE="$W/home/mmry-config.json" \
+        MMRY_NO_SELF_UPDATE=1 bash "$PLUGIN/hooks-handlers/search-memories.sh" --ids "$@" 2>&1
+}
+search_codex() {
+    env -u CLAUDE_SESSION_ID -u MMRY_CONFIG_FILE HOME="$W/home" TMPDIR="$W/tmp" MMRY_HOST=codex CODEX_HOME="$CX" \
+        MMRY_NO_SELF_UPDATE=1 bash "$CX/mmry/hooks-handlers/search-memories.sh" --ids "$@" 2>&1
+}
 # The id of the one active memory whose content contains a marker.
 find_ids() { api GET "/api/memories/search?q=$1" | "$JQ" -r --arg m "$1" '[.[] | select(.content | contains($m)) | .id] | join(",")'; }
 show() { api GET "/api/memories/$1" | "$JQ" -c '{id, visibility, permissionGroupID, memoryTier, content}'; }
@@ -88,6 +97,9 @@ correction_case() { # label saver marker "original" "correction" [extra flags fo
     old="$(find_ids "$mk")"
     [[ "$old" =~ ^[0-9]+$ ]] || { fail "$label: original not found exactly once (ids: '$old')"; return 1; }
     say "original id $old: $(show "$old")"
+    local found; found="$(${saver/save_/search_} "$mk")"
+    say "plugin search --ids '$mk': $(printf '%s' "$found" | grep '^id ' | tr '\n' ' ')"
+    [[ "$found" == *"id $old |"* ]] && pass "$label: the plugin's search --ids shows id $old" || fail "$label: search --ids did not show id $old"
     out="$($saver --context "$corr $mk" --supersedes "$old")"; rc=$?
     say "correction save --supersedes $old: exit $rc: $out"
     [[ $rc -eq 0 ]] && pass "$label: correction save exit 0" || fail "$label: correction exit $rc"

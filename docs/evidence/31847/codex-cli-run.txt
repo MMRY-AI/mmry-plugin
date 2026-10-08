@@ -1,3 +1,5 @@
+Setup: CODEX_HOME=<isolated>; codex plugin marketplace add <this worktree> ; codex plugin add mmry@mmry-plugin ; handlers copied to ${CODEX_HOME}/mmry as session-init.sh does ; Integration test subscriber CodexCorr_1791497942 ; memory 31987 seeded with save-memory.sh. No memory file and no id were given to Codex.
+
 Reading additional input from stdin...
 OpenAI Codex v0.160.0
 --------
@@ -8,57 +10,42 @@ approval: never
 sandbox: danger-full-access
 reasoning effort: none
 reasoning summaries: none
-session id: 01a11d8d-7958-7b33-9449-8ac3dd75b76f
+session id: 01a11d99-ba21-74a2-b0c4-1e786cafa444
 --------
 user
-Your MMRY AI memories for this session were loaded from E:/mmry-wt/31847-codexhome/tmp/mmry-memories.md (read it). The memory there about the CodexCorr staging database region is wrong: the staging database moved to region eastus last week. Please fix that in MMRY AI. Keep the marker text CX1791497134 in the saved text.
+You remembered in MMRY AI that the CodexCorr staging database is in region westus2. That is wrong: it moved to region eastus last week. Please fix what MMRY AI remembers. Keep the marker text CX1791497942 in the saved text.
 codex
-I’ll read the loaded memories and the MMRY skill, then correct the staging database region while preserving `CX1791497134`.
-exec
-"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath 'E:/mmry-wt/31847-codexhome/tmp/mmry-memories.md'" in E:\mmry-wt\31847-codexhome\work
- succeeded in 193ms:
-# MMRY AI — Loaded Memories
-
-id: 31967
-memoryTier: Operational
-category: Fact
-scope: CodexCorr/infrastructure
-topic: Staging database region westus2
-content: FACT: The CodexCorr staging database is hosted in region westus2. CX1791497134
-source: ai-processing
-taskDisplayID: null
-workingDirectory: /tmp
-projectID: null
-sessionID: null
-createdDate: 2026-10-08T22:05:40.4433333
-accessCount: 0
-lastAccessedDate: null
-visibility: Global
-permissionGroupID: null
-lastModifiedBy: null
-lastModifiedDate: null
-agentName: null
----
-
+I’ll use the MMRY memory skill to correct the staging database region and preserve `CX1791497942` in the saved text.
 exec
 "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath '//ricoserv02/E/mmry-wt/31847-codexhome/plugins/cache/mmry-plugin/mmry/local/skills-codex/memory-system/SKILL.md'" in E:\mmry-wt\31847-codexhome\work
- succeeded in 191ms:
+ succeeded in 205ms:
 ---
-    [... the remainder of skills-codex/memory-system/SKILL.md as installed, elided; the full transcript was 428 lines ...]
+    [... skills-codex/memory-system/SKILL.md as installed, elided ...]
 exec
 "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$c = @'"'
-bash \""'${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh" --tier "Operational" --category "Fact" --scope "CodexCorr/infrastructure" --topic "Staging database region eastus" --content "FACT: The CodexCorr staging database is hosted in region eastus after moving there last week. CX1791497134" --supersedes 31967 --source "codex" --working-dir "$PWD"
-'"'@; "'$f = Join-Path $env:TEMP "mmry-$PID.sh"; [IO.File]::WriteAllText($f, $c.Replace("`r", "")); & (Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) '"'bin\\bash.exe') "'$f; $mmryExit = $LASTEXITCODE; Remove-Item -LiteralPath $f; exit $mmryExit' in E:\mmry-wt\31847-codexhome\work
- succeeded in 2858ms:
-Stored 1 memory under Operational tier. It replaces memory 31967, which is no longer active.
+bash \""'${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" --ids "CX1791497942"
+'"'@; "'$f = Join-Path $env:TEMP "mmry-$PID.sh"; [IO.File]::WriteAllText($f, $c.Replace("`r", "")); & (Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) '"'bin\\bash.exe') "'$f; Remove-Item $f' in E:\mmry-wt\31847-codexhome\work
+ succeeded in 1336ms:
+Found 1 memories:
+
+id 31987 | Operational | CodexCorr/infrastructure | Staging database region location
+  FACT: The CodexCorr staging database is hosted in region westus2. CX1791497942
+---
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$c = @'"'
+bash \""'${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh" --tier "Operational" --category "Fact" --scope "CodexCorr/infrastructure" --topic "Staging database region location" --content "FACT: The CodexCorr staging database is hosted in region eastus after moving from westus2 last week (reported on 2026-10-08). CX1791497942" --supersedes 31987 --source "codex" --working-dir "$PWD"
+'"'@; "'$f = Join-Path $env:TEMP "mmry-$PID.sh"; [IO.File]::WriteAllText($f, $c.Replace("`r", "")); & (Join-Path (Split-Path (Split-Path (Split-Path (git --exec-path)))) '"'bin\\bash.exe') "'$f; $resultCode = $LASTEXITCODE; Remove-Item $f; exit $resultCode' in E:\mmry-wt\31847-codexhome\work
+ succeeded in 3596ms:
+Stored 1 memory under Operational tier. It replaces memory 31987, which is no longer active.
 
 codex
-Updated MMRY AI: the CodexCorr staging database region is now `eastus`. The old memory was retired, and `CX1791497134` remains in the saved text.
+Corrected MMRY AI: the CodexCorr staging database is in **eastus**. The old memory was retired, and `CX1791497942` remains in the saved text.
 tokens used
-37,672
-Updated MMRY AI: the CodexCorr staging database region is now `eastus`. The old memory was retired, and `CX1791497134` remains in the saved text.
+15,443
+Corrected MMRY AI: the CodexCorr staging database is in **eastus**. The old memory was retired, and `CX1791497942` remains in the saved text.
 
-== API check after the Codex CLI run 2026-10-08T22:06:57Z
-GET /api/memories/31967 -> 404
-search CX1791497134 ->
-{"id":31968,"visibility":"Global","permissionGroupID":null,"memoryTier":"Operational","content":"Memory to save — Topic: Staging database region eastus. Content: FACT: The CodexCorr staging database is hosted in region eastus after moving there last week. CX1791497134. Suggested tier: Operational. Suggested category: Fact. Scope: CodexCorr/infrastructure."}
+== API check after the Codex CLI run 2026-10-08T22:20:16Z
+GET /api/memories/31987 -> 404
+search CX1791497942 ->
+{"id":31988,"visibility":"Global","permissionGroupID":null,"memoryTier":"Operational"}
