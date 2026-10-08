@@ -82,7 +82,7 @@ manifest_now() {
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     # Still emitted the current (pre-refresh) cache this turn — non-blocking.
-    [[ "$output" == *'Foundation fact'* ]]
+    [[ "$output" == *'Foundation fact'* ]] || return 1
     # The lock is touched before the background fetch is spawned. Since #31893 the decision itself is
     # made by a detached process, off the prompt's path, so the lock is waited for, up to 30 s.
     local i
