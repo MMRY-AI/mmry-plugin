@@ -76,12 +76,64 @@ HANDLER_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$HANDLER_DIR" == "${BASH_SOURCE[0]}" ]] && HANDLER_DIR="."
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
 
-# How long the idle poller keeps watching, and how often it asks. Both are overridable so the test
-# suite can run the loop in a second rather than four minutes; neither is meant to be tuned by a
-# user. The budget is deliberately finite: a poller that never gave up would outlive the session it
-# was watching, and messages that arrive after it stops are caught by the SessionStart sweep.
-MMRY_IDLE_POLL_SECONDS="${MMRY_IDLE_POLL_SECONDS:-240}"
-MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-15}"
+# ---- The idle watch: its window, its schedule, and its renewal (#31721) ----------------------
+# A member that has finished a turn is watched in the background (the Stop runtime below), so a
+# message sent to it while it sits idle still reaches it. Until #31721 that watch ran for four
+# minutes, asked every fifteen seconds whatever was happening, and then stopped for good: after
+# that the member heard nothing until a person typed into its window, and on 2026-10-04 a lead and
+# its members sat on unread questions and assignments for an hour or more because of it.
+#
+# THE CEILING, MEASURED RATHER THAN ASSUMED (#31721, Claude Code 2.1.285, Windows 11). A background
+# Stop hook ("asyncRewake": true) is held to the "timeout" in its registration and to nothing
+# shorter: probes ran 674 s against a timeout of 900, and past an hour against 7200, each waking the
+# model with no human input when it exited 2. A probe that overran its timeout (20 s, sleeping 40)
+# was killed outright, its TERM trap never ran, and the model was NOT woken. So a watch cannot
+# outlive its registration, and it cannot be relied on to hand anything over once it is killed.
+# The method, the client version and the raw logs are in docs/evidence/31721/README.md.
+#
+# SO THE WATCH RENEWS ITSELF, BEFORE THE CEILING, FOR AS LONG AS THE MEMBER IS IN THE FORMATION.
+# When its window ends with nothing to say, it asks the service whether this session is still a
+# member of this formation. If the service says yes, it exits 2 with a short renewal notice. That
+# wakes the session, which ends its turn at once, and the Stop that follows starts a fresh watch:
+# five consecutive hand-overs of exactly this kind were observed with nobody typing. If the member
+# has left (the local record is gone or names another formation), the service says it is no longer
+# a member, or the service cannot confirm it, the watch stops quietly, as it always used to. It
+# never wakes a session on a guess.
+#
+#   MMRY_IDLE_POLL_SECONDS   the window, 28 minutes. hooks/hooks.json gives the Stop registration
+#                            1800 s; the 120 s between them covers preparation, one last poll at
+#                            the client's 25 s limit, and the membership question at 10 s. One
+#                            renewal per 28 idle minutes is the cost of listening indefinitely.
+#   MMRY_IDLE_POLL_INTERVAL  UNSET in a shipped install. Set, it replaces the schedule below with a
+#                            flat interval, which exists only so the test suite can run a window in
+#                            seconds. Neither is a customer setting.
+#
+# THE SCHEDULE, A BACKOFF INSTEAD OF A FLAT FIFTEEN SECONDS (#31721 requirements 3 and 4). A reply is
+# likeliest just after a member stops working, so the watch asks every 3 s for the first minute -
+# a reply sent 10 s after the turn ended is surfaced inside 15 s, where the flat rate surfaced it at
+# 15 s at best. After that it slows: every 15 s to five minutes, every 30 s to fifteen, then every
+# 60 s. Over one full 28-minute window that is 70 requests where the flat rate made 113, and a
+# watch that follows a renewal starts at the slow end, since nobody is about to reply to a renewal.
+MMRY_IDLE_POLL_SECONDS="${MMRY_IDLE_POLL_SECONDS:-1680}"
+MMRY_IDLE_POLL_INTERVAL="${MMRY_IDLE_POLL_INTERVAL:-}"
+_IDLE_EARLY_INTERVAL=3
+_IDLE_EARLY_UNTIL=60
+_IDLE_MID_INTERVAL=15
+_IDLE_MID_UNTIL=300
+_IDLE_LATE_INTERVAL=30
+_IDLE_LATE_UNTIL=900
+_IDLE_MAX_INTERVAL=60
+# The poll lock's staleness, RE-DERIVED FROM THE SCHEDULE rather than from the window (#31721, see
+# #31405). A live watch touches its lock before every sleep, so the longest a live lock goes
+# untouched is the longest interval, one request at the client's 25 s limit, and the membership
+# question at 10 s: 60 + 25 + 10 = 95 s. 120 s is that with margin. The old rule, window + 60,
+# would have left an abandoned lock in force for 29 minutes. And a lock whose holder left its pid is
+# judged by the pid, not by age at all: alive holds it, dead releases it (#31746).
+_IDLE_LOCK_STALE=120
+# How long a turn that has just ended waits for the previous watch to stand down (see HANDOVER in
+# the idle mode). The old watch notices within one 3 s slice of its sleep, or once a request it is
+# already waiting on returns (25 s at the client's limit); 40 s covers both with margin.
+_IDLE_HANDOVER_WAIT=40
 
 # ---- 0. Resolve a jq BEFORE anything is parsed with it. ----
 # THIS MUST BE THE PROJECT'S OWN RESOLVER, NOT `command -v jq` (#31196 QA round 2).
@@ -419,6 +471,27 @@ _acquire() {
     return 1
 }
 
+# The POLLER lock's own rule (#31721). A watch now lives for most of half an hour, so "older than N
+# seconds" cannot be the test for a lock whose holder is still alive: a laptop that slept through a
+# touch would come back to find a second watcher started beside the first. So a lock carrying its
+# holder's pid is judged by the pid alone - alive holds it however old it is, dead releases it at
+# once, on every platform, because kill -0 is a builtin. Only a lock with no readable pid (one being
+# taken this instant, or made by hand) falls back to age, against _IDLE_LOCK_STALE.
+_acquire_poller() {
+    local dir="$1" max_age="$2" pid=""
+    if _take "$dir"; then return 0; fi
+    if [[ -f "${dir}/pid" ]]; then
+        { IFS= read -r pid || true; } < "${dir}/pid" 2>/dev/null || true
+    fi
+    if [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]]; then
+        if kill -0 "$pid" 2>/dev/null; then return 1; fi
+    else
+        _lock_is_stale "$dir" "$max_age" || return 1
+    fi
+    _drop "$dir"
+    _take "$dir"
+}
+
 _release_mutex() {
     _drop "$_mutex_dir"
     _held_mutex=""
@@ -444,6 +517,7 @@ trap '_release_all' EXIT
 _poll_once() {
     FORMATION_BLOCK=""
     FORMATION_NEWEST=""
+    FORMATION_DIRECTED_IDS=""
 
     # Hold the mutex from BEFORE THE LAST-SEEN READ until after "seen" is written. The read is the
     # first half of the read-then-write that must not interleave, so leaving it outside the lock -
@@ -457,14 +531,26 @@ _poll_once() {
     local last_seen
     mmry_formation_state_read "$session_id" || true
     last_seen="$MMRY_FS_LAST_SEEN"
+    # Directed messages already printed and not yet reported to the service as read (#31721).
+    _fc_shown_owed="$MMRY_FS_SHOWN"
 
     # Not enough time left to ask and still answer inside the budget: ask nothing (#31746).
     _fc_limit_request || { _release_mutex; return 1; }
 
-    if ! mmry_get_formation_transmissions "$formation_id" "$session_id" "$last_seen" 2>/dev/null; then
+    if ! mmry_get_formation_transmissions "$formation_id" "$session_id" "$last_seen" "$_fc_shown_owed" 2>/dev/null; then
         _release_mutex; return 1
     fi
     [[ "${MMRY_HTTP_CODE:-}" =~ ^2[0-9][0-9]$ ]] || { _release_mutex; return 1; }
+
+    # READ STATUS, REPORTED (#31721). The poll that just succeeded carried the owed ids, so the
+    # service has recorded them and the sender can see they were read. Forget them now, still under
+    # the delivery mutex, so nothing else can be appending to the list at the same moment. A poll
+    # that failed above keeps them, and the next one reports them instead: a report can be late, it
+    # is never lost, and it is never made for something that was not printed.
+    if [[ -n "$_fc_shown_owed" ]]; then
+        mmry_formation_state_seen "$last_seen" "$session_id" "" || true
+        _fc_shown_owed=""
+    fi
     [[ -n "${MMRY_RESPONSE:-}" ]] || { _release_mutex; return 1; }
 
     # ---- Parse. Without jq there is no safe way to read this, so do nothing. ----
@@ -497,12 +583,16 @@ _poll_once() {
     # rendered lines do, cannot shear the fields read after it. A NUL inside a value is removed,
     # which is what the command substitution that used to hold each field did to it anyway. A
     # response that is not an array, or is empty, produces no fields, and that is "nothing to say".
-    local count="" directed_count="" system_count="" newest="" lines=""
+    # The fifth field (#31721) is the ids of the DIRECTED lines in this batch, comma-separated. Once
+    # the batch has been printed they are owed to the service as read, and the next poll reports
+    # them; see _mark_shown.
+    local count="" directed_count="" system_count="" newest="" directed_ids="" lines=""
     {
         IFS= read -r -d '' count || true
         IFS= read -r -d '' directed_count || true
         IFS= read -r -d '' system_count || true
         IFS= read -r -d '' newest || true
+        IFS= read -r -d '' directed_ids || true
         IFS= read -r -d '' lines || true
     } < <("$MMRY_JQ" -j '
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
@@ -511,6 +601,8 @@ _poll_once() {
               ([.[] | select((.recipientMemberID // null) != null)] | length | tostring),
               ([.[] | select(system)] | length | tostring),
               (([.[].sentDate // empty] | max) // "" | tostring),
+              ([.[] | select((.recipientMemberID // null) != null) | (.transmissionID // empty)
+                    | select(type == "number") | tostring] | join(",")),
               ([ .[] | (if system
                         then "  [MMRY] "
                         else "  [" + ((.senderRole // "member")) + " " + ((.senderSessionID // "?") | tostring) + "] "
@@ -566,6 +658,7 @@ _poll_once() {
     FORMATION_BLOCK+="are about to touch. Do not reply to the formation unless you have something worth${nl}"
     FORMATION_BLOCK+="transmitting."
     FORMATION_NEWEST="$newest"
+    FORMATION_DIRECTED_IDS="${directed_ids//[!0-9,]/}"
     return 0
 }
 
@@ -585,11 +678,89 @@ _mark_shown() {
     if [[ -n "$FORMATION_NEWEST" ]]; then
         # Pass the resolved session id: in the hook runtime it may only be on stdin, and "seen" must
         # record against the same key the read used, or the next poll re-delivers everything (#31143).
-        mmry_formation_state_seen "$FORMATION_NEWEST" "$session_id" || true
+        #
+        # The same write records the directed ids just printed as OWED to the service as read
+        # (#31721), added to any still owed. It happens here, after printing, so an id is only ever
+        # reported for a line that was shown. The list keeps its newest 50; a session owing more
+        # than that has not reached the service in 50 directed messages, and the oldest of them are
+        # the ones whose read time is least worth having.
+        local owed="${_fc_shown_owed:-}"
+        if [[ -n "$FORMATION_DIRECTED_IDS" ]]; then
+            owed="${owed:+${owed},}${FORMATION_DIRECTED_IDS}"
+            local -a _fc_ids=()
+            IFS=',' read -r -a _fc_ids <<< "$owed" || true
+            if (( ${#_fc_ids[@]} > 50 )); then
+                _fc_ids=("${_fc_ids[@]:${#_fc_ids[@]}-50}")
+            fi
+            owed=""
+            local _fc_id
+            for _fc_id in "${_fc_ids[@]}"; do
+                if [[ -n "$_fc_id" ]]; then owed="${owed:+${owed},}${_fc_id}"; fi
+            done
+        fi
+        mmry_formation_state_seen "$FORMATION_NEWEST" "$session_id" "$owed" || true
     fi
     # The claim is complete, so the mutex can go now rather than at exit; the idle poller needs it
     # released before it sleeps, or it would hold it for the rest of its budget.
     _release_mutex
+}
+
+# ---- The idle watch's schedule and its renewal question (#31721) -----------------------------
+# Sets _fc_interval to the seconds to wait before the next ask, given the seconds since the turn
+# ended. A global rather than stdout, because `$(f)` would be a process per iteration.
+_idle_interval() {
+    local elapsed="${1:-0}"
+    if [[ "$MMRY_IDLE_POLL_INTERVAL" =~ ^[0-9]+$ ]] && (( MMRY_IDLE_POLL_INTERVAL > 0 )); then
+        _fc_interval=$MMRY_IDLE_POLL_INTERVAL
+    elif (( elapsed < _IDLE_EARLY_UNTIL )); then
+        _fc_interval=$_IDLE_EARLY_INTERVAL
+    elif (( elapsed < _IDLE_MID_UNTIL )); then
+        _fc_interval=$_IDLE_MID_INTERVAL
+    elif (( elapsed < _IDLE_LATE_UNTIL )); then
+        _fc_interval=$_IDLE_LATE_INTERVAL
+    else
+        _fc_interval=$_IDLE_MAX_INTERVAL
+    fi
+}
+
+# Sleeps the given seconds in slices of at most 3, and returns 1 at once when a turn that has just
+# ended has asked this watch to stand down (the HANDOVER in the idle mode). 3 s bounds how long the
+# new watch waits; it costs one short-lived process per slice and nothing on the network.
+_idle_sleep() {
+    local left="${1:-0}" slice
+    while (( left > 0 )); do
+        [[ ! -d "$_handover_dir" ]] || return 1
+        slice=3
+        (( left < slice )) && slice=$left
+        sleep "$slice" || return 1
+        left=$(( left - slice ))
+    done
+    return 0
+}
+
+# Returns 0 only when this session is still in this formation by its own record AND the service
+# says, in so many words, that it is a member. Every other answer - not a member, an error, a 404 from
+# a service too old to have the route, no answer, a body that is not the expected object - returns 1,
+# and the watch stops instead of renewing. A renewal wakes the session, so it is made on a fact, never
+# on a guess. One retry covers a single dropped request at the one moment it matters.
+_idle_confirmed_member() {
+    mmry_formation_state_read "$session_id" || return 1
+    [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || return 1
+    local MMRY_HTTP_MAX_TIME=10 MMRY_HTTP_CONNECT_TIMEOUT=5 attempt member=""
+    for attempt in 1 2; do
+        if mmry_get_formation_sent "$formation_id" "$session_id" 2>/dev/null \
+            && [[ "${MMRY_HTTP_CODE:-}" =~ ^2[0-9][0-9]$ ]]; then
+            member="$("$MMRY_JQ" -r 'if type == "object" and (.member | type) == "boolean" then (.member | tostring) else "unknown" end' \
+                <<< "${MMRY_RESPONSE:-}" 2>/dev/null || true)"
+            member="${member%$'\r'}"
+            [[ "$member" == "true" ]] && return 0
+            [[ "$member" == "false" ]] && return 1
+        fi
+        # Only a request that never got an answer, or got a server fault, is worth asking again.
+        [[ "${MMRY_HTTP_CODE:-000}" =~ ^(000|5[0-9][0-9])$ ]] || return 1
+        if (( attempt == 1 )); then sleep 3 || return 1; fi
+    done
+    return 1
 }
 
 # ---- 3. Deliver, in whichever way this runtime actually listens to. ----
@@ -650,6 +821,11 @@ case "$mode" in
         else
             _event_name="UserPromptSubmit"
             _preamble="These formation messages were sent while this session was idle and had not yet been shown. They may be stale; check before acting."
+            # A person typed, so the next watch follows real work and must start at the fast end of
+            # its schedule, not at the slow end a renewal earns (#31721). One test, no process,
+            # unless a renewal marker is actually there.
+            [[ -d "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" ]] \
+                && { rmdir "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
         fi
         _poll_once || exit 0
         printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rs \
@@ -695,11 +871,63 @@ case "$mode" in
             _mark_shown
             exit 2
         fi
-        _acquire "$_poller_dir" $(( MMRY_IDLE_POLL_SECONDS + 60 )) || exit 0
+        # HANDOVER (#31721 requirement 3). A watch lives for up to 28 minutes, so a member that ends a
+        # later turn usually finds the previous watch still running - and by then that watch may be
+        # asking only once a minute, which would make a reply to the turn that just ended slower than
+        # the flat 15 s it replaced. So a turn that ends while a watch is LIVE asks it to stand down
+        # and takes over with a fresh window that starts at the fast end. The old watch notices
+        # within one 3 s slice of its sleep (or as soon as a request it is waiting on returns) and
+        # exits quietly, releasing the lock; this one waits for it rather than ever running beside
+        # it, so there is still exactly one watcher. Nothing is killed: a watch killed between
+        # printing and recording what it printed could lose or repeat a message (#31746).
+        #
+        # Only a holder whose pid is alive is asked. A pid-less lock is being taken this instant or
+        # was made by hand, and is left to the age rule as before.
+        _handover_dir="${MMRY_TMPDIR}/.mmry-formation-handover-${_safe_sid}"
+        if ! _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE"; then
+            _holder=""
+            if [[ -f "${_poller_dir}/pid" ]]; then
+                { IFS= read -r _holder || true; } < "${_poller_dir}/pid" 2>/dev/null || true
+            fi
+            if [[ "$_holder" =~ ^[0-9]+$ ]] && kill -0 "$_holder" 2>/dev/null; then
+                mkdir "$_handover_dir" 2>/dev/null || true
+                _waited=0
+                until _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE"; do
+                    # Giving up WITHDRAWS the request, or the old watch would stand down at its next
+                    # slice with nobody to take over, and the member would be watched by nobody.
+                    (( _waited < _IDLE_HANDOVER_WAIT )) || { rmdir "$_handover_dir" 2>/dev/null || true; exit 0; }
+                    sleep 1 || exit 0
+                    _waited=$(( _waited + 1 ))
+                done
+            else
+                # The holder went between the two looks, or has not written its pid yet. One more
+                # try; if somebody is taking the lock at this instant, they are the watcher.
+                _acquire_poller "$_poller_dir" "$_IDLE_LOCK_STALE" || exit 0
+            fi
+        fi
         _held_poller=1
+        # Whatever asked a PREVIOUS holder to stand down is not addressed to this one.
+        rmdir "$_handover_dir" 2>/dev/null || true
 
-        _deadline=$(( $(date +%s 2>/dev/null || printf '0') + MMRY_IDLE_POLL_SECONDS ))
+        # A watch that follows a renewal starts at the slow end of the schedule: the renewal turn
+        # asked nobody anything, so nothing is about to be answered (#31721 requirement 4). The
+        # marker is only trusted while fresh, and any typed prompt removes it (see the prompt mode).
+        _renew_marker="${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}"
+        _offset=0
+        if [[ -d "$_renew_marker" ]]; then
+            _lock_is_stale "$_renew_marker" 120 || _offset=$_IDLE_LATE_UNTIL
+            rmdir "$_renew_marker" 2>/dev/null || true
+        fi
+
+        _start="$(date +%s 2>/dev/null || printf '0')"
+        [[ "$_start" =~ ^[0-9]+$ ]] || exit 0
+        _deadline=$(( _start + MMRY_IDLE_POLL_SECONDS ))
         while :; do
+            # LEAVING STOPS THE WATCH (#31721). One file read, no process: the record is gone after
+            # /mmry:formation leave, and names another formation after a join elsewhere.
+            mmry_formation_state_read "$session_id" || exit 0
+            [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || exit 0
+
             if _poll_once; then
                 printf '%s\n' "$FORMATION_BLOCK" >&2 || exit 0
                 _mark_shown
@@ -707,11 +935,37 @@ case "$mode" in
             fi
             _now="$(date +%s 2>/dev/null || printf '0')"
             [[ "$_now" =~ ^[0-9]+$ ]] || exit 0
-            (( _now + MMRY_IDLE_POLL_INTERVAL <= _deadline )) || exit 0
+            (( _now < _deadline )) || break
+            _idle_interval $(( _now - _start + _offset ))
+            # The window is honoured to its end: the last wait is cut short at the deadline and one
+            # final ask is made there, rather than giving up as much as a whole interval early.
+            (( _now + _fc_interval <= _deadline )) || _fc_interval=$(( _deadline - _now ))
             # Keep the poller lock's mtime honest so a live poller is never mistaken for a stale one.
             touch "$_poller_dir" 2>/dev/null || true
-            sleep "$MMRY_IDLE_POLL_INTERVAL" || exit 0
+            # Sleep in slices, so a turn that has just ended can take over within 3 s (see HANDOVER).
+            # A watch asked to stand down exits quietly: it does not renew, because the watch that
+            # asked is already listening.
+            _idle_sleep "$_fc_interval" || exit 0
+            [[ ! -d "$_handover_dir" ]] || exit 0
         done
+
+        # The window is spent and nothing arrived. Renew only if this session is STILL in this
+        # formation and the service CONFIRMS it; otherwise stop quietly, as the watch always did. A
+        # turn that ended meanwhile has a watch waiting to take over, and needs no wake from this one.
+        [[ ! -d "$_handover_dir" ]] || exit 0
+        _idle_confirmed_member || exit 0
+        mkdir "$_renew_marker" 2>/dev/null || true
+        # TWO WORDS, NOT SILENCE. Asked to end its turn without replying, a model produced no output,
+        # and Claude Code 2.1.285 answered that with a prompt of its own ("Your previous response had
+        # no visible output...") - a second turn for every renewal, seen in the live run on #31721. A
+        # short visible line is one turn, and tells a person reading the window what happened.
+        if (( MMRY_IDLE_POLL_SECONDS >= 120 )); then
+            _quiet="$(( MMRY_IDLE_POLL_SECONDS / 60 )) minutes"
+        else
+            _quiet="${MMRY_IDLE_POLL_SECONDS} seconds"
+        fi
+        printf '%s\n' "MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with exactly: Still listening." >&2 || exit 0
+        exit 2
         ;;
 
     *)

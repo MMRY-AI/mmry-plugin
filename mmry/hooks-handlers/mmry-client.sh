@@ -1104,19 +1104,39 @@ mmry_send_formation_transmission() {
     return $rc
 }
 
+# SHOWN_IDS (#31721) is a comma-separated list of the DIRECTED transmission ids this session has
+# already printed. The service records each as read, which is how the sender learns it was seen, and
+# it costs no request of its own: it rides on the poll the check was going to make anyway, so nothing
+# is reported before the message has actually been shown. Only digits and commas are passed;
+# anything else is dropped here rather than sent.
 mmry_get_formation_transmissions() {
-    # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601]
+    # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601] [SHOWN_IDS]
     #
     # Both parameters are encoded, as its siblings on the claims endpoints already were. The
     # session id is not ours to assume the shape of, and "since" is an ISO timestamp whose colons
     # are reserved characters in a query string: an unencoded value is a request the server is
     # entitled to read differently from the one we meant to send (#31196 QA round 2).
-    local formation_id="$1" session_id="$2" since="${3:-}"
+    local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}"
     local path="/api/formations/${formation_id}/transmissions?sessionId=$(_mmry_urlencode "$session_id")"
     if [[ -n "$since" ]]; then
         path="${path}&since=$(_mmry_urlencode "$since")"
     fi
+    shown="${shown//[!0-9,]/}"
+    if [[ -n "${shown//,/}" ]]; then
+        path="${path}&shownIds=${shown}"
+    fi
     _mmry_request GET "$path"
+}
+
+mmry_get_formation_sent() {
+    # Usage: mmry_get_formation_sent FORMATION_ID SESSION_ID
+    #
+    # The directed messages this session sent in the formation, newest first, each with whether its
+    # recipient has been shown it (#31721). The answer also says whether the service still holds
+    # this session in this formation ("member"), which is what the idle watch asks before it renews
+    # itself: a member keeps listening for as long as it is in the formation, and no longer.
+    local formation_id="$1" session_id="$2"
+    _mmry_request GET "/api/formations/${formation_id}/transmissions/sent?sessionId=$(_mmry_urlencode "$session_id")"
 }
 
 

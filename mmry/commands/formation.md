@@ -19,19 +19,33 @@ are four moments a member receives:
 
 1. **After any tool call.** A member that is working picks messages up between its own steps.
 2. **While it is sitting idle.** When a member's turn ends, MMRY keeps watching on its behalf in
-   the background for about four minutes and wakes it if something arrives. This is the case that
-   matters most, because a member is usually idle at exactly the moment the lead has something to
-   tell it.
-3. **When its human comes back and types.** If the background watch had already given up, anything
+   the background, for as long as this session is in the formation, and wakes it if something
+   arrives. This is the case that matters most, because a member is usually idle at exactly the
+   moment the lead has something to tell it. The watch checks every few seconds for the first
+   minute after a turn ends, when a reply is most likely, and less often the longer the member sits
+   idle, down to once a minute. Every time a turn ends it starts again at its fastest, so a quick
+   reply to what the member just said arrives quickly however long it has been in the formation.
+3. **When its human comes back and types.** If the background watch could not run, anything
    outstanding is shown on the next prompt, before the member acts on it.
 4. **When that session next starts.** Anything still unread is shown then, marked as having
    arrived while the session was not running, and flagged as possibly stale.
 
-**A truly idle session may not receive.** The background watch gives up after about four minutes,
-and it cannot run at all if the session has been closed, or is on a machine that has gone to
-sleep. After that, every remaining path needs somebody to touch that session: a tool call, a typed
-prompt, or a restart. Nothing is lost, the message is held on the server, but it may go unread for
-as long as the session stays untouched, and the lead is not told that it has.
+**The watch renews itself, and you may see it do so.** Claude Code lets a background check run for
+a limited time, so after about half an hour of silence the watch hands over to a fresh one. To do
+that it wakes the session briefly with a note that MMRY is still listening; the session replies
+"Still listening." and a new watch starts. That short turn in the window is expected and needs
+nothing from anybody. The watch stops renewing when this session leaves the formation, joins a
+different one, or the service says it is no longer a member, for example because the formation was
+closed out.
+
+**A session that cannot run may not receive.** The watch keeps listening for as long as the session
+is open and in the formation, but it cannot run at all if the session has been closed, or is on a
+machine that has gone to sleep. It also stops, rather than waking the session on a guess, if MMRY
+cannot confirm with the service at the moment of renewal that this session is still a member. After
+that, every remaining path needs somebody to touch that session: a tool call, a typed prompt, or a
+restart. Nothing is lost, the message is held on the server, but it may go unread for as long as the
+session stays untouched. The sender can see that it has not been read: see "Whether A Directed
+Message Has Been Read" below.
 
 **What to do instead when it matters.** If a member has to act on something now, do not assume the
 message arrived. Ask that session to run `/mmry:formation status`: that is a tool call, and it
@@ -63,6 +77,29 @@ which updates itself once the marketplace carries a newer version than the insta
 
 A message is never delivered twice. The background watch and the tool-call path share one record
 of what this session has already been shown.
+
+## Whether A Directed Message Has Been Read
+
+A message sent to one member with `say --to` can be checked. `/mmry:formation roster` lists, under
+the members, each directed message this session sent, newest first, as either `NOT READ YET` or
+`READ` with the time:
+
+```
+Directed messages this session sent, newest first:
+  to member 12 (Wingman)  READ 2026-10-07 14:02:03 UTC  "rewrite the validator"
+  to member 14 (Wingman)  NOT READ YET  "take the import bug"
+```
+
+**Read means it has been shown to that member,** printed into their session by the plugin or
+attached to one of their tool responses through the connector. It does not mean they have acted on
+it. Not read yet means they have not been shown it; the usual reason is a session that is closed,
+asleep, or untouched since before the message was sent. The read time is when MMRY learned the
+message was shown, which is normally within seconds of it being shown. With the plugin, a session
+that is closed the moment after it was shown reports the read when it next starts.
+
+A broadcast has no read state, because it has no single reader, and neither does a notice MMRY sends
+on somebody's behalf, such as an assignment change. Only messages this session sent with `--to` are
+listed.
 
 ## How to Run It
 
@@ -122,6 +159,10 @@ The member id is what `say --to` addresses. Report the list as the script prints
 have left are shown last and marked; a message cannot be directed at them, and the server refuses
 it rather than sending it into a void.
 
+When this session has sent directed messages, the roster also lists them with whether each has been
+read (#31721). Report those lines as printed, including `NOT READ YET`: that is the line that tells a
+lead to follow up, so never summarise it as "sent".
+
 ### say
 
 The user gives the message, for example `/mmry:formation say "I am refactoring FormationService, do not touch it"`.
@@ -165,7 +206,7 @@ Nothing is sent in any of those cases, and the message is not quietly broadcast 
 
 Send one when it affects what somebody else is doing: you are about to change a file, you are
 blocked, you have finished something they are waiting on. Do not narrate. Every member is
-interrupted by it: on its next tool call if it is working, or within a few minutes if it is idle.
+interrupted by it: on its next tool call if it is working, or within a minute if it is idle.
 A member whose session is closed reads it when that session next starts. See "When A Member
 Actually Receives A Message" above before assuming somebody has acted on it.
 
@@ -196,7 +237,7 @@ this.** A wingman reassigning a colleague is refused, and the refusal comes from
 decides it from the roster rather than from anything the request says.
 
 **It reaches that member and nobody else.** The assigned session sees it on its next tool call, or
-within a few minutes if it is idle, marked as directed at it. The other members are not
+within a minute if it is idle, marked as directed at it. The other members are not
 interrupted, because an instruction that concerns one person and is read by five is the waste the
 formation exists to remove. An assignment is the message most likely to be sent to somebody who is
 idle and waiting, so if it has to be acted on now, confirm rather than assume.
