@@ -89,7 +89,7 @@ MMRY_TMPDIR="${TMPDIR:-/tmp}"
 # model with no human input when it exited 2. A probe that overran its timeout (20 s, sleeping 40)
 # was killed outright, its TERM trap never ran, and the model was NOT woken. So a watch cannot
 # outlive its registration, and it cannot be relied on to hand anything over once it is killed.
-# The evidence is on the task and in docs/evidence/31721-hook-ceiling.md.
+# The method, the client version and the raw logs are in docs/evidence/31721/README.md.
 #
 # SO THE WATCH RENEWS ITSELF, BEFORE THE CEILING, FOR AS LONG AS THE MEMBER IS IN THE FORMATION.
 # When its window ends with nothing to say, it asks the service whether this session is still a
@@ -880,8 +880,11 @@ case "$mode" in
             fi
             _now="$(date +%s 2>/dev/null || printf '0')"
             [[ "$_now" =~ ^[0-9]+$ ]] || exit 0
+            (( _now < _deadline )) || break
             _idle_interval $(( _now - _start + _offset ))
-            (( _now + _fc_interval <= _deadline )) || break
+            # The window is honoured to its end: the last wait is cut short at the deadline and one
+            # final ask is made there, rather than giving up as much as a whole interval early.
+            (( _now + _fc_interval <= _deadline )) || _fc_interval=$(( _deadline - _now ))
             # Keep the poller lock's mtime honest so a live poller is never mistaken for a stale one.
             touch "$_poller_dir" 2>/dev/null || true
             sleep "$_fc_interval" || exit 0
@@ -891,7 +894,16 @@ case "$mode" in
         # formation and the service CONFIRMS it; otherwise stop quietly, as the watch always did.
         _idle_confirmed_member || exit 0
         mkdir "$_renew_marker" 2>/dev/null || true
-        printf '%s\n' "MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last $(( MMRY_IDLE_POLL_SECONDS / 60 )) minutes. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report: end your turn now, without replying." >&2 || exit 0
+        # TWO WORDS, NOT SILENCE. Asked to end its turn without replying, a model produced no output,
+        # and Claude Code 2.1.285 answered that with a prompt of its own ("Your previous response had
+        # no visible output...") - a second turn for every renewal, seen in the live run on #31721. A
+        # short visible line is one turn, and tells a person reading the window what happened.
+        if (( MMRY_IDLE_POLL_SECONDS >= 120 )); then
+            _quiet="$(( MMRY_IDLE_POLL_SECONDS / 60 )) minutes"
+        else
+            _quiet="${MMRY_IDLE_POLL_SECONDS} seconds"
+        fi
+        printf '%s\n' "MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with exactly: Still listening." >&2 || exit 0
         exit 2
         ;;
 

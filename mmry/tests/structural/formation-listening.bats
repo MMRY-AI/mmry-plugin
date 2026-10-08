@@ -19,7 +19,7 @@
 #   requirement 5  the poll lock: a live holder keeps it however old, a dead one releases it, and
 #                  a pid-less lock goes by the age derived from the schedule.
 # The live renewal across real Claude Code sessions is not provable here; see
-# docs/evidence/31721-hook-ceiling.md for that measurement and the live test.
+# docs/evidence/31721/README.md for that measurement and the live test.
 
 setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"
@@ -108,7 +108,7 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
 
     [ "$status" -eq 2 ] || { echo "expected a renewal wake (exit 2), got ${status}: ${output}"; return 1; }
     [[ "$output" == *"MMRY FORMATION WATCH RENEWED (formation 4242)"* ]] || { echo "no renewal notice: ${output}"; return 1; }
-    [[ "$output" == *"end your turn now"* ]]
+    [[ "$output" == *"Reply with exactly: Still listening."* ]]
     # A renewal is not a message, and must never be dressed as one.
     [[ "$output" != *"FORMATION TRANSMISSION"* ]]
     # It polled first, and asked about membership exactly once, at the end.
