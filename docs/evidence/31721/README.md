@@ -69,3 +69,38 @@ so a polite stop would be logged. The registration of each probe is in `*.settin
 ## Live test: idle longer than three hook windows, still receives (requirement 1)
 
 See `live/` once run. Recorded below.
+
+## Human steps: the same live test on macOS, and in the interactive Claude Code window
+
+The live test above was driven headless on Windows. Two legs remain for a person:
+
+**A. macOS, headless, the same harness (about 95 minutes, unattended).**
+Needs: a Mac with Claude Code signed in (`claude --version` recorded), node, git, jq; the #31721
+API deployed to Integration with migration 063 applied (the PM does both); an Integration test
+account email and password nobody else uses.
+
+    git clone -b 31721/formation-listening https://github.com/MMRY-AI/mmry-plugin.git ~/mmry-31721
+    cd ~/mmry-31721/docs/evidence/31721/live
+    bash setup.sh ~/live31721
+    LIVE_DIR=~/live31721 LIVE_API=https://mnemo-integration-d8h6bzh2bxgrc3e4.westus3-01.azurewebsites.net \
+        RENEWALS_NEEDED=3 node live.js
+
+`live.js` registers its own throwaway account on the target, so no credential is typed. Pass when
+`~/live31721/live.log` ends with a `PASS R repeated LIVE-31721-...` line and a `sender view:` line
+with `"read":true`, and `~/live31721/watch.log` shows at least three `rc=2 said=MMRY FORMATION
+WATCH RENEWED` lines before the line that delivered. Send back both logs and `claude --version`.
+
+**B. Interactive window (any platform, about 90 minutes, nobody types into window 1).**
+1. Install the branch's handlers where the plugin runs them: back up `~/.claude/mmry/hooks-handlers`,
+   then copy `mmry/hooks-handlers/*` from the branch over it. In the installed plugin's
+   `hooks/hooks.json` (under `~/.claude/plugins/cache/mmry-plugin/mmry/<version>/`), set the Stop
+   formation-check entry's `"timeout"` to 1800. Restart Claude Code.
+2. Window 1: `/mmry:formation start "live 31721"`, note the id. Window 2: `/mmry:formation join <id>`,
+   then `/mmry:formation roster` and note window 1's member id.
+3. Leave window 1 alone. Expect, about every 28 minutes, a short turn in window 1 reading "Still
+   listening." with nobody typing.
+4. After the third such turn, in window 2: `/mmry:formation say "LIVE check, reply with the word
+   BANANA" --to <window 1 member id>`.
+5. Pass: within about a minute window 1 shows the message marked DIRECTED TO YOU and replies, with
+   nobody touching it; then `/mmry:formation roster` in window 2 shows the message as `READ <time>`.
+6. Restore the backed-up handlers and the original timeout.
