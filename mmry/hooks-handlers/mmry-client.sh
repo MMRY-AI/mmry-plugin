@@ -13,11 +13,19 @@ set -euo pipefail
 # The directory comes from BASH_SOURCE without a fork (#31746). It was `$(cd "$(dirname ...)" && pwd)`,
 # two processes paid by every handler that sources this file, the per-prompt formation check among
 # them. Sourcing a sibling needs a path, not an absolute one; hook-guard.sh explains the idiom.
+# DEFINITIONS ONLY, ON REQUEST (#31893). The per-prompt Foundation hook needs the set verifier below and
+# nothing that starts a process: resolving jq costs a `jq --version` and loading the config a jq parse,
+# five processes on Windows, which under load is five seconds of a 20-second hook. With
+# MMRY_CLIENT_DEFINE_ONLY=1 this file defines its functions and its defaults and starts nothing; jq is
+# not resolved and the config is not loaded, so a caller that sets it may call only functions that
+# need neither. Every other caller is unchanged.
+if [[ "${MMRY_CLIENT_DEFINE_ONLY:-}" != "1" ]]; then
 _mmry_client_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_mmry_client_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_client_dir="."
 source "${_mmry_client_dir}/lib-jq.sh"
 unset _mmry_client_dir
 mmry_resolve_jq || true
+fi
 
 # ============================================================================
 # 1. CONFIG LOADING
@@ -445,6 +453,9 @@ mmry_read_foundation_set() {
     MMRY_FND_VERDICT=""
     MMRY_FND_SET=""
     MMRY_FND_SETID=""
+    # The file exactly as read, on rc 0 only (#31893): the per-prompt hook keeps it beside the parts it
+    # prepared and serves them only while the file still reads the same.
+    MMRY_FND_RAW=""
 
     # THE ONE READ (#31597). Every answer below comes from this copy and nothing reopens the file,
     # so a replacement that lands while this runs either happened before the read, and the new set
@@ -513,7 +524,21 @@ mmry_read_foundation_set() {
     fi
 
     local act_cksum act_count
-    read -r act_cksum act_count < <(printf '%s' "$body" | cksum 2>/dev/null)
+    # WITHIN A TIME LIMIT WHEN THE CALLER GIVES ONE (#31893). The per-prompt hook verifies in its own
+    # process, with no worker to kill, so it passes the seconds it has left in MMRY_FND_CKSUM_SECS and a
+    # cksum that has not answered by then is a verdict of its own, "slow", rc 4, never a wait past the
+    # hook's limit. The cksum is left to finish on its own; it holds none of the caller's descriptors
+    # beyond its pipe, so nothing that reads the hook waits for it. Without the variable, unchanged.
+    if [[ "${MMRY_FND_CKSUM_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then
+        local _ck_rc=0
+        read -r -t "$MMRY_FND_CKSUM_SECS" act_cksum act_count < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; printf '%s' "$body" | cksum 2>/dev/null) || _ck_rc=$?
+        if (( _ck_rc > 128 )); then
+            MMRY_FND_VERDICT='slow|the cached directives could not be checked in the time this prompt allows'
+            return 4
+        fi
+    else
+        read -r act_cksum act_count < <(printf '%s' "$body" | cksum 2>/dev/null)
+    fi
     if [[ ! "$act_cksum" =~ ^[0-9]+$ ]]; then
         MMRY_FND_VERDICT='unreadable|the cached directives could not be read for verification'
         return 3
@@ -540,6 +565,7 @@ mmry_read_foundation_set() {
     body="${body%$'\n'}"
     MMRY_FND_SET="$body"
     MMRY_FND_SETID="$exp_cksum"
+    MMRY_FND_RAW="$raw"
     # The checksum is the verdict's fourth field (#31411 QA round 2): the hook names the set's
     # version in every part and record, and the by-reference copy is checked against it.
     MMRY_FND_VERDICT="ok ${exp_entries} ${act_bytes} ${exp_cksum}"
@@ -1376,4 +1402,4 @@ mmry_health() {
 # 7. AUTO-INIT
 # ============================================================================
 
-mmry_load_config
+[[ "${MMRY_CLIENT_DEFINE_ONLY:-}" == "1" ]] || mmry_load_config

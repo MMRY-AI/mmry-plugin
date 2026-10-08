@@ -54,6 +54,8 @@ _seed_lines() {
     awk -v n="$1" -v t="${2:-keep every sentence short and every claim backed by something you ran}" \
         'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: %s.\n", i, t }' > "$CACHE"
     fnd_seal "$CACHE" "" "$SET"
+    # Sealing runs cksum too; only what the hook starts is counted.
+    : > "$CALLS"
 }
 
 _fire() {
@@ -71,13 +73,14 @@ _fire_all() {
 _ctx() {
     PART_TEXT=""
     [[ -s "$TEST_TMPDIR/part$1.json" ]] || return 0
-    PART_TEXT="$(jq -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part$1.json" | tr -d '\r' && printf '.')" || return 1
+    PART_TEXT="$("$REAL_JQ" -j '.hookSpecificOutput.additionalContext // ""' "$TEST_TMPDIR/part$1.json" | tr -d '\r' && printf '.')" || return 1
     PART_TEXT="${PART_TEXT%.}"
 }
-_sysmsg() { [[ -s "$TEST_TMPDIR/part$1.json" ]] && jq -r '.systemMessage // ""' "$TEST_TMPDIR/part$1.json" | tr -d '\r'; }
+_sysmsg() { [[ -s "$TEST_TMPDIR/part$1.json" ]] && "$REAL_JQ" -r '.systemMessage // ""' "$TEST_TMPDIR/part$1.json" | tr -d '\r'; }
 
 # The parts that arrived, rejoined in label order, into JOINED; their count into NPARTS; and the
 # version each named, space separated, into VERSIONS.
+# Parsed with the real jq, not the logging one, so a count of jq is a count of what the hook started.
 _rejoin() {
     local k
     JOINED=""; NPARTS=0; VERSIONS=""
@@ -85,7 +88,8 @@ _rejoin() {
         _ctx "$k"
         [[ "$PART_TEXT" =~ This\ is\ PART\ $k\ OF\ [0-9]+\ of\ the\ set,\ version\ ([0-9]+)\. ]] || continue
         VERSIONS+=" ${BASH_REMATCH[1]}"
-        JOINED+="${PART_TEXT#*$'\n\n'}"
+        # After the part's own heading: a note about a previous turn can come before it.
+        JOINED+="${PART_TEXT#*if their versions differ, tell the user.$'\n\n'}"
         NPARTS=$(( NPARTS + 1 ))
     done
 }
@@ -94,13 +98,35 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
 
 @test "in-time R2: a six-part prompt verifies the set once, not once per part, and it arrives whole and in order" {
     _seed_lines 600
-    _fire_all
+    # The detached refresh decision (its own test below) starts a jq of its own off the prompt's
+    # path; it is switched off here so the count is the prompt's path alone.
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
     _rejoin; _want
     [ "$NPARTS" -eq 6 ] || { echo "expected six parts, got $NPARTS"; return 1; }
     [ "$JOINED" = "$WANT" ] || { echo "the six parts do not rejoin into the set (${#JOINED} of ${#WANT} bytes)"; return 1; }
     local n; n="$(_calls cksum)"
     [ "$n" -eq 1 ] || { echo "the set was verified $n times on one prompt"; return 1; }
     [ "$(_calls jq)" -eq 0 ] || { echo "a jq was started on the prompt path: $(_calls jq)"; return 1; }
+}
+
+@test "in-time: the daily refresh is still decided, off the prompt's path, and at most once in its interval" {
+    _seed_lines 3
+    # A configured account whose set is a year old: a refresh is due.
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":60}\n' > "$MMRY_CONFIG_FILE"
+    touch -t 202501010000 "$SET"
+    _fire 1
+    _ctx 1
+    [[ "$PART_TEXT" == *"Directive 0003"* ]] || { echo "the prompt did not deliver: ${PART_TEXT:0:200}"; return 1; }
+    # Decided by a detached process, so it is waited for, up to 30 s.
+    local i; for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
+    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "no refresh was decided"; return 1; }
+    # Once decided, the next prompt inside the interval does not start the decision again.
+    rm -f "$TEST_TMPDIR/.mmry-foundation-refresh"
+    : > "$CALLS"
+    _fire 1
+    sleep 3
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "decided again inside the interval"; return 1; }
+    [ "$(_calls jq)" -eq 0 ] || { echo "the decision was started again: $(_calls jq) jq"; return 1; }
 }
 
 @test "in-time R2: while the set is unchanged, later prompts only read: no cksum, no jq, and still whole" {
@@ -228,7 +254,7 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     local start=$SECONDS
     MMRY_FOUNDATION_DEADLINE_SECS=3 _fire 2
     local elapsed=$(( SECONDS - start ))
-    kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+    kill "$holder" 2>/dev/null || true; wait "$holder" 2>/dev/null || true
     (( elapsed >= 3 && elapsed < 15 )) || { echo "waited ${elapsed}s"; return 1; }
     [ -z "$(_sysmsg 2)" ] || { echo "showed the person: $(_sysmsg 2)"; return 1; }
     _ctx 2
