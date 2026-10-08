@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # foundation-under-load.sh - the six Foundation parts, prompt after prompt, on a machine under seeded
 # load, timing every part against its registered limit (#31893 TC1). Not part of the suite; a
-# measurement tool. Bash 4+ (EPOCHREALTIME) for the driver only; the hook itself is not affected.
+# measurement tool, for Windows Git Bash: the clock is /proc/uptime, read by the read builtin, so taking a
+# time starts no process and adds nothing to what it measures on a loaded machine.
 #
 # usage: bash tests/perf/foundation-under-load.sh <hook.sh> [prompts] [spinners] [churners] [lines]
 #   run from the plugin's mmry/ directory. Defaults: 20 prompts, 128 CPU spinners, 128 process
@@ -37,7 +38,10 @@ export TMPDIR="$d" MMRY_TMPDIR="$d" HOME="$W/home" MMRY_CONFIG_FILE="$d/mmry-con
 PAYLOAD='{"session_id":"sess-load-1","transcript_path":"/x","cwd":"/x","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}'
 want="$(cat "$W/body"; printf .)"; want="${want%.}"; want="${want%$'\n'}"
 
-empty_ms() { local a b; a=$EPOCHREALTIME; bash -c 'exit 0'; b=$EPOCHREALTIME; awk -v a="$a" -v b="$b" 'BEGIN { printf "%d", (b - a) * 1000 }'; }
+# Seconds since boot, to the hundredth, into the named variable, with no process.
+now_up() { local u _; read -r u _ < /proc/uptime; printf -v "$1" "%s" "$u"; }
+[[ -r /proc/uptime ]] || { echo "needs /proc/uptime (Windows Git Bash, Linux)"; exit 2; }
+empty_ms() { local a b; now_up a; bash -c "exit 0"; now_up b; awk -v a="$a" -v b="$b" "BEGIN { printf \"%d\", (b - a) * 1000 }"; }
 
 i=0
 while (( i < SPIN )); do bash -c 'while [ ! -e "$0" ]; do :; done' "$STOP" & i=$(( i + 1 )); done
@@ -53,8 +57,8 @@ while (( p <= RUNS )); do
     rm -f "$W"/out.* "$W"/end.* "$W"/start.*
     pids=()
     for k in 1 2 3 4 5 6; do
-        printf '%s' "$EPOCHREALTIME" > "$W/start.$k"
-        ( printf '%s' "$PAYLOAD" | bash "$HOOK" --part "$k" > "$W/out.$k" 2>/dev/null; printf '%s' "$EPOCHREALTIME" > "$W/end.$k" ) &
+        now_up t; printf "%s" "$t" > "$W/start.$k"
+        ( printf '%s' "$PAYLOAD" | bash "$HOOK" --part "$k" > "$W/out.$k" 2>/dev/null; now_up t; printf "%s" "$t" > "$W/end.$k" ) &
         pids+=("$!")
     done
     # These six only: a bare wait would also wait for the load, which never ends on its own.
