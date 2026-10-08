@@ -85,7 +85,7 @@ At this level the launch chain alone - before the handler's own clock starts - c
 the 4 s the deadline reserves for it, most of all on Codex (`cmd`, `where`, Git's `bash.exe`,
 `codex-hook.sh`, then the handler). The three Codex runs that did not show anything were past the
 deadline and printed and marked nothing, so their message stays pending for the next check; under
-Codex they would also have shown the timeout notice. This is the limit named in DD-97.
+Codex they would also have shown the timeout notice. This is the limit named in DD-100.
 
 ## Raw files
 
