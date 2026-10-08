@@ -360,7 +360,7 @@ _lock_mtime() {
     if stat --version >/dev/null 2>&1; then
         stat -c %Y "$1" 2>/dev/null || printf '0'
     else
-        stat -f %m "$1" 2>/dev/null || printf '0'
+        stat -f %Sm "$1" 2>/dev/null || printf '0'
     fi
 }
 
