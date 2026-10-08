@@ -164,18 +164,11 @@ if [[ "$(mmry_host)" == "codex" && -f "$P/vendor/jq/CHECKSUMS.txt" ]]; then
     fi
 fi
 
-# LEFTOVER FORMATION MEMBERSHIPS (#31844). A session that ended without leaving its formation left
-# its membership record in the temp folder for ever, and that record kept the formation check
-# running for sessions that were in no formation at all. Each session start removes other sessions'
-# records that nobody has written for the stale period and whose idle watch is not running; the
-# rule, the period and why it is safe for a live member are in formation-state.sh. This session's
-# own record is never removed: a resumed session keeps its id. In-process and best-effort: nothing
-# here can stop memories loading.
-if [[ -f "$P/hooks-handlers/formation-state.sh" ]]; then
-    _mmry_own_sid="$(mmry_session_id 2>/dev/null)" || _mmry_own_sid=""
-    { source "$P/hooks-handlers/formation-state.sh" 2>/dev/null \
-        && mmry_formation_sweep "$_mmry_own_sid"; } 2>/dev/null || true
-fi
+# LEFTOVER FORMATION MEMBERSHIPS (#31844) are cleared by session-start.sh, not here. The sweep must
+# know this session's own id for certain, and only the hook payload says that: this file does not
+# read stdin, and the environment variable it used to consult can be empty or inherited from another
+# session (#31844 QA round 2, D1). session-start.sh also has the client the sweep now needs, to ask
+# the service before it removes anything.
 
 # Delegate to the main session-start logic
 bash "$P/hooks-handlers/session-start.sh"

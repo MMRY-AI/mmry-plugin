@@ -158,25 +158,46 @@ mmry_formation_state_refresh() {
 # session on the machine pay for the full formation check. Measured on one Windows machine on
 # 2026-10-08: 41 entries, the oldest five weeks old.
 #
-# THE RULE. Another session's record that has not been written for MMRY_FORMATION_STALE_SECONDS is
-# removed when a session starts, unless that session's idle watch is still running (its poll lock
-# holds a pid that is alive). A member that is alive keeps its record fresh without trying:
-#   - every check it makes (prompt, tool call, session start) refreshes it - see
-#     mmry_formation_state_refresh above, called from formation-check.sh;
-#   - its idle watch refreshes it at every pause, at most a minute apart, for as long as the
-#     service confirms the membership, renewing itself every 28 minutes.
-# So a record this old belongs to a session that has done nothing at all for three days, and has no
-# watch. The period is three days, not one, for the members that have no watch to keep them fresh: a
-# Codex session (Codex has no background hook), or a Claude Code session whose watch stopped because
-# the service could not be reached when it asked, then sat idle over a weekend. Those must not come
-# back on Monday to find they have silently left.
+# THE RULE. Another session's record is removed at a session start only when ALL of these hold:
+#   1. nobody has written it for MMRY_FORMATION_STALE_SECONDS (three days);
+#   2. that session's idle watch is not running (its poll lock holds no live pid);
+#   3. THE SERVICE SAYS, in so many words, that the session is not a member of the formation the
+#      record names (#31844 QA round 2).
+# A live member keeps its record fresh without trying: every check it makes refreshes it (see
+# mmry_formation_state_refresh above), and its idle watch refreshes it at every pause. But age alone
+# cannot tell an ended session from a member that has simply been quiet, and QA found three genuine
+# members whose records go stale: a Codex member (Codex has no idle watch) idle for three days; a
+# Claude Code member whose watch stopped after two unreachable-service results, then sat idle; and a
+# Claude Code member closed on Friday and resumed on Tuesday after another window had started first.
+# Nothing re-creates a removed record, so for each of those the gate closed and directed messages
+# silently stopped. Rule 3 is what makes removal safe: only the service knows who is in a formation.
 #
-# The starting session's own record is never swept, however old: a resumed session keeps its id.
+# Any answer that is not a clean "member": false keeps the record - the service unreachable, a
+# server fault, a refused credential, a 404 from a service too old for the route, a body that is not
+# the expected object. A record kept today is asked about again at the next session start.
 #
-# The number is not a customer setting. The variable exists so the suite can name it, as with the
+# BOUNDED (#31844 QA round 2). The questions are asked at session start, which has a 30 s budget the
+# memory load also needs, so at most MMRY_FORMATION_SWEEP_MAX_ASKS of them, each limited to a few
+# seconds, and none is started once MMRY_FORMATION_SWEEP_BUDGET seconds would be exceeded. The first
+# answer that says the service cannot be asked (no connection, a 5xx, 401, 403, 429) stops the
+# questions for this start: forty stale records against a service that is down cost one timeout, not
+# forty. Records not reached are kept and asked about at a later start.
+#
+# NO SWEEP WITHOUT THE HOST'S OWN SESSION ID (#31844 QA round 2, D1). The starting session's own
+# record is never swept, however old: a resumed session keeps its id. That protection is only as good
+# as the id, so the caller passes the id from the hook payload - never an environment variable that
+# may be empty or inherited from another session - and a call with no id sweeps nothing at all.
+#
+# A record whose name is not the session id as written (an id with bytes that had to be replaced to
+# make a file name; a "_" is the sign of it) is never asked about: the service would be asked about a
+# session that does not exist, would truthfully say "not a member", and a member would be removed.
+#
+# The numbers are not customer settings. The variables exist so the suite can name them, as with the
 # idle watch's window in formation-check.sh.
 # ---------------------------------------------------------------------------------------------
 MMRY_FORMATION_STALE_SECONDS="${MMRY_FORMATION_STALE_SECONDS:-259200}"
+MMRY_FORMATION_SWEEP_MAX_ASKS="${MMRY_FORMATION_SWEEP_MAX_ASKS:-8}"
+MMRY_FORMATION_SWEEP_BUDGET="${MMRY_FORMATION_SWEEP_BUDGET:-8}"
 
 # True when a name in this folder is a membership record and not one of the locks and markers that
 # share its prefix. Those belong to formation-check.sh and are judged by their own rules there.
@@ -189,19 +210,47 @@ mmry_formation_is_membership_name() {
     return 1
 }
 
-# Remove other sessions' stale records. $1 = the calling session's id, whose record is never touched.
-# Best-effort on every path and silent: this runs at session start, and a session that fails to start
-# because a temp file could not be read is a far worse fault than a temp file left in place.
+# Ask the service whether session $2 is a member of formation $1, within $3 seconds. Sets
+# MMRY_FS_ANSWER to "member", "not-member", "unknown" (keep this record, ask about the next) or
+# "stop" (keep this record and ask nothing more this time). Needs mmry-client.sh and MMRY_JQ.
+_mmry_formation_sweep_ask() {
+    local fid="$1" sid="$2" member=""
+    local MMRY_HTTP_MAX_TIME="$3" MMRY_HTTP_CONNECT_TIMEOUT="$3"
+    (( MMRY_HTTP_CONNECT_TIMEOUT > 3 )) && MMRY_HTTP_CONNECT_TIMEOUT=3
+    MMRY_FS_ANSWER="unknown"
+    MMRY_HTTP_CODE=""
+    MMRY_RESPONSE=""
+    mmry_get_formation_sent "$fid" "$sid" 2>/dev/null || true
+    case "${MMRY_HTTP_CODE:-000}" in
+        2[0-9][0-9]) ;;
+        000|5[0-9][0-9]|401|403|429) MMRY_FS_ANSWER="stop"; return 0 ;;
+        *) return 0 ;;
+    esac
+    member="$("$MMRY_JQ" -r 'if type == "object" and (.member | type) == "boolean" then (.member | tostring) else "unknown" end' \
+        <<< "${MMRY_RESPONSE:-}" 2>/dev/null || true)"
+    member="${member%$'\r'}"
+    if [[ "$member" == "false" ]]; then
+        MMRY_FS_ANSWER="not-member"
+    elif [[ "$member" == "true" ]]; then
+        MMRY_FS_ANSWER="member"
+    fi
+    return 0
+}
+
+# Remove other sessions' stale records. $1 = the calling session's id FROM THE HOOK PAYLOAD; its
+# record is never touched, and without it nothing is swept. Best-effort on every path and silent:
+# this runs at session start, and a session that fails to start because a temp file could not be
+# read is a far worse fault than a temp file left in place.
 # Costs nothing when there is no other record to look at. Otherwise one `stat` for all of them (two
-# on BSD, whose stat spells it differently), and one `rm` if anything is to go.
+# on BSD, whose stat spells it differently), and only for a record that is stale and has no live
+# watch, one bounded question to the service each, then one `rm` if anything is to go.
 mmry_formation_sweep() {
     local own_name="" max="${MMRY_FORMATION_STALE_SECONDS:-}" f name
     [[ "$max" =~ ^[0-9]+$ ]] || return 0
     (( max > 0 )) || return 0
-    if [[ -n "${1:-}" ]]; then
-        mmry_formation_safe_sid "$1"
-        own_name=".mmry-formation-${MMRY_FS_SAFE}"
-    fi
+    [[ -n "${1:-}" ]] || return 0
+    mmry_formation_safe_sid "$1"
+    own_name=".mmry-formation-${MMRY_FS_SAFE}"
     local -a cands=()
     for f in "${MMRY_TMPDIR}"/.mmry-formation-*; do
         [[ -f "$f" ]] || continue
@@ -220,7 +269,7 @@ mmry_formation_sweep() {
     [[ -n "$stats" ]] || { stats="$(stat -f '%m %N' -- "${cands[@]}" 2>/dev/null)" || true; }
     [[ -n "$stats" ]] || return 0
 
-    local -a doomed=()
+    local -a stale=()
     local line mtime path sid pid
     while IFS= read -r line; do
         mtime="${line%% *}"
@@ -237,8 +286,40 @@ mmry_formation_sweep() {
         if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
             continue
         fi
-        doomed+=("$path")
+        stale+=("$path")
     done <<< "$stats"
+    (( ${#stale[@]} > 0 )) || return 0
+
+    # Old and unwatched is not enough: only the service can say the session has left (rule 3).
+    # Without the client there is nobody to ask, and every record is kept.
+    declare -F mmry_get_formation_sent >/dev/null 2>&1 || return 0
+    [[ -n "${MMRY_JQ:-}" ]] || return 0
+    local asks_max="${MMRY_FORMATION_SWEEP_MAX_ASKS:-}" budget="${MMRY_FORMATION_SWEEP_BUDGET:-}"
+    [[ "$asks_max" =~ ^[0-9]+$ ]] || asks_max=8
+    [[ "$budget" =~ ^[0-9]+$ ]] || budget=8
+    local per=4 asks=0 started="$SECONDS" fid=""
+    (( per > budget )) && per="$budget"
+    local -a doomed=()
+    for path in "${stale[@]}"; do
+        name="${path##*/}"
+        sid="${name#.mmry-formation-}"
+        fid=""
+        { IFS= read -r fid || true; } < "$path" 2>/dev/null || true
+        fid="${fid%$'\r'}"
+        # A record that names no formation is not a membership: set refuses a non-numeric id, and
+        # the delivery hook ignores such a record. Nobody can be in it, so there is nothing to ask.
+        if ! [[ "$fid" =~ ^[0-9]+$ ]]; then
+            doomed+=("$path")
+            continue
+        fi
+        [[ "$sid" == *_* ]] && continue
+        (( asks < asks_max && per > 0 )) || break
+        (( SECONDS - started + per <= budget )) || break
+        asks=$(( asks + 1 ))
+        _mmry_formation_sweep_ask "$fid" "$sid" "$per" || true
+        [[ "$MMRY_FS_ANSWER" == "stop" ]] && break
+        [[ "$MMRY_FS_ANSWER" == "not-member" ]] && doomed+=("$path")
+    done
     (( ${#doomed[@]} > 0 )) || return 0
     rm -f -- "${doomed[@]}" 2>/dev/null || true
     return 0

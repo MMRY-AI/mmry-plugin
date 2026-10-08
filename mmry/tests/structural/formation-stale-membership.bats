@@ -132,31 +132,51 @@ _run_counted() {
     LAUNCHES="$(grep -c . "$GATE_LOG" || true)"
 }
 
-# A session start: the shipped session-init.sh, run against a copy of the plugin whose memory-loading
-# delegate is a probe. session-init.sh's own job is installing files and, since #31844, the sweep;
-# what session-start.sh then does is not under test here.
+# A session start: the shipped session-init.sh, which hands over to the shipped session-start.sh, run
+# as the host runs it, with the hook payload on stdin and the fake service below on PATH. Since QA
+# round 2 the sweep runs in session-start.sh, after the payload's session id is read, and asks the
+# service before it removes anything, so the whole chain is under test, not a probe.
+#   $1 = the session_id in the hook payload ("" for a payload without one)
+#   $2 = the CLAUDE_CODE_SESSION_ID in the environment (optional; unset when not given)
+# What the service says about a session: the file ${SVC}/sent-<session id> if there is one, else
+# $SS_SENT, which defaults to "not a member" - the answer for an ended session in a closed formation.
+_SS_NOT_MEMBER='{"formationId":4242,"member":false,"messages":[]}'
 _session_start() {
-    # $1 = the starting session's CLAUDE_CODE_SESSION_ID ("" for none)
-    local root="${BATS_TEST_TMPDIR}/plugin"
-    if [[ ! -d "$root" ]]; then
-        mkdir -p "$root"
-        cp -R "$HANDLERS" "$root/"
-        [[ -d "${PLUGIN_ROOT}/setup" ]] && cp -R "${PLUGIN_ROOT}/setup" "$root/"
-        printf '#!/usr/bin/env bash\necho SESSION-START-REACHED\n' > "$root/hooks-handlers/session-start.sh"
-    fi
+    [[ -n "${SVC:-}" ]] || _idle_fixture
     local home="${BATS_TEST_TMPDIR}/ss-home"; mkdir -p "$home"
-    if [[ -n "${1:-}" ]]; then
-        run env HOME="$home" TMPDIR="$TMPDIR" CLAUDE_PLUGIN_ROOT="$root" CLAUDE_CODE_SESSION_ID="$1" \
-            bash "$root/hooks-handlers/session-init.sh" < /dev/null
-    else
-        run env HOME="$home" TMPDIR="$TMPDIR" CLAUDE_PLUGIN_ROOT="$root" \
-            bash "$root/hooks-handlers/session-init.sh" < /dev/null
-    fi
+    local payload='{}' sent="${SS_SENT:-$_SS_NOT_MEMBER}"
+    [[ -n "${1:-}" ]] && payload="{\"session_id\":\"$1\",\"hook_event_name\":\"SessionStart\"}"
+    local -a extra=()
+    (( $# >= 2 )) && extra=(CLAUDE_CODE_SESSION_ID="$2")
+    run env HOME="$home" TMPDIR="$TMPDIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" PATH="${SS_PATH:-${SVC}:${PATH}}" \
+        FC_LOG="$FC_LOG" FC_SENT="$sent" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_NO_SELF_UPDATE=1 "${extra[@]}" \
+        bash "${PLUGIN_ROOT}/hooks-handlers/session-init.sh" <<< "$payload"
+}
+
+# The session start finished and loaded memories (its SessionStart output was printed).
+_started() {
+    [[ "$status" -eq 0 && "$output" == *'"hookEventName":"SessionStart"'* ]]
+}
+
+# How many membership questions the fake service has been asked.
+_asked() { grep -c '/transmissions/sent' "$FC_LOG" || true; }
+
+# What the service will say about session $1: "true", "false", or a raw body.
+_service_says() {
+    [[ -n "${SVC:-}" ]] || _idle_fixture
+    case "$2" in
+        true|false) printf '{"formationId":4242,"member":%s,"messages":[]}' "$2" > "${SVC}/sent-$1" ;;
+        *) printf '%s' "$2" > "${SVC}/sent-$1" ;;
+    esac
 }
 
 # A fake service for the formation check: transmissions answer $FC_TX (default an empty list), the
-# membership question answers $FC_SENT. With FC_SWITCH set, the membership question first rewrites
-# the asking session's record to name formation FC_SWITCH (a join elsewhere at that very moment).
+# membership question answers ${SVC}/sent-<session id> when there is one, else $FC_SENT. With
+# FC_SWITCH set, the membership question first rewrites the asking session's record to name
+# formation FC_SWITCH (a join elsewhere at that very moment). ${SVC}/down: nothing connects.
+# ${SVC}/delay: every request takes that many seconds first.
 _idle_fixture() {
     SVC="${BATS_TEST_TMPDIR}/svc"; mkdir -p "$SVC"
     {
@@ -168,9 +188,13 @@ _idle_fixture() {
         echo '    prev="$arg"'
         echo 'done'
         echo 'printf "%s\n" "$url" >> "${FC_LOG:-/dev/null}"'
+        echo 'here="${BASH_SOURCE[0]%/*}"'
+        echo '[[ -f "$here/delay" ]] && sleep "$(cat "$here/delay")"'
+        echo 'if [[ -f "$here/down" ]]; then printf 000; exit 7; fi'
         echo 'case "$url" in'
         echo '    */transmissions/sent*)'
-        echo '        answer="${FC_SENT:-}"'
+        echo '        sid="${url##*sessionId=}"; sid="${sid%%&*}"'
+        echo '        if [[ -f "$here/sent-$sid" ]]; then answer="$(cat "$here/sent-$sid")"; else answer="${FC_SENT:-}"; fi'
         echo '        [[ -n "${FC_SWITCH:-}" ]] && printf "%s\n" "$FC_SWITCH" > "${FC_STATE_FILE}"'
         echo '        ;;'
         echo '    *) answer="${FC_TX:-[]}" ;;'
@@ -221,18 +245,27 @@ _run_idle() {
     _member "$OTHER"
     _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 60 ))
     _session_start "$ME"
-    echo "session-init: status $status, output [$output]" >&3
-    [[ "$status" -eq 0 ]] || { echo "session-init exited $status: $output"; return 1; }
-    [[ "$output" == *SESSION-START-REACHED* ]] || { echo "session-init did not go on to load memories: $output"; return 1; }
+    echo "session start: status $status, membership questions $(_asked)" >&3
+    _started || { echo "the session start did not go on to load memories: status $status, output [$output]"; return 1; }
     [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "the stale membership file survived the session start"; return 1; }
+    [[ "$(_asked)" -eq 1 ]] || { echo "expected one membership question, the service was asked $(_asked)"; return 1; }
 }
 
-@test "stale 1: the same sweep runs at a session start that has no session id from the host" {
+@test "stale 1 D1: a session start whose payload carries no session id sweeps nothing" {
+    # The own record's protection is only as good as the id. Without the payload's id there is no
+    # trustworthy id, so nothing is swept - not even a record the service would call ended.
     _member "$OTHER"
     _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 60 ))
-    _session_start ""
-    [[ "$status" -eq 0 ]] || { echo "session-init exited $status: $output"; return 1; }
-    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "no host session id: the stale file was kept"; return 1; }
+    _session_start "" ""
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    [[ -f "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "no payload id: a record was swept anyway"; return 1; }
+    # Also with an environment id present: it is not the payload's, so it is not used.
+    _session_start "" "inherited-$$"
+    [[ -f "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "no payload id, inherited env id: a record was swept"; return 1; }
+    [[ "$(_asked)" -eq 0 ]] || { echo "the service was asked $(_asked) membership questions with no payload id"; return 1; }
+    # CONTROL: the same record goes at the next start that does carry an id.
+    _session_start "$ME"
+    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "control: a start with a payload id did not sweep"; return 1; }
 }
 
 @test "stale 1: a file younger than the period is NOT removed - it may be a live member between checks" {
@@ -283,19 +316,24 @@ _run_idle() {
     [[ -f "${TMPDIR}/unrelated-file" ]] || { echo "the sweep removed a file outside its pattern"; return 1; }
 }
 
-@test "stale 1: the sweep never makes a session start fail, even when stat and rm both fail" {
-    _session_start "$ME"   # builds the probe plugin
+@test "stale 1: the sweep never makes a session start fail, when stat fails or rm fails" {
     _member "$OTHER"
     _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 60 ))
-    local bin="${BATS_TEST_TMPDIR}/badbin" root="${BATS_TEST_TMPDIR}/plugin"
+    local bin="${BATS_TEST_TMPDIR}/badbin" real_rm; real_rm="$(command -v rm)"
     mkdir -p "$bin"
+    _idle_fixture
+    # stat fails outright.
     printf '#!/bin/sh\necho broken >&2\nexit 1\n' > "$bin/stat"
-    printf '#!/bin/sh\necho broken >&2\nexit 1\n' > "$bin/rm"
-    chmod +x "$bin/stat" "$bin/rm"
-    run env PATH="${bin}:${PATH}" HOME="${BATS_TEST_TMPDIR}/ss-home" TMPDIR="$TMPDIR" CLAUDE_PLUGIN_ROOT="$root" \
-        CLAUDE_CODE_SESSION_ID="$ME" bash "$root/hooks-handlers/session-init.sh" < /dev/null
-    [[ "$status" -eq 0 && "$output" == *SESSION-START-REACHED* ]] || {
-        echo "a failing sweep broke the session start: status $status, output [$output]"; return 1; }
+    chmod +x "$bin/stat"
+    SS_PATH="${bin}:${SVC}:${PATH}" _session_start "$ME"
+    _started || { echo "a failing stat broke the session start: status $status, output [$output]"; return 1; }
+    # rm fails on the membership file, so the sweep's removal fails; every other rm works.
+    rm -f "$bin/stat"
+    printf '#!/bin/sh\ncase "$*" in *.mmry-formation-*) echo broken >&2; exit 1 ;; esac\nexec "%s" "$@"\n' "$real_rm" > "$bin/rm"
+    chmod +x "$bin/rm"
+    SS_PATH="${bin}:${SVC}:${PATH}" _session_start "$ME"
+    _started || { echo "a failing rm broke the session start: status $status, output [$output]"; return 1; }
+    [[ "$(_asked)" -ge 1 ]] || { echo "control: the sweep never reached its question, so rm was never tried"; return 1; }
 }
 
 @test "stale 1: after the sweep the gate stays closed for a session in no formation, on every registration" {
@@ -354,6 +392,205 @@ _run_idle() {
     grep -q '/transmissions/sent' "$FC_LOG" || { echo "control: the membership question was never asked"; return 1; }
     [[ -f "${TMPDIR}/.mmry-formation-${ME}" ]] || { echo "member:false about 4242 removed a membership of 4343"; return 1; }
     [[ "$(head -1 "${TMPDIR}/.mmry-formation-${ME}")" == 4343 ]] || { echo "the record no longer names 4343"; return 1; }
+}
+
+# =============================================================================================
+# REQUIREMENT 2 (QA ROUND 2): A GENUINE MEMBER NEVER LOSES ITS MEMBERSHIP TO THE CLEANUP
+#
+# Each of these is a member whose record goes stale through no fault of its own: nothing refreshes
+# it, and it has no running watch. Age cannot tell it from an ended session; the service can.
+# Every scenario test here FAILED on ac6472b, whose sweep removed on age and watch alone.
+# =============================================================================================
+
+@test "member 2a: a Codex member idle longer than the period (Codex has no idle watch) keeps its record" {
+    local codex="codex-$$-${BATS_TEST_NUMBER}"
+    _standins
+    _member "$codex" 4242
+    _backdate "${TMPDIR}/.mmry-formation-${codex}" $(( PERIOD + 3600 ))
+    _service_says "$codex" true
+    _session_start "$ME"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    echo "membership questions: $(_asked)" >&3
+    [[ -f "${TMPDIR}/.mmry-formation-${codex}" ]] || { echo "the idle Codex member's record was removed"; return 1; }
+    [[ "$(head -1 "${TMPDIR}/.mmry-formation-${codex}")" == 4242 ]] || { echo "the record no longer names its formation"; return 1; }
+    grep -q "sessionId=${codex}" "$FC_LOG" || { echo "control: the service was never asked about the Codex member"; return 1; }
+    # And its gate still opens, so directed messages still reach it.
+    _run_counted "$(_codex_command_for UserPromptSubmit "$FAKE_ROOT")" ""
+    [[ "$output" == *"LAUNCHER-REACHED formation-check"* ]] || { echo "the Codex member's gate is closed: $output"; return 1; }
+}
+
+@test "member 2b: a Claude Code member whose watch stopped on an unreachable service, then sat idle, keeps its record" {
+    _standins
+    _idle_fixture
+    _member "$ME" 4242
+    # The watch asks its membership question, the service cannot be reached twice, and it stops.
+    : > "${SVC}/down"
+    _run_idle '{"member":true,"sent":[]}'
+    rm -f "${SVC}/down"
+    [[ "$status" -eq 0 ]] || { echo "control: the watch did not stop quietly: $status $output"; return 1; }
+    [[ -f "${TMPDIR}/.mmry-formation-${ME}" ]] || { echo "control: the stopped watch removed the record itself"; return 1; }
+    local pid=""
+    [[ -f "${TMPDIR}/.mmry-formation-poll-${ME}/pid" ]] && pid="$(cat "${TMPDIR}/.mmry-formation-poll-${ME}/pid")"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then echo "control: the watch is still running"; return 1; fi
+    # Then it sits idle past the period, and another window starts.
+    _backdate "${TMPDIR}/.mmry-formation-${ME}" $(( PERIOD + 3600 ))
+    _service_says "$ME" true
+    _session_start "$OTHER"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    [[ -f "${TMPDIR}/.mmry-formation-${ME}" ]] || { echo "the member whose watch stopped was removed"; return 1; }
+    _run_counted "$(_command_for "${HOOKS}/hooks.json" UserPromptSubmit)" "$ME"
+    [[ "$output" == *"GUARD-REACHED formation-check"* ]] || { echo "the member's gate is closed: $output"; return 1; }
+}
+
+@test "member 2c: a member closed on Friday and resumed after another window started on Tuesday keeps its record" {
+    _standins
+    _member "$ME" 4242
+    # Friday 17:00 to Tuesday morning: four days with nothing written.
+    _backdate "${TMPDIR}/.mmry-formation-${ME}" $(( 4 * 86400 ))
+    _service_says "$ME" true
+    _session_start "$OTHER"           # Tuesday: another window first
+    _started || { echo "the other window's start failed: status $status, output [$output]"; return 1; }
+    [[ -f "${TMPDIR}/.mmry-formation-${ME}" ]] || { echo "the closed member's record was removed by the other window"; return 1; }
+    _session_start "$ME"              # then the member is resumed, same id
+    _started || { echo "the resumed start failed: status $status, output [$output]"; return 1; }
+    [[ -f "${TMPDIR}/.mmry-formation-${ME}" ]] || { echo "the resumed member's record is gone"; return 1; }
+    _run_counted "$(_command_for "${HOOKS}/hooks.json" UserPromptSubmit)" "$ME"
+    [[ "$output" == *"GUARD-REACHED formation-check"* ]] || { echo "the resumed member's gate is closed: $output"; return 1; }
+}
+
+@test "member 2 D1: the starting session's own record survives when its environment id is empty or inherited" {
+    # The payload names this session. The environment says nothing, or names another session (an
+    # inherited CLAUDE_CODE_SESSION_ID). The service is made to call this session "not a member", so
+    # only the own-id protection can keep the record: this test is about the id, not the question.
+    _member "$ME" 4242
+    _service_says "$ME" false
+    local env_id
+    for env_id in "" "inherited-$$"; do
+        _backdate "${TMPDIR}/.mmry-formation-${ME}" $(( PERIOD + 3600 ))
+        _session_start "$ME" "$env_id"
+        _started || { echo "env [${env_id}]: session start failed: status $status, output [$output]"; return 1; }
+        [[ -f "${TMPDIR}/.mmry-formation-${ME}" ]] || { echo "env id [${env_id}]: the session's own record was swept"; return 1; }
+    done
+    if grep -q "sessionId=${ME}" "$FC_LOG"; then echo "the service was asked about the starting session itself"; return 1; fi
+}
+
+@test "member 2: no clean 'not a member' answer, no removal - unreachable, a body without member, member:true, bad JSON" {
+    _member "$OTHER" 4242
+    _idle_fixture
+    local body
+    for body in down '{"member":true,"messages":[]}' '{"messages":[]}' 'not json' empty; do
+        rm -f "${SVC}/down" "${SVC}/sent-${OTHER}"
+        case "$body" in
+            down) : > "${SVC}/down" ;;
+            empty) : > "${SVC}/sent-${OTHER}" ;;
+            *) _service_says "$OTHER" "$body" ;;
+        esac
+        _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
+        : > "$FC_LOG"
+        _session_start "$ME"
+        [[ "$status" -eq 0 ]] || { echo "[${body}]: session start exited $status: $output"; return 1; }
+        [[ "$(_asked)" -ge 1 ]] || { echo "control [${body}]: the service was never asked"; return 1; }
+        [[ -f "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "answer [${body}] removed the record"; return 1; }
+    done
+}
+
+@test "member 2: member:false under any status other than 2xx never removes (500 503 401 403 404 429)" {
+    _member "$OTHER" 4242
+    _idle_fixture
+    _service_says "$OTHER" false
+    cp "${SVC}/curl" "${SVC}/curl.200"
+    local code
+    for code in 500 503 401 403 404 429; do
+        sed "s/^printf 200\$/printf ${code}/" "${SVC}/curl.200" > "${SVC}/curl"
+        chmod +x "${SVC}/curl"
+        _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
+        : > "$FC_LOG"
+        _session_start "$ME"
+        [[ "$(_asked)" -ge 1 ]] || { echo "control ${code}: the service was never asked"; return 1; }
+        [[ -f "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "HTTP ${code} with member:false removed the record"; return 1; }
+    done
+}
+
+@test "member 2 boundary: past the period an ended session's record is still removed; inside it nobody is asked" {
+    _member "$OTHER" 4242
+    _service_says "$OTHER" false
+    _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD - 120 ))
+    _session_start "$ME"
+    [[ -f "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "inside the period: removed"; return 1; }
+    [[ "$(_asked)" -eq 0 ]] || { echo "inside the period the service was asked $(_asked) times"; return 1; }
+    _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 120 ))
+    _session_start "$ME"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "past the period, service says ended: the record was kept"; return 1; }
+    [[ "$(_asked)" -eq 1 ]] || { echo "expected exactly one question, got $(_asked)"; return 1; }
+}
+
+@test "member 2 bounded: forty stale records against a service that is down cost one question, and all are kept" {
+    local i
+    for i in $(seq 1 40); do
+        _member "gone-${i}-$$" 37
+        _backdate "${TMPDIR}/.mmry-formation-gone-${i}-$$" $(( PERIOD + 3600 ))
+    done
+    _idle_fixture
+    : > "${SVC}/down"
+    _session_start "$ME"
+    [[ "$status" -eq 0 ]] || { echo "session start exited $status: $output"; return 1; }
+    echo "service down, 40 stale records: questions asked $(_asked)" >&3
+    [[ "$(_asked)" -eq 1 ]] || { echo "the sweep asked $(_asked) questions of a service that is down"; return 1; }
+    [[ "$(ls -A "$TMPDIR" | grep -c '^\.mmry-formation-gone-')" -eq 40 ]] || { echo "records were removed with the service down"; return 1; }
+}
+
+@test "member 2 bounded: at most MMRY_FORMATION_SWEEP_MAX_ASKS questions a start; the rest go at later starts" {
+    local i max
+    max="$(grep -oE '^MMRY_FORMATION_SWEEP_MAX_ASKS="\$\{MMRY_FORMATION_SWEEP_MAX_ASKS:-[0-9]+\}"' \
+        "${HANDLERS}/formation-state.sh" | grep -oE '[0-9]+' | tail -1)"
+    [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 && max < 40 )) || { echo "no usable MMRY_FORMATION_SWEEP_MAX_ASKS default: [$max]"; return 1; }
+    for i in $(seq 1 40); do
+        _member "gone-${i}-$$" 37
+        _backdate "${TMPDIR}/.mmry-formation-gone-${i}-$$" $(( PERIOD + 3600 ))
+    done
+    _session_start "$ME"
+    local left; left="$(ls -A "$TMPDIR" | grep -c '^\.mmry-formation-gone-' || true)"
+    echo "40 ended records, cap ${max}: asked $(_asked), left ${left}" >&3
+    [[ "$(_asked)" -eq "$max" ]] || { echo "asked $(_asked), cap is ${max}"; return 1; }
+    [[ "$left" -eq $(( 40 - max )) ]] || { echo "left ${left}, expected $(( 40 - max ))"; return 1; }
+    local n=0
+    while (( left > 0 && n < 10 )); do
+        _session_start "$ME"; n=$(( n + 1 ))
+        left="$(ls -A "$TMPDIR" | grep -c '^\.mmry-formation-gone-' || true)"
+    done
+    [[ "$left" -eq 0 ]] || { echo "after ${n} more starts ${left} ended records remain"; return 1; }
+}
+
+@test "member 2 bounded: a slow service stops the questions at the time budget" {
+    local i budget
+    budget="$(grep -oE '^MMRY_FORMATION_SWEEP_BUDGET="\$\{MMRY_FORMATION_SWEEP_BUDGET:-[0-9]+\}"' \
+        "${HANDLERS}/formation-state.sh" | grep -oE '[0-9]+' | tail -1)"
+    [[ "$budget" =~ ^[0-9]+$ ]] && (( budget > 0 && budget <= 15 )) || { echo "no usable budget default: [$budget]"; return 1; }
+    for i in $(seq 1 10); do
+        _member "gone-${i}-$$" 37
+        _backdate "${TMPDIR}/.mmry-formation-gone-${i}-$$" $(( PERIOD + 3600 ))
+    done
+    _idle_fixture
+    printf '3\n' > "${SVC}/delay"
+    _session_start "$ME"
+    rm -f "${SVC}/delay"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    echo "3 s a request, budget ${budget} s: questions asked $(_asked)" >&3
+    # Every request in this fake takes 3 s, the memory load's included. A question is only started
+    # when it can finish inside the budget, so there are at most budget / 3 of them, rounded up.
+    (( $(_asked) >= 1 && $(_asked) <= (budget + 2) / 3 )) || { echo "asked $(_asked) questions at 3 s each against a ${budget} s budget"; return 1; }
+}
+
+@test "member 2: a record whose name is not the session id as written is never asked about or removed" {
+    local odd='odd id/with:bytes'
+    TMPDIR="$TMPDIR" bash "${HANDLERS}/formation-state.sh" set 4242 "$odd"
+    local f="${TMPDIR}/.mmry-formation-odd_id_with_bytes"
+    [[ -f "$f" ]] || { echo "control: the record is not where expected"; ls -A "$TMPDIR"; return 1; }
+    _backdate "$f" $(( PERIOD + 3600 ))
+    _session_start "$ME"
+    [[ -f "$f" ]] || { echo "the record with a rewritten name was removed"; return 1; }
+    [[ "$(_asked)" -eq 0 ]] || { echo "the service was asked about a session id that does not exist"; return 1; }
 }
 
 # =============================================================================================
