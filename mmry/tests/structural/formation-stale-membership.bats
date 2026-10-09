@@ -653,14 +653,14 @@ _run_idle() {
 _quiet_and_dead() {
     local i
     for i in $(seq 1 "$1"); do
-        _member "a0000${i}-quiet-$" 4242
-        _service_says_in 4242 "a0000${i}-quiet-$" true
-        _backdate "${TMPDIR}/.mmry-formation-a0000${i}-quiet-$" $(( PERIOD + 3600 ))
+        _member "a0000${i}-quiet-$$" 4242
+        _service_says_in 4242 "a0000${i}-quiet-$$" true
+        _backdate "${TMPDIR}/.mmry-formation-a0000${i}-quiet-$$" $(( PERIOD + 3600 ))
     done
     for i in $(seq 1 "$2"); do
-        _member "z0000${i}-dead-$" 37
-        _service_says_in 37 "z0000${i}-dead-$" false
-        _backdate "${TMPDIR}/.mmry-formation-z0000${i}-dead-$" $(( PERIOD + 3600 ))
+        _member "z0000${i}-dead-$$" 37
+        _service_says_in 37 "z0000${i}-dead-$$" false
+        _backdate "${TMPDIR}/.mmry-formation-z0000${i}-dead-$$" $(( PERIOD + 3600 ))
     done
 }
 
@@ -690,12 +690,12 @@ _shipped_cap() {
     (( starts <= bound )) || { echo "the ended records took ${starts} starts; the bound is ${bound}"; return 1; }
     [[ "$(_left '^\.mmry-formation-a0000.*-quiet-')" -eq 10 ]] || { echo "members were removed: $(ls -A "$TMPDIR")"; return 1; }
     for i in $(seq 1 10); do
-        [[ "$(head -1 "${TMPDIR}/.mmry-formation-a0000${i}-quiet-$")" == 4242 ]] || { echo "member ${i} no longer names 4242"; return 1; }
+        [[ "$(head -1 "${TMPDIR}/.mmry-formation-a0000${i}-quiet-$$")" == 4242 ]] || { echo "member ${i} no longer names 4242"; return 1; }
     done
     # Each question names the record's own formation (M5).
-    grep -q "/formations/4242/transmissions/sent?sessionId=a00001-quiet-$" "$FC_LOG" \
+    grep -q "/formations/4242/transmissions/sent?sessionId=a00001-quiet-$$" "$FC_LOG" \
         || { echo "no question about member 1 in formation 4242:"; cat "$FC_LOG"; return 1; }
-    grep -q "/formations/37/transmissions/sent?sessionId=z00001-dead-$" "$FC_LOG" \
+    grep -q "/formations/37/transmissions/sent?sessionId=z00001-dead-$$" "$FC_LOG" \
         || { echo "no question about ended record 1 in formation 37:"; cat "$FC_LOG"; return 1; }
     # A member the service vouched for is not asked about again for a full period.
     : > "$FC_LOG"
@@ -729,11 +729,11 @@ _shipped_cap() {
     local cap; cap="$(_shipped_cap)"
     [[ "$cap" =~ ^[0-9]+$ ]] && (( cap > 0 )) || { echo "no usable cap default: [$cap]"; return 1; }
     _quiet_and_dead "$cap" 1
-    _backdate "${TMPDIR}/.mmry-formation-z00001-dead-$" $(( PERIOD + 7200 ))
+    _backdate "${TMPDIR}/.mmry-formation-z00001-dead-$$" $(( PERIOD + 7200 ))
     _session_start "$ME"
     _started || { echo "session start failed: status $status, output [$output]"; return 1; }
     echo "cap ${cap}, questions $(_asked)" >&3
-    [[ ! -e "${TMPDIR}/.mmry-formation-z00001-dead-$" ]] || { echo "the oldest record was not reached at the first start: $(_asked) questions went to newer ones"; return 1; }
+    [[ ! -e "${TMPDIR}/.mmry-formation-z00001-dead-$$" ]] || { echo "the oldest record was not reached at the first start: $(_asked) questions went to newer ones"; return 1; }
     [[ "$(_left '^\.mmry-formation-a0000.*-quiet-')" -eq "$cap" ]] || { echo "members were removed"; return 1; }
 }
 
@@ -775,7 +775,7 @@ _forged_stat() {   # $1 = bin dir, $2 = the genuine record, $3... = forged paths
 }
 
 @test "inject r3: a stale record that names no formation is removed without a question; a fresh one is kept" {
-    local blank="blank-$-${BATS_TEST_NUMBER}"
+    local blank="blank-$$-${BATS_TEST_NUMBER}"
     printf 'not-a-number\n' > "${TMPDIR}/.mmry-formation-${OTHER}"
     _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
     : > "${TMPDIR}/.mmry-formation-${blank}"
@@ -790,7 +790,7 @@ _forged_stat() {   # $1 = bin dir, $2 = the genuine record, $3... = forged paths
 }
 
 @test "inject r3: a record name with a byte outside A-Za-z0-9._- is never considered, let alone removed" {
-    local odd="${TMPDIR}/.mmry-formation-odd name-$"
+    local odd="${TMPDIR}/.mmry-formation-odd name-$$"
     printf '4242\n' > "$odd"
     _backdate "$odd" $(( PERIOD + 3600 ))
     # CONTROL: an ordinary ended record beside it is asked about and removed.
