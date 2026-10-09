@@ -176,6 +176,10 @@ mmry_formation_state_refresh() {
 # server fault, a refused credential, a 404 from a service too old for the route, a body that is not
 # the expected object. A record kept today is asked about again at the next session start.
 #
+# REACHED, AND NOTHING BUT A RECORD REMOVED (#31844 QA round 3). A clean member:true refreshes the
+# record, the questions go oldest first, and only a name of the record form that is exactly one of
+# the records collected can be removed. The detail is above mmry_formation_sweep.
+#
 # BOUNDED (#31844 QA round 2). The questions are asked at session start, which has a 30 s budget the
 # memory load also needs, so at most MMRY_FORMATION_SWEEP_MAX_ASKS of them, each limited to a few
 # seconds, and none is started once MMRY_FORMATION_SWEEP_BUDGET seconds would be exceeded. The first
@@ -237,6 +241,31 @@ _mmry_formation_sweep_ask() {
     return 0
 }
 
+# The names a record can have: the prefix and the session id as mmry_formation_safe_sid writes it,
+# nothing else (#31844 QA round 3). The letters are spelled out for the reason given there: a range
+# in a bracket expression is locale-dependent. A name with any other byte - a newline above all - is
+# not a record this plugin wrote, and is never looked at, asked about or removed.
+_MMRY_FS_RECORD_RE='^\.mmry-formation-[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]+$'
+
+# A member the service has just vouched for (#31844 QA round 3): bring its record's time up to date,
+# so it is not stale - not asked about again - for a full period. The same in-place rewrite its own
+# checks make, under the same delivery mutex they make it under, so it cannot write back a last-seen
+# value the member has just advanced. The mutex is only TRIED: if the member holds it, it is
+# delivering right now and refreshes the record itself; a `touch -c`, which writes no content and so
+# races nothing, brings the time up to date meanwhile.
+_mmry_formation_sweep_refresh() {
+    local sid="$1" path="$2" lock="${MMRY_TMPDIR}/.mmry-formation-cs-$1"
+    if mkdir "$lock" 2>/dev/null; then
+        printf '%s\n' "$$" > "${lock}/pid" 2>/dev/null || true
+        mmry_formation_state_refresh "$sid" || true
+        rm -f "${lock}/pid" 2>/dev/null || true
+        rmdir "$lock" 2>/dev/null || true
+    else
+        touch -c -- "$path" 2>/dev/null || true
+    fi
+    return 0
+}
+
 # Remove other sessions' stale records. $1 = the calling session's id FROM THE HOOK PAYLOAD; its
 # record is never touched, and without it nothing is swept. Best-effort on every path and silent:
 # this runs at session start, and a session that fails to start because a temp file could not be
@@ -244,6 +273,20 @@ _mmry_formation_sweep_ask() {
 # Costs nothing when there is no other record to look at. Otherwise one `stat` for all of them (two
 # on BSD, whose stat spells it differently), and only for a record that is stale and has no live
 # watch, one bounded question to the service each, then one `rm` if anything is to go.
+#
+# EVERY STALE RECORD IS REACHED (#31844 QA round 3). The questions go OLDEST FIRST, and a record the
+# service clearly calls a member is refreshed, so it leaves the stale set for a full period. Each
+# start that can ask K questions therefore settles the K oldest stale records for good - removed, or
+# refreshed to the back - and a record is reached within ceil(R / K) starts, where R is the number
+# of stale records at least as old as it. (Before, the order was the same at every start and a member
+# was never refreshed, so a cap's worth of quiet members ahead of an ended record kept it for ever.)
+# An answer that is not a clean member:true never refreshes: a service that is down would otherwise
+# keep every ended record alive.
+#
+# ONLY A COLLECTED RECORD IS EVER REMOVED (#31844 QA round 3, security). stat's output is text, and a
+# file name can carry a newline, so a line of it is a claim about a path, not a path. A name that is
+# not of the record form is never collected, and a line whose path is not exactly one of the records
+# collected is ignored, so nothing but a record in MMRY_TMPDIR can reach the `rm`.
 mmry_formation_sweep() {
     local own_name="" max="${MMRY_FORMATION_STALE_SECONDS:-}" f name
     [[ "$max" =~ ^[0-9]+$ ]] || return 0
@@ -255,6 +298,7 @@ mmry_formation_sweep() {
     for f in "${MMRY_TMPDIR}"/.mmry-formation-*; do
         [[ -f "$f" ]] || continue
         name="${f##*/}"
+        [[ "$name" =~ $_MMRY_FS_RECORD_RE ]] || continue
         mmry_formation_is_membership_name "$name" || continue
         [[ "$name" == "$own_name" ]] && continue
         cands+=("$f")
@@ -269,12 +313,16 @@ mmry_formation_sweep() {
     [[ -n "$stats" ]] || { stats="$(stat -f '%m %N' -- "${cands[@]}" 2>/dev/null)" || true; }
     [[ -n "$stats" ]] || return 0
 
-    local -a stale=()
-    local line mtime path sid pid
+    # Stale and unwatched, in order of age, oldest first; equal ages keep the folder's order.
+    local -a stale=() ages=()
+    local line mtime path sid pid c known i
     while IFS= read -r line; do
         mtime="${line%% *}"
         path="${line#* }"
         [[ "$mtime" =~ ^[0-9]+$ && "$path" != "$line" ]] || continue
+        known=0
+        for c in "${cands[@]}"; do [[ "$c" == "$path" ]] && { known=1; break; }; done
+        (( known )) || continue
         (( now - mtime > max )) || continue
         name="${path##*/}"
         sid="${name#.mmry-formation-}"
@@ -286,7 +334,11 @@ mmry_formation_sweep() {
         if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
             continue
         fi
-        stale+=("$path")
+        i=${#stale[@]}
+        while (( i > 0 )) && (( ages[i - 1] > mtime )); do
+            stale[i]="${stale[i - 1]}"; ages[i]="${ages[i - 1]}"; i=$(( i - 1 ))
+        done
+        stale[i]="$path"; ages[i]="$mtime"
     done <<< "$stats"
     (( ${#stale[@]} > 0 )) || return 0
 
@@ -318,6 +370,7 @@ mmry_formation_sweep() {
         asks=$(( asks + 1 ))
         _mmry_formation_sweep_ask "$fid" "$sid" "$per" || true
         [[ "$MMRY_FS_ANSWER" == "stop" ]] && break
+        [[ "$MMRY_FS_ANSWER" == "member" ]] && _mmry_formation_sweep_refresh "$sid" "$path"
         [[ "$MMRY_FS_ANSWER" == "not-member" ]] && doomed+=("$path")
     done
     (( ${#doomed[@]} > 0 )) || return 0
