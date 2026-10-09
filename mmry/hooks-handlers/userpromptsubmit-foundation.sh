@@ -183,22 +183,30 @@ _mmry_fnd_now() {
     [[ "$_FND_NOW" =~ ^[0-9]{1,12}$ ]] || _FND_NOW=0
 }
 
-# A FIFTH OF A SECOND WITHOUT A PROCESS (#31893 QA round 2). A part waiting on another polled with an
-# external `sleep 0.2`, and on a loaded Windows machine starting it took a second or two, so a wait
-# meant to be a fifth of a second was ten times that and added its own load to the machine the
-# preparing part was trying to finish on. This waits with the read builtin instead: read -t on a FIFO
-# opened read-write, which never sees data or an end, returns when its time is up, with no process.
-# The FIFO is made once per part and temp directory and kept; one per part, because Cygwin refuses a
-# second open of a FIFO while another process is opening it (EBUSY, measured). Anything else at the path,
-# or a read that comes back early, falls back to the external sleep, as does the bash 3.2 a Mac ships,
-# whose read -t takes whole seconds only; a process there costs a few milliseconds.
+# A FIFTH OF A SECOND, AND ONE PROCESS FOR THE WHOLE WAIT, NOT ONE A POLL (#31893 QA round 2). A part
+# waiting on another polled with an external `sleep 0.2`, and on a loaded Windows machine starting it
+# took a second or two, so each poll cost ten times the wait it asked for and added its own load to the
+# machine the preparing part was trying to finish on. A part now waits with the read builtin: read -t on
+# a pipe whose writer is alive and silent returns when its time is up. The writer is a sleep, started
+# once, the first time this part waits, behind fd 8, with nothing of the hook's: its stdout is that pipe,
+# its stdin and stderr /dev/null, the rest closed, so nothing that reads the hook waits for it, and it
+# ends by itself after the hook's whole budget. Bash itself has no silent writer to offer without one.
+# NOT A FIFO: one was tried and measured, and Cygwin hung a part inside a FIFO open for 19 minutes,
+# beyond signals, until taskkill. A pipe that ends early, or the bash 3.2 a Mac ships, whose read -t
+# takes whole seconds only, takes the external sleep; a process there costs a few milliseconds.
 _mmry_fnd_nap() {
     if (( BASH_VERSINFO[0] >= 4 )); then
-        local f="${_FOUND_TMPDIR}/.mmry-foundation-tick${_SFX}" _x="" _r=0
-        [[ -e "$f" || -L "$f" ]] || mkfifo -m 600 "$f" 2>/dev/null
-        if [[ -p "$f" ]]; then
-            IFS= read -r -t 0.2 _x <> "$f" 2>/dev/null || _r=$?
+        if [[ -z "${_FND_TICK:-}" ]]; then
+            _FND_TICK=no
+            exec 8< <(exec </dev/null 2>/dev/null 3>&- 4>&- 5>&- 6>&- 7>&- 9>&-; exec sleep 30) 2>/dev/null && _FND_TICK=yes
+        fi
+        if [[ "$_FND_TICK" == yes ]]; then
+            local _x="" _r=0
+            IFS= read -r -t 0.2 -u 8 _x 2>/dev/null || _r=$?
             (( _r > 128 )) && return 0
+            # It ended, or said something: not a clock any more.
+            exec 8<&- 2>/dev/null
+            _FND_TICK=no
         fi
     fi
     sleep 0.2 2>/dev/null || sleep 1 2>/dev/null

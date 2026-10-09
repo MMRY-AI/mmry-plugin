@@ -325,12 +325,14 @@ _logging_shim() {
     chmod +x "$SHIMS/$1"
 }
 
-@test "in-time R1: a preparing prompt starts one cksum, one rename a part and one more for part 1's delivery, and no rm or sleep" {
+@test "in-time R1: a preparing prompt starts one cksum, one rename a part and one more for part 1's delivery, no rm, and one sleep a waiting part, not one a poll" {
     # QA's trace of the preparing prompt (#31893 round 2): an up-front record, a stored copy, a delivery
     # record, an outcome record and an rm on every part, each a process, and an external sleep on every
-    # wait. On a loaded Windows machine each process is a second or two, and the preparing part ran past
-    # the 20 s limit. The waits are counted on a bash with fractional read -t; the bash 3.2 a Mac ships
-    # has none and sleeps, where a process is cheap.
+    # poll of a wait. On a loaded Windows machine each process is a second or two, and the preparing part
+    # ran past the 20 s limit. A waiting part may start one sleep for its whole wait (the silent writer
+    # its builtin read -t waits on), so five waiting parts start at most five, where one a poll started
+    # one every 0.2 s for the second the check takes. Counted on a bash with fractional read -t; the bash
+    # 3.2 a Mac ships has none and sleeps each poll, where a process is cheap.
     local real_sleep; real_sleep="$(command -v sleep)"
     _seed_lines 600
     # Verification takes a second, so the other five parts wait on it.
@@ -350,15 +352,15 @@ _logging_shim() {
     [ "$rm" -eq 0 ] || { echo "rm started $rm times on the preparing prompt"; return 1; }
     [ "$mv" -le 7 ] || { echo "mv started $mv times on the preparing prompt, more than one a part and one for part 1's delivery"; return 1; }
     if [ "$(bash -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]; then
-        [ "$sl" -eq 0 ] || { echo "an external sleep was started $sl times while parts waited"; return 1; }
+        [ "$sl" -le 5 ] || { echo "an external sleep was started $sl times while five parts waited: one a poll, not one a wait"; return 1; }
     fi
     # The next prompt is served: no cksum, and still no rm.
     : > "$CALLS"
     MMRY_FOUNDATION_REFRESH_SECONDS=0 _six
     _rejoin
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "served prompt: $NPARTS parts"; return 1; }
-    ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)"
-    [ "$ck" -eq 0 ] && [ "$rm" -eq 0 ] && [ "$mv" -le 7 ] || { echo "served prompt: cksum $ck, rm $rm, mv $mv"; return 1; }
+    ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)" sl="$(_calls sleep)"
+    [ "$ck" -eq 0 ] && [ "$rm" -eq 0 ] && [ "$mv" -le 7 ] && [ "$sl" -eq 0 ] || { echo "served prompt: cksum $ck, rm $rm, mv $mv, sleep $sl"; return 1; }
     # The shims live in the test's temp directory, which teardown removes with rm: put the real ones back.
     "$SHIMS/rm" -f "$SHIMS/mv" "$SHIMS/sleep" "$SHIMS/rm"
     hash -r

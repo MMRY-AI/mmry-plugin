@@ -78,8 +78,8 @@ add claim-age "a claim is believed while kill -0 answers, however old it is" \
     '        if kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then'
 add nap-sleeps "a waiting part polls with an external sleep again" \
     '    if (( BASH_VERSINFO[0] >= 4 )); then
-        local f="${_FOUND_TMPDIR}/.mmry-foundation-tick${_SFX}"' '    if false; then
-        local f="${_FOUND_TMPDIR}/.mmry-foundation-tick${_SFX}"'
+        if [[ -z "${_FND_TICK:-}" ]]; then' '    if false; then
+        if [[ -z "${_FND_TICK:-}" ]]; then'
 add finish-two-steps "the ending writes the outcome by temp and rename, then removes the marker with rm" \
     '        if [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]]' '        if false && [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]]'
 add up-front-record "the prepared path writes a pessimistic record before it starts, one more process" \
