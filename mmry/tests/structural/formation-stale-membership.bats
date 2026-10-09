@@ -707,7 +707,8 @@ _shipped_cap() {
     _quiet_and_dead 5 2
     printf '2\n' > "${SVC}/delay-sent"
     local starts=0 dead=2 before=0 asked k=0 bound
-    while (( dead > 0 && (k == 0 || starts <= (7 + k - 1) / k) )); do
+    # At most 7 starts (one question each); fewer when more fit. A start that asks nothing ends it.
+    while (( dead > 0 && starts < 7 && (starts == 0 || k > 0) && (k == 0 || starts <= (7 + k - 1) / k) )); do
         _session_start "$ME"; starts=$(( starts + 1 ))
         _started || { echo "start ${starts} failed: status $status, output [$output]"; return 1; }
         asked="$(_asked)"
