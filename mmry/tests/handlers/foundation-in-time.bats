@@ -337,8 +337,11 @@ _logging_shim() {
     printf '#!/usr/bin/env bash\nprintf "cksum\n" >> "%s"\n"%s" 1\nexec "%s" "$@"\n' "$CALLS" "$real_sleep" "$REAL_CKSUM" > "$SHIMS/cksum"
     chmod +x "$SHIMS/cksum"
     local c; for c in mv rm sleep; do _logging_shim "$c"; done
+    # _fire_all removes the last prompt's output with rm; the parts overwrite it anyway, so it is not
+    # run here and every rm counted is the hook's.
+    _six() { local k pids=(); for k in 1 2 3 4 5 6; do _fire "$k" & pids+=("$!"); done; wait "${pids[@]}"; }
     : > "$CALLS"
-    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _six
     _rejoin; _want
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "preparing prompt: $NPARTS parts, ${#JOINED} of ${#WANT} bytes"; return 1; }
     local ck mv rm sl
@@ -351,11 +354,14 @@ _logging_shim() {
     fi
     # The next prompt is served: no cksum, and still no rm.
     : > "$CALLS"
-    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _six
     _rejoin
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "served prompt: $NPARTS parts"; return 1; }
     ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)"
     [ "$ck" -eq 0 ] && [ "$rm" -eq 0 ] && [ "$mv" -le 7 ] || { echo "served prompt: cksum $ck, rm $rm, mv $mv"; return 1; }
+    # The shims live in the test's temp directory, which teardown removes with rm: put the real ones back.
+    "$SHIMS/rm" -f "$SHIMS/mv" "$SHIMS/sleep" "$SHIMS/rm"
+    hash -r
 }
 
 @test "in-time R1: a part 2-6 that refuses waits for part 1's word only until the deadline, not a fixed 8 s past it" {

@@ -529,10 +529,26 @@ mmry_read_foundation_set() {
     # cksum that has not answered by then is a verdict of its own, "slow", rc 4, never a wait past the
     # hook's limit. The cksum is left to finish on its own; it holds none of the caller's descriptors
     # beyond its pipe, so nothing that reads the hook waits for it. Without the variable, unchanged.
+    #
+    # THE CLOCK DECIDES A TIMEOUT, NOT THE STATUS (#31893 QA round 2, as lib-hookread.sh does). bash 4
+    # and later report a read -t that ran out of time with a status above 128; the bash 3.2 macOS ships
+    # returns 1, the same as a read that found nothing. Trusting the status alone made a slow check on a
+    # Mac "unreadable", a refusal, and the person was shown a notice with a false cause. So a read that
+    # failed once the time given has passed is a timeout, whatever its status.
+    #
+    # ONE PROCESS FOR THE CHECK, NOT THREE (#31893 QA round 2). The set ends in the writer's newline, so
+    # a here-string, which adds one, gives cksum exactly the same bytes as printf '%s' did, and cksum
+    # replaces the subshell instead of being one end of a pipeline beside a forked printf. A set that does
+    # not end in a newline takes the pipeline, as before. On a loaded Windows machine each process saved
+    # is a second or more of the prompt's 20.
     if [[ "${MMRY_FND_CKSUM_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then
-        local _ck_rc=0
-        read -r -t "$MMRY_FND_CKSUM_SECS" act_cksum act_count < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; printf '%s' "$body" | cksum 2>/dev/null) || _ck_rc=$?
-        if (( _ck_rc > 128 )); then
+        local _ck_rc=0 _ck_t0=$SECONDS
+        if [[ "$body" == *$'\n' ]]; then
+            read -r -t "$MMRY_FND_CKSUM_SECS" act_cksum act_count < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; exec cksum 2>/dev/null <<<"${body%$'\n'}") || _ck_rc=$?
+        else
+            read -r -t "$MMRY_FND_CKSUM_SECS" act_cksum act_count < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; printf '%s' "$body" | cksum 2>/dev/null) || _ck_rc=$?
+        fi
+        if (( _ck_rc > 128 )) || { (( _ck_rc != 0 )) && (( SECONDS - _ck_t0 >= MMRY_FND_CKSUM_SECS )); }; then
             MMRY_FND_VERDICT='slow|the cached directives could not be checked in the time this prompt allows'
             return 4
         fi

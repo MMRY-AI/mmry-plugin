@@ -183,6 +183,28 @@ _mmry_fnd_now() {
     [[ "$_FND_NOW" =~ ^[0-9]{1,12}$ ]] || _FND_NOW=0
 }
 
+# A FIFTH OF A SECOND WITHOUT A PROCESS (#31893 QA round 2). A part waiting on another polled with an
+# external `sleep 0.2`, and on a loaded Windows machine starting it took a second or two, so a wait
+# meant to be a fifth of a second was ten times that and added its own load to the machine the
+# preparing part was trying to finish on. This waits with the read builtin instead: read -t on a FIFO
+# opened read-write, which never sees data or an end, returns when its time is up, with no process.
+# The FIFO is made once per part and temp directory and kept; one per part, because Cygwin refuses a
+# second open of a FIFO while another process is opening it (EBUSY, measured). Anything else at the path,
+# or a read that comes back early, falls back to the external sleep, as does the bash 3.2 a Mac ships,
+# whose read -t takes whole seconds only; a process there costs a few milliseconds.
+_mmry_fnd_nap() {
+    if (( BASH_VERSINFO[0] >= 4 )); then
+        local f="${_FOUND_TMPDIR}/.mmry-foundation-tick${_SFX}" _x="" _r=0
+        [[ -e "$f" || -L "$f" ]] || mkfifo -m 600 "$f" 2>/dev/null
+        if [[ -p "$f" ]]; then
+            IFS= read -r -t 0.2 _x <> "$f" 2>/dev/null || _r=$?
+            (( _r > 128 )) && return 0
+        fi
+    fi
+    sleep 0.2 2>/dev/null || sleep 1 2>/dev/null
+    return 0
+}
+
 # THIS SESSION'S ID, from the start of the payload (#31583 QA round 6, R4(c)). Read here, before the
 # quick exit, so that a part with nothing to send can still record that for this session (#31583 QA
 # round 2, R4). Claude Code sends session_id as the first field (captured from a real payload: offset
@@ -365,17 +387,60 @@ _mmry_fnd_spoil() { _FND_STDOUT_SPOILED=1; }
 # read as this one's. Read without sourcing the client, and written by temp and rename, which
 # costs one mv (_mmry_fnd_write).
 _mmry_outcome() {
+    _mmry_fnd_outcome_line "$1"
+    # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
+    # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
+    # could catch half a line, and a FIFO left at the path would have blocked the write.
+    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$_FND_OLINE"
+    return 0
+}
+# The outcome record's line for outcome $1, into _FND_OLINE: "<session> <start second> <outcome>"
+# (#31583 QA round 3, R4(a)), the second this firing started, so the status command can tell this
+# prompt's records from an earlier prompt's.
+_mmry_fnd_outcome_line() {
     local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
     # read, not $(<file): it runs after a failed emit too, where a command substitution would capture
     # the stale bytes (see _mmry_fnd_spoil).
     [[ -z "$tok" && -f "$f" && -r "$f" ]] && { IFS= read -r tok < "$f" 2>/dev/null || [[ -n "$tok" ]] || tok=""; }
-    # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
-    # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
-    # could catch half a line, and a FIFO left at the path would have blocked the write.
-    # "<session> <start second> <outcome>" (#31583 QA round 3, R4(a)): the second this firing started,
-    # so the status command can tell this prompt's records from an earlier prompt's.
-    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$tok ${_FND_T0:-0} $1"
-    return 0
+    _FND_OLINE="$tok ${_FND_T0:-0} $1"
+}
+
+# RECORD WHAT THIS FIRING CAME TO, AND LEAVE (#31893 QA round 2). Every way out of the supervisor
+# after its emit comes here. $1 is the outcome ("" writes none), $2 "cut" leaves the cut-short marker
+# for the next turn.
+#
+# ONE PROCESS, NOT THREE. The ending used to be an outcome record written by temp and rename, then an
+# rm of the in-flight marker: two processes on every part, three on part 1 with its delivery record,
+# each a second or two on a loaded Windows machine, after the deadline as much as before it. The
+# in-flight marker is this firing's own file, so it is the temp: the outcome is written into it and it
+# is renamed onto the record, which puts the record in place and clears the marker in one mv. A reader
+# still never sees half a line. Anything odd at either path, or a spoiled stdout (see _mmry_fnd_spoil),
+# takes the old way. The pending record and the cut-short marker are removed only when they are there.
+#
+# THE REFRESH DECISION COMES LAST, and only with time left: past the deadline nothing optional runs.
+_mmry_fnd_finish() {
+    local out="$1" cut="${2:-}" o="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    set --
+    [[ "$cut" == cut ]] && _mmry_fnd_mark_cut
+    if [[ -n "$out" ]]; then
+        _mmry_fnd_outcome_line "$out"
+        if [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]] && { [[ ! -e "$o" ]] || [[ -f "$o" ]]; } \
+            && printf '%s' "$_FND_OLINE" > "$_INFLIGHT" 2>/dev/null && mv -f "$_INFLIGHT" "$o" 2>/dev/null; then
+            :
+        else
+            _mmry_fnd_write "$o" "$_FND_OLINE" || true
+            [[ -e "$_INFLIGHT" ]] && set -- "$_INFLIGHT"
+        fi
+    else
+        [[ -e "$_INFLIGHT" ]] && set -- "$_INFLIGHT"
+    fi
+    [[ -e "$_PENDING" ]] && set -- "$@" "$_PENDING"
+    [[ "$cut" != cut && -e "$_CUTSHORT" ]] && set -- "$@" "$_CUTSHORT"
+    (( $# > 0 )) && rm -f "$@" 2>/dev/null
+    if (( ${_FND_REFRESH_DUE:-0} && SECONDS < DEADLINE )) && declare -F _mmry_fnd_refresh_check >/dev/null; then
+        _mmry_fnd_refresh_check
+    fi
+    exit 0
 }
 
 # WHAT PART 1 RECORDED ON THIS PROMPT, waiting up to $1 seconds for it (#31583 QA round 3, P4). Prints
@@ -383,24 +448,31 @@ _mmry_outcome() {
 # second within 3 s of this firing's own, the gap /mmry:foundation-status groups a prompt's parts by;
 # part 1's record from an earlier prompt, and the "failed unfinished" it writes when it starts, are
 # not an answer and are waited past. Polled every 0.2 s; only a part 2-6 that refuses ever asks.
+#
+# INTO _FND_P1, AND NEVER PAST THE DEADLINE (#31893 QA round 2). It printed its answer for a "$( )",
+# a fork, and it waited its $1 seconds from whenever it was asked, so a part that refused late waited
+# them on top of the deadline, outside every bound the hook has. The deadline now ends this wait too,
+# as it ends every other wait in the hook, and the polling waits without a process (_mmry_fnd_nap).
 _mmry_fnd_part1_said() {
     local f="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}" tok="${MMRY_FND_SID:-}"
-    local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t i
+    local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t end=$(( SECONDS + $1 ))
+    _FND_P1=""
+    (( end > DEADLINE )) && end=$DEADLINE
     [[ -z "$tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || tok=""; }
     [[ -n "$tok" ]] || return 1
-    for (( i = 0; i <= $1 * 5; i++ )); do
+    while :; do
         l=""
         [[ -f "$f" && -r "$f" ]] && { l="$(<"$f")" 2>/dev/null || l=""; }
         if [[ "$l" =~ $re && "${BASH_REMATCH[1]}" == "$tok" ]]; then
             t=$(( 10#${BASH_REMATCH[2]} ))
             if (( t >= ${_FND_T0:-0} - 3 && t <= ${_FND_T0:-0} + 3 )) && [[ "${BASH_REMATCH[3]}" != "failed unfinished" ]]; then
-                printf '%s' "${BASH_REMATCH[3]}"
+                _FND_P1="${BASH_REMATCH[3]}"
                 return 0
             fi
         fi
-        (( i < $1 * 5 )) && sleep 0.2
+        (( SECONDS < end )) || return 1
+        _mmry_fnd_nap
     done
-    return 1
 }
 
 _mmry_emit() {
@@ -694,16 +766,21 @@ _mmry_fnd_serve_prepared() {
 
 # STORE THE PREPARATION: the file as it was verified (MMRY_FND_RAW), beside where FND_PARTS cut the
 # set $4, for version $1 of $2 entries and $3 bytes. Only cuts that account for every byte are stored.
-# By temp and rename, so a part never reads half a copy; one that cannot be stored costs the next
-# prompt a preparation, nothing else.
+# One that cannot be stored costs the next prompt a preparation, nothing else.
+#
+# WRITTEN IN PLACE, WITH NO PROCESS (#31893 QA round 2). It was a temp file and an mv, so that a part
+# never read half a copy, and the mv was one more process on the preparing part before its emit. A
+# part reading the copy serves from it only when the whole set file follows its first line byte for
+# byte (_mmry_fnd_serve_prepared), so half a copy reads as no copy and the part waits or prepares
+# again; it is never served. Only a regular file, or nothing, is written over (#31411 QA round 3, N2).
 _mmry_fnd_store_prepared() {
-    local LC_ALL=C ends="" o=0 p
+    local LC_ALL=C ends="" o=0 p f="${_FOUND_TMPDIR}/.mmry-foundation-prepared.${_FND_KEY}"
     [[ -n "${MMRY_FND_RAW:-}" ]] || return 1
     for p in "${FND_PARTS[@]}"; do o=$(( o + ${#p} )); ends+=" $o"; done
     (( ${#FND_PARTS[@]} >= 1 && ${#FND_PARTS[@]} <= MMRY_FND_PARTS_MAX && o == ${#4} )) || return 1
-    _mmry_fnd_write "${_FOUND_TMPDIR}/.mmry-foundation-prepared.${_FND_KEY}" \
-        "mmry-fnd-prepared v1 $1 ${#FND_PARTS[@]} $2 $3 ${MMRY_FND_PARTS_MAX} ${MMRY_FND_PART_CAP} ${o}${ends}
-${MMRY_FND_RAW}"
+    [[ -e "$f" && ! -f "$f" ]] && return 1
+    printf '%s' "mmry-fnd-prepared v1 $1 ${#FND_PARTS[@]} $2 $3 ${MMRY_FND_PARTS_MAX} ${MMRY_FND_PART_CAP} ${o}${ends}
+${MMRY_FND_RAW}" > "$f" 2>/dev/null
 }
 
 # Leave the cut-short marker (see _CUTSHORT in the supervisor). Empty, so made by a redirect, and only
@@ -751,7 +828,14 @@ _mmry_fnd_claim() {
     l="$(<"$c")" 2>/dev/null || l=""
     if [[ "$l" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
         [[ "$l" == "$mine" ]] && return 0
-        if kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then
+        # A CLAIM OLDER THAN THE DEADLINE IS DEAD, WHATEVER kill -0 SAYS (#31893 QA round 2, R4). Its
+        # holder's own preparation stopped at its deadline, so a claim stamped more than that before or
+        # after this firing's start is over. Trusting kill -0 alone, a pid reused by any unrelated live
+        # process kept the claim held forever: every part waited out its deadline on every prompt and
+        # nothing was delivered. Taking over a claim that was in fact live costs one more cksum.
+        _fnd_age=$(( ${_FND_T0:-0} - 10#${BASH_REMATCH[2]} ))
+        (( _fnd_age < 0 )) && _fnd_age=$(( -_fnd_age ))
+        if (( _fnd_age <= DEADLINE + 2 )) && kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then
             _FND_HELD="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
             return 1
         fi
@@ -865,16 +949,11 @@ _mmry_fnd_prepared_path() {
                     refused)
                         if (( MMRY_FND_PART == 1 )); then WORKER_RC=3 BODY="$detail" _FND_ROUTE=done; return 0; fi
                         detail="${detail%%|*}"
-                        _mmry_outcome "failed refused ${detail:-unknown}"
-                        rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
-                        exit 0 ;;
+                        _mmry_fnd_finish "failed refused ${detail:-unknown}" ;;
                     deadline)
                         if (( MMRY_FND_PART == 1 )); then WORKER_RC=124 HIT_DEADLINE=1 _FND_ROUTE=done; return 0; fi
                         # The next turn's part is told this one was cut short.
-                        _mmry_outcome "failed deadline ${DEADLINE}"
-                        _mmry_fnd_mark_cut
-                        rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
-                        exit 0 ;;
+                        _mmry_fnd_finish "failed deadline ${DEADLINE}" cut ;;
                     none)
                         if (( MMRY_FND_PART > 1 )); then _FND_KIND="NONE ${MMRY_FND_PART} 0" BODY="" WORKER_RC=0 _FND_ROUTE=done; return 0; fi
                         _FND_ROUTE=worker; return 0 ;;
@@ -896,7 +975,7 @@ _mmry_fnd_prepared_path() {
             WORKER_RC=124 HIT_DEADLINE=1 _FND_ROUTE=done
             return 0
         fi
-        sleep 0.2 2>/dev/null || sleep 1 2>/dev/null
+        _mmry_fnd_nap
     done
 }
 
@@ -1125,24 +1204,28 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     if _mmry_fnd_serve_prepared; then
         # Served from the prepared set, with nothing left that can run long or leave in silence: the
         # emit and the record below are all that remain, and a kill before them leaves the in-flight
-        # marker. The pessimistic record that follows is for every other path, which still has a
-        # preparation, a wait or a worker ahead of it; here it would be one more process on every part
-        # of every ordinary prompt and say nothing the marker does not (#31893).
+        # marker (#31893).
         _FND_ROUTE=done
     else
+        # Prepared here, or waited for. Every way out of this path below records what happened, and a
+        # kill before that leaves the in-flight marker, so it writes no up-front record either: that
+        # was one more process before the deadline on every part of the preparing prompt (#31893 QA
+        # round 2). The worker, which can leave in silence, still gets one; see below.
+        _mmry_fnd_prepared_path
+    fi
+    # The daily refresh decision is made after the emit, in _mmry_fnd_finish, and only with time left
+    # (#31893 QA round 2): it starts a process, and before the emit that process was the prompt's.
+    [[ "$_FND_ROUTE" == "done" ]] && _FND_REFRESH_DUE=1
+
+    # THE WORKER, for what the prepared path hands back. Its body keeps the supervisor's indentation,
+    # so the mutation catalogue (tests/mutation/run-mutations.sh) still finds every line it names.
+    if [[ "$_FND_ROUTE" == "worker" ]]; then
     # A RECORD THAT ASSUMES THE WORST, WRITTEN FIRST (#31583 QA round 3, R4(b)). Every way out of
     # this supervisor below replaces it with what actually happened. Some ways out used to write
     # nothing - a part whose loader found nothing to send, a loader that could not start, an emit
     # that failed - and the previous prompt's record then stood for this one. Any exit that still
     # forgets to replace it now reads as a failure, not as the last prompt's delivery.
     _mmry_outcome "failed unfinished"
-    _mmry_fnd_prepared_path
-    fi
-    [[ "$_FND_ROUTE" == "done" ]] && _mmry_fnd_refresh_check
-
-    # THE WORKER, for what the prepared path hands back. Its body keeps the supervisor's indentation,
-    # so the mutation catalogue (tests/mutation/run-mutations.sh) still finds every line it names.
-    if [[ "$_FND_ROUTE" == "worker" ]]; then
     OUTFILE="${_FOUND_TMPDIR}/.mmry-foundation-out.$$"
     # The watchdog touches this immediately BEFORE it kills the worker, and nothing else ever
     # creates it. It is therefore the only evidence that distinguishes "we stopped it at the
@@ -1346,9 +1429,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             # silent, and still records its refusal for /mmry:foundation-status. Part 1 delivered in parts,
             # or had nothing to send, or said nothing within 8 s: this part alone was refused, the set
             # changed between the two reads, and it names itself as above. Waiting costs nothing unless a
-            # part refuses; 8 s is past part 1's refusal path on a loaded machine and inside the budget.
+            # part refuses; 8 s is past part 1's refusal path on a loaded machine, and the wait never runs
+            # past the deadline (#31893 QA round 2).
             _fnd_p1=""
-            _fnd_p1="$(_mmry_fnd_part1_said 8)" || _fnd_p1=""
+            _mmry_fnd_part1_said 8 && _fnd_p1="$_FND_P1"
             if [[ "$_fnd_p1" == failed* || "$_fnd_p1" == "ok by-reference"* ]]; then
                 NOTICE="" USERMSG=""
             fi
@@ -1358,9 +1442,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # A CAUSE CODE, NOT PROSE (#31583 QA round 6). The status command used to print whatever
         # text this record held, and the record sits in a shared temp directory. It now holds a
         # code and a number only; the command turns those into fixed sentences.
-        _mmry_outcome "failed refused ${_STATE:-unknown}"
-        rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
-        exit 0
+        _mmry_fnd_finish "failed refused ${_STATE:-unknown}"
     fi
 
     if (( WORKER_RC != 0 )); then
@@ -1430,16 +1512,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             USERMSG="${USERMSG/MMRY AI: your Foundation directives were NOT applied/MMRY AI: part ${MMRY_FND_PART} of your Foundation directives was NOT applied}"
         fi
         _mmry_emit "$NOTICE" "$USERMSG"
-        _mmry_outcome "failed ${_FOUND_OUTCOME}"
         # Cut short, the next turn is told this one ran without the directives (#31893 TC3). A crash
         # was reported in full here and needs no second telling.
-        if (( HIT_DEADLINE == 1 )); then
-            _mmry_fnd_mark_cut
-            rm -f "$_INFLIGHT" "$_PENDING" 2>/dev/null || true
-        else
-            rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
-        fi
-        exit 0
+        _fnd_cut=""
+        (( HIT_DEADLINE == 1 )) && _fnd_cut=cut
+        _mmry_fnd_finish "failed ${_FOUND_OUTCOME}" "$_fnd_cut"
     fi
 
     # Worker finished inside the deadline with nothing to inject (toggle off, no cache,
@@ -1472,18 +1549,21 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
                 _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
             fi
         fi
+        _fnd_o=""
         if [[ -e "$_PENDING" ]]; then
             mv -f "$_PENDING" "$_STATUS" 2>/dev/null
-            _mmry_outcome "ok part 1 of 1"
+            _fnd_o="ok part 1 of 1"
         elif [[ "$_FND_KIND" == NONE* ]]; then
             # The worker said there is nothing for this part: a part beyond the end of the set, no set
             # loaded yet, an empty one, or re-injection off. That is the right answer, so it is recorded.
-            _mmry_outcome "none"
+            _fnd_o="none"
+        elif [[ "$_FND_ROUTE" == "done" ]]; then
+            # Nothing said and nothing explained on the prepared path, which wrote no up-front record.
+            _fnd_o="failed unfinished"
         fi
-        # Anything else said nothing and explained nothing, so the record written at the start stands:
-        # "failed unfinished" (#31583 QA round 3, R4(b)).
-        rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
-        exit 0
+        # Anything else on the worker's path said nothing and explained nothing, so the record written
+        # at the start stands: "failed unfinished" (#31583 QA round 3, R4(b)).
+        _mmry_fnd_finish "$_fnd_o"
     fi
 
     USERMSG=""
@@ -1518,23 +1598,23 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # Promoted only if the emit itself succeeded. If this process is killed inside the emit,
     # or the reader is gone, the record keeps describing the last turn that DID deliver,
     # which stays true.
+    _fnd_o=""
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
         case "$_FND_KIND" in
             # "PART k n version": the version goes into the outcome record (#31583 QA round 2 R4,
             # #31597), so the status command can tell a prompt whose parts came from two versions.
-            "PART "*)  _fk=(${_FND_KIND#PART }); _mmry_outcome "ok part ${_fk[0]} of ${_fk[1]}${_fk[2]:+ set ${_fk[2]}}" ;;
-            "BYREF "*) _mmry_outcome "ok by-reference ${_FND_KIND#BYREF }" ;;
-            *)         _mmry_outcome "ok part 1 of 1" ;;
+            "PART "*)  _fk=(${_FND_KIND#PART }); _fnd_o="ok part ${_fk[0]} of ${_fk[1]}${_fk[2]:+ set ${_fk[2]}}" ;;
+            "BYREF "*) _fnd_o="ok by-reference ${_FND_KIND#BYREF }" ;;
+            *)         _fnd_o="ok part 1 of 1" ;;
         esac
     else
         # The hand-over to Claude Code failed (#31583 QA round 3, R4(b)). Nothing was delivered, and
         # this used to leave the previous prompt's record to say otherwise.
-        _mmry_outcome "failed emit"
+        _fnd_o="failed emit"
         _mmry_fnd_log "foundation reinjection FAILED: the output could not be written (part ${MMRY_FND_PART})"
     fi
-    rm -f "$_INFLIGHT" "$_PENDING" "$_CUTSHORT" 2>/dev/null || true
-    exit 0
+    _mmry_fnd_finish "$_fnd_o"
 fi
 
 # ============================================================================
