@@ -1913,7 +1913,10 @@ _fnd_n=${#FND_PARTS[@]}
 _fnd_head="$_FND_HEAD"
 
 # A set this worker cut into six parts or fewer is stored as prepared, so the next prompt serves it
-# without a worker (#31893). This is how a set that is only cut in characters, by awk, gets there.
+# without a worker (#31893). The supervisor prepares every set that fits itself, a non-ASCII set that
+# only fits counted in characters included (QA round 2, R2), so a worker gets here only on the
+# supervisor's fallbacks, such as a client it could not load or a set it could not read or found missing
+# after this session had delivered or stored one.
 if (( _fnd_n >= 1 && _fnd_n <= MMRY_FND_PARTS_MAX )); then
     _mmry_fnd_key
     _mmry_fnd_store_prepared "$_fnd_setid" "$_exp_entries" "$_act_bytes" "$content" || true
