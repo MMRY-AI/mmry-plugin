@@ -172,11 +172,23 @@ _service_says() {
     esac
 }
 
+# What the service will say about session $2 IN FORMATION $1 only: "true", "false", or a raw body.
+_service_says_in() {
+    [[ -n "${SVC:-}" ]] || _idle_fixture
+    case "$3" in
+        true|false) printf '{"formationId":%s,"member":%s,"messages":[]}' "$1" "$3" > "${SVC}/sent-$1-$2" ;;
+        *) printf '%s' "$3" > "${SVC}/sent-$1-$2" ;;
+    esac
+}
+
 # A fake service for the formation check: transmissions answer $FC_TX (default an empty list), the
 # membership question answers ${SVC}/sent-<session id> when there is one, else $FC_SENT. With
 # FC_SWITCH set, the membership question first rewrites the asking session's record to name
 # formation FC_SWITCH (a join elsewhere at that very moment). ${SVC}/down: nothing connects.
-# ${SVC}/delay: every request takes that many seconds first.
+# ${SVC}/delay: every request takes that many seconds first. ${SVC}/delay-sent: only the membership
+# question does (#31844 QA round 3), so a start that asks several costs only those.
+# KEYED ON THE FORMATION TOO (#31844 QA round 3, M5): ${SVC}/sent-<formation>-<session> answers for
+# that pair alone and is preferred, so a question about the wrong formation gets the fallback answer.
 _idle_fixture() {
     SVC="${BATS_TEST_TMPDIR}/svc"; mkdir -p "$SVC"
     {
@@ -194,7 +206,10 @@ _idle_fixture() {
         echo 'case "$url" in'
         echo '    */transmissions/sent*)'
         echo '        sid="${url##*sessionId=}"; sid="${sid%%&*}"'
-        echo '        if [[ -f "$here/sent-$sid" ]]; then answer="$(cat "$here/sent-$sid")"; else answer="${FC_SENT:-}"; fi'
+        echo '        fid="${url#*/formations/}"; fid="${fid%%/*}"'
+        echo '        [[ -f "$here/delay-sent" ]] && sleep "$(cat "$here/delay-sent")"'
+        echo '        if [[ -f "$here/sent-$fid-$sid" ]]; then answer="$(cat "$here/sent-$fid-$sid")"'
+        echo '        elif [[ -f "$here/sent-$sid" ]]; then answer="$(cat "$here/sent-$sid")"; else answer="${FC_SENT:-}"; fi'
         echo '        [[ -n "${FC_SWITCH:-}" ]] && printf "%s\n" "$FC_SWITCH" > "${FC_STATE_FILE}"'
         echo '        ;;'
         echo '    *) answer="${FC_TX:-[]}" ;;'
@@ -617,6 +632,175 @@ _run_idle() {
     _session_start "$ME"
     [[ -f "$f" ]] || { echo "the record with a rewritten name was removed"; return 1; }
     [[ "$(_asked)" -eq 0 ]] || { echo "the service was asked about a session id that does not exist"; return 1; }
+}
+
+# =============================================================================================
+# QA ROUND 3: EVERY STALE RECORD IS REACHED, AND THE CLEANUP REMOVES NOTHING BUT A RECORD
+#
+# REACH (requirement 1). The sweep asked about stale records in the same order at every start, and a
+# record the service called a member was never refreshed, so a full cap of quiet members sorting
+# ahead of an ended record used up every start's questions and the ended record was never reached.
+# Now a clean member:true refreshes the record, and the questions go oldest first.
+#
+# INJECTION (security). The sweep took the path in each line of stat's output on trust. A record name
+# carrying a newline could add a line naming any file at all, and the no-formation branch removed it
+# without a question. Now only names of the record form are considered, and only a path that is
+# exactly one of the records collected is ever removed.
+# =============================================================================================
+
+# $1 quiet members of formation 4242 that the service vouches for, $2 ended records of formation 37
+# it does not. All past the period; every member's name sorts ahead of every ended record's.
+_quiet_and_dead() {
+    local i
+    for i in $(seq 1 "$1"); do
+        _member "a0000${i}-quiet-$" 4242
+        _service_says_in 4242 "a0000${i}-quiet-$" true
+        _backdate "${TMPDIR}/.mmry-formation-a0000${i}-quiet-$" $(( PERIOD + 3600 ))
+    done
+    for i in $(seq 1 "$2"); do
+        _member "z0000${i}-dead-$" 37
+        _service_says_in 37 "z0000${i}-dead-$" false
+        _backdate "${TMPDIR}/.mmry-formation-z0000${i}-dead-$" $(( PERIOD + 3600 ))
+    done
+}
+
+_left() { ls -A "$TMPDIR" | grep -c -- "$1" || true; }
+
+_shipped_cap() {
+    grep -oE '^MMRY_FORMATION_SWEEP_MAX_ASKS="\$\{MMRY_FORMATION_SWEEP_MAX_ASKS:-[0-9]+\}"' \
+        "${HANDLERS}/formation-state.sh" | grep -oE '[0-9]+' | tail -1
+}
+
+@test "reach r3: ten quiet members ahead of five ended records - every ended record goes within the stated starts, every member stays" {
+    # QA's reproduction. Only the cap limits the questions here, as in the cap test above.
+    export MMRY_FORMATION_SWEEP_BUDGET=600
+    local cap bound starts=0 dead=5 i
+    cap="$(_shipped_cap)"
+    [[ "$cap" =~ ^[0-9]+$ ]] && (( cap > 0 )) || { echo "no usable cap default: [$cap]"; return 1; }
+    # The bound: every stale record is reached within ceil(stale records / cap) starts.
+    bound=$(( (15 + cap - 1) / cap ))
+    _quiet_and_dead 10 5
+    while (( dead > 0 && starts <= bound )); do
+        _session_start "$ME"; starts=$(( starts + 1 ))
+        _started || { echo "start ${starts} failed: status $status, output [$output]"; return 1; }
+        dead="$(_left '^\.mmry-formation-z0000.*-dead-')"
+        echo "start ${starts}: questions so far $(_asked), ended records left ${dead}" >&3
+    done
+    (( dead == 0 )) || { echo "after ${starts} starts ${dead} of 5 ended records remain: the questions never reach them"; return 1; }
+    (( starts <= bound )) || { echo "the ended records took ${starts} starts; the bound is ${bound}"; return 1; }
+    [[ "$(_left '^\.mmry-formation-a0000.*-quiet-')" -eq 10 ]] || { echo "members were removed: $(ls -A "$TMPDIR")"; return 1; }
+    for i in $(seq 1 10); do
+        [[ "$(head -1 "${TMPDIR}/.mmry-formation-a0000${i}-quiet-$")" == 4242 ]] || { echo "member ${i} no longer names 4242"; return 1; }
+    done
+    # Each question names the record's own formation (M5).
+    grep -q "/formations/4242/transmissions/sent?sessionId=a00001-quiet-$" "$FC_LOG" \
+        || { echo "no question about member 1 in formation 4242:"; cat "$FC_LOG"; return 1; }
+    grep -q "/formations/37/transmissions/sent?sessionId=z00001-dead-$" "$FC_LOG" \
+        || { echo "no question about ended record 1 in formation 37:"; cat "$FC_LOG"; return 1; }
+    # A member the service vouched for is not asked about again for a full period.
+    : > "$FC_LOG"
+    _session_start "$ME"
+    [[ "$(_asked)" -eq 0 ]] || { echo "members already vouched for were asked again: $(_asked) questions"; return 1; }
+}
+
+@test "reach r3: with a slow service only a few questions fit the budget, and every ended record is still reached" {
+    _quiet_and_dead 5 2
+    printf '2\n' > "${SVC}/delay-sent"
+    local starts=0 dead=2 before=0 asked k=0 bound
+    while (( dead > 0 && (k == 0 || starts <= (7 + k - 1) / k) )); do
+        _session_start "$ME"; starts=$(( starts + 1 ))
+        _started || { echo "start ${starts} failed: status $status, output [$output]"; return 1; }
+        asked="$(_asked)"
+        if (( k == 0 || asked - before < k )); then k=$(( asked - before )); fi
+        before="$asked"
+        dead="$(_left '^\.mmry-formation-z0000.*-dead-')"
+        echo "start ${starts}: questions so far ${asked}, ended records left ${dead}" >&3
+    done
+    rm -f "${SVC}/delay-sent"
+    (( k >= 1 )) || { echo "a start asked no question at all"; return 1; }
+    (( dead == 0 )) || { echo "after ${starts} starts ${dead} of 2 ended records remain: the questions never reach them"; return 1; }
+    bound=$(( (7 + k - 1) / k ))
+    (( starts <= bound )) || { echo "took ${starts} starts with at least ${k} questions each; the bound is ${bound}"; return 1; }
+    [[ "$(_left '^\.mmry-formation-a0000.*-quiet-')" -eq 5 ]] || { echo "members were removed"; return 1; }
+}
+
+@test "reach r3: the record stale longest is asked first, whatever its name sorts as" {
+    export MMRY_FORMATION_SWEEP_BUDGET=600
+    local cap; cap="$(_shipped_cap)"
+    [[ "$cap" =~ ^[0-9]+$ ]] && (( cap > 0 )) || { echo "no usable cap default: [$cap]"; return 1; }
+    _quiet_and_dead "$cap" 1
+    _backdate "${TMPDIR}/.mmry-formation-z00001-dead-$" $(( PERIOD + 7200 ))
+    _session_start "$ME"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    echo "cap ${cap}, questions $(_asked)" >&3
+    [[ ! -e "${TMPDIR}/.mmry-formation-z00001-dead-$" ]] || { echo "the oldest record was not reached at the first start: $(_asked) questions went to newer ones"; return 1; }
+    [[ "$(_left '^\.mmry-formation-a0000.*-quiet-')" -eq "$cap" ]] || { echo "members were removed"; return 1; }
+}
+
+# What stat prints for a record whose name carries "\n1 <path>": the genuine line, then forged ones.
+_forged_stat() {   # $1 = bin dir, $2 = the genuine record, $3... = forged paths
+    local bin="$1" real="$2" old p
+    shift 2
+    old=$(( $(date +%s) - PERIOD - 3600 ))
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'printf "%%s %%s\\n" %s "%s"\n' "$old" "$real"
+        for p in "$@"; do printf 'printf "%%s %%s\\n" 1 "%s"\n' "$p"; done
+    } > "${bin}/stat"
+    chmod +x "${bin}/stat"
+}
+
+@test "inject r3: a forged line in stat's output never removes a file that is not a collected record" {
+    local work="${BATS_TEST_TMPDIR}/work" bin="${BATS_TEST_TMPDIR}/forge"
+    mkdir -p "$work" "$bin"
+    printf 'project notes\n' > "${work}/CLAUDE.md"
+    printf '4242\n' > "${BATS_TEST_TMPDIR}/numeric-outside"
+    printf 'keep\n' > "${TMPDIR}/unrelated-file"
+    _member "$OTHER" 4242
+    _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
+    _service_says_in 4242 "$OTHER" false
+    # A relative path is the working directory's. The fake's default answer is "not a member".
+    _forged_stat "$bin" "${TMPDIR}/.mmry-formation-${OTHER}" \
+        "CLAUDE.md" "${BATS_TEST_TMPDIR}/numeric-outside" "${TMPDIR}/unrelated-file"
+    run env HOME="${BATS_TEST_TMPDIR}/fc-home" TMPDIR="$TMPDIR" PATH="${bin}:${SVC}:${PATH}" FC_LOG="$FC_LOG" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash -c "cd '${work}' && source '${HANDLERS}/mmry-client.sh' && source '${HANDLERS}/formation-state.sh' && mmry_formation_sweep '${ME}'"
+    [[ "$status" -eq 0 ]] || { echo "sweep exited $status: $output"; return 1; }
+    [[ -f "${work}/CLAUDE.md" ]] || { echo "the sweep removed CLAUDE.md in the working directory"; return 1; }
+    [[ -f "${BATS_TEST_TMPDIR}/numeric-outside" ]] || { echo "the sweep removed a file outside TMPDIR"; return 1; }
+    [[ -f "${TMPDIR}/unrelated-file" ]] || { echo "the sweep removed a TMPDIR file that is not a record"; return 1; }
+    if grep -q 'numeric-outside\|unrelated-file\|CLAUDE' "$FC_LOG"; then echo "the service was asked about a forged path:"; cat "$FC_LOG"; return 1; fi
+    # CONTROL: the sweep ran on the forged output and acted on its genuine line.
+    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "control: the genuine ended record was not removed, so the forged stat proved nothing"; return 1; }
+}
+
+@test "inject r3: a stale record that names no formation is removed without a question; a fresh one is kept" {
+    local blank="blank-$-${BATS_TEST_NUMBER}"
+    printf 'not-a-number\n' > "${TMPDIR}/.mmry-formation-${OTHER}"
+    _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
+    : > "${TMPDIR}/.mmry-formation-${blank}"
+    _backdate "${TMPDIR}/.mmry-formation-${blank}" $(( PERIOD + 3600 ))
+    printf 'not-a-number\n' > "${TMPDIR}/.mmry-formation-${LIVE}"
+    _session_start "$ME"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "a stale record naming no formation was kept"; return 1; }
+    [[ ! -e "${TMPDIR}/.mmry-formation-${blank}" ]] || { echo "a stale empty record was kept"; return 1; }
+    [[ -f "${TMPDIR}/.mmry-formation-${LIVE}" ]] || { echo "a record inside the period was removed"; return 1; }
+    [[ "$(_asked)" -eq 0 ]] || { echo "the service was asked $(_asked) times about records that name no formation"; return 1; }
+}
+
+@test "inject r3: a record name with a byte outside A-Za-z0-9._- is never considered, let alone removed" {
+    local odd="${TMPDIR}/.mmry-formation-odd name-$"
+    printf '4242\n' > "$odd"
+    _backdate "$odd" $(( PERIOD + 3600 ))
+    # CONTROL: an ordinary ended record beside it is asked about and removed.
+    _member "$OTHER" 4242
+    _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
+    _session_start "$ME"
+    _started || { echo "session start failed: status $status, output [$output]"; return 1; }
+    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "control: the ordinary ended record was not removed"; return 1; }
+    [[ -f "$odd" ]] || { echo "a record whose name has a space was removed"; return 1; }
+    if grep -q 'odd' "$FC_LOG"; then echo "the service was asked about the odd name:"; cat "$FC_LOG"; return 1; fi
 }
 
 # =============================================================================================
