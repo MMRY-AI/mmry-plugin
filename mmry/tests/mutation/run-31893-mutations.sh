@@ -99,6 +99,15 @@ add status-new-by-rename "a session's first delivery record is made by a pending
 add store-by-rename "the prepared copy is written by temp and rename, one more process" \
     '    printf '"'"'%s'"'"' "mmry-fnd-prepared v1' '    _mmry_fnd_write "$f" "mmry-fnd-prepared v1'
 
+# QA round 3 (#31893): a non-ASCII set that fits only counted in characters.
+add nonascii-to-worker "a set that needs cutting in characters goes to a worker on every part again" \
+    '    _FND_CUT_LATE=0
+    if [[ "${MMRY_FND_AWK_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then' '    _FND_CUT_LATE=0
+    [[ -n "${MMRY_FND_AWK_SECS:-}" ]] && return 0
+    if [[ "${MMRY_FND_AWK_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then'
+add awk-unbounded "the preparing part's character cut is not bounded by the time it has left" \
+    '    MMRY_FND_AWK_SECS="$left" _mmry_fnd_parts "$MMRY_FND_SET"' '    _mmry_fnd_parts "$MMRY_FND_SET"'
+
 run_suite() { ( cd "$1/tests" && ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 
 copy() { rm -rf "$1"; mkdir -p "$1"; cp -R "$PLUGIN_SRC/." "$1/"; }

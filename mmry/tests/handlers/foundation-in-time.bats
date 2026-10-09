@@ -442,3 +442,54 @@ _logging_shim() {
     local i; for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
     [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "the quicker prompt did not decide the refresh"; return 1; }
 }
+
+# A Japanese set of $1 lines, each 37 characters and 95 bytes, written in octal so no locale is
+# involved: "- 指示 NNNN：", 25 of 日 and a 。. 700 lines are about 25,900 characters and 66,500 bytes, so it
+# needs more than six parts counted in bytes and three counted in characters, as Claude Code counts.
+_seed_japanese() {
+    awk -v n="$1" 'BEGIN { for (i = 1; i <= n; i++) { printf "- \346\214\207\347\244\272 %04d\357\274\232", i; for (j = 0; j < 25; j++) printf "\346\227\245"; printf "\343\200\202\n" } }' > "$CACHE"
+    fnd_seal "$CACHE" "" "$SET"
+    : > "$CALLS"
+}
+# An awk that logs every call and takes $1 seconds first. Installed after the set is seeded.
+_awk_shim() {
+    printf '#!/usr/bin/env bash\nprintf "awk\n" >> "%s"\nsleep %s\nexec "%s" "$@"\n' "$CALLS" "$1" "$(command -v awk)" > "$SHIMS/awk"
+    chmod +x "$SHIMS/awk"
+}
+
+@test "in-time R2: a non-ASCII set that fits only counted in characters is prepared once, cut once, and every part only reads" {
+    # QA round 2 (2026-10-09): a set too big for six parts in bytes but small enough in characters
+    # went to the old worker on every part, so the prompt paid for preparing it once per part: 206
+    # processes on a 700-line Japanese set against 298 on 2.10.1.
+    _seed_japanese 700
+    _awk_shim 0
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
+    _rejoin; _want
+    [ "$NPARTS" -eq 3 ] && [ "$JOINED" = "$WANT" ] || { echo "first prompt: $NPARTS parts, ${#JOINED} of ${#WANT} characters"; return 1; }
+    local n; n="$(_calls cksum)"
+    [ "$n" -eq 1 ] || { echo "the set was verified $n times on one prompt"; return 1; }
+    [ "$(_calls awk)" -eq 1 ] || { echo "the set was cut in characters $(_calls awk) times on one prompt"; return 1; }
+    [ "$(_calls jq)" -eq 0 ] || { echo "a jq was started on the prompt path: $(_calls jq)"; return 1; }
+    : > "$CALLS"
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
+    _rejoin
+    [ "$NPARTS" -eq 3 ] && [ "$JOINED" = "$WANT" ] || { echo "second prompt: $NPARTS parts, ${#JOINED} of ${#WANT} characters"; return 1; }
+    [ "$(_calls cksum)$(_calls awk)$(_calls jq)" = "000" ] || { echo "the second prompt did not only read: cksum $(_calls cksum), awk $(_calls awk), jq $(_calls jq)"; return 1; }
+}
+
+@test "in-time R3: the character cut the preparing part runs is bounded by its deadline, quietly to the person" {
+    _seed_japanese 700
+    _awk_shim 30
+    local start elapsed budget
+    budget="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("userpromptsubmit-foundation")) | .timeout] | unique | .[0]' "$PLUGIN_ROOT/hooks/hooks.json" | tr -d '\r')"
+    start=$SECONDS
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 MMRY_FOUNDATION_DEADLINE_SECS=3 _fire_all
+    elapsed=$(( SECONDS - start ))
+    (( elapsed < budget )) || { echo "the prompt took ${elapsed}s against ${budget}s"; return 1; }
+    local k; for k in 1 2 3 4 5 6; do
+        [ -z "$(_sysmsg "$k")" ] || { echo "part $k showed the person: $(_sysmsg "$k")"; return 1; }
+    done
+    _ctx 1
+    [[ "$PART_TEXT" == *"cut short"* ]] || { echo "the assistant was not told: ${PART_TEXT:0:300}"; return 1; }
+    [[ "$PART_TEXT" != *"0001"* ]] || { echo "a set was sent from a cut that did not finish"; return 1; }
+}
