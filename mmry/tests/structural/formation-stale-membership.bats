@@ -458,6 +458,29 @@ _run_idle() {
     [[ "$output" == *"GUARD-REACHED formation-check"* ]] || { echo "the resumed member's gate is closed: $output"; return 1; }
 }
 
+@test "member 2 D1: the sweep itself refuses to run without an id, whoever calls it" {
+    # session-start.sh only calls the sweep with the payload's id, but the function's own contract
+    # is that a call with no id sweeps nothing. A stale record the service calls ended is the bait.
+    _member "$OTHER" 4242
+    _backdate "${TMPDIR}/.mmry-formation-${OTHER}" $(( PERIOD + 3600 ))
+    _idle_fixture
+    _service_says "$OTHER" false
+    local call
+    for call in '""' ''; do
+        run env HOME="${BATS_TEST_TMPDIR}/fc-home" TMPDIR="$TMPDIR" PATH="${SVC}:${PATH}" FC_LOG="$FC_LOG" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            bash -c "source '${HANDLERS}/mmry-client.sh' && source '${HANDLERS}/formation-state.sh' && mmry_formation_sweep ${call}"
+        [[ "$status" -eq 0 ]] || { echo "sweep [${call}] exited $status: $output"; return 1; }
+        [[ -f "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "the sweep called with [${call}] removed a record"; return 1; }
+    done
+    [[ "$(_asked)" -eq 0 ]] || { echo "the sweep with no id asked the service $(_asked) times"; return 1; }
+    # CONTROL: the same call with an id does remove it, so the harness can see a removal.
+    run env HOME="${BATS_TEST_TMPDIR}/fc-home" TMPDIR="$TMPDIR" PATH="${SVC}:${PATH}" FC_LOG="$FC_LOG" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash -c "source '${HANDLERS}/mmry-client.sh' && source '${HANDLERS}/formation-state.sh' && mmry_formation_sweep '${ME}'"
+    [[ ! -e "${TMPDIR}/.mmry-formation-${OTHER}" ]] || { echo "control: the sweep with an id did not remove the ended record: $output"; return 1; }
+}
+
 @test "member 2 D1: the starting session's own record survives when its environment id is empty or inherited" {
     # The payload names this session. The environment says nothing, or names another session (an
     # inherited CLAUDE_CODE_SESSION_ID). The service is made to call this session "not a member", so
@@ -545,6 +568,9 @@ _run_idle() {
     max="$(grep -oE '^MMRY_FORMATION_SWEEP_MAX_ASKS="\$\{MMRY_FORMATION_SWEEP_MAX_ASKS:-[0-9]+\}"' \
         "${HANDLERS}/formation-state.sh" | grep -oE '[0-9]+' | tail -1)"
     [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 && max < 40 )) || { echo "no usable MMRY_FORMATION_SWEEP_MAX_ASKS default: [$max]"; return 1; }
+    # Only the cap may limit the count here. With the shipped time budget a slow machine stops
+    # sooner, which would hide a missing cap (seen in the mutation run) and fail a sound one.
+    export MMRY_FORMATION_SWEEP_BUDGET=600
     for i in $(seq 1 40); do
         _member "gone-${i}-$$" 37
         _backdate "${TMPDIR}/.mmry-formation-gone-${i}-$$" $(( PERIOD + 3600 ))
