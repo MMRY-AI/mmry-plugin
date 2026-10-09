@@ -411,3 +411,22 @@ _logging_shim() {
     _rejoin; _want
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "$NPARTS parts, ${#JOINED} of ${#WANT} bytes"; return 1; }
 }
+
+@test "in-time R1: a part past half its deadline leaves the refresh decision, a process, to a quicker prompt" {
+    _seed_lines 3
+    # A configured account whose set is a year old: a refresh is due.
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":60}\n' > "$MMRY_CONFIG_FILE"
+    touch -t 202501010000 "$SET"
+    # Verification takes 2.2 s of a 4 s deadline, so the part finishes past half of it.
+    _cksum_shim 2.2
+    MMRY_FOUNDATION_DEADLINE_SECS=4 _fire 1
+    _ctx 1
+    [[ "$PART_TEXT" == *"Directive 0003"* ]] || { echo "the prompt did not deliver: ${PART_TEXT:0:200}"; return 1; }
+    # The decision writes its stamp before it starts anything, so no stamp means it did not run.
+    [ ! -f "$TEST_TMPDIR/.mmry-foundation-refresh-checked" ] || { echo "a part past half its deadline started the refresh decision"; return 1; }
+    # The next prompt is served at once and makes it.
+    _cksum_shim 0
+    MMRY_FOUNDATION_DEADLINE_SECS=4 _fire 1
+    local i; for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
+    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "the quicker prompt did not decide the refresh"; return 1; }
+}

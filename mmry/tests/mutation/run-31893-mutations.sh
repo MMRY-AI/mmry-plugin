@@ -87,6 +87,7 @@ add up-front-record "the prepared path writes a pessimistic record before it sta
     fi' '        _mmry_outcome "failed unfinished"
         _mmry_fnd_prepared_path
     fi'
+add refresh-late "the refresh decision, a process, runs however late the part is"     'SECONDS * 2 < DEADLINE )) && declare -F _mmry_fnd_refresh_check' 'SECONDS < DEADLINE )) && declare -F _mmry_fnd_refresh_check'
 add store-by-rename "the prepared copy is written by temp and rename, one more process" \
     '    printf '"'"'%s'"'"' "mmry-fnd-prepared v1' '    _mmry_fnd_write "$f" "mmry-fnd-prepared v1'
 

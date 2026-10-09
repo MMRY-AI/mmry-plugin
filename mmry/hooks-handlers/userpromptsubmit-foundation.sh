@@ -425,7 +425,9 @@ _mmry_fnd_outcome_line() {
 # still never sees half a line. Anything odd at either path, or a spoiled stdout (see _mmry_fnd_spoil),
 # takes the old way. The pending record and the cut-short marker are removed only when they are there.
 #
-# THE REFRESH DECISION COMES LAST, and only with time left: past the deadline nothing optional runs.
+# THE REFRESH DECISION COMES LAST, and only in the first half of the deadline. It starts a process, the
+# one thing here that can wait: a firing running late leaves it to the next quicker prompt (it is made at
+# most once in 300 s anyway), so the time that process costs is never taken from a prompt near its limit.
 _mmry_fnd_finish() {
     local out="$1" cut="${2:-}" o="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
     set --
@@ -445,7 +447,7 @@ _mmry_fnd_finish() {
     [[ -e "$_PENDING" ]] && set -- "$@" "$_PENDING"
     [[ "$cut" != cut && -e "$_CUTSHORT" ]] && set -- "$@" "$_CUTSHORT"
     (( $# > 0 )) && rm -f "$@" 2>/dev/null
-    if (( ${_FND_REFRESH_DUE:-0} && SECONDS < DEADLINE )) && declare -F _mmry_fnd_refresh_check >/dev/null; then
+    if (( ${_FND_REFRESH_DUE:-0} && SECONDS * 2 < DEADLINE )) && declare -F _mmry_fnd_refresh_check >/dev/null; then
         _mmry_fnd_refresh_check
     fi
     exit 0
@@ -725,6 +727,25 @@ _mmry_fnd_content_of() {
     _FND_CONTENT="${b%$'\n'}"
 }
 
+# PART 1'S DELIVERY RECORD, PENDING UNTIL ITS EMIT SUCCEEDS (#31583), WITHOUT A PROCESS WHEN IT IS
+# UNCHANGED (#31893 QA round 2). Promoting the pending record was an mv on part 1 of every prompt, one
+# process more than any other part, and QA measured part 1 two to three seconds behind the rest on every
+# served prompt. On an unchanged set the record is the same line prompt after prompt, so when the
+# status already holds exactly $1 no pending file is made: after the emit the same bytes are written
+# back over it in place, opened read-write and not truncated, which renews the time the status command
+# reports as "last sent" while a reader can never see anything but that line. Any other record goes
+# through the pending file and the mv, as before.
+_mmry_fnd_pending() {
+    local cur=""
+    _FND_SAME_STATUS=""
+    if [[ -f "$_STATUS" && -r "$_STATUS" ]]; then IFS= read -r -d '' cur < "$_STATUS" 2>/dev/null; fi
+    if [[ -n "$cur" && "$cur" == "$1" ]]; then
+        _FND_SAME_STATUS="$1"
+        return 0
+    fi
+    printf '%s' "$1" > "$_PENDING" 2>/dev/null
+}
+
 # THIS PART, FROM THE PREPARED COPY, IF IT STILL STANDS. 0 with BODY, _FND_KIND and WORKER_RC set, or
 # 1 and nothing set. Every check below is a reason to prepare again, never a reason to send less:
 #   - the set file reads byte for byte as it did when it was verified (the copy beside the cuts);
@@ -768,7 +789,7 @@ _mmry_fnd_serve_prepared() {
     _mmry_fnd_json_escape_v "$_FND_PAYLOAD"
     BODY="$_FND_ESC" _FND_KIND="PART $k $n $setid" WORKER_RC=0
     # The delivery record is part 1's to write, pending until its emit succeeds, as the worker did.
-    (( k == 1 )) && { printf '%s ok entries=%s bytes=%s\n' "$_FND_STAMP" "$entries" "$bytes" > "$_PENDING"; } 2>/dev/null
+    (( k == 1 )) && _mmry_fnd_pending "$_FND_STAMP ok entries=$entries bytes=$bytes"$'\n'
     return 0
 }
 
@@ -933,7 +954,7 @@ _mmry_fnd_prepare() {
     _mmry_fnd_payload "$MMRY_FND_PART" "${#FND_PARTS[@]}" "$_c" "${FND_PARTS[MMRY_FND_PART - 1]}"
     _mmry_fnd_json_escape_v "$_FND_PAYLOAD"
     BODY="$_FND_ESC" _FND_KIND="PART ${MMRY_FND_PART} ${#FND_PARTS[@]} ${_c}" WORKER_RC=0 _FND_ROUTE=done
-    (( MMRY_FND_PART == 1 )) && { printf '%s ok entries=%s bytes=%s\n' "$_FND_STAMP" "$_e" "$_b" > "$_PENDING"; } 2>/dev/null
+    (( MMRY_FND_PART == 1 )) && _mmry_fnd_pending "$_FND_STAMP ok entries=$_e bytes=$_b"$'\n'
     return 0
 }
 
@@ -1221,8 +1242,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # round 2). The worker, which can leave in silence, still gets one; see below.
         _mmry_fnd_prepared_path
     fi
-    # The daily refresh decision is made after the emit, in _mmry_fnd_finish, and only with time left
-    # (#31893 QA round 2): it starts a process, and before the emit that process was the prompt's.
+    # The daily refresh decision is made after the emit, in _mmry_fnd_finish (#31893 QA round 2): it
+    # starts a process, and before the emit that process was the prompt's.
     [[ "$_FND_ROUTE" == "done" ]] && _FND_REFRESH_DUE=1
 
     # THE WORKER, for what the prepared path hands back. Its body keeps the supervisor's indentation,
@@ -1608,6 +1629,15 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # which stays true.
     _fnd_o=""
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
+        # The unchanged record rewritten in place, read once more first so nothing else is overwritten
+        # (see _mmry_fnd_pending); any other record by its pending file and an mv.
+        _fnd_cur=""
+        [[ -n "${_FND_SAME_STATUS:-}" && -f "$_STATUS" && -r "$_STATUS" ]] && { IFS= read -r -d '' _fnd_cur < "$_STATUS" 2>/dev/null; }
+        if [[ -n "${_FND_SAME_STATUS:-}" && "$_fnd_cur" == "$_FND_SAME_STATUS" ]]; then
+            printf '%s' "$_FND_SAME_STATUS" 1<> "$_STATUS" 2>/dev/null
+        elif [[ -n "${_FND_SAME_STATUS:-}" ]]; then
+            printf '%s' "$_FND_SAME_STATUS" > "$_PENDING" 2>/dev/null && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+        fi
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
         case "$_FND_KIND" in
             # "PART k n version": the version goes into the outcome record (#31583 QA round 2 R4,
