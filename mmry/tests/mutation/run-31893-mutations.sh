@@ -99,7 +99,7 @@ add status-new-by-rename "a session's first delivery record is made by a pending
 add store-by-rename "the prepared copy is written by temp and rename, one more process" \
     '    printf '"'"'%s'"'"' "mmry-fnd-prepared v1' '    _mmry_fnd_write "$f" "mmry-fnd-prepared v1'
 
-# QA round 3 (#31893): a non-ASCII set that fits only counted in characters.
+# QA round 2, R2 (#31893, 2026-10-09): a non-ASCII set that fits only counted in characters.
 add nonascii-to-worker "a set that needs cutting in characters goes to a worker on every part again" \
     '    _FND_CUT_LATE=0
     if [[ "${MMRY_FND_AWK_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then' '    _FND_CUT_LATE=0

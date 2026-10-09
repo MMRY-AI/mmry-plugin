@@ -631,13 +631,17 @@ _mmry_fnd_parts() {
     # set where 2.10.1 took 298. The worker, which has its own deadline, still cuts unbounded.
     _FND_CUT_LATE=0
     if [[ "${MMRY_FND_AWK_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then
-        local _crc=0
+        local _crc=0 _ct0=$SECONDS
         lens=""
         IFS= read -r -d '' -t "$MMRY_FND_AWK_SECS" lens < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
             LC_ALL=C exec awk -v BINMODE=1 -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
                 -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" <<<"$s" 2>/dev/null) || _crc=$?
-        # read -d '' ends at end of input with 1; past its time limit with more than 128.
-        if (( _crc > 128 )); then _FND_CUT_LATE=1; return 0; fi
+        # read -d '' ends at end of input with 1; past its time limit with more than 128, except on
+        # macOS bash 3.2, which says 1 for that too, so there the time taken tells them apart, as for
+        # the cksum.
+        if (( _crc > 128 )) || { (( _crc != 0 )) && (( SECONDS - _ct0 >= MMRY_FND_AWK_SECS )); }; then
+            _FND_CUT_LATE=1; return 0
+        fi
         lens="${lens%$'\n'}"
         [[ -n "$lens" ]] || return 0
     else

@@ -492,4 +492,20 @@ _awk_shim() {
     _ctx 1
     [[ "$PART_TEXT" == *"cut short"* ]] || { echo "the assistant was not told: ${PART_TEXT:0:300}"; return 1; }
     [[ "$PART_TEXT" != *"0001"* ]] || { echo "a set was sent from a cut that did not finish"; return 1; }
+    # The same where read -t reports a timeout as 1, as macOS bash 3.2 does (see the cksum's test).
+    rm -f "$TEST_TMPDIR"/.mmry-foundation-claim.* "$TEST_TMPDIR"/.mmry-foundation-result.*
+    start=$SECONDS
+    (
+        read() { builtin read "$@"; local _r32=$?; (( _r32 > 128 )) && return 1; return "$_r32"; }
+        export -f read
+        MMRY_FOUNDATION_REFRESH_SECONDS=0 MMRY_FOUNDATION_DEADLINE_SECS=3 _fire_all
+    )
+    elapsed=$(( SECONDS - start ))
+    (( elapsed < budget )) || { echo "bash 3.2: the prompt took ${elapsed}s against ${budget}s"; return 1; }
+    for k in 1 2 3 4 5 6; do
+        [ -z "$(_sysmsg "$k")" ] || { echo "bash 3.2: part $k showed the person: $(_sysmsg "$k")"; return 1; }
+    done
+    _ctx 1
+    [[ "$PART_TEXT" == *"cut short"* ]] || { echo "bash 3.2: the assistant was not told: ${PART_TEXT:0:300}"; return 1; }
+    [[ "$PART_TEXT" != *"0001"* ]] || { echo "bash 3.2: a set was sent from a cut that did not finish"; return 1; }
 }
