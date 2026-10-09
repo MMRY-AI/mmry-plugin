@@ -13,7 +13,11 @@
 #   run from the plugin's mmry/ directory. <hook.sh> is the userpromptsubmit-foundation.sh to measure;
 #   it must sit in a hooks-handlers/ directory with the files it sources. Defaults: 5 prompts,
 #   600 lines (about 53 KB, six parts). Output: one line per prompt and a median.
-#   MMRY_COUNT_VERIFY=1 also checks that the six parts rejoin into the set, whole and in order.
+#   MMRY_COUNT_VERIFY=1 also checks that the parts rejoin into the set, whole and in order, byte for
+#   byte, on both the first prompt and the next one.
+#   MMRY_COUNT_SET=ja seeds a Japanese set instead (#31893 QA round 2, R2): each line 37 characters and
+#   95 bytes, so 700 lines are about 25,900 characters and 66,500 bytes, too big for six parts counted
+#   in bytes and three parts counted in characters.
 set -u
 HOOK="${1:?usage: foundation-process-count.sh <hook.sh> [prompts] [lines]}"; RUNS="${2:-5}"; LINES="${3:-600}"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) echo "Windows only"; exit 2 ;; esac
@@ -28,7 +32,12 @@ now_ms() { local s; s=$(date +%s%N); printf '%d' $(( s / 1000000 )); }
 seed() { # a fresh temp dir with a sealed set of $LINES directives and a realistic config
     local d="$1" s b
     rm -rf "$d"; mkdir -p "$d"
-    awk -v n="$LINES" 'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: keep every sentence short and every claim backed by something you ran.\n", i }' > "$d/body"
+    if [[ "${MMRY_COUNT_SET:-}" == ja ]]; then
+        # "- 指示 NNNN：" then 25 of 日 and a 。, in octal so no locale is involved.
+        awk -v n="$LINES" 'BEGIN { for (i = 1; i <= n; i++) { printf "- \346\214\207\347\244\272 %04d\357\274\232", i; for (j = 0; j < 25; j++) printf "\346\227\245"; printf "\343\200\202\n" } }' > "$d/body"
+    else
+        awk -v n="$LINES" 'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: keep every sentence short and every claim backed by something you ran.\n", i }' > "$d/body"
+    fi
     read -r s b < <(cksum < "$d/body")
     { printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$LINES" "$b" "$s"; cat "$d/body"; printf 'END OF FOUNDATION SET'; } > "$d/mmry-foundation-set.md"
     printf 'sess-count' > "$d/mmry-foundation.session"
@@ -50,12 +59,12 @@ driver() { # $1 = command per part (k substituted), $2 = temp dir
 num() { sed -n 's/.*PROCESSES=\([0-9]*\).*/\1/p' <<< "$1"; }
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
 
-verify() { # the six parts rejoin into the set, whole and in order
-    local d="$1" k got="" ctx n=0 want
+verify() { # the parts in $2 (default out) rejoin into the set, whole and in order
+    local d="$1" o="${2:-out}" k got="" ctx n=0 want
     for k in 1 2 3 4 5 6; do
-        [[ -s "$d/out.$k" ]] || continue
+        [[ -s "$d/$o.$k" ]] || continue
         # A dot after the text, so the command substitution cannot drop a part's trailing newline.
-        ctx="$(jq -j '(.hookSpecificOutput.additionalContext // "") + "."' "$d/out.$k" | tr -d '\r')" || return 1
+        ctx="$(jq -j '(.hookSpecificOutput.additionalContext // "") + "."' "$d/$o.$k" | tr -d '\r')" || return 1
         ctx="${ctx%.}"
         [[ "$ctx" == *"This is PART $k OF "* ]] || { echo "part $k unlabelled"; return 1; }
         got+="${ctx#*$'\n\n'}"; n=$(( n + 1 ))
@@ -72,11 +81,12 @@ while (( i <= RUNS )); do
     # The first prompt on a freshly written set, then the next prompt on the same set: the first is
     # the one a session pays once (and whenever the set changes), the next is every other prompt.
     seed "$W/h"; rf="$(driver "bash \"$HOOK\" --part @K@" "$W/h")"
+    for k in 1 2 3 4 5 6; do [[ -f "$W/h/out.$k" ]] && mv -f "$W/h/out.$k" "$W/h/first.$k"; done
     t0=$(now_ms); rh="$(driver "bash \"$HOOK\" --part @K@" "$W/h")"; t1=$(now_ms)
     nb=$(num "$rb"); nh=$(num "$rh"); nf=$(num "$rf")
     first_all+=" $(( nf - nb + 6 ))"
     line="prompt $i: first prompt on the set $(( nf - nb + 6 )) processes; next prompt $(( nh - nb + 6 )) processes (driver+hooks $nh, driver+6 empty bash $nb), ${rh##* }, $(( t1 - t0 )) ms"
-    [[ "${MMRY_COUNT_VERIFY:-}" == 1 ]] && line="$line | $(verify "$W/h")"
+    [[ "${MMRY_COUNT_VERIFY:-}" == 1 ]] && line="$line | first: $(verify "$W/h" first) | next: $(verify "$W/h")"
     echo "$line"
     base_all+=" $nb"; hook_all+=" $(( nh - nb + 6 ))"; ms_all+=" $(( t1 - t0 ))"
     i=$(( i + 1 ))

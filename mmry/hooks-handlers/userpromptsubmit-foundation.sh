@@ -615,9 +615,6 @@ _mmry_fnd_parts() {
     (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )) || return 0
     # Plain ASCII: bytes are characters, so the set really does not fit.
     [[ "$s" =~ $nonascii ]] || return 0
-    # The supervisor prepares with no process it cannot bound (#31893); a set that needs counting in
-    # characters is left to the worker, which runs awk inside its deadline.
-    [[ -n "${MMRY_FND_NO_AWK:-}" ]] && return 0
     # Counted in characters. Only as much of the set as K + 1 parts could hold is passed: four bytes
     # is the most a character takes, and anything beyond that is by reference regardless.
     # BINMODE=1 (#31411 QA round 3): gawk on Windows reads its input in text mode and drops the CR
@@ -625,9 +622,29 @@ _mmry_fnd_parts() {
     # do). The lengths then summed short of the set, the check below failed, and every non-ASCII set
     # of two or more memories went by reference. Binary input keeps every byte. Any other awk treats
     # BINMODE as an ordinary variable it never reads, so BSD awk on a Mac is unaffected.
-    lens="$(LC_ALL=C awk -v BINMODE=1 -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
-        -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" \
-        <<<"$s" 2>/dev/null)" || return 0
+    #
+    # BOUNDED IN THE SUPERVISOR (#31893 QA round 2, R2). The supervisor prepares with no process it
+    # cannot bound, so it passes the seconds it has left in MMRY_FND_AWK_SECS and the cut is waited
+    # for that long and no longer, the way its cksum is (MMRY_FND_CKSUM_SECS in mmry-client.sh). Out
+    # of time, _FND_CUT_LATE=1 and the byte result stands. Before this the supervisor left every such
+    # set to the worker, and every part paid for preparing it: 206 processes on a 700-line Japanese
+    # set where 2.10.1 took 298. The worker, which has its own deadline, still cuts unbounded.
+    _FND_CUT_LATE=0
+    if [[ "${MMRY_FND_AWK_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then
+        local _crc=0
+        lens=""
+        IFS= read -r -d '' -t "$MMRY_FND_AWK_SECS" lens < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+            LC_ALL=C exec awk -v BINMODE=1 -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
+                -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" <<<"$s" 2>/dev/null) || _crc=$?
+        # read -d '' ends at end of input with 1; past its time limit with more than 128.
+        if (( _crc > 128 )); then _FND_CUT_LATE=1; return 0; fi
+        lens="${lens%$'\n'}"
+        [[ -n "$lens" ]] || return 0
+    else
+        lens="$(LC_ALL=C awk -v BINMODE=1 -v cap="$MMRY_FND_PART_CAP" -v max="$MMRY_FND_PARTS_MAX" \
+            -f "${PLUGIN_ROOT}/hooks-handlers/foundation-cut.awk" \
+            <<<"$s" 2>/dev/null)" || return 0
+    fi
     while IFS= read -r L; do
         [[ "$L" =~ ^[0-9]+$ ]] || return 0
         parts+=("${s:off:L}")
@@ -676,8 +693,8 @@ _mmry_fnd_parts() {
 # refusal or a deadline it gives the turn its one notice and parts 2 to 6 stay quiet. "worker" sends
 # every part down the path it always took: a worker of its own. That is kept for what the supervisor
 # does not do itself, and none of it is the ordinary prompt: a set gone or missing since it was stored,
-# a set too large for six parts (by reference), and a non-ASCII set that only fits when counted in
-# characters, which needs awk.
+# and a set too large for six parts (by reference). A non-ASCII set that only fits when counted in
+# characters is prepared here like any other, its awk bounded by the deadline (QA round 2, R2).
 #
 # THE REFRESH. The daily background refresh was decided by part 1's worker on every prompt, with a
 # date and four stats. Part 1 now starts that check detached, at most once every 300 s, so it is no
@@ -959,9 +976,18 @@ _mmry_fnd_prepare() {
             _FND_ROUTE=worker; _mmry_fnd_result worker; return 0 ;;
     esac
     read -r _ok _e _b _c <<<"$MMRY_FND_VERDICT"
-    MMRY_FND_NO_AWK=1 _mmry_fnd_parts "$MMRY_FND_SET"
+    # A non-ASCII set that only fits counted in characters is cut here too, by awk, inside what is
+    # left of the deadline (#31893 QA round 2, R2), so it is prepared once and every part only reads.
+    left=$(( DEADLINE - SECONDS ))
+    (( left >= 1 )) || left=1
+    MMRY_FND_AWK_SECS="$left" _mmry_fnd_parts "$MMRY_FND_SET"
+    if (( ${_FND_CUT_LATE:-0} )); then
+        WORKER_RC=124 HIT_DEADLINE=1 _FND_ROUTE=done
+        _mmry_fnd_result deadline
+        return 0
+    fi
     if (( ${#FND_PARTS[@]} > MMRY_FND_PARTS_MAX )); then
-        # By reference, or a non-ASCII set that needs counting in characters: the worker's.
+        # By reference: the worker's.
         _FND_ROUTE=worker; _mmry_fnd_result worker; return 0
     fi
     _mmry_fnd_store_prepared "$_c" "$_e" "$_b" "$MMRY_FND_SET" || true
