@@ -325,7 +325,7 @@ _logging_shim() {
     chmod +x "$SHIMS/$1"
 }
 
-@test "in-time R1: a preparing prompt starts one cksum, one rename a part and one more for part 1's delivery, no rm, and one sleep a waiting part, not one a poll" {
+@test "in-time R1: a preparing prompt starts one cksum, a rename a part and one for part 1's delivery, no rm, a sleep a waiting part not a poll; a served prompt a rename a part" {
     # QA's trace of the preparing prompt (#31893 round 2): an up-front record, a stored copy, a delivery
     # record, an outcome record and an rm on every part, each a process, and an external sleep on every
     # poll of a wait. On a loaded Windows machine each process is a second or two, and the preparing part
@@ -354,13 +354,19 @@ _logging_shim() {
     if [ "$(bash -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]; then
         [ "$sl" -le 5 ] || { echo "an external sleep was started $sl times while five parts waited: one a poll, not one a wait"; return 1; }
     fi
-    # The next prompt is served: no cksum, and still no rm.
+    # The next prompt is served: no cksum, no rm, and one rename a part. Part 1's delivery record is
+    # unchanged, so it is renewed in place, with no process: its time moves on and its line does not.
+    local st="$TEST_TMPDIR/mmry-foundation.status.S1" line
+    line="$(cat "$st")"
+    touch -t 202501010000 "$st"
     : > "$CALLS"
     MMRY_FOUNDATION_REFRESH_SECONDS=0 _six
     _rejoin
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "served prompt: $NPARTS parts"; return 1; }
     ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)" sl="$(_calls sleep)"
-    [ "$ck" -eq 0 ] && [ "$rm" -eq 0 ] && [ "$mv" -le 7 ] && [ "$sl" -eq 0 ] || { echo "served prompt: cksum $ck, rm $rm, mv $mv, sleep $sl"; return 1; }
+    [ "$ck" -eq 0 ] && [ "$rm" -eq 0 ] && [ "$mv" -le 6 ] && [ "$sl" -eq 0 ] || { echo "served prompt: cksum $ck, rm $rm, mv $mv, sleep $sl"; return 1; }
+    [ "$(cat "$st")" = "$line" ] || { echo "the delivery record changed: $(cat "$st")"; return 1; }
+    [ "$st" -nt "$SET" ] || { echo "the delivery record's time was not renewed"; return 1; }
     # The shims live in the test's temp directory, which teardown removes with rm: put the real ones back.
     "$SHIMS/rm" -f "$SHIMS/mv" "$SHIMS/sleep" "$SHIMS/rm"
     hash -r
