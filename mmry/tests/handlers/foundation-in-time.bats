@@ -317,3 +317,89 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     [ -z "$(_sysmsg 1)" ] || { echo "the person was shown: $(_sysmsg 1)"; return 1; }
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ]
 }
+
+# A shim for $1 that logs each call and then runs the real one, so a count is what the hook started.
+_logging_shim() {
+    local real; real="$(command -v "$1")"
+    printf '#!/usr/bin/env bash\nprintf "%s\n" >> "%s"\nexec "%s" "$@"\n' "$1" "$CALLS" "$real" > "$SHIMS/$1"
+    chmod +x "$SHIMS/$1"
+}
+
+@test "in-time R1: a preparing prompt starts one cksum, one rename a part and one more for part 1's delivery, and no rm or sleep" {
+    # QA's trace of the preparing prompt (#31893 round 2): an up-front record, a stored copy, a delivery
+    # record, an outcome record and an rm on every part, each a process, and an external sleep on every
+    # wait. On a loaded Windows machine each process is a second or two, and the preparing part ran past
+    # the 20 s limit. The waits are counted on a bash with fractional read -t; the bash 3.2 a Mac ships
+    # has none and sleeps, where a process is cheap.
+    local real_sleep; real_sleep="$(command -v sleep)"
+    _seed_lines 600
+    # Verification takes a second, so the other five parts wait on it.
+    printf '#!/usr/bin/env bash\nprintf "cksum\n" >> "%s"\n"%s" 1\nexec "%s" "$@"\n' "$CALLS" "$real_sleep" "$REAL_CKSUM" > "$SHIMS/cksum"
+    chmod +x "$SHIMS/cksum"
+    local c; for c in mv rm sleep; do _logging_shim "$c"; done
+    : > "$CALLS"
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
+    _rejoin; _want
+    [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "preparing prompt: $NPARTS parts, ${#JOINED} of ${#WANT} bytes"; return 1; }
+    local ck mv rm sl
+    ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)" sl="$(_calls sleep)"
+    [ "$ck" -eq 1 ] || { echo "cksum $ck times"; return 1; }
+    [ "$rm" -eq 0 ] || { echo "rm started $rm times on the preparing prompt"; return 1; }
+    [ "$mv" -le 7 ] || { echo "mv started $mv times on the preparing prompt, more than one a part and one for part 1's delivery"; return 1; }
+    if [ "$(bash -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]; then
+        [ "$sl" -eq 0 ] || { echo "an external sleep was started $sl times while parts waited"; return 1; }
+    fi
+    # The next prompt is served: no cksum, and still no rm.
+    : > "$CALLS"
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
+    _rejoin
+    [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "served prompt: $NPARTS parts"; return 1; }
+    ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)"
+    [ "$ck" -eq 0 ] && [ "$rm" -eq 0 ] && [ "$mv" -le 7 ] || { echo "served prompt: cksum $ck, rm $rm, mv $mv"; return 1; }
+}
+
+@test "in-time R1: a part 2-6 that refuses waits for part 1's word only until the deadline, not a fixed 8 s past it" {
+    _seed_lines 600
+    # Same length, same record line, one byte changed: a contents refusal.
+    local raw; raw="$(cat "$SET")"
+    printf '%s' "${raw/Directive 0300: keep/Directive 0300: KEEP}" > "$SET"
+    # Part 2 alone: it prepares, refuses, and asks what part 1 said, which never comes.
+    local start=$SECONDS
+    MMRY_FOUNDATION_DEADLINE_SECS=3 _fire 2
+    local elapsed=$(( SECONDS - start ))
+    (( elapsed < 6 )) || { echo "part 2 took ${elapsed}s against a 3 s deadline"; return 1; }
+    # Part 1 said nothing, so part 2 names itself, as it always has.
+    [[ "$(_sysmsg 2)" == *"part 2"* ]] || { echo "part 2 said: $(_sysmsg 2)"; return 1; }
+}
+
+@test "in-time R3: where read -t reports a timeout as 1, as macOS bash 3.2 does, a slow check is cut short in silence, not refused" {
+    _seed_lines 600
+    _cksum_shim 60
+    # bash 3.2 returns 1 for a read -t that runs out of time, not a status above 128. Every read the
+    # hook makes goes through this, exported to the hook's bash, so it sees what a Mac's bash returns.
+    (
+        read() { builtin read "$@"; local _r32=$?; (( _r32 > 128 )) && return 1; return "$_r32"; }
+        export -f read
+        MMRY_FOUNDATION_DEADLINE_SECS=3 _fire_all
+    )
+    local k; for k in 1 2 3 4 5 6; do
+        [ -z "$(_sysmsg "$k")" ] || { echo "part $k showed the person: $(_sysmsg "$k")"; return 1; }
+    done
+    _ctx 1
+    [[ "$PART_TEXT" == *"cut short"* ]] || { echo "the assistant was not told it was cut short: ${PART_TEXT:0:300}"; return 1; }
+    [[ "$PART_TEXT" != *"could not verify"* ]] || { echo "a slow check was reported as a refusal"; return 1; }
+}
+
+@test "in-time R4: a claim older than the deadline is taken over even when its pid now belongs to a live, unrelated process" {
+    _seed_lines 600
+    # The claimant died long ago and an unrelated process has its pid: kill -0 says alive.
+    sleep 300 & local other=$!
+    printf '%s %s' "$other" "$(( $(date +%s) - 600 ))" > "$TEST_TMPDIR/.mmry-foundation-claim.S1"
+    local start=$SECONDS
+    MMRY_FOUNDATION_DEADLINE_SECS=8 _fire_all
+    local elapsed=$(( SECONDS - start ))
+    kill "$other" 2>/dev/null || true; wait "$other" 2>/dev/null || true
+    (( elapsed < 8 )) || { echo "the parts waited out the deadline on a stale claim: ${elapsed}s"; return 1; }
+    _rejoin; _want
+    [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "$NPARTS parts, ${#JOINED} of ${#WANT} bytes"; return 1; }
+}
