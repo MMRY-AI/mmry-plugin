@@ -22,8 +22,9 @@ _rep() {
     printf '%s' "${t/"$2"/"$3"}" > "$1"
 }
 
-declare -a NAMES=() OLDS=() NEWS=() DESCS=()
-add() { NAMES+=("$1"); DESCS+=("$2"); OLDS+=("$3"); NEWS+=("$4"); }
+declare -a NAMES=() OLDS=() NEWS=() DESCS=() FILES=()
+# add <name> <description> <old text> <new text> [file, default the hook]
+add() { NAMES+=("$1"); DESCS+=("$2"); OLDS+=("$3"); NEWS+=("$4"); FILES+=("${5:-$H}"); }
 
 add serve-no-compare "a part is served from the prepared copy without checking the set still reads the same" \
     '[[ -n "$raw" && "${p#*$'"'"'\n'"'"'}" == "$raw" ]] || return 1' '[[ -n "$raw" ]] || return 1'
@@ -38,7 +39,7 @@ add live-claim-ignored "a claim held by a live firing does not make a part wait"
             return 1' '            _FND_HELD="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
             return 0'
 add dead-claim-kept "a claim left by a firing that died is waited out, not taken over" \
-    '        if kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then' '        if true; then'
+    '        if (( _fnd_age <= DEADLINE + 2 )) && kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then' '        if (( _fnd_age <= DEADLINE + 2 )); then'
 add any-result "a waiting part believes a result whichever firing left it" \
     'if [[ "$l" =~ $rre && "${BASH_REMATCH[1]}" == "$seen" ]]; then' 'if [[ "$l" =~ $rre ]]; then'
 add cksum-unbounded "the supervisor's cksum is not bounded by the time left" \
@@ -66,6 +67,29 @@ add refresh-never "the refresh is never decided" \
 add no-store "the preparation is never stored, so every prompt prepares again" \
     '    _mmry_fnd_store_prepared "$_c" "$_e" "$_b" "$MMRY_FND_SET" || true' '    :'
 
+# QA round 2 (#31893).
+add whole-run-deadline "a refusing part 2-6 waits its 8 s for part 1 past the deadline" \
+    '    (( end > DEADLINE )) && end=$DEADLINE' '    :'
+add bash32-timeout "a cksum timeout is known only by a status above 128, so bash 3.2's 1 reads as unreadable" \
+    'if (( _ck_rc > 128 )) || { (( _ck_rc != 0 )) && (( SECONDS - _ck_t0 >= MMRY_FND_CKSUM_SECS )); }; then' \
+    'if (( _ck_rc > 128 )); then' hooks-handlers/mmry-client.sh
+add claim-age "a claim is believed while kill -0 answers, however old it is" \
+    '        if (( _fnd_age <= DEADLINE + 2 )) && kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then' \
+    '        if kill -0 "${BASH_REMATCH[1]}" 2>/dev/null; then'
+add nap-sleeps "a waiting part polls with an external sleep again" \
+    '    if (( BASH_VERSINFO[0] >= 4 )); then
+        local f="${_FOUND_TMPDIR}/.mmry-foundation-tick${_SFX}"' '    if false; then
+        local f="${_FOUND_TMPDIR}/.mmry-foundation-tick${_SFX}"'
+add finish-two-steps "the ending writes the outcome by temp and rename, then removes the marker with rm" \
+    '        if [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]]' '        if false && [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]]'
+add up-front-record "the prepared path writes a pessimistic record before it starts, one more process" \
+    '        _mmry_fnd_prepared_path
+    fi' '        _mmry_outcome "failed unfinished"
+        _mmry_fnd_prepared_path
+    fi'
+add store-by-rename "the prepared copy is written by temp and rename, one more process" \
+    '    printf '"'"'%s'"'"' "mmry-fnd-prepared v1' '    _mmry_fnd_write "$f" "mmry-fnd-prepared v1'
+
 run_suite() { ( cd "$1/tests" && ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 
 copy() { rm -rf "$1"; mkdir -p "$1"; cp -R "$PLUGIN_SRC/." "$1/"; }
@@ -85,7 +109,7 @@ for i in "${!NAMES[@]}"; do
         (( hit )) || continue
     fi
     copy "$WORK/m"
-    if ! _rep "$WORK/m/$H" "${OLDS[$i]}" "${NEWS[$i]}"; then
+    if ! _rep "$WORK/m/${FILES[$i]}" "${OLDS[$i]}" "${NEWS[$i]}"; then
         echo "ABORT: mutation $n found nothing to change"; exit 3
     fi
     if run_suite "$WORK/m" "$WORK/m.out"; then
