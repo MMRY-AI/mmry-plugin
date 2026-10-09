@@ -727,23 +727,43 @@ _mmry_fnd_content_of() {
     _FND_CONTENT="${b%$'\n'}"
 }
 
-# PART 1'S DELIVERY RECORD, PENDING UNTIL ITS EMIT SUCCEEDS (#31583), WITHOUT A PROCESS WHEN IT IS
-# UNCHANGED (#31893 QA round 2). Promoting the pending record was an mv on part 1 of every prompt, one
+# PART 1'S DELIVERY RECORD, PENDING UNTIL ITS EMIT SUCCEEDS (#31583), WITHOUT A PROCESS WHERE NONE IS
+# NEEDED (#31893 QA round 2). Promoting the pending record was an mv on part 1 of every prompt, one
 # process more than any other part, and QA measured part 1 two to three seconds behind the rest on every
-# served prompt. On an unchanged set the record is the same line prompt after prompt, so when the
-# status already holds exactly $1 no pending file is made: after the emit the same bytes are written
-# back over it in place, opened read-write and not truncated, which renews the time the status command
-# reports as "last sent" while a reader can never see anything but that line. Any other record goes
-# through the pending file and the mv, as before.
+# served prompt. Two cases need no pending file, and for them the line is kept in _FND_STATUS_LINE and
+# written after the emit (_mmry_fnd_deliver):
+#   - the status already holds exactly $1, which is every served prompt on an unchanged set: the same
+#     bytes are written back over it in place, opened read-write and not truncated, which renews the time
+#     the status command reports as "last sent" while a reader can never see anything but that line;
+#   - there is no status yet, which is a session's first delivery: it is created with the line. A reader
+#     at that instant finds no record, or for an instant an empty one, which reads as no delivery yet,
+#     which was true a moment before.
+# Any other record, a change of set within a session, goes through the pending file and the mv.
 _mmry_fnd_pending() {
     local cur=""
-    _FND_SAME_STATUS=""
+    _FND_STATUS_LINE=""
     if [[ -f "$_STATUS" && -r "$_STATUS" ]]; then IFS= read -r -d '' cur < "$_STATUS" 2>/dev/null; fi
-    if [[ -n "$cur" && "$cur" == "$1" ]]; then
-        _FND_SAME_STATUS="$1"
+    if [[ -n "$cur" && "$cur" == "$1" ]] || [[ ! -e "$_STATUS" && ! -L "$_STATUS" ]]; then
+        _FND_STATUS_LINE="$1"
         return 0
     fi
     printf '%s' "$1" > "$_PENDING" 2>/dev/null
+}
+
+# After a successful emit: the line kept by _mmry_fnd_pending, renewed in place when the status still
+# holds it, created when there is still none, and otherwise promoted the old way.
+_mmry_fnd_deliver() {
+    local cur=""
+    [[ -n "${_FND_STATUS_LINE:-}" ]] || return 0
+    [[ -f "$_STATUS" && -r "$_STATUS" ]] && { IFS= read -r -d '' cur < "$_STATUS" 2>/dev/null; }
+    if [[ -n "$cur" && "$cur" == "$_FND_STATUS_LINE" ]]; then
+        printf '%s' "$_FND_STATUS_LINE" 1<> "$_STATUS" 2>/dev/null
+    elif [[ ! -e "$_STATUS" && ! -L "$_STATUS" ]]; then
+        printf '%s' "$_FND_STATUS_LINE" > "$_STATUS" 2>/dev/null
+    else
+        printf '%s' "$_FND_STATUS_LINE" > "$_PENDING" 2>/dev/null && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
+    fi
+    return 0
 }
 
 # THIS PART, FROM THE PREPARED COPY, IF IT STILL STANDS. 0 with BODY, _FND_KIND and WORKER_RC set, or
@@ -1629,15 +1649,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # which stays true.
     _fnd_o=""
     if _mmry_emit_escaped "$BODY" "$USERMSG"; then
-        # The unchanged record rewritten in place, read once more first so nothing else is overwritten
-        # (see _mmry_fnd_pending); any other record by its pending file and an mv.
-        _fnd_cur=""
-        [[ -n "${_FND_SAME_STATUS:-}" && -f "$_STATUS" && -r "$_STATUS" ]] && { IFS= read -r -d '' _fnd_cur < "$_STATUS" 2>/dev/null; }
-        if [[ -n "${_FND_SAME_STATUS:-}" && "$_fnd_cur" == "$_FND_SAME_STATUS" ]]; then
-            printf '%s' "$_FND_SAME_STATUS" 1<> "$_STATUS" 2>/dev/null
-        elif [[ -n "${_FND_SAME_STATUS:-}" ]]; then
-            printf '%s' "$_FND_SAME_STATUS" > "$_PENDING" 2>/dev/null && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
-        fi
+        _mmry_fnd_deliver
         [[ -e "$_PENDING" ]] && mv -f "$_PENDING" "$_STATUS" 2>/dev/null
         case "$_FND_KIND" in
             # "PART k n version": the version goes into the outcome record (#31583 QA round 2 R4,

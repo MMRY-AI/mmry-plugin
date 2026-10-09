@@ -325,7 +325,7 @@ _logging_shim() {
     chmod +x "$SHIMS/$1"
 }
 
-@test "in-time R1: a preparing prompt starts one cksum, a rename a part and one for part 1's delivery, no rm, a sleep a waiting part not a poll; a served prompt a rename a part" {
+@test "in-time R1: a preparing prompt starts one cksum, a rename a part, no rm, a sleep a waiting part not a poll; a served prompt a rename a part" {
     # QA's trace of the preparing prompt (#31893 round 2): an up-front record, a stored copy, a delivery
     # record, an outcome record and an rm on every part, each a process, and an external sleep on every
     # poll of a wait. On a loaded Windows machine each process is a second or two, and the preparing part
@@ -350,7 +350,10 @@ _logging_shim() {
     ck="$(_calls cksum)" mv="$(_calls mv)" rm="$(_calls rm)" sl="$(_calls sleep)"
     [ "$ck" -eq 1 ] || { echo "cksum $ck times"; return 1; }
     [ "$rm" -eq 0 ] || { echo "rm started $rm times on the preparing prompt"; return 1; }
-    [ "$mv" -le 7 ] || { echo "mv started $mv times on the preparing prompt, more than one a part and one for part 1's delivery"; return 1; }
+    # One rename a part, the outcome record. Part 1's first delivery record of the session is created
+    # in place: there is none to replace.
+    [ "$mv" -le 6 ] || { echo "mv started $mv times on the preparing prompt, more than one a part"; return 1; }
+    [ -s "$TEST_TMPDIR/mmry-foundation.status.S1" ] || { echo "no delivery record"; return 1; }
     if [ "$(bash -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]; then
         [ "$sl" -le 5 ] || { echo "an external sleep was started $sl times while five parts waited: one a poll, not one a wait"; return 1; }
     fi

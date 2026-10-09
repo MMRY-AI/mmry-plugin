@@ -89,9 +89,13 @@ add up-front-record "the prepared path writes a pessimistic record before it sta
     fi'
 add refresh-late "the refresh decision, a process, runs however late the part is"     'SECONDS * 2 < DEADLINE )) && declare -F _mmry_fnd_refresh_check' 'SECONDS < DEADLINE )) && declare -F _mmry_fnd_refresh_check'
 add status-by-rename "an unchanged delivery record is promoted by a pending file and an mv again" \
-    '        if [[ -n "${_FND_SAME_STATUS:-}" && "$_fnd_cur" == "$_FND_SAME_STATUS" ]]; then' '        if false; then'
+    '    if [[ -n "$cur" && "$cur" == "$_FND_STATUS_LINE" ]]; then' '    if false; then'
 add status-not-renewed "an unchanged delivery record is left as it was, so its last-sent time goes stale" \
-    '            printf '"'"'%s'"'"' "$_FND_SAME_STATUS" 1<> "$_STATUS" 2>/dev/null' '            :'
+    '        printf '"'"'%s'"'"' "$_FND_STATUS_LINE" 1<> "$_STATUS" 2>/dev/null' '        :'
+add status-new-by-rename "a session's first delivery record is made by a pending file and an mv again" \
+    '    elif [[ ! -e "$_STATUS" && ! -L "$_STATUS" ]]; then
+        printf' '    elif false; then
+        printf'
 add store-by-rename "the prepared copy is written by temp and rename, one more process" \
     '    printf '"'"'%s'"'"' "mmry-fnd-prepared v1' '    _mmry_fnd_write "$f" "mmry-fnd-prepared v1'
 
