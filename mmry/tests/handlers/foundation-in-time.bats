@@ -131,9 +131,12 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
 
 @test "in-time R2: while the set is unchanged, later prompts only read: no cksum, no jq, and still whole" {
     _seed_lines 600
-    _fire_all
+    # The refresh decision runs after the emit, detached (see test 2), so prompt 1's could start its
+    # jq after the counter below is reset and be counted against prompt 2's read path. Switched off on
+    # both prompts, as in tests 1 and 14: what is asserted is the served read path alone.
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
     : > "$CALLS"
-    _fire_all
+    MMRY_FOUNDATION_REFRESH_SECONDS=0 _fire_all
     _rejoin; _want
     [ "$NPARTS" -eq 6 ] && [ "$JOINED" = "$WANT" ] || { echo "second prompt: $NPARTS parts, ${#JOINED} of ${#WANT} bytes"; return 1; }
     [ "$(_calls cksum)" -eq 0 ] || { echo "an unchanged set was verified again: $(_calls cksum) cksum"; return 1; }
