@@ -114,6 +114,6 @@ Clean up: "leave the formation" in each conversation, then retire the test memor
 ## Runs kept here
 
 - `live-windows-run3.txt`: plugin de68916 (the bash 3.2 stdin fix), Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
-- `live-windows-run3.txt`: plugin 90ac8e4, Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
+- `live-windows-run2.txt`: plugin 90ac8e4, Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
 - `live-windows-run1.txt`: plugin 4a58d58, the same checks before the server was renamed from
   `mmry` to `mmry_plugin`. 16 of 16 PASS. (Its commit message said 18; the run has 16 checks.)
