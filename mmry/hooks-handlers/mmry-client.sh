@@ -1048,8 +1048,10 @@ mmry_create_format() {
     #    {"key":"triggers","label":"Triggers","type":"list","of":"text"}]
     #
     # MATCH_HINTS are the user's own words for an example of this type. They are shown to the
-    # assistant so it recognises a later example; the server does not route a plain save into a
-    # type by them (#31827). A record is made only when the save names the type and its fields.
+    # assistant so it recognises a later example. The server also files a save as a record of the
+    # type when its words contain them AND the save has values for the type's fields (supplied, or
+    # labelled lines); without values it stays an ordinary memory. Naming the type and giving
+    # its fields is the reliable way.
     local name="$1" fields="$2" description="${3:-}" mode="${4:-append}"
     local identity="${5:-}" hints="${6:-}" visibility="${7:-Private}" group_id="${8:-}"
 
@@ -1085,7 +1087,7 @@ mmry_revise_format() {
 
 mmry_rename_format() {
     # Usage: mmry_rename_format ID [NAME] [DESCRIPTION] [MATCH_HINTS]
-    # Changes what a type is CALLED, what it is for, or what the router recognises it by.
+    # Changes what a type is CALLED, what it is for, or the words that help the assistant choose it.
     # Touches no field and no record. Omitted values are left alone rather than cleared.
     local body
     body="$(_mmry_build_json \

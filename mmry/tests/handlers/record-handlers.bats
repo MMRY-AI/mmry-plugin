@@ -30,9 +30,14 @@ setup() {
     grep -q "GET http://localhost:5291/api/data-formats" "$LOG"
 }
 
-@test "list-formats: a type with no match hints says it must be named explicitly" {
+@test "list-formats: a type with no match hints says so, and says when a save becomes a record" {
     run bash "$HANDLERS/list-formats.sh"
-    [[ "$output" == *"must be named explicitly"* ]] || return 1
+    [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
+    [[ "$output" == *"a save becomes a record when it names this type and has values for its fields"* ]] || return 1
+    # A type with hints says it can also be chosen by its words; a type with none must not.
+    echo "$output" | grep "words that help choose it: (none)" | grep -q "or contains these words" && return 1
+    echo "$output" | grep -v "(none)" | grep -q "or contains these words"
+    [[ "$output" != *"recognised by"* ]] || return 1
 }
 
 @test "list-formats: --id reads one type and lists its fields" {
@@ -483,4 +488,54 @@ _mmry_no_jq() {
     [[ "$output" == *"words: Migraine on Tuesday after red wine."* ]] || return 1
     [[ "$output" == *"id 1 | recorded 2026-10-07T09:00:00"* ]] || return 1
     [[ "$output" != *"(no topic)"* ]] || return 1
+}
+
+# --- #32002: what the messages say a save does ---------------------------------
+
+@test "revise-format: --match-hints says the words help choose the type, never that a save is filed by them (#32002)" {
+    run bash "$HANDLERS/revise-format.sh" --id 42 --match-hints "migraine, headache"
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"Those words now help the assistant choose this type. A save becomes a record when MMRY can tell which type it is, by its name or by these words, and has values for the type's fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."* ]] || return 1
+    [[ "$output" != *"recognised"* ]] || return 1
+    [[ "$output" != *"from now on"* ]] || return 1
+}
+
+@test "save-memory: a record save with malformed fields is refused as the SKILL describes, and stores nothing (#32002)" {
+    export MOCK_CURL_HTTP_CODE=400
+    # The REAL body: GlobalExceptionHandler answers a malformed request body with this envelope
+    # (seen live on Integration, 2026-10-10), not plain text.
+    export MOCK_CURL_RESPONSE='{"error":"Request body is required.","detail":null}'
+    run bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope finance         --topic "Lunch" --content "Spent 40 dollars on lunch."         --record-type "Expenses" --record-fields '{"amount":'
+    [[ "$status" -eq 1 ]] || return 1
+    [[ "$output" == *'Error (HTTP 400): {"error":"Request body is required.","detail":null}'* ]] || return 1
+    [[ "$output" == *"Nothing was saved."* ]] || return 1
+    [[ "$output" != *"NewMemoryID"* ]] || return 1
+    [[ "$output" != *"RecordedAs"* ]] || return 1
+    # The malformed fields really left the machine as sent, and exactly one save was attempted.
+    grep -qF '"fields":{"amount":' "$LOG"
+    [[ "$(grep -c 'POST http://localhost:5291/api/memories' "$LOG")" -eq 1 ]]
+}
+
+@test "SKILL.md describes the refusal the script prints (#32002)" {
+    local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    grep -qF 'Error (HTTP 400): {"error":"Request body is required.","detail":null}' "$skill" || return 1
+    grep -qF 'Nothing was saved.' "$skill" || return 1
+    grep -q 'A refused record save saves nothing' "$skill" || return 1
+    ! grep -q 'This can never cost the save' "$skill"
+}
+
+@test "no plugin message or guidance contradicts when a save becomes a record (#32002)" {
+    # The rule (MemoryFormatRouter): a save becomes a record when MMRY can tell which type it
+    # belongs to (named, or chosen by hint words) AND has values for that type's fields (supplied,
+    # or labelled lines). Neither "the hints alone file a save" nor "a plain save never becomes a
+    # record" is true.
+    local f
+    for f in hooks-handlers/revise-format.sh hooks-handlers/list-formats.sh hooks-handlers/create-format.sh \
+             hooks-handlers/mmry-client.sh hooks-handlers/save-memory.sh skills/memory-system/SKILL.md; do
+        if grep -qiE 'recognised as belonging|recognised by|what the router|will be recognised|saves stop being recognised|never cost the save|must be named explicitly|never becomes a|never turn|nothing files a plain save|only when it names|only when the save names|does not route a plain save' "$PLUGIN_ROOT/$f"; then
+            fail "$f still carries a claim that contradicts when a save becomes a record"
+        fi
+    done
+    # And the SKILL states the rule in both halves.
+    grep -q "belongs to \*\*and\*\* has values for that type's fields" "$PLUGIN_ROOT/skills/memory-system/SKILL.md"
 }

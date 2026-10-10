@@ -138,13 +138,16 @@ RECORD_HANDLERS=(
     grep -q 'mmry_record_history' "$skill" || fail "'One account, every surface' omits the connector's history tool"
 }
 
-@test "SKILL.md does not claim a plain save is filed into a type by itself (#31827)" {
-    # Integration, 2026-10-07 and 2026-10-10: a plain-words save never becomes a record on any
-    # route. A skill telling the assistant otherwise is how an expense ends up an ordinary memory.
+@test "SKILL.md states when a save becomes a record (#32002)" {
+    # Integration, 2026-10-10 (#32002): a save becomes a record when MMRY can tell which type it
+    # belongs to AND has values for that type's fields. The skill must say both halves, and tell
+    # the assistant that naming the type and giving its fields is the reliable path.
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     if grep -qi 'later ordinary save. be recognised and recorded\|recorded here without the user asking' "$skill"; then
-        fail "SKILL.md still claims match hints route a plain save into a record type"
+        fail "SKILL.md still claims match hints alone route a plain save into a record type"
     fi
-    grep -q 'Nothing files a plain save into a type for you' "$skill" \
-        || fail "SKILL.md does not tell the assistant it must name the type itself"
+    grep -q 'When a save becomes a record' "$skill" \
+        || fail "SKILL.md does not state when a save becomes a record"
+    grep -q 'Naming the type and giving its fields is the reliable way' "$skill" \
+        || fail "SKILL.md does not tell the assistant to name the type"
 }

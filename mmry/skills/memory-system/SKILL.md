@@ -89,7 +89,7 @@ All operations go through the MMRY AI REST API:
 | POST | `/api/data-formats` | Define a structured record type |
 | GET | `/api/data-formats` | List the user's record types |
 | GET | `/api/data-formats/{id}` | One record type in full |
-| PUT | `/api/data-formats/{id}` | Rename it, or change what it is recognised by |
+| PUT | `/api/data-formats/{id}` | Rename it, or change the words that help choose it |
 | POST | `/api/data-formats/{id}/versions` | Publish a new shape for it |
 | POST | `/api/data-formats/{id}/retire` | Stop offering it (nothing is deleted) |
 | POST | `/api/data-formats/{id}/reinstate` | Offer it again |
@@ -146,12 +146,18 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
 headache, aura"). They are shown by `list-formats.sh` so that **you** recognise, in a later
 conversation, that what the user just said is another example of this type.
 
-**Nothing files a plain save into a type for you.** A save made with `--context` alone, however
-closely its words match a type's hints, is stored as an ordinary memory and never becomes a
-record. A record is created only when the save names the type and carries the fields. So when
-the user tells you something in their own words and it fits one of their types, **you** read the
-values out of their words and save it as a record (see the next section). Run `list-formats.sh`
-whenever what they say looks like a recurring shape, so you know which types they have.
+**When a save becomes a record.** A save becomes a record when MMRY can tell which type it
+belongs to **and** has values for that type's fields. The type is the one the save names, or the
+one whose hint words appear in it as whole words (the type with the most hint words wins, a tie
+chooses none, and a type with no hint words is never chosen this way). The values are the fields
+the save supplies, or labelled lines such as `Amount: 25`. Without both, the save stays an
+ordinary memory: naming a type with no values stays ordinary, and so do hint words with no
+supplied fields and no labelled lines.
+Naming the type and giving its fields is the reliable way, so when the user tells you something
+in their own words and it fits one of their types, **you** read the values out of their words and
+save it as a record naming the type (see the next section).
+Run `list-formats.sh` whenever what they say looks like a recurring shape, so you know which
+types they have.
 
 `--mode` decides what makes two records the same one:
 
@@ -184,10 +190,23 @@ So this one writes **one** memory directly, and `--tier`, `--category`, `--scope
 `--content` are all required. The script says which are missing rather than letting the server
 refuse.
 
-**This can never cost the save.** A type that does not exist, a field it does not declare, a
-value too long for its column — all of them cost the structure and keep the words. The script
-prints `RecordedAs:` so you can tell which happened. **Report what actually happened**: saying
-"recorded in your migraine log" when it was stored as ordinary text is worse than saying nothing.
+**A save that names a type the server cannot use keeps the words.** A type that does not exist, a
+field it does not declare, a value too long for its column: all of them cost the structure and
+keep the words. The script prints `RecordedAs:` so you can tell which happened. **Report what
+actually happened**: saying "recorded in your migraine log" when it was stored as ordinary text
+is worse than saying nothing.
+
+**A refused record save saves nothing.** If `--record-fields` is not one valid JSON object, the
+server refuses the whole request and the script exits 1. It prints the server's reason, which
+looks like this:
+
+```
+Error (HTTP 400): {"error":"Request body is required.","detail":null}
+Nothing was saved. Check that --record-fields is one valid JSON object, then run the save again.
+```
+
+There is no `NewMemoryID` and no `RecordedAs`, and the user's words are NOT stored. Fix the
+fields and run the same save again, and tell the user it did not go through until it has.
 
 **As the request itself**, when writing the record *is* what the user asked for. This one
 **refuses** rather than falling back, so a mistyped field name comes back as an error naming the
@@ -216,7 +235,7 @@ they have.
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 \
   --fields '[{"key":"severity","type":"number"},{"key":"triggers","type":"list","of":"text"}]'
 
-# change what it is called, what it is for, or what a save is recognised by
+# change what it is called, what it is for, or the words that help you choose it
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --rename "Headache log"
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --match-hints "migraine, headache, aura"
 
