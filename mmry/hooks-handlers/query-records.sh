@@ -57,7 +57,13 @@ if mmry_get_records "$FORMAT_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE"; 
             "\(.total) record(s) in \(.format.name):",
             "",
             (.entries[] |
-                "id \(.id) | \(.topic // "(no topic)")",
+                # The route answers entryKey, recordedAt and note (the words the record was saved from), not a
+                # topic (#31827, read from Integration): printing .topic said "(no topic)" for
+                # every record and never showed the words.
+                "id \(.id)"
+                    + (if (.entryKey // "") != "" then " | \(.entryKey)" else "" end)
+                    + (if (.recordedAt // "") != "" then " | recorded \(.recordedAt)" else "" end),
+                (if (.note // "") != "" then "    words: \(.note)" else empty end),
                 (.values | to_entries[] | "    \(.key): " + (if .value == null then "(blank)" elif (.value | type) == "array" then (.value | map(tostring) | join(", ")) else (.value | tostring) end)),
                 "---")'
     else

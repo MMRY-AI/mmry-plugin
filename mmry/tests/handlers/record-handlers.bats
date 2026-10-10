@@ -474,3 +474,13 @@ _mmry_no_jq() {
     [[ "$status" -eq 0 ]]
     grep -q '"supersedesId":123' "$LOG"
 }
+
+@test "query-records: shows the words each record was saved from, not a topic the route never sends" {
+    # Read from Integration (#31827): entries carry note, entryKey and recordedAt. The first port
+    # printed .topic, which is absent, so every record read "(no topic)" and its words were lost.
+    run bash "$HANDLERS/query-records.sh" --format-id 42
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"words: Migraine on Tuesday after red wine."* ]]
+    [[ "$output" == *"id 1 | recorded 2026-10-07T09:00:00"* ]]
+    [[ "$output" != *"(no topic)"* ]]
+}

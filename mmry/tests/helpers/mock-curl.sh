@@ -121,7 +121,7 @@ case "$URL" in
             RESPONSE_BODY='{"outcome":"structured.created","memoryId":99,"entryId":7}'
         else
             HTTP_CODE="200"
-            RESPONSE_BODY='{"total":2,"format":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"topic":"Tuesday","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"topic":"Friday","values":{"severity":3,"triggers":null}}]}'
+            RESPONSE_BODY='{"total":2,"format":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"recordedAt":"2026-10-07T09:00:00","note":"Migraine on Tuesday after red wine.","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"entryKey":null,"recordedAt":"2026-10-10T09:00:00","note":"Mild one on Friday.","values":{"severity":3,"triggers":null}}]}'
         fi
         ;;
     */api/data-formats/*/versions)
