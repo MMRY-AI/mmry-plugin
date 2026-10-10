@@ -302,7 +302,7 @@ disclosure the sameness exists to prevent.
 ### One account, every surface
 
 The same record types and the same records are reached from the MMRY connector (ChatGPT, Cursor,
-Claude Desktop, Codex) through the `mmry_format_*`, `mmry_record` and `mmry_record_history` tools,
+Claude Desktop and the user's other connected tools) through the `mmry_format_*`, `mmry_record` and `mmry_record_history` tools,
 and over the REST API. **A customer can also correct a record themselves**, without asking anyone,
 at `mmryai.com/records` in their account area. A type defined here is visible there, a record
 written there is readable here, and a correction made in any of them is immediately true in all of
