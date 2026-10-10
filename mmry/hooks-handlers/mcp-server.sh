@@ -322,7 +322,10 @@ _mcp_run_handler() {
 # binary is assumed: macOS has none. The handler runs in the background and a watcher stops it.
 _mcp_timeout() {
     local limit="$MMRY_MCP_HANDLER_TIMEOUT" pid watcher rc
-    "$@" &
+    # <&0 is load-bearing. A background job's stdin defaults to /dev/null when job control is off,
+    # and bash 3.2, the macOS bash, applies that even inside a pipeline, so the reload's hook
+    # payload never reached session-start.sh there (macOS CI, 2026-10-10). Naming stdin keeps it.
+    "$@" <&0 &
     pid=$!
     ( sleep "$limit" && kill "$pid" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
     watcher=$!
