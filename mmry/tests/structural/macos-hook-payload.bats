@@ -500,7 +500,7 @@ LATECURL
         echo "Stop did not wake the session for a message that arrived while it was watching (exit ${status}): ${output}"
         return 1
     }
-    [[ "$output" == *"FORMATION TRANSMISSION"* ]]
+    [[ "$output" == *"MMRY AI Formation Transmission"* ]]
     [[ "$output" == *"FormationService.cs"* ]]
 
     # Control for the fixture: it must genuinely have been asked more than once, or "it polled" is

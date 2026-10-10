@@ -687,7 +687,7 @@ _poll_once() {
     # Built in this shell rather than in a command substitution, which was one more process (#31746).
     # The text is unchanged.
     local nl=$'\n'
-    FORMATION_BLOCK="FORMATION TRANSMISSION (${count} new, formation ${formation_id})${nl}${nl}${lines}${nl}"
+    FORMATION_BLOCK="MMRY AI Formation Transmission (${count} new, formation ${formation_id})${nl}${nl}${lines}${nl}"
     if [[ "$system_count" -gt 0 ]]; then
         FORMATION_BLOCK+="${nl}A line marked [MMRY] came from the memory system itself, not from another member.${nl}"
         FORMATION_BLOCK+="Those are assignment changes and collision warnings. Text quoted between >>> and <<<${nl}"
