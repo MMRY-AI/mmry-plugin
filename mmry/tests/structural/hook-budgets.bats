@@ -317,15 +317,13 @@ EOF
 ' > "$TEST_TMPDIR/mmry-foundation.md"
     _manifest_for "$TEST_TMPDIR/mmry-foundation.md"
 
-    # A jq that never returns in time. --version stays fast because the resolver probes it.
-    local shim="$TEST_TMPDIR/hang-jq.sh"
-    cat > "$shim" <<'SHIMEOF'
-#!/usr/bin/env bash
-for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done
-sleep 60
-exec jq "$@"
-SHIMEOF
-    chmod +x "$shim"
+    # A cksum that never returns in time (#31893: the ordinary prompt verifies the set in the supervisor
+    # with one cksum and starts no jq, so that is where a hang has to be). It used to be a jq.
+    local shim="$TEST_TMPDIR/hang-cksum" realck
+    realck="$(command -v cksum)"
+    mkdir -p "$shim"
+    printf '#!/usr/bin/env bash\nsleep 60\nexec "%s" "$@"\n' "$realck" > "$shim/cksum"
+    chmod +x "$shim/cksum"
 
     local handler budget start elapsed_ms out margin_ms control_ms own_ms real_bash broken
     handler="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
@@ -351,7 +349,10 @@ SHIMEOF
     control_ms=$(( $(_now_ms) - start ))
 
     start="$(_now_ms)"
-    out="$(MMRY_JQ="$shim" bash "$handler" 2>/dev/null)"
+    # The control above prepared the set and stored it; forgotten, so this firing verifies it again and
+    # meets the hang (#31893).
+    rm -f "$TEST_TMPDIR"/.mmry-foundation-prepared.* "$TEST_TMPDIR"/.mmry-foundation-claim.* "$TEST_TMPDIR"/.mmry-foundation-result.*
+    out="$(PATH="$shim:$PATH" bash "$handler" 2>/dev/null)"
     elapsed_ms=$(( $(_now_ms) - start ))
     margin_ms=$(( budget * 1000 - elapsed_ms ))
     # What the plugin's own deadline cost, net of what this machine charges any firing right now.
@@ -369,10 +370,12 @@ SHIMEOF
     # net of the control: the shipped 15 s deadline that #31434 QA failed leaves under 5 s here on
     # any machine, while a busy machine no longer fails a 10 s one.
     (( budget * 1000 - own_ms >= 5000 )) || return 1
-    # And the customer was told. A guard that wins the race and says nothing is the silent
-    # loss wearing a different hat.
-    [[ "$out" == *'NOT applied to this turn'* ]] || return 1
+    # And the assistant was told. A guard that wins the race and says nothing is the silent loss
+    # wearing a different hat. Since #31893 the person is not shown a slow prompt (requirement 3), so
+    # it is the assistant's channel that must carry it, and the person's that must not.
+    [[ "$out" == *'cut short'* ]] || return 1
     [[ "$out" == *'exceeded'* ]] || return 1
+    [[ "$out" != *'systemMessage'* ]] || return 1
     echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
 }
 
@@ -402,7 +405,9 @@ SHIMEOF
     # The FIRST such loop only, ending at its kill (#31411 QA round 2). A sed range reopens at every
     # later line that starts the same way, and the part cut added one below the watchdog, so the block
     # ran to the end of the file and took in the cut's own counters.
-    block="$(awk '/^        while / { f = 1 } f { print } f && /kill -TERM/ { exit }' "$handler")"
+    # Anchored on the watchdog's own clock loop since #31893, which moved the cut's functions (and their
+    # own `while` loops) above the supervisor so the supervisor can cut the set itself.
+    block="$(awk '/^        while [(][(] SECONDS < / { f = 1 } f { print } f && /kill -TERM/ { exit }' "$handler")"
     # SAMPLE SIZE, as everywhere else in this file: an extraction that found nothing must fail
     # loudly rather than pass a comparison against an empty string.
     (( $(printf '%s
@@ -412,8 +417,11 @@ SHIMEOF
 
     # The loop bound must be a CLOCK. `SECONDS` is a bash builtin, so this also removes the
     # per-round spawn that caused the drift in the first place.
+    # Since #31893 the bound is what is left of DEADLINE when the worker starts, _FND_WDL, because the
+    # prepared path may already have spent some of it; still a clock.
     printf '%s
-' "$block" | grep -q 'while (( SECONDS < DEADLINE ))'
+' "$block" | grep -q 'while (( SECONDS < _FND_WDL ))'
+    grep -q '^    _FND_WDL=$(( DEADLINE - SECONDS ))$' "$handler"
     # And nothing in it may be a per-iteration counter standing in for elapsed time.
     #
     # Counted rather than written as `! ... | grep -q` (#31434 QA). A `!`-negated command is
@@ -926,11 +934,18 @@ _foundation_budget() {
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
 
-    MMRY_JQ="$slow" MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 3
+    # Slowed at its cksum (#31893: the ordinary prompt starts no jq; it verifies the set with one cksum).
+    local ckdir="$TEST_TMPDIR/slow-cksum" realck
+    realck="$(command -v cksum)"
+    mkdir -p "$ckdir"
+    printf '#!/usr/bin/env bash\nsleep 20\nexec "%s" "$@"\n' "$realck" > "$ckdir/cksum"
+    chmod +x "$ckdir/cksum"
+    PATH="$ckdir:$PATH" MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 3
     [ "$status" -eq 0 ]
-    # Not silent: the customer channel carries a notice naming the part that was lost.
-    [[ "$output" == *systemMessage* ]] || return 1
-    [[ "$output" == *'part 3 of your Foundation directives was NOT applied'* ]] || return 1
+    # Not silent, and not shown to the person (#31893 requirement 3): the assistant's channel carries
+    # it, naming the part that was lost.
+    [[ "$output" != *systemMessage* ]] || return 1
+    [[ "$output" == *'cut short'* ]] || return 1
     # The assistant is told as well, and which part.
     # And the assistant is told which part (#31411 QA round 2: a part names itself).
     [[ "$output" == *'could not load PART 3 of this account'* ]] || return 1

@@ -184,6 +184,8 @@ _big_response() {
     # passed it. Now each clear is walked back to the end of the previous exit path: it must
     # meet an emit first, or the path must say, in a comment, that it never emits.
     # The marker is written by temp and rename since #31583 QA round 2 (_mmry_fnd_write).
+    # SINCE #31893 QA ROUND 2 a path ends in _mmry_fnd_finish, which clears the marker by renaming it
+    # onto the outcome record and then exits, so a call to it is a clear and the end of its path.
     grep -q '_mmry_fnd_write "\$_INFLIGHT"' "$f"
     local report
     report="$(awk '
@@ -195,6 +197,11 @@ _big_response() {
         /rm -f "\$_INFLIGHT"/ {
             clears++
             if (!emitted && !noemit) { bad = bad " " NR }
+        }
+        /^[[:space:]]*_mmry_fnd_finish "/ {
+            clears++
+            if (!emitted && !noemit) { bad = bad " " NR }
+            emitted = 0; noemit = 0
         }
         END { printf "clears=%d bad=%s", clears, bad }
     ' "$f")"

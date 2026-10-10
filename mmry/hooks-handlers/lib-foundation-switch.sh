@@ -41,7 +41,10 @@ unset _mmry_fsw_had_errexit
 # bash 3.2 (what macOS ships) has no `${x,,}`, so this does the mapping by hand: the index of
 # the character within the uppercase alphabet is the length of the prefix before it, and a
 # character that is absent leaves the alphabet unchanged at length 26.
-_mmry_tolower() {
+_mmry_tolower() { _mmry_tolower_v "$1"; printf '%s' "$_MMRY_LOWER"; }
+# The same, into _MMRY_LOWER, for a caller that cannot afford "$( )": that is a fork, a process on
+# Windows, and the off switch below is asked by every part of every prompt (#31893 QA round 2).
+_mmry_tolower_v() {
     local s="$1" out="" c pre
     local up="ABCDEFGHIJKLMNOPQRSTUVWXYZ" lo="abcdefghijklmnopqrstuvwxyz"
     local i=0
@@ -55,13 +58,14 @@ _mmry_tolower() {
         fi
         i=$(( i + 1 ))
     done
-    printf '%s' "$out"
+    _MMRY_LOWER="$out"
 }
 
 # Is Foundation re-injection switched OFF by this value? Same vocabulary the worker has always
 # honoured, now in one place because the SUPERVISOR has to answer the question too (#31434 QA).
 _mmry_reinject_off() {
-    case "$(_mmry_tolower "$1")" in
+    _mmry_tolower_v "$1"
+    case "$_MMRY_LOWER" in
         false|off|0|no|disabled) return 0 ;;
     esac
     return 1

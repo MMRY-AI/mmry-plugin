@@ -418,7 +418,7 @@ _mmry_host_resolve() {
         if [[ -n "${_MMRY_HOST_DIR_FROM_MARKER:-}" ]]; then
             _MMRY_HOST_DIR_V="${_MMRY_HOST_DIR_FROM_MARKER}"
         else
-            _MMRY_HOST_DIR_V="${CODEX_HOME:-$(mmry_home)/.codex}"
+            _MMRY_HOST_DIR_V="${CODEX_HOME:-${HOME:-$(mmry_home)}/.codex}"
             # A TRAILING SEPARATOR IS NOT PART OF THE DIRECTORY (#31245 QA round 4). A customer
             # who set CODEX_HOME=C:\Users\x\codexhome\ - which is what tab-completion in cmd
             # hands you - produced a credential path of "...\codexhome\/mmry-config.json".
@@ -431,7 +431,10 @@ _mmry_host_resolve() {
         _MMRY_HOST_CLIENT_V="codex"
         _MMRY_HOST_LABEL_V="Codex"
     else
-        _MMRY_HOST_DIR_V="$(mmry_home)/.claude"
+        # HOME first, with no process when it is set (#31893 QA round 2): mmry_home answers HOME then,
+        # so this is the same directory, and "$( )" is a fork, a process on Windows, paid by every part
+        # of every prompt. mmry_home still resolves a missing HOME.
+        _MMRY_HOST_DIR_V="${HOME:-$(mmry_home)}/.claude"
         _MMRY_HOST_CLIENT_V="claude-code"
         _MMRY_HOST_LABEL_V="Claude Code"
     fi
