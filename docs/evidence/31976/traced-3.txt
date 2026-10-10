@@ -1,0 +1,7 @@
+impl run total_ms prep_ms delivered node_procs bash_procs
+before 1 7722 3904 yes 29 65
+after 1 4536 2677 yes 29 67
+before 2 5637 3684 yes 29 69
+after 2 6421 2982 yes 29 67
+before 3 5549 3297 yes 29 70
+after 3 3531 3009 yes 29 66

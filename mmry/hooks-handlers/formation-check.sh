@@ -171,7 +171,30 @@ mmry_host_assert_own_credential 2>/dev/null || exit 0
 
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-jq.sh" 2>/dev/null || exit 0
-mmry_resolve_jq >/dev/null 2>&1 || true
+
+# THE jq IS PROVED BY ITS FIRST REAL USE, NOT BY `jq --version` FIRST (#31976). mmry_resolve_jq asks a
+# candidate for its version before trusting it: one process, 0.4 to 1 s of the 15 s budget on a loaded
+# Windows machine, measured, spent asking a jq whether it runs right before running it - and with no
+# jq on PATH, four more to find the bundle. So the jq it would choose is named without a process
+# (mmry_jq_candidate) and used for the payload parse below WITHOUT that question, and a parse that
+# answers is the proof: it is recorded as verified, so the client's own mmry_resolve_jq returns at
+# once. A parse that does not answer, or no payload to parse, falls back to mmry_resolve_jq exactly as
+# before - the version question, then the bundled jq - so a broken jq still ends where it always did,
+# at the cost it always had.
+_fc_jq_unproved=""
+_fc_jq_env="${MMRY_JQ:-}"
+# The old way, from what the environment gave: the version question, then the bundle.
+_fc_resolve_jq() {
+    _fc_jq_unproved=""
+    MMRY_JQ="$_fc_jq_env"
+    mmry_resolve_jq >/dev/null 2>&1 || true
+}
+mmry_jq_candidate || true
+if [[ -n "${_MMRY_JQ_CANDIDATE:-}" ]]; then
+    MMRY_JQ="$_MMRY_JQ_CANDIDATE"; _fc_jq_unproved=1
+else
+    _fc_resolve_jq
+fi
 
 # lib-host.sh is already sourced above, before lib-jq.sh, because the credential question has to be
 # asked before anything can answer it wrongly. The delivery routes below are not the same on both
@@ -222,14 +245,31 @@ if [[ ! -t 0 ]]; then
         mmry_note_hook_read_fault "formation-check" "$hook_read_status" || true
     fi
 
+    # A here-string, not `printf | jq`: the pipeline was one more process (#31976). Same bytes in,
+    # plus the newline a here-string ends with, which jq reads as whitespace.
     if [[ -n "$payload" && -n "${MMRY_JQ:-}" ]]; then
-        parsed="$(printf '%s' "$payload" | "$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' 2>/dev/null || true)"
+        parsed="$("$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' <<< "$payload" 2>/dev/null || true)"
+        # A jq that has not been proved and did not answer: prove one the old way, and ask again.
+        if [[ "$parsed" != *$'	'* && -n "$_fc_jq_unproved" ]]; then
+            _fc_resolve_jq
+            if [[ -n "${MMRY_JQ:-}" ]]; then
+                parsed="$("$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' <<< "$payload" 2>/dev/null || true)"
+            fi
+        fi
         # @tsv always emits the separator, so a missing tab means jq produced nothing at all.
         if [[ "$parsed" == *$'	'* ]]; then
             session_id="${parsed%%$'	'*}"
             hook_event="${parsed#*$'	'}"
+            # It answered, so it runs: the client's mmry_resolve_jq need not ask again.
+            if [[ -n "$_fc_jq_unproved" ]]; then
+                _MMRY_JQ_VERIFIED="$MMRY_JQ"; export MMRY_JQ; _fc_jq_unproved=""
+            fi
         fi
     fi
+fi
+# Nothing proved the jq above (no payload, or one that did not parse): prove it the old way now.
+if [[ -n "$_fc_jq_unproved" ]]; then
+    _fc_resolve_jq
 fi
 # A PAYLOAD THAT ARRIVED WITHOUT THE FIELDS WE ASSUME IS A FAULT, NOT SILENCE (#31245 QA round 2).
 #
@@ -456,9 +496,11 @@ _take() {
     return 0
 }
 
+# One process, not two (#31976): this was `rm -f pid` then `rmdir`, and releasing the mutex is the
+# last thing a delivering check does before it exits, inside the budget. A lock holds nothing but its
+# pid file, so removing the two together is the same act.
 _drop() {
-    rm -f "${1}/pid" 2>/dev/null || true
-    rmdir "$1" 2>/dev/null || true
+    rm -rf -- "$1" 2>/dev/null || true
 }
 
 _acquire() {
@@ -843,10 +885,13 @@ case "$mode" in
                 && { rmdir "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
         fi
         _poll_once || exit 0
-        printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rs \
+        # A here-string, not `printf | jq`, which was one more process before the person's prompt
+        # could go (#31976). A here-string ends with one newline the block never has (it ends with
+        # "transmitting."), so .[:-1] takes exactly that newline off and the text is unchanged.
+        "$MMRY_JQ" -Rs \
             --arg ev "$_event_name" --arg pre "$_preamble" \
-            '{hookSpecificOutput:{hookEventName:$ev, additionalContext:($pre + "\n\n" + .)}}' \
-            2>/dev/null || exit 0
+            '{hookSpecificOutput:{hookEventName:$ev, additionalContext:($pre + "\n\n" + .[:-1])}}' \
+            <<< "$FORMATION_BLOCK" 2>/dev/null || exit 0
         _mark_shown
         exit 0
         ;;

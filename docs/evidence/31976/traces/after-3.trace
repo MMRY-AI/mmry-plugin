@@ -1,0 +1,628 @@
+T0 1791625605052
++ 1791625605.154463 552289 :1 [] sh -c 'd="${TMPDIR:-/tmp}"; s="${CLAUDE_CODE_SESSION_ID:-}"; case "$s" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s="" ;; esac; m=""; if [ -n "$s" ]; then if [ -f "$d/.mmry-formation-$s" ]; then m=1; fi; else for f in "$d"/.mmry-formation-*; do case "${f##*/}" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f "$f" ]; then m=1; break; fi; done; fi; if [ -n "$m" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'
++ 1791625605.513991 552289 hook-guard.sh:15 [] set -euo pipefail
++ 1791625605.520651 552289 hook-guard.sh:17 [] SCRIPT_NAME=formation-check
++ 1791625605.520693 552289 hook-guard.sh:19 [] [[ -z formation-check ]]
++ 1791625605.520725 552289 hook-guard.sh:39 [] _mmry_guard_dir=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
++ 1791625605.520748 552289 hook-guard.sh:40 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\h\o\o\k\-\g\u\a\r\d\.\s\h ]]
++ 1791625605.520779 552289 hook-guard.sh:44 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh ]]
++ 1791625605.520983 552289 hook-guard.sh:44 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh
+++ 1791625605.521199 552289 lib-host.sh:30 [] set -euo pipefail
+++ 1791625605.521226 552289 lib-host.sh:33 [] [[ -n '' ]]
+++ 1791625605.521240 552289 lib-host.sh:34 [] _MMRY_LIB_HOST_SOURCED=1
+++ 1791625605.521273 552289 lib-host.sh:77 [] _MMRY_LC=
+++ 1791625605.521322 552289 lib-host.sh:110 [] _MMRY_NP=
+++ 1791625605.521557 552289 lib-host.sh:171 [] [[ -z '' ]]
+++ 1791625605.521579 552289 lib-host.sh:200 [] _mmry_self_src=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh
+++ 1791625605.521597 552289 lib-host.sh:201 [] _mmry_self_dir=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++ 1791625605.521613 552289 lib-host.sh:202 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\l\i\b\-\h\o\s\t\.\s\h ]]
+++ 1791625605.521625 552289 lib-host.sh:206 [] _mmry_needs_resolve=0
+++ 1791625605.521639 552289 lib-host.sh:207 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers != /* ]]
+++ 1791625605.521649 552289 lib-host.sh:208 [] case "/${_mmry_self_dir//\\//}/" in
+++ 1791625605.521665 552289 lib-host.sh:211 [] ((  _mmry_needs_resolve == 1  ))
+++ 1791625605.521679 552289 lib-host.sh:214 [] [[ -n /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers ]]
+++ 1791625605.521693 552289 lib-host.sh:245 [] _mmry_norm_path_str_g /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++ 1791625605.521718 552289 lib-host.sh:112 [_mmry_norm_path_str_g source main] local p=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++ 1791625605.521736 552289 lib-host.sh:113 [_mmry_norm_path_str_g source main] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers =~ ^([A-Za-z]):(/.*)?$ ]]
+++ 1791625605.521764 552289 lib-host.sh:118 [_mmry_norm_path_str_g source main] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == */ ]]
+++ 1791625605.521779 552289 lib-host.sh:119 [_mmry_norm_path_str_g source main] _MMRY_NP=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++ 1791625605.521798 552289 lib-host.sh:245 [] _mmry_self_dir=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++ 1791625605.521814 552289 lib-host.sh:264 [] _mmry_marker=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/../.mmry-host
+++ 1791625605.521827 552289 lib-host.sh:265 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/../.mmry-host ]]
+++ 1791625605.522044 552289 lib-host.sh:313 [] [[ -z '' ]]
+++ 1791625605.522058 552289 lib-host.sh:313 [] [[ -n '' ]]
+++ 1791625605.522071 552289 lib-host.sh:331 [] [[ -z '' ]]
+++ 1791625605.522083 552289 lib-host.sh:331 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == */.codex/* ]]
+++ 1791625605.522133 552289 lib-host.sh:333 [] unset _mmry_self_dir _mmry_self_src _mmry_codex_home _mmry_marker _mmry_marker_host _mmry_marker_home
+++ 1791625605.522195 552289 lib-host.sh:350 [] _MMRY_HOST_KEY=$'\001unset'
+++ 1791625605.522212 552289 lib-host.sh:351 [] _MMRY_HOST_V=
+++ 1791625605.522224 552289 lib-host.sh:351 [] _MMRY_HOST_DIR_V=
+++ 1791625605.522234 552289 lib-host.sh:351 [] _MMRY_HOST_CLIENT_V=
+++ 1791625605.522245 552289 lib-host.sh:351 [] _MMRY_HOST_LABEL_V=
+++ 1791625605.522310 552289 lib-host.sh:396 [] [[ -z /tmp/31976-run-M4vv/home ]]
+++ 1791625605.522635 552289 lib-host.sh:727 [] _mmry_host_resolve
+++ 1791625605.522665 552289 lib-host.sh:406 [_mmry_host_resolve source main] local 'key=||/tmp/31976-run-M4vv/home|'
+++ 1791625605.522683 552289 lib-host.sh:407 [_mmry_host_resolve source main] [[ ||/tmp/31976-run-M4vv/home| == \u\n\s\e\t ]]
+++ 1791625605.522698 552289 lib-host.sh:408 [_mmry_host_resolve source main] _MMRY_HOST_KEY='||/tmp/31976-run-M4vv/home|'
+++ 1791625605.522710 552289 lib-host.sh:409 [_mmry_host_resolve source main] case "${MMRY_HOST:-}" in
+++ 1791625605.522723 552289 lib-host.sh:411 [_mmry_host_resolve source main] _MMRY_HOST_V=claude
+++ 1791625605.522738 552289 lib-host.sh:413 [_mmry_host_resolve source main] [[ claude == \c\o\d\e\x ]]
+++ 1791625605.522761 552289 lib-host.sh:437 [_mmry_host_resolve source main] _MMRY_HOST_DIR_V=/tmp/31976-run-M4vv/home/.claude
+++ 1791625605.522774 552289 lib-host.sh:438 [_mmry_host_resolve source main] _MMRY_HOST_CLIENT_V=claude-code
+++ 1791625605.522786 552289 lib-host.sh:439 [_mmry_host_resolve source main] _MMRY_HOST_LABEL_V='Claude Code'
+++ 1791625605.522813 552289 lib-host.sh:728 [] [[ -z '' ]]
+++ 1791625605.522826 552289 lib-host.sh:728 [] [[ claude == \c\o\d\e\x ]]
++ 1791625605.523026 552289 hook-guard.sh:49 [] _mmry_host_resolve
++ 1791625605.523054 552289 lib-host.sh:406 [_mmry_host_resolve main] local 'key=||/tmp/31976-run-M4vv/home|'
++ 1791625605.523072 552289 lib-host.sh:407 [_mmry_host_resolve main] [[ ||/tmp/31976-run-M4vv/home| == \|\|\/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\| ]]
++ 1791625605.523086 552289 lib-host.sh:407 [_mmry_host_resolve main] return 0
++ 1791625605.523113 552289 hook-guard.sh:50 [] TARGET=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/formation-check.sh
++ 1791625605.523143 552289 hook-guard.sh:55 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/formation-check.sh ]]
++ 1791625605.523304 552289 hook-guard.sh:68 [] [[ formation-check == \f\o\r\m\a\t\i\o\n\-\c\h\e\c\k ]]
++ 1791625605.523324 552289 hook-guard.sh:68 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s ]]
++ 1791625605.523337 552289 hook-guard.sh:69 [] set --
++ 1791625605.523352 552289 hook-guard.sh:71 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/formation-check.sh
+++ 1791625605.523540 552289 formation-check.sh:66 [] set -euo pipefail
+++ 1791625605.523563 552289 formation-check.sh:70 [] trap 'exit 0' ERR
+++ 1791625605.523590 552289 formation-check.sh:75 [] HANDLER_DIR=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++ 1791625605.523611 552289 formation-check.sh:76 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\f\o\r\m\a\t\i\o\n\-\c\h\e\c\k\.\s\h ]]
+++ 1791625605.523628 552289 formation-check.sh:77 [] MMRY_TMPDIR=/tmp/31976-run-M4vv/tmp
+++ 1791625605.523667 552289 formation-check.sh:117 [] MMRY_IDLE_POLL_SECONDS=1680
+++ 1791625605.523683 552289 formation-check.sh:118 [] MMRY_IDLE_POLL_INTERVAL=
+++ 1791625605.523696 552289 formation-check.sh:119 [] _IDLE_EARLY_INTERVAL=3
+++ 1791625605.523708 552289 formation-check.sh:120 [] _IDLE_EARLY_UNTIL=60
+++ 1791625605.523721 552289 formation-check.sh:121 [] _IDLE_MID_INTERVAL=15
+++ 1791625605.523733 552289 formation-check.sh:122 [] _IDLE_MID_UNTIL=300
+++ 1791625605.523766 552289 formation-check.sh:123 [] _IDLE_LATE_INTERVAL=30
+++ 1791625605.523779 552289 formation-check.sh:124 [] _IDLE_LATE_UNTIL=900
+++ 1791625605.523791 552289 formation-check.sh:125 [] _IDLE_MAX_INTERVAL=60
+++ 1791625605.523806 552289 formation-check.sh:132 [] _IDLE_LOCK_STALE=120
+++ 1791625605.523820 552289 formation-check.sh:136 [] _IDLE_HANDOVER_WAIT=40
+++ 1791625605.523852 552289 formation-check.sh:168 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh ]]
+++ 1791625605.523998 552289 formation-check.sh:169 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh
++++ 1791625605.524183 552289 lib-host.sh:30 [] set -euo pipefail
++++ 1791625605.524207 552289 lib-host.sh:33 [] [[ -n 1 ]]
++++ 1791625605.524219 552289 lib-host.sh:33 [] return 0
+++ 1791625605.524244 552289 formation-check.sh:170 [] mmry_host_assert_own_credential
+++ 1791625605.524274 552289 lib-host.sh:864 [mmry_host_assert_own_credential source main] _mmry_host_resolve
+++ 1791625605.524303 552289 lib-host.sh:406 [_mmry_host_resolve mmry_host_assert_own_credential source main] local 'key=||/tmp/31976-run-M4vv/home|'
+++ 1791625605.524321 552289 lib-host.sh:407 [_mmry_host_resolve mmry_host_assert_own_credential source main] [[ ||/tmp/31976-run-M4vv/home| == \|\|\/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\| ]]
+++ 1791625605.524335 552289 lib-host.sh:407 [_mmry_host_resolve mmry_host_assert_own_credential source main] return 0
+++ 1791625605.524358 552289 lib-host.sh:865 [mmry_host_assert_own_credential source main] [[ claude == \c\o\d\e\x ]]
+++ 1791625605.524372 552289 lib-host.sh:865 [mmry_host_assert_own_credential source main] return 0
+++ 1791625605.524403 552289 formation-check.sh:173 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-jq.sh
++++ 1791625605.524565 552289 lib-jq.sh:21 [] set -euo pipefail
++++ 1791625605.524610 552289 lib-jq.sh:67 [] _mmry_libjq_dir=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
++++ 1791625605.524630 552289 lib-jq.sh:68 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\l\i\b\-\j\q\.\s\h ]]
++++ 1791625605.524650 552289 lib-jq.sh:69 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh ]]
++++ 1791625605.524808 552289 lib-jq.sh:71 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh
+++++ 1791625605.524961 552289 lib-host.sh:30 [] set -euo pipefail
+++++ 1791625605.524984 552289 lib-host.sh:33 [] [[ -n 1 ]]
+++++ 1791625605.524996 552289 lib-host.sh:33 [] return 0
++++ 1791625605.525029 552289 lib-jq.sh:88 [] declare -F mmry_host_assert_own_credential
++++ 1791625605.525077 552289 lib-jq.sh:89 [] mmry_host_assert_own_credential
++++ 1791625605.525097 552289 lib-host.sh:864 [mmry_host_assert_own_credential source source main] _mmry_host_resolve
++++ 1791625605.525127 552289 lib-host.sh:406 [_mmry_host_resolve mmry_host_assert_own_credential source source main] local 'key=||/tmp/31976-run-M4vv/home|'
++++ 1791625605.525146 552289 lib-host.sh:407 [_mmry_host_resolve mmry_host_assert_own_credential source source main] [[ ||/tmp/31976-run-M4vv/home| == \|\|\/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\| ]]
++++ 1791625605.525161 552289 lib-host.sh:407 [_mmry_host_resolve mmry_host_assert_own_credential source source main] return 0
++++ 1791625605.525184 552289 lib-host.sh:865 [mmry_host_assert_own_credential source source main] [[ claude == \c\o\d\e\x ]]
++++ 1791625605.525198 552289 lib-host.sh:865 [mmry_host_assert_own_credential source source main] return 0
++++ 1791625605.525223 552289 lib-jq.sh:91 [] unset _mmry_libjq_dir
+++ 1791625605.525515 552289 formation-check.sh:184 [] _fc_jq_unproved=
+++ 1791625605.525535 552289 formation-check.sh:185 [] _fc_jq_env=
+++ 1791625605.525560 552289 formation-check.sh:192 [] mmry_jq_candidate
+++ 1791625605.525588 552289 lib-jq.sh:174 [mmry_jq_candidate source main] _MMRY_JQ_CANDIDATE=
+++ 1791625605.525603 552289 lib-jq.sh:175 [mmry_jq_candidate source main] [[ -n '' ]]
+++ 1791625605.525621 552289 lib-jq.sh:178 [mmry_jq_candidate source main] [[ '' != \1 ]]
+++ 1791625605.525636 552289 lib-jq.sh:178 [mmry_jq_candidate source main] command -v jq
+++ 1791625605.530905 552289 lib-jq.sh:179 [mmry_jq_candidate source main] _MMRY_JQ_CANDIDATE=jq
+++ 1791625605.530940 552289 lib-jq.sh:179 [mmry_jq_candidate source main] return 0
+++ 1791625605.530986 552289 formation-check.sh:193 [] [[ -n jq ]]
+++ 1791625605.531003 552289 formation-check.sh:194 [] MMRY_JQ=jq
+++ 1791625605.531016 552289 formation-check.sh:194 [] _fc_jq_unproved=1
+++ 1791625605.531053 552289 formation-check.sh:230 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-hookread.sh
++++ 1791625605.531290 552289 lib-hookread.sh:64 [] set -euo pipefail
+++ 1791625605.531497 552289 formation-check.sh:232 [] session_id=
+++ 1791625605.531515 552289 formation-check.sh:233 [] hook_event=
+++ 1791625605.531529 552289 formation-check.sh:234 [] hook_read_status=notty
+++ 1791625605.531583 552289 formation-check.sh:235 [] [[ ! -t 0 ]]
+++ 1791625605.531607 552289 formation-check.sh:236 [] mmry_read_hook_payload 2
+++ 1791625605.531653 552289 lib-hookread.sh:69 [mmry_read_hook_payload source main] local budget=2
+++ 1791625605.531671 552289 lib-hookread.sh:71 [mmry_read_hook_payload source main] MMRY_HOOK_PAYLOAD=
+++ 1791625605.531686 552289 lib-hookread.sh:72 [mmry_read_hook_payload source main] MMRY_HOOK_READ_STATUS=notty
+++ 1791625605.531701 552289 lib-hookread.sh:75 [mmry_read_hook_payload source main] '[' -t 0 ']'
+++ 1791625605.531716 552289 lib-hookread.sh:80 [mmry_read_hook_payload source main] case "$budget" in
+++ 1791625605.531733 552289 lib-hookread.sh:83 [mmry_read_hook_payload source main] '[' 2 -lt 1 ']'
+++ 1791625605.531752 552289 lib-hookread.sh:88 [mmry_read_hook_payload source main] local deadline=2
+++ 1791625605.531770 552289 lib-hookread.sh:89 [mmry_read_hook_payload source main] local line rc remaining timed_out=0
+++ 1791625605.531787 552289 lib-hookread.sh:91 [mmry_read_hook_payload source main] :
+++ 1791625605.531805 552289 lib-hookread.sh:92 [mmry_read_hook_payload source main] remaining=2
+++ 1791625605.531821 552289 lib-hookread.sh:94 [mmry_read_hook_payload source main] '[' 2 -le 0 ']'
+++ 1791625605.531835 552289 lib-hookread.sh:99 [mmry_read_hook_payload source main] line=
+++ 1791625605.531848 552289 lib-hookread.sh:100 [mmry_read_hook_payload source main] rc=0
+++ 1791625605.531865 552289 lib-hookread.sh:103 [mmry_read_hook_payloadsourcemain] IFS=
+++ 1791625605.531882 552289 lib-hookread.sh:103 [mmry_read_hook_payloadsourcemain] read -r -t 2 line
+++ 1791625605.533496 552289 lib-hookread.sh:103 [mmry_read_hook_payload source main] rc=1
+++ 1791625605.533530 552289 lib-hookread.sh:108 [mmry_read_hook_payload source main] '[' -n '{"session_id":"sess-measure","hook_event_name":"UserPromptSubmit","prompt":"hi"}' ']'
+++ 1791625605.533551 552289 lib-hookread.sh:109 [mmry_read_hook_payload source main] '[' -n '' ']'
+++ 1791625605.533569 552289 lib-hookread.sh:113 [mmry_read_hook_payload source main] MMRY_HOOK_PAYLOAD='{"session_id":"sess-measure","hook_event_name":"UserPromptSubmit","prompt":"hi"}'
+++ 1791625605.533586 552289 lib-hookread.sh:118 [mmry_read_hook_payload source main] '[' 1 -eq 0 ']'
+++ 1791625605.533604 552289 lib-hookread.sh:135 [mmry_read_hook_payload source main] '[' 1 -gt 128 ']'
+++ 1791625605.533621 552289 lib-hookread.sh:135 [mmry_read_hook_payload source main] '[' 0 -ge 2 ']'
+++ 1791625605.533635 552289 lib-hookread.sh:138 [mmry_read_hook_payload source main] break
+++ 1791625605.533651 552289 lib-hookread.sh:141 [mmry_read_hook_payload source main] '[' 0 -eq 1 ']'
+++ 1791625605.533668 552289 lib-hookread.sh:145 [mmry_read_hook_payload source main] '[' -z '{"session_id":"sess-measure","hook_event_name":"UserPromptSubmit","prompt":"hi"}' ']'
+++ 1791625605.533681 552289 lib-hookread.sh:149 [mmry_read_hook_payload source main] MMRY_HOOK_READ_STATUS=ok
+++ 1791625605.533694 552289 lib-hookread.sh:150 [mmry_read_hook_payload source main] return 0
+++ 1791625605.533726 552289 formation-check.sh:237 [] payload='{"session_id":"sess-measure","hook_event_name":"UserPromptSubmit","prompt":"hi"}'
+++ 1791625605.533772 552289 formation-check.sh:238 [] hook_read_status=ok
+++ 1791625605.533789 552289 formation-check.sh:244 [] [[ ok == \e\m\p\t\y ]]
+++ 1791625605.533802 552289 formation-check.sh:244 [] [[ ok == \t\i\m\e\o\u\t ]]
+++ 1791625605.533816 552289 formation-check.sh:250 [] [[ -n {"session_id":"sess-measure","hook_event_name":"UserPromptSubmit","prompt":"hi"} ]]
+++ 1791625605.533828 552289 formation-check.sh:250 [] [[ -n jq ]]
++++ 1791625605.550959 552311 formation-check.sh:251 [] jq -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv'
+++ 1791625605.942676 552289 formation-check.sh:251 [] parsed='sess-measure	UserPromptSubmit'
+++ 1791625605.942718 552289 formation-check.sh:253 [] [[ sess-measure	UserPromptSubmit != *\	* ]]
+++ 1791625605.942736 552289 formation-check.sh:260 [] [[ sess-measure	UserPromptSubmit == *\	* ]]
+++ 1791625605.942755 552289 formation-check.sh:261 [] session_id=sess-measure
+++ 1791625605.942773 552289 formation-check.sh:262 [] hook_event=UserPromptSubmit
+++ 1791625605.942787 552289 formation-check.sh:264 [] [[ -n 1 ]]
+++ 1791625605.942800 552289 formation-check.sh:265 [] _MMRY_JQ_VERIFIED=jq
+++ 1791625605.942815 552289 formation-check.sh:265 [] export MMRY_JQ
+++ 1791625605.942830 552289 formation-check.sh:265 [] _fc_jq_unproved=
+++ 1791625605.942859 552289 formation-check.sh:271 [] [[ -n '' ]]
+++ 1791625605.942894 552289 formation-check.sh:284 [] [[ -z sess-measure ]]
+++ 1791625605.942929 552289 formation-check.sh:305 [] session_id=sess-measure
+++ 1791625605.942945 552289 formation-check.sh:306 [] [[ -n sess-measure ]]
+++ 1791625605.942965 552289 formation-check.sh:317 [] mode=
+++ 1791625605.942993 552289 formation-check.sh:318 [] [[ -z '' ]]
+++ 1791625605.943005 552289 formation-check.sh:319 [] case "$hook_event" in
+++ 1791625605.943020 552289 formation-check.sh:322 [] mode=prompt
+++ 1791625605.943044 552289 formation-check.sh:344 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/formation-state.sh ]]
+++ 1791625605.943241 552289 formation-check.sh:345 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/formation-state.sh
++++ 1791625605.943462 552289 formation-state.sh:24 [] set -euo pipefail
++++ 1791625605.943500 552289 formation-state.sh:26 [] MMRY_TMPDIR=/tmp/31976-run-M4vv/tmp
++++ 1791625605.943531 552289 formation-state.sh:46 [] _MMRY_STATE_DIR=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
++++ 1791625605.943554 552289 formation-state.sh:47 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\f\o\r\m\a\t\i\o\n\-\s\t\a\t\e\.\s\h ]]
++++ 1791625605.943578 552289 formation-state.sh:51 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh ]]
++++ 1791625605.943747 552289 formation-state.sh:51 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh
+++++ 1791625605.943929 552289 lib-host.sh:30 [] set -euo pipefail
+++++ 1791625605.943953 552289 lib-host.sh:33 [] [[ -n 1 ]]
+++++ 1791625605.943966 552289 lib-host.sh:33 [] return 0
++++ 1791625605.944180 552289 formation-state.sh:202 [] MMRY_FORMATION_STALE_SECONDS=259200
++++ 1791625605.944200 552289 formation-state.sh:203 [] MMRY_FORMATION_SWEEP_MAX_ASKS=8
++++ 1791625605.944217 552289 formation-state.sh:204 [] MMRY_FORMATION_SWEEP_BUDGET=8
++++ 1791625605.944306 552289 formation-state.sh:248 [] _MMRY_FS_RECORD_RE='^\.mmry-formation-[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]+$'
++++ 1791625605.944650 552289 formation-state.sh:382 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/formation-state.sh != \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\h\o\o\k\-\g\u\a\r\d\.\s\h ]]
++++ 1791625605.944667 552289 formation-state.sh:383 [] return 0
+++ 1791625605.944697 552289 formation-check.sh:346 [] mmry_formation_state_read sess-measure
+++ 1791625605.944717 552289 formation-state.sh:103 [mmry_formation_state_read source main] MMRY_FS_FORMATION=
+++ 1791625605.944734 552289 formation-state.sh:104 [mmry_formation_state_read source main] MMRY_FS_LAST_SEEN=
+++ 1791625605.944748 552289 formation-state.sh:105 [mmry_formation_state_read source main] MMRY_FS_SHOWN=
+++ 1791625605.944765 552289 formation-state.sh:106 [mmry_formation_state_read source main] mmry_formation_state_path sess-measure
+++ 1791625605.944785 552289 formation-state.sh:90 [mmry_formation_state_path mmry_formation_state_read source main] local sid=sess-measure
+++ 1791625605.944803 552289 formation-state.sh:91 [mmry_formation_state_path mmry_formation_state_read source main] [[ -z sess-measure ]]
+++ 1791625605.944820 552289 formation-state.sh:94 [mmry_formation_state_path mmry_formation_state_read source main] sid=sess-measure
+++ 1791625605.944837 552289 formation-state.sh:95 [mmry_formation_state_path mmry_formation_state_read source main] mmry_formation_safe_sid sess-measure
+++ 1791625605.944855 552289 formation-state.sh:81 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read source main] local sid=sess-measure
+++ 1791625605.944887 552289 formation-state.sh:82 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read source main] [[ -z '' ]]
+++ 1791625605.944903 552289 formation-state.sh:83 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read source main] MMRY_FS_SAFE=sess-measure
+++ 1791625605.944926 552289 formation-state.sh:96 [mmry_formation_state_path mmry_formation_state_read source main] MMRY_FS_PATH=/tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure
+++ 1791625605.944945 552289 formation-state.sh:107 [mmry_formation_state_read source main] [[ -f /tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure ]]
+++ 1791625605.945256 552289 formation-state.sh:108 [mmry_formation_state_readsourcemain] IFS=
+++ 1791625605.945273 552289 formation-state.sh:108 [mmry_formation_state_readsourcemain] read -r MMRY_FS_FORMATION
+++ 1791625605.945301 552289 formation-state.sh:108 [mmry_formation_state_readsourcemain] IFS=
+++ 1791625605.945312 552289 formation-state.sh:108 [mmry_formation_state_readsourcemain] read -r MMRY_FS_LAST_SEEN
+++ 1791625605.945365 552289 formation-state.sh:109 [mmry_formation_state_readsourcemain] IFS=
+++ 1791625605.945377 552289 formation-state.sh:109 [mmry_formation_state_readsourcemain] read -r MMRY_FS_SHOWN
+++ 1791625605.945392 552289 formation-state.sh:109 [mmry_formation_state_read source main] true
+++ 1791625605.945424 552289 formation-state.sh:113 [mmry_formation_state_read source main] MMRY_FS_SHOWN=
+++ 1791625605.945439 552289 formation-state.sh:114 [mmry_formation_state_read source main] [[ -n 42 ]]
+++ 1791625605.945452 552289 formation-state.sh:115 [mmry_formation_state_read source main] return 0
+++ 1791625605.945479 552289 formation-check.sh:348 [] formation_id=42
+++ 1791625605.945498 552289 formation-check.sh:349 [] [[ 42 =~ ^[0-9]+$ ]]
+++ 1791625605.945532 552289 formation-check.sh:353 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/mmry-client.sh
++++ 1791625605.945741 552289 mmry-client.sh:7 [] set -euo pipefail
++++ 1791625605.945781 552289 mmry-client.sh:22 [] [[ '' != \1 ]]
++++ 1791625605.945802 552289 mmry-client.sh:23 [] _mmry_client_dir=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
++++ 1791625605.945819 552289 mmry-client.sh:24 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\m\m\r\y\-\c\l\i\e\n\t\.\s\h ]]
++++ 1791625605.945835 552289 mmry-client.sh:25 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-jq.sh
+++++ 1791625605.946061 552289 lib-jq.sh:21 [] set -euo pipefail
+++++ 1791625605.946122 552289 lib-jq.sh:67 [] _mmry_libjq_dir=/tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers
+++++ 1791625605.946144 552289 lib-jq.sh:68 [] [[ /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers == \/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\/\.\c\l\a\u\d\e\/\m\m\r\y\/\h\o\o\k\s\-\h\a\n\d\l\e\r\s\/\l\i\b\-\j\q\.\s\h ]]
+++++ 1791625605.946167 552289 lib-jq.sh:69 [] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh ]]
+++++ 1791625605.946321 552289 lib-jq.sh:71 [] source /tmp/31976-run-M4vv/home/.claude/mmry/hooks-handlers/lib-host.sh
++++++ 1791625605.946484 552289 lib-host.sh:30 [] set -euo pipefail
++++++ 1791625605.946507 552289 lib-host.sh:33 [] [[ -n 1 ]]
++++++ 1791625605.946519 552289 lib-host.sh:33 [] return 0
+++++ 1791625605.946551 552289 lib-jq.sh:88 [] declare -F mmry_host_assert_own_credential
+++++ 1791625605.946598 552289 lib-jq.sh:89 [] mmry_host_assert_own_credential
+++++ 1791625605.946618 552289 lib-host.sh:864 [mmry_host_assert_own_credential source source source main] _mmry_host_resolve
+++++ 1791625605.946648 552289 lib-host.sh:406 [_mmry_host_resolve mmry_host_assert_own_credential source source source main] local 'key=||/tmp/31976-run-M4vv/home|'
+++++ 1791625605.946668 552289 lib-host.sh:407 [_mmry_host_resolve mmry_host_assert_own_credential source source source main] [[ ||/tmp/31976-run-M4vv/home| == \|\|\/\t\m\p\/\3\1\9\7\6\-\r\u\n\-\M\4\v\v\/\h\o\m\e\| ]]
+++++ 1791625605.946683 552289 lib-host.sh:407 [_mmry_host_resolve mmry_host_assert_own_credential source source source main] return 0
+++++ 1791625605.946708 552289 lib-host.sh:865 [mmry_host_assert_own_credential source source source main] [[ claude == \c\o\d\e\x ]]
+++++ 1791625605.946721 552289 lib-host.sh:865 [mmry_host_assert_own_credential source source source main] return 0
+++++ 1791625605.946745 552289 lib-jq.sh:91 [] unset _mmry_libjq_dir
++++ 1791625605.947055 552289 mmry-client.sh:26 [] unset _mmry_client_dir
++++ 1791625605.947074 552289 mmry-client.sh:27 [] mmry_resolve_jq
++++ 1791625605.947099 552289 lib-jq.sh:135 [mmry_resolve_jq source source main] [[ -n jq ]]
++++ 1791625605.947116 552289 lib-jq.sh:135 [mmry_resolve_jq source source main] [[ jq == \j\q ]]
++++ 1791625605.947130 552289 lib-jq.sh:136 [mmry_resolve_jq source source main] return 0
++++ 1791625605.947162 552289 mmry-client.sh:34 [] MMRY_API_URL=
++++ 1791625605.947177 552289 mmry-client.sh:35 [] MMRY_API_KEY=
++++ 1791625605.947192 552289 mmry-client.sh:36 [] MMRY_AUTH_METHOD=
++++ 1791625605.947210 552289 mmry-client.sh:44 [] MMRY_FOUNDATION_REINJECT=
++++ 1791625605.947225 552289 mmry-client.sh:45 [] MMRY_FOUNDATION_TOKEN_CAP=
++++ 1791625605.947241 552289 mmry-client.sh:48 [] MMRY_FOUNDATION_REFRESH_SECONDS=
++++ 1791625605.947257 552289 mmry-client.sh:51 [] MMRY_TMPDIR=/tmp/31976-run-M4vv/tmp
++++ 1791625605.947270 552289 mmry-client.sh:54 [] MMRY_HTTP_CODE=
++++ 1791625605.947282 552289 mmry-client.sh:55 [] MMRY_RESPONSE=
++++ 1791625605.947294 552289 mmry-client.sh:57 [] MMRY_PROCESS_MESSAGE=
++++ 1791625605.947307 552289 mmry-client.sh:60 [] _MMRY_DEFAULT_URL=https://mmryai.com
++++ 1791625605.947563 552289 mmry-client.sh:297 [] MMRY_FND_TRAILER='END OF FOUNDATION SET'
++++ 1791625605.949193 552289 mmry-client.sh:1500 [] MMRY_AGENT_NAME_MAX=100
++++ 1791625605.949372 552289 mmry-client.sh:1565 [] [[ '' == \1 ]]
++++ 1791625605.949392 552289 mmry-client.sh:1565 [] mmry_load_config
++++ 1791625605.949440 552289 mmry-client.sh:123 [mmry_load_config source source main] [[ '' == \1 ]]
++++ 1791625605.949458 552289 mmry-client.sh:128 [mmry_load_config source source main] local config_file=
++++ 1791625605.949479 552289 mmry-client.sh:129 [mmry_load_config source source main] local plugin_root=
++++ 1791625605.949495 552289 mmry-client.sh:131 [mmry_load_config source source main] [[ -n '' ]]
++++ 1791625605.949509 552289 mmry-client.sh:133 [mmry_load_config source source main] [[ -n '' ]]
++++ 1791625605.949524 552289 mmry-client.sh:135 [mmry_load_config source source main] _mmry_claude_config_fallback_ok
++++ 1791625605.949542 552289 mmry-client.sh:112 [_mmry_claude_config_fallback_ok mmry_load_config source source main] [[ '' != \c\o\d\e\x ]]
++++ 1791625605.949561 552289 mmry-client.sh:135 [mmry_load_config source source main] [[ -f /tmp/31976-run-M4vv/home/.claude/mmry-config.json ]]
++++ 1791625605.949748 552289 mmry-client.sh:136 [mmry_load_config source source main] config_file=/tmp/31976-run-M4vv/home/.claude/mmry-config.json
++++ 1791625605.949769 552289 mmry-client.sh:139 [mmry_load_config source source main] [[ -n /tmp/31976-run-M4vv/home/.claude/mmry-config.json ]]
++++ 1791625605.949785 552289 mmry-client.sh:192 [mmry_load_config source source main] [[ -n jq ]]
++++ 1791625605.949803 552289 mmry-client.sh:193 [mmry_load_config source source main] local _cfg_url= _cfg_auth= _cfg_key=
++++ 1791625605.949824 552289 mmry-client.sh:194 [mmry_load_config source source main] local _cfg_reinject= _cfg_cap= _cfg_refresh=
+++++ 1791625606.287141 552329 mmry-client.sh:115 [mmry_load_config source source main] jq -j '
+                    [ .apiUrl, .authMethod, .apiKey,
+                      .foundationReinject, .foundationReinjectTokenCap, .foundationRefreshSeconds ]
+                    | map(if . == null then "" else tostring end)
+                    | map(. + "\u0000")
+                    | .[]
+                ' /tmp/31976-run-M4vv/home/.claude/mmry-config.json
++++ 1791625606.287208 552289 mmry-client.sh:202 [mmry_load_configsourcesourcemain] IFS=
++++ 1791625606.287234 552289 mmry-client.sh:202 [mmry_load_configsourcesourcemain] read -r -d '' _cfg_url
++++ 1791625606.988393 552289 mmry-client.sh:203 [mmry_load_configsourcesourcemain] IFS=
++++ 1791625606.988429 552289 mmry-client.sh:203 [mmry_load_configsourcesourcemain] read -r -d '' _cfg_auth
++++ 1791625606.988462 552289 mmry-client.sh:204 [mmry_load_configsourcesourcemain] IFS=
++++ 1791625606.988474 552289 mmry-client.sh:204 [mmry_load_configsourcesourcemain] read -r -d '' _cfg_key
++++ 1791625606.988507 552289 mmry-client.sh:205 [mmry_load_configsourcesourcemain] IFS=
++++ 1791625606.988518 552289 mmry-client.sh:205 [mmry_load_configsourcesourcemain] read -r -d '' _cfg_reinject
++++ 1791625606.988538 552289 mmry-client.sh:206 [mmry_load_configsourcesourcemain] IFS=
++++ 1791625606.988548 552289 mmry-client.sh:206 [mmry_load_configsourcesourcemain] read -r -d '' _cfg_cap
++++ 1791625606.988568 552289 mmry-client.sh:207 [mmry_load_configsourcesourcemain] IFS=
++++ 1791625606.988578 552289 mmry-client.sh:207 [mmry_load_configsourcesourcemain] read -r -d '' _cfg_refresh
++++ 1791625606.988613 552289 mmry-client.sh:216 [mmry_load_config source source main] [[ -z '' ]]
++++ 1791625606.988628 552289 mmry-client.sh:216 [mmry_load_config source source main] [[ -n http://127.0.0.1:52673 ]]
++++ 1791625606.988642 552289 mmry-client.sh:216 [mmry_load_config source source main] MMRY_API_URL=http://127.0.0.1:52673
++++ 1791625606.988657 552289 mmry-client.sh:217 [mmry_load_config source source main] [[ -z '' ]]
++++ 1791625606.988669 552289 mmry-client.sh:217 [mmry_load_config source source main] [[ -n apikey ]]
++++ 1791625606.988683 552289 mmry-client.sh:217 [mmry_load_config source source main] MMRY_AUTH_METHOD=apikey
++++ 1791625606.988697 552289 mmry-client.sh:218 [mmry_load_config source source main] [[ -z '' ]]
++++ 1791625606.988709 552289 mmry-client.sh:218 [mmry_load_config source source main] [[ -n k_measure ]]
++++ 1791625606.988721 552289 mmry-client.sh:218 [mmry_load_config source source main] MMRY_API_KEY=k_measure
++++ 1791625606.988736 552289 mmry-client.sh:219 [mmry_load_config source source main] [[ -z '' ]]
++++ 1791625606.988748 552289 mmry-client.sh:219 [mmry_load_config source source main] [[ -n '' ]]
++++ 1791625606.988760 552289 mmry-client.sh:219 [mmry_load_config source source main] true
++++ 1791625606.988775 552289 mmry-client.sh:220 [mmry_load_config source source main] [[ -z '' ]]
++++ 1791625606.988786 552289 mmry-client.sh:220 [mmry_load_config source source main] [[ -n '' ]]
++++ 1791625606.988797 552289 mmry-client.sh:220 [mmry_load_config source source main] true
++++ 1791625606.988812 552289 mmry-client.sh:221 [mmry_load_config source source main] [[ -z '' ]]
++++ 1791625606.988823 552289 mmry-client.sh:221 [mmry_load_config source source main] [[ -n '' ]]
++++ 1791625606.988834 552289 mmry-client.sh:221 [mmry_load_config source source main] true
++++ 1791625606.988850 552289 mmry-client.sh:226 [mmry_load_config source source main] MMRY_API_URL=http://127.0.0.1:52673
++++ 1791625606.988903 552289 mmry-client.sh:227 [mmry_load_config source source main] MMRY_FOUNDATION_REINJECT=true
++++ 1791625606.988920 552289 mmry-client.sh:228 [mmry_load_config source source main] MMRY_FOUNDATION_TOKEN_CAP=1500
++++ 1791625606.988936 552289 mmry-client.sh:229 [mmry_load_config source source main] MMRY_FOUNDATION_REFRESH_SECONDS=86400
++++ 1791625606.988950 552289 mmry-client.sh:232 [mmry_load_config source source main] [[ -z apikey ]]
++++ 1791625606.988962 552289 mmry-client.sh:236 [mmry_load_config source source main] _MMRY_CONFIG_LOADED=1
+++ 1791625606.989021 552289 formation-check.sh:354 [] command -v curl
+++ 1791625606.989355 552289 formation-check.sh:355 [] mmry_load_config
+++ 1791625606.989412 552289 mmry-client.sh:123 [mmry_load_config source main] [[ 1 == \1 ]]
+++ 1791625606.989429 552289 mmry-client.sh:123 [mmry_load_config source main] [[ '' != \1 ]]
+++ 1791625606.989443 552289 mmry-client.sh:124 [mmry_load_config source main] return 0
+++ 1791625606.989496 552289 formation-check.sh:390 [] _fc_budget=0
+++ 1791625606.989510 552289 formation-check.sh:391 [] _fc_reserve=4
+++ 1791625606.989522 552289 formation-check.sh:392 [] _fc_request=0
+++ 1791625606.989539 552289 formation-check.sh:393 [] case "$mode" in
+++ 1791625606.989551 552289 formation-check.sh:394 [] _fc_budget=15
+++ 1791625606.989562 552289 formation-check.sh:394 [] _fc_request=6
+++ 1791625606.989580 552289 formation-check.sh:397 [] _fc_deadline=11
+++ 1791625606.989633 552289 formation-check.sh:436 [] mmry_formation_safe_sid sess-measure
+++ 1791625606.989652 552289 formation-state.sh:81 [mmry_formation_safe_sid source main] local sid=sess-measure
+++ 1791625606.989685 552289 formation-state.sh:82 [mmry_formation_safe_sid source main] [[ -z '' ]]
+++ 1791625606.989699 552289 formation-state.sh:83 [mmry_formation_safe_sid source main] MMRY_FS_SAFE=sess-measure
+++ 1791625606.989719 552289 formation-check.sh:437 [] _safe_sid=sess-measure
+++ 1791625606.989738 552289 formation-check.sh:438 [] _mutex_dir=/tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure
+++ 1791625606.989756 552289 formation-check.sh:439 [] _poller_dir=/tmp/31976-run-M4vv/tmp/.mmry-formation-poll-sess-measure
+++ 1791625606.989769 552289 formation-check.sh:440 [] _held_mutex=
+++ 1791625606.989781 552289 formation-check.sh:441 [] _held_poller=
+++ 1791625606.989972 552289 formation-check.sh:550 [] trap _release_all EXIT
+++ 1791625606.990609 552289 formation-check.sh:824 [] case "$mode" in
+++ 1791625606.990635 552289 formation-check.sh:875 [] [[ prompt == \s\t\a\r\t ]]
+++ 1791625606.990657 552289 formation-check.sh:879 [] _event_name=UserPromptSubmit
+++ 1791625606.990673 552289 formation-check.sh:880 [] _preamble='These formation messages were sent while this session was idle and had not yet been shown. They may be stale; check before acting.'
+++ 1791625606.990691 552289 formation-check.sh:884 [] [[ -d /tmp/31976-run-M4vv/tmp/.mmry-formation-renewed-sess-measure ]]
+++ 1791625606.990888 552289 formation-check.sh:887 [] _poll_once
+++ 1791625606.990956 552289 formation-check.sh:560 [_poll_once source main] FORMATION_BLOCK=
+++ 1791625606.990972 552289 formation-check.sh:561 [_poll_once source main] FORMATION_NEWEST=
+++ 1791625606.990986 552289 formation-check.sh:562 [_poll_once source main] FORMATION_DIRECTED_IDS=
+++ 1791625606.991003 552289 formation-check.sh:570 [_poll_once source main] _acquire /tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure 120
+++ 1791625606.991029 552289 formation-check.sh:507 [_acquire _poll_once source main] local dir=/tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure max_age=120
+++ 1791625606.991050 552289 formation-check.sh:508 [_acquire _poll_once source main] _take /tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure
+++ 1791625606.991071 552289 formation-check.sh:494 [_take _acquire _poll_once source main] mkdir /tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure
+++ 1791625607.979146 552289 formation-check.sh:495 [_take _acquire _poll_once source main] printf '%s\n' 552289
+++ 1791625607.979725 552289 formation-check.sh:496 [_take _acquire _poll_once source main] return 0
+++ 1791625607.979761 552289 formation-check.sh:508 [_acquire _poll_once source main] return 0
+++ 1791625607.979785 552289 formation-check.sh:571 [_poll_once source main] _held_mutex=1
+++ 1791625607.979802 552289 formation-check.sh:573 [_poll_once source main] local last_seen
+++ 1791625607.979823 552289 formation-check.sh:574 [_poll_once source main] mmry_formation_state_read sess-measure
+++ 1791625607.979845 552289 formation-state.sh:103 [mmry_formation_state_read _poll_once source main] MMRY_FS_FORMATION=
+++ 1791625607.979860 552289 formation-state.sh:104 [mmry_formation_state_read _poll_once source main] MMRY_FS_LAST_SEEN=
+++ 1791625607.979874 552289 formation-state.sh:105 [mmry_formation_state_read _poll_once source main] MMRY_FS_SHOWN=
+++ 1791625607.979893 552289 formation-state.sh:106 [mmry_formation_state_read _poll_once source main] mmry_formation_state_path sess-measure
+++ 1791625607.979920 552289 formation-state.sh:90 [mmry_formation_state_path mmry_formation_state_read _poll_once source main] local sid=sess-measure
+++ 1791625607.979941 552289 formation-state.sh:91 [mmry_formation_state_path mmry_formation_state_read _poll_once source main] [[ -z sess-measure ]]
+++ 1791625607.979959 552289 formation-state.sh:94 [mmry_formation_state_path mmry_formation_state_read _poll_once source main] sid=sess-measure
+++ 1791625607.979977 552289 formation-state.sh:95 [mmry_formation_state_path mmry_formation_state_read _poll_once source main] mmry_formation_safe_sid sess-measure
+++ 1791625607.979997 552289 formation-state.sh:81 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read _poll_once source main] local sid=sess-measure
+++ 1791625607.980030 552289 formation-state.sh:82 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read _poll_once source main] [[ -z '' ]]
+++ 1791625607.980046 552289 formation-state.sh:83 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read _poll_once source main] MMRY_FS_SAFE=sess-measure
+++ 1791625607.980069 552289 formation-state.sh:96 [mmry_formation_state_path mmry_formation_state_read _poll_once source main] MMRY_FS_PATH=/tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure
+++ 1791625607.980090 552289 formation-state.sh:107 [mmry_formation_state_read _poll_once source main] [[ -f /tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure ]]
+++ 1791625607.980398 552289 formation-state.sh:108 [mmry_formation_state_read_poll_oncesourcemain] IFS=
+++ 1791625607.980420 552289 formation-state.sh:108 [mmry_formation_state_read_poll_oncesourcemain] read -r MMRY_FS_FORMATION
+++ 1791625607.980451 552289 formation-state.sh:108 [mmry_formation_state_read_poll_oncesourcemain] IFS=
+++ 1791625607.980463 552289 formation-state.sh:108 [mmry_formation_state_read_poll_oncesourcemain] read -r MMRY_FS_LAST_SEEN
+++ 1791625607.980520 552289 formation-state.sh:109 [mmry_formation_state_read_poll_oncesourcemain] IFS=
+++ 1791625607.980532 552289 formation-state.sh:109 [mmry_formation_state_read_poll_oncesourcemain] read -r MMRY_FS_SHOWN
+++ 1791625607.980549 552289 formation-state.sh:109 [mmry_formation_state_read _poll_once source main] true
+++ 1791625607.980581 552289 formation-state.sh:113 [mmry_formation_state_read _poll_once source main] MMRY_FS_SHOWN=
+++ 1791625607.980597 552289 formation-state.sh:114 [mmry_formation_state_read _poll_once source main] [[ -n 42 ]]
+++ 1791625607.980611 552289 formation-state.sh:115 [mmry_formation_state_read _poll_once source main] return 0
+++ 1791625607.980634 552289 formation-check.sh:575 [_poll_once source main] last_seen=2026-10-09T23:00:00.000
+++ 1791625607.980662 552289 formation-check.sh:577 [_poll_once source main] _fc_shown_owed=
+++ 1791625607.980680 552289 formation-check.sh:581 [_poll_once source main] mmry_formation_state_refresh sess-measure
+++ 1791625607.980702 552289 formation-state.sh:147 [mmry_formation_state_refresh _poll_once source main] mmry_formation_state_read sess-measure
+++ 1791625607.980725 552289 formation-state.sh:103 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] MMRY_FS_FORMATION=
+++ 1791625607.980741 552289 formation-state.sh:104 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] MMRY_FS_LAST_SEEN=
+++ 1791625607.980755 552289 formation-state.sh:105 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] MMRY_FS_SHOWN=
+++ 1791625607.980773 552289 formation-state.sh:106 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] mmry_formation_state_path sess-measure
+++ 1791625607.980795 552289 formation-state.sh:90 [mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] local sid=sess-measure
+++ 1791625607.980813 552289 formation-state.sh:91 [mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] [[ -z sess-measure ]]
+++ 1791625607.980831 552289 formation-state.sh:94 [mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] sid=sess-measure
+++ 1791625607.980848 552289 formation-state.sh:95 [mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] mmry_formation_safe_sid sess-measure
+++ 1791625607.980868 552289 formation-state.sh:81 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] local sid=sess-measure
+++ 1791625607.980902 552289 formation-state.sh:82 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] [[ -z '' ]]
+++ 1791625607.980917 552289 formation-state.sh:83 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] MMRY_FS_SAFE=sess-measure
+++ 1791625607.980941 552289 formation-state.sh:96 [mmry_formation_state_path mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] MMRY_FS_PATH=/tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure
+++ 1791625607.980962 552289 formation-state.sh:107 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] [[ -f /tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure ]]
+++ 1791625607.981213 552289 formation-state.sh:108 [mmry_formation_state_readmmry_formation_state_refresh_poll_oncesourcemain] IFS=
+++ 1791625607.981233 552289 formation-state.sh:108 [mmry_formation_state_readmmry_formation_state_refresh_poll_oncesourcemain] read -r MMRY_FS_FORMATION
+++ 1791625607.981266 552289 formation-state.sh:108 [mmry_formation_state_readmmry_formation_state_refresh_poll_oncesourcemain] IFS=
+++ 1791625607.981278 552289 formation-state.sh:108 [mmry_formation_state_readmmry_formation_state_refresh_poll_oncesourcemain] read -r MMRY_FS_LAST_SEEN
+++ 1791625607.981330 552289 formation-state.sh:109 [mmry_formation_state_readmmry_formation_state_refresh_poll_oncesourcemain] IFS=
+++ 1791625607.981343 552289 formation-state.sh:109 [mmry_formation_state_readmmry_formation_state_refresh_poll_oncesourcemain] read -r MMRY_FS_SHOWN
+++ 1791625607.981360 552289 formation-state.sh:109 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] true
+++ 1791625607.981393 552289 formation-state.sh:113 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] MMRY_FS_SHOWN=
+++ 1791625607.981409 552289 formation-state.sh:114 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] [[ -n 42 ]]
+++ 1791625607.981423 552289 formation-state.sh:115 [mmry_formation_state_read mmry_formation_state_refresh _poll_once source main] return 0
+++ 1791625607.981451 552289 formation-state.sh:148 [mmry_formation_state_refresh _poll_once source main] mmry_formation_state_seen 2026-10-09T23:00:00.000 sess-measure
+++ 1791625607.981485 552289 formation-state.sh:124 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] local iso=2026-10-09T23:00:00.000 fid= seen_line= shown= keep_shown=1
+++ 1791625607.981508 552289 formation-state.sh:125 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] ((  2 >= 3  ))
+++ 1791625607.981529 552289 formation-state.sh:126 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] mmry_formation_state_path sess-measure
+++ 1791625607.981551 552289 formation-state.sh:90 [mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] local sid=sess-measure
+++ 1791625607.981568 552289 formation-state.sh:91 [mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] [[ -z sess-measure ]]
+++ 1791625607.981587 552289 formation-state.sh:94 [mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] sid=sess-measure
+++ 1791625607.981604 552289 formation-state.sh:95 [mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] mmry_formation_safe_sid sess-measure
+++ 1791625607.981623 552289 formation-state.sh:81 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] local sid=sess-measure
+++ 1791625607.981654 552289 formation-state.sh:82 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] [[ -z '' ]]
+++ 1791625607.981670 552289 formation-state.sh:83 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] MMRY_FS_SAFE=sess-measure
+++ 1791625607.981693 552289 formation-state.sh:96 [mmry_formation_state_path mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] MMRY_FS_PATH=/tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure
+++ 1791625607.981714 552289 formation-state.sh:127 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] [[ -f /tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure ]]
+++ 1791625607.981977 552289 formation-state.sh:128 [mmry_formation_state_seenmmry_formation_state_refresh_poll_oncesourcemain] IFS=
+++ 1791625607.981994 552289 formation-state.sh:128 [mmry_formation_state_seenmmry_formation_state_refresh_poll_oncesourcemain] read -r fid
+++ 1791625607.982021 552289 formation-state.sh:128 [mmry_formation_state_seenmmry_formation_state_refresh_poll_oncesourcemain] IFS=
+++ 1791625607.982033 552289 formation-state.sh:128 [mmry_formation_state_seenmmry_formation_state_refresh_poll_oncesourcemain] read -r seen_line
+++ 1791625607.982084 552289 formation-state.sh:129 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] ((  keep_shown  ))
+++ 1791625607.982101 552289 formation-state.sh:129 [mmry_formation_state_seenmmry_formation_state_refresh_poll_oncesourcemain] IFS=
+++ 1791625607.982113 552289 formation-state.sh:129 [mmry_formation_state_seenmmry_formation_state_refresh_poll_oncesourcemain] read -r shown
+++ 1791625607.982129 552289 formation-state.sh:129 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] true
+++ 1791625607.982157 552289 formation-state.sh:130 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] [[ -n 42 ]]
+++ 1791625607.982176 552289 formation-state.sh:131 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] shown=
+++ 1791625607.982193 552289 formation-state.sh:132 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] [[ -n '' ]]
+++ 1791625607.982478 552289 formation-state.sh:135 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] printf '%s\n' 42
+++ 1791625607.982530 552289 formation-state.sh:135 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] printf '%s\n' 2026-10-09T23:00:00.000
+++ 1791625607.982596 552289 formation-state.sh:137 [mmry_formation_state_seen mmry_formation_state_refresh _poll_once source main] return 0
+++ 1791625607.982626 552289 formation-state.sh:149 [mmry_formation_state_refresh _poll_once source main] return 0
+++ 1791625607.982649 552289 formation-check.sh:584 [_poll_once source main] _fc_limit_request
+++ 1791625607.982671 552289 formation-check.sh:409 [_fc_limit_request _poll_once source main] ((  _fc_budget == 0  ))
+++ 1791625607.982692 552289 formation-check.sh:410 [_fc_limit_request _poll_once source main] local left=9
+++ 1791625607.982708 552289 formation-check.sh:411 [_fc_limit_request _poll_once source main] ((  left >= 1  ))
+++ 1791625607.982724 552289 formation-check.sh:412 [_fc_limit_request _poll_once source main] MMRY_HTTP_MAX_TIME=6
+++ 1791625607.982748 552289 formation-check.sh:413 [_fc_limit_request _poll_once source main] ((  left < MMRY_HTTP_MAX_TIME  ))
+++ 1791625607.982762 552289 formation-check.sh:414 [_fc_limit_request _poll_once source main] MMRY_HTTP_CONNECT_TIMEOUT=3
+++ 1791625607.982777 552289 formation-check.sh:415 [_fc_limit_request _poll_once source main] ((  MMRY_HTTP_CONNECT_TIMEOUT > MMRY_HTTP_MAX_TIME  ))
+++ 1791625607.982791 552289 formation-check.sh:416 [_fc_limit_request _poll_once source main] return 0
+++ 1791625607.982820 552289 formation-check.sh:586 [_poll_once source main] mmry_get_formation_transmissions 42 sess-measure 2026-10-09T23:00:00.000 ''
+++ 1791625607.982890 552289 mmry-client.sh:1202 [mmry_get_formation_transmissions _poll_once source main] local formation_id=42 session_id=sess-measure since=2026-10-09T23:00:00.000 shown=
+++ 1791625607.982920 552289 mmry-client.sh:1203 [mmry_get_formation_transmissions _poll_once source main] _mmry_urlencode_v sess-measure
+++ 1791625607.982944 552289 mmry-client.sh:71 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] local s=sess-measure
+++ 1791625607.982965 552289 mmry-client.sh:72 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.982982 552289 mmry-client.sh:73 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.982999 552289 mmry-client.sh:74 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983015 552289 mmry-client.sh:75 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983031 552289 mmry-client.sh:76 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983047 552289 mmry-client.sh:77 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983062 552289 mmry-client.sh:78 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983077 552289 mmry-client.sh:79 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983092 552289 mmry-client.sh:80 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983107 552289 mmry-client.sh:81 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=sess-measure
+++ 1791625607.983123 552289 mmry-client.sh:82 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] [[ sess-measure == *\
+ ]]
+++ 1791625607.983139 552289 mmry-client.sh:83 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] _MMRY_URLENC=sess-measure
+++ 1791625607.983168 552289 mmry-client.sh:1203 [mmry_get_formation_transmissions _poll_once source main] local 'path=/api/formations/42/transmissions?sessionId=sess-measure'
+++ 1791625607.983184 552289 mmry-client.sh:1204 [mmry_get_formation_transmissions _poll_once source main] [[ -n 2026-10-09T23:00:00.000 ]]
+++ 1791625607.983201 552289 mmry-client.sh:1205 [mmry_get_formation_transmissions _poll_once source main] _mmry_urlencode_v 2026-10-09T23:00:00.000
+++ 1791625607.983222 552289 mmry-client.sh:71 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] local s=2026-10-09T23:00:00.000
+++ 1791625607.983240 552289 mmry-client.sh:72 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23:00:00.000
+++ 1791625607.983258 552289 mmry-client.sh:73 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23:00:00.000
+++ 1791625607.983276 552289 mmry-client.sh:74 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983292 552289 mmry-client.sh:75 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983307 552289 mmry-client.sh:76 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983322 552289 mmry-client.sh:77 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983350 552289 mmry-client.sh:78 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983369 552289 mmry-client.sh:79 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983384 552289 mmry-client.sh:80 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983398 552289 mmry-client.sh:81 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] s=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983413 552289 mmry-client.sh:82 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] [[ 2026-10-09T23%3A00%3A00.000 == *\
+ ]]
+++ 1791625607.983429 552289 mmry-client.sh:83 [_mmry_urlencode_v mmry_get_formation_transmissions _poll_once source main] _MMRY_URLENC=2026-10-09T23%3A00%3A00.000
+++ 1791625607.983452 552289 mmry-client.sh:1206 [mmry_get_formation_transmissions _poll_once source main] path='/api/formations/42/transmissions?sessionId=sess-measure&since=2026-10-09T23%3A00%3A00.000'
+++ 1791625607.983470 552289 mmry-client.sh:1208 [mmry_get_formation_transmissions _poll_once source main] shown=
+++ 1791625607.983486 552289 mmry-client.sh:1209 [mmry_get_formation_transmissions _poll_once source main] [[ -n '' ]]
+++ 1791625607.983502 552289 mmry-client.sh:1212 [mmry_get_formation_transmissions _poll_once source main] _mmry_request GET '/api/formations/42/transmissions?sessionId=sess-measure&since=2026-10-09T23%3A00%3A00.000'
+++ 1791625607.983535 552289 mmry-client.sh:773 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local method=GET
+++ 1791625607.983554 552289 mmry-client.sh:774 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local 'path=/api/formations/42/transmissions?sessionId=sess-measure&since=2026-10-09T23%3A00%3A00.000'
+++ 1791625607.983571 552289 mmry-client.sh:775 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local body=
+++ 1791625607.983586 552289 mmry-client.sh:779 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local auth_header
+++ 1791625607.983602 552289 mmry-client.sh:780 [_mmry_request mmry_get_formation_transmissions _poll_once source main] _mmry_auth_header_v
+++ 1791625607.983619 552289 mmry-client.sh:747 [_mmry_auth_header_v _mmry_request mmry_get_formation_transmissions _poll_once source main] _MMRY_AUTH_HEADER=
+++ 1791625607.983638 552289 mmry-client.sh:748 [_mmry_auth_header_v _mmry_request mmry_get_formation_transmissions _poll_once source main] [[ apikey == \a\p\i\k\e\y ]]
+++ 1791625607.983653 552289 mmry-client.sh:748 [_mmry_auth_header_v _mmry_request mmry_get_formation_transmissions _poll_once source main] [[ -n k_measure ]]
+++ 1791625607.983670 552289 mmry-client.sh:749 [_mmry_auth_header_v _mmry_request mmry_get_formation_transmissions _poll_once source main] _MMRY_AUTH_HEADER='X-Api-Key: k_measure'
+++ 1791625607.983684 552289 mmry-client.sh:750 [_mmry_auth_header_v _mmry_request mmry_get_formation_transmissions _poll_once source main] return 0
+++ 1791625607.983703 552289 mmry-client.sh:785 [_mmry_request mmry_get_formation_transmissions _poll_once source main] auth_header='X-Api-Key: k_measure'
+++ 1791625607.983727 552289 mmry-client.sh:792 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local connect_timeout=3 max_time=6
+++ 1791625607.983746 552289 mmry-client.sh:793 [_mmry_request mmry_get_formation_transmissions _poll_once source main] [[ 3 =~ ^[1-9][0-9]*$ ]]
+++ 1791625607.983774 552289 mmry-client.sh:794 [_mmry_request mmry_get_formation_transmissions _poll_once source main] [[ 6 =~ ^[1-9][0-9]*$ ]]
+++ 1791625607.983792 552289 mmry-client.sh:796 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local tmp_resp
++++ 1791625607.998339 552346 mmry-client.sh:797 [_mmry_request mmry_get_formation_transmissions _poll_once source main] mktemp /tmp/31976-run-M4vv/tmp/mmry-resp-XXXXXX
+++ 1791625608.019172 552289 mmry-client.sh:797 [_mmry_request mmry_get_formation_transmissions _poll_once source main] tmp_resp=/tmp/31976-run-M4vv/tmp/mmry-resp-HtDz9P
+++ 1791625608.019251 552289 mmry-client.sh:803 [_mmry_request mmry_get_formation_transmissions _poll_once source main] curl_args=('-s' '-o' '/tmp/31976-run-M4vv/tmp/mmry-resp-HtDz9P' '-w' '%{http_code}' '--connect-timeout' '3' '--max-time' '6' '-X' 'GET' '-H' 'X-Api-Key: k_measure' '-H' 'Content-Type: application/json; charset=utf-8')
+++ 1791625608.019289 552289 mmry-client.sh:803 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local curl_args
+++ 1791625608.019309 552289 mmry-client.sh:805 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local tmp_body=
+++ 1791625608.019325 552289 mmry-client.sh:806 [_mmry_request mmry_get_formation_transmissions _poll_once source main] [[ -n '' ]]
+++ 1791625608.019342 552289 mmry-client.sh:812 [_mmry_request mmry_get_formation_transmissions _poll_once source main] local http_code
++++ 1791625608.036432 552354 mmry-client.sh:813 [_mmry_request mmry_get_formation_transmissions _poll_once source main] curl -s -o /tmp/31976-run-M4vv/tmp/mmry-resp-HtDz9P -w '%{http_code}' --connect-timeout 3 --max-time 6 -X GET -H 'X-Api-Key: k_measure' -H 'Content-Type: application/json; charset=utf-8' 'http://127.0.0.1:52673/api/formations/42/transmissions?sessionId=sess-measure&since=2026-10-09T23%3A00%3A00.000'
+++ 1791625608.073563 552289 mmry-client.sh:813 [_mmry_request mmry_get_formation_transmissions _poll_once source main] http_code=200
+++ 1791625608.073616 552289 mmry-client.sh:823 [_mmry_request mmry_get_formation_transmissions _poll_once source main] MMRY_RESPONSE=
+++ 1791625608.073644 552289 mmry-client.sh:824 [_mmry_request mmry_get_formation_transmissions _poll_once source main] [[ -f /tmp/31976-run-M4vv/tmp/mmry-resp-HtDz9P ]]
+++ 1791625608.074435 552289 mmry-client.sh:825 [_mmry_requestmmry_get_formation_transmissions_poll_oncesourcemain] IFS=
+++ 1791625608.074462 552289 mmry-client.sh:825 [_mmry_requestmmry_get_formation_transmissions_poll_oncesourcemain] read -r -d '' MMRY_RESPONSE
+++ 1791625608.074804 552289 mmry-client.sh:825 [_mmry_request mmry_get_formation_transmissions _poll_once source main] true
+++ 1791625608.074830 552289 mmry-client.sh:827 [_mmry_request mmry_get_formation_transmissions _poll_once source main] [[ [{"transmissionID":9001,"senderRole":"lead","senderSessionID":"lead-1","senderUserID":1,"content":"MEASURE-MSG","sentDate":"2026-10-10T01:00:00"}] == *\
+ ]]
+++ 1791625608.074852 552289 mmry-client.sh:828 [_mmry_request mmry_get_formation_transmissions _poll_once source main] rm -f /tmp/31976-run-M4vv/tmp/mmry-resp-HtDz9P ''
+++ 1791625608.112843 552289 mmry-client.sh:829 [_mmry_request mmry_get_formation_transmissions _poll_once source main] MMRY_HTTP_CODE=200
+++ 1791625608.112886 552289 mmry-client.sh:832 [_mmry_request mmry_get_formation_transmissions _poll_once source main] [[ 200 =~ ^2[0-9][0-9]$ ]]
+++ 1791625608.112916 552289 mmry-client.sh:833 [_mmry_request mmry_get_formation_transmissions _poll_once source main] return 0
+++ 1791625608.112976 552289 formation-check.sh:589 [_poll_once source main] [[ 200 =~ ^2[0-9][0-9]$ ]]
+++ 1791625608.112996 552289 formation-check.sh:596 [_poll_once source main] [[ -n '' ]]
+++ 1791625608.113016 552289 formation-check.sh:600 [_poll_once source main] [[ -n [{"transmissionID":9001,"senderRole":"lead","senderSessionID":"lead-1","senderUserID":1,"content":"MEASURE-MSG","sentDate":"2026-10-10T01:00:00"}] ]]
+++ 1791625608.113032 552289 formation-check.sh:605 [_poll_once source main] [[ -z jq ]]
+++ 1791625608.113048 552289 formation-check.sh:605 [_poll_once source main] command -v jq
+++ 1791625608.118477 552289 formation-check.sh:635 [_poll_once source main] local count= directed_count= system_count= newest= directed_ids= lines=
+++ 1791625608.133878 552289 formation-check.sh:637 [_poll_oncesourcemain] IFS=
+++ 1791625608.133911 552289 formation-check.sh:637 [_poll_oncesourcemain] read -r -d '' count
++++ 1791625608.133888 552371 formation-check.sh:559 [_poll_once source main] jq -j '
+        def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
+        if type == "array" and length > 0 then
+            [ (length | tostring),
+              ([.[] | select((.recipientMemberID // null) != null)] | length | tostring),
+              ([.[] | select(system)] | length | tostring),
+              (([.[].sentDate // empty] | max) // "" | tostring),
+              ([.[] | select((.recipientMemberID // null) != null) | (.transmissionID // empty)
+                    | select(type == "number") | tostring] | join(",")),
+              ([ .[] | (if system
+                        then "  [MMRY] "
+                        else "  [" + ((.senderRole // "member")) + " " + ((.senderSessionID // "?") | tostring) + "] "
+                        end)
+                       + (if (.recipientMemberID // null) != null then "DIRECTED TO YOU: " else "" end)
+                       + ((.content // .topic // "") | tostring)
+               ] | join("\n"))
+            ] | map(gsub("\u0000"; "") + "\u0000") | .[]
+        else empty end'
+++ 1791625608.182259 552289 formation-check.sh:638 [_poll_oncesourcemain] IFS=
+++ 1791625608.182297 552289 formation-check.sh:638 [_poll_oncesourcemain] read -r -d '' directed_count
+++ 1791625608.182325 552289 formation-check.sh:639 [_poll_oncesourcemain] IFS=
+++ 1791625608.182336 552289 formation-check.sh:639 [_poll_oncesourcemain] read -r -d '' system_count
+++ 1791625608.182357 552289 formation-check.sh:640 [_poll_oncesourcemain] IFS=
+++ 1791625608.182368 552289 formation-check.sh:640 [_poll_oncesourcemain] read -r -d '' newest
+++ 1791625608.182411 552289 formation-check.sh:641 [_poll_oncesourcemain] IFS=
+++ 1791625608.182421 552289 formation-check.sh:641 [_poll_oncesourcemain] read -r -d '' directed_ids
+++ 1791625608.182440 552289 formation-check.sh:642 [_poll_oncesourcemain] IFS=
+++ 1791625608.182451 552289 formation-check.sh:642 [_poll_oncesourcemain] read -r -d '' lines
+++ 1791625608.182524 552289 formation-check.sh:662 [_poll_once source main] [[ 1 =~ ^[0-9]+$ ]]
+++ 1791625608.182547 552289 formation-check.sh:662 [_poll_once source main] [[ 1 -eq 0 ]]
+++ 1791625608.182563 552289 formation-check.sh:667 [_poll_once source main] [[   [lead lead-1] MEASURE-MSG == *\
+ ]]
+++ 1791625608.182578 552289 formation-check.sh:668 [_poll_once source main] [[ -z   [lead lead-1] MEASURE-MSG ]]
+++ 1791625608.182593 552289 formation-check.sh:674 [_poll_once source main] [[ 0 =~ ^[0-9]+$ ]]
+++ 1791625608.182609 552289 formation-check.sh:679 [_poll_once source main] [[ 0 =~ ^[0-9]+$ ]]
+++ 1791625608.182625 552289 formation-check.sh:685 [_poll_once source main] _fc_in_time
+++ 1791625608.182642 552289 formation-check.sh:401 [_fc_in_time _poll_once source main] ((  _fc_budget == 0  ))
+++ 1791625608.182656 552289 formation-check.sh:402 [_fc_in_time _poll_once source main] ((  SECONDS <= _fc_deadline  ))
+++ 1791625608.182676 552289 formation-check.sh:689 [_poll_once source main] local 'nl=
+'
+++ 1791625608.182704 552289 formation-check.sh:690 [_poll_once source main] FORMATION_BLOCK='FORMATION TRANSMISSION (1 new, formation 42)
+
+  [lead lead-1] MEASURE-MSG
+'
+++ 1791625608.182719 552289 formation-check.sh:691 [_poll_once source main] [[ 0 -gt 0 ]]
+++ 1791625608.182732 552289 formation-check.sh:697 [_poll_once source main] [[ 0 -gt 0 ]]
+++ 1791625608.182788 552289 formation-check.sh:702 [_poll_once source main] FORMATION_BLOCK+='
+These are other assistants working the same job right now. Act on anything that
+'
+++ 1791625608.182810 552289 formation-check.sh:703 [_poll_once source main] FORMATION_BLOCK+='affects what you are doing, especially a Blocked or a Heads up naming something you
+'
+++ 1791625608.182830 552289 formation-check.sh:704 [_poll_once source main] FORMATION_BLOCK+='are about to touch. Do not reply to the formation unless you have something worth
+'
+++ 1791625608.182842 552289 formation-check.sh:705 [_poll_once source main] FORMATION_BLOCK+=transmitting.
+++ 1791625608.182856 552289 formation-check.sh:706 [_poll_once source main] FORMATION_NEWEST=2026-10-10T01:00:00
+++ 1791625608.182874 552289 formation-check.sh:707 [_poll_once source main] FORMATION_DIRECTED_IDS=
+++ 1791625608.182887 552289 formation-check.sh:708 [_poll_once source main] return 0
+++ 1791625608.182950 552289 formation-check.sh:891 [] jq -Rs --arg ev UserPromptSubmit --arg pre 'These formation messages were sent while this session was idle and had not yet been shown. They may be stale; check before acting.' '{hookSpecificOutput:{hookEventName:$ev, additionalContext:($pre + "\n\n" + .[:-1])}}'
+++ 1791625608.540698 552289 formation-check.sh:895 [] _mark_shown
+++ 1791625608.540777 552289 formation-check.sh:724 [_mark_shown source main] [[ -n 2026-10-10T01:00:00 ]]
+++ 1791625608.540816 552289 formation-check.sh:733 [_mark_shown source main] local owed=
+++ 1791625608.540850 552289 formation-check.sh:734 [_mark_shown source main] [[ -n '' ]]
+++ 1791625608.540888 552289 formation-check.sh:747 [_mark_shown source main] mmry_formation_state_seen 2026-10-10T01:00:00 sess-measure ''
+++ 1791625608.540946 552289 formation-state.sh:124 [mmry_formation_state_seen _mark_shown source main] local iso=2026-10-10T01:00:00 fid= seen_line= shown= keep_shown=1
+++ 1791625608.540985 552289 formation-state.sh:125 [mmry_formation_state_seen _mark_shown source main] ((  3 >= 3  ))
+++ 1791625608.541013 552289 formation-state.sh:125 [mmry_formation_state_seen _mark_shown source main] keep_shown=0
+++ 1791625608.541043 552289 formation-state.sh:125 [mmry_formation_state_seen _mark_shown source main] shown=
+++ 1791625608.541076 552289 formation-state.sh:126 [mmry_formation_state_seen _mark_shown source main] mmry_formation_state_path sess-measure
+++ 1791625608.541117 552289 formation-state.sh:90 [mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] local sid=sess-measure
+++ 1791625608.541149 552289 formation-state.sh:91 [mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] [[ -z sess-measure ]]
+++ 1791625608.541181 552289 formation-state.sh:94 [mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] sid=sess-measure
+++ 1791625608.541213 552289 formation-state.sh:95 [mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] mmry_formation_safe_sid sess-measure
+++ 1791625608.541250 552289 formation-state.sh:81 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] local sid=sess-measure
+++ 1791625608.541307 552289 formation-state.sh:82 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] [[ -z '' ]]
+++ 1791625608.541336 552289 formation-state.sh:83 [mmry_formation_safe_sid mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] MMRY_FS_SAFE=sess-measure
+++ 1791625608.541377 552289 formation-state.sh:96 [mmry_formation_state_path mmry_formation_state_seen _mark_shown source main] MMRY_FS_PATH=/tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure
+++ 1791625608.541413 552289 formation-state.sh:127 [mmry_formation_state_seen _mark_shown source main] [[ -f /tmp/31976-run-M4vv/tmp/.mmry-formation-sess-measure ]]
+++ 1791625608.542089 552289 formation-state.sh:128 [mmry_formation_state_seen_mark_shownsourcemain] IFS=
+++ 1791625608.542121 552289 formation-state.sh:128 [mmry_formation_state_seen_mark_shownsourcemain] read -r fid
+++ 1791625608.542229 552289 formation-state.sh:128 [mmry_formation_state_seen_mark_shownsourcemain] IFS=
+++ 1791625608.542258 552289 formation-state.sh:128 [mmry_formation_state_seen_mark_shownsourcemain] read -r seen_line
+++ 1791625608.542386 552289 formation-state.sh:129 [mmry_formation_state_seen _mark_shown source main] ((  keep_shown  ))
+++ 1791625608.542453 552289 formation-state.sh:130 [mmry_formation_state_seen _mark_shown source main] [[ -n 42 ]]
+++ 1791625608.542489 552289 formation-state.sh:131 [mmry_formation_state_seen _mark_shown source main] shown=
+++ 1791625608.542520 552289 formation-state.sh:132 [mmry_formation_state_seen _mark_shown source main] [[ -n '' ]]
+++ 1791625608.543076 552289 formation-state.sh:135 [mmry_formation_state_seen _mark_shown source main] printf '%s\n' 42
+++ 1791625608.543163 552289 formation-state.sh:135 [mmry_formation_state_seen _mark_shown source main] printf '%s\n' 2026-10-10T01:00:00
+++ 1791625608.543289 552289 formation-state.sh:137 [mmry_formation_state_seen _mark_shown source main] return 0
+++ 1791625608.543344 552289 formation-check.sh:751 [_mark_shown source main] _release_mutex
+++ 1791625608.543378 552289 formation-check.sh:538 [_release_mutex _mark_shown source main] _drop /tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure
+++ 1791625608.543413 552289 formation-check.sh:503 [_drop _release_mutex _mark_shown source main] rm -rf -- /tmp/31976-run-M4vv/tmp/.mmry-formation-cs-sess-measure
+++ 1791625608.571697 552289 formation-check.sh:539 [_release_mutex _mark_shown source main] _held_mutex=
+++ 1791625608.571770 552289 formation-check.sh:896 [] exit 0
++ 1791625608.571871 552289 formation-check.sh:1 [] _release_all
++ 1791625608.571890 552289 formation-check.sh:543 [_release_all source main] [[ -n '' ]]
++ 1791625608.571905 552289 formation-check.sh:544 [_release_all source main] [[ -n '' ]]
++ 1791625608.571920 552289 formation-check.sh:545 [_release_all source main] return 0
