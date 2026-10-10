@@ -320,7 +320,7 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-debrief.sh" "wha
 
 Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
 
-Messages from the formation arrive on their own, marked `FORMATION TRANSMISSION`. A line marked
+Messages from the formation arrive on their own, marked `MMRY AI Formation Transmission`. A line marked
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.
 

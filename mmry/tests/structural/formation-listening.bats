@@ -116,7 +116,7 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     [[ "$output" == *"MMRY FORMATION WATCH RENEWED (formation 4242)"* ]] || { echo "no renewal notice: ${output}"; return 1; }
     [[ "$output" == *"Reply with exactly: Still listening."* ]] || return 1
     # A renewal is not a message, and must never be dressed as one.
-    [[ "$output" != *"FORMATION TRANSMISSION"* ]] || return 1
+    [[ "$output" != *"MMRY AI Formation Transmission"* ]] || return 1
     # It polled first, and asked about membership exactly once, at the end.
     [ "$(_count_polls)" -ge 2 ]
     [ "$(_count_sent)" -eq 1 ]
@@ -153,6 +153,14 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     [ "$status" -eq 2 ]
     [[ "$output" == *"LS-DIRECTED take the validator"* ]] || return 1
     [[ "$output" != *"WATCH RENEWED"* ]] || return 1
+}
+
+@test "banner: a delivered message begins with exactly 'MMRY AI Formation Transmission (1 new, formation N)' (#32001)" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    run env FAKE_BODY='[{"transmissionID":51,"senderRole":"lead","senderSessionID":"other-session","senderUserID":7,"recipientMemberID":null,"content":"LS-BANNER hello","sentDate":"2026-10-07T01:00:00"}]'         FAKE_SENT_BODY="$_member_true"         MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1         bash "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 2 ] || { echo "expected a delivery (exit 2), got ${status}: ${output}"; return 1; }
+    [[ "$output" == "MMRY AI Formation Transmission (1 new, formation 4242)"* ]] || { echo "wrong banner: ${output}"; return 1; }
+    [[ "$output" == *"LS-BANNER hello"* ]] || return 1
 }
 
 @test "stop: leaving the formation mid-watch stops it at once, quietly, without asking to renew" {
