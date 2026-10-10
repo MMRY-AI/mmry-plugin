@@ -146,12 +146,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
 headache, aura"). They are shown by `list-formats.sh` so that **you** recognise, in a later
 conversation, that what the user just said is another example of this type.
 
-**Nothing files a plain save into a type for you.** A save made with `--context` alone, however
-closely its words match a type's hints, is stored as an ordinary memory and never becomes a
-record. A record is created only when the save names the type and carries the fields. So when
-the user tells you something in their own words and it fits one of their types, **you** read the
-values out of their words and save it as a record (see the next section). Run `list-formats.sh`
-whenever what they say looks like a recurring shape, so you know which types they have.
+**When a save becomes a record.** A save becomes a record of a type when it names the type and
+its fields, or when its words contain the type's hint words **and** a labelled value for its
+fields (lines such as `Amount: 25`). Hint words with no labelled value stay an ordinary memory,
+and so does a save that fits two types equally well. Naming the type is the reliable way, so
+when the user tells you something in their own words and it fits one of their types, **you** read
+the values out of their words and save it as a record naming the type (see the next section).
+Run `list-formats.sh` whenever what they say looks like a recurring shape, so you know which
+types they have.
 
 `--mode` decides what makes two records the same one:
 
@@ -185,16 +187,22 @@ So this one writes **one** memory directly, and `--tier`, `--category`, `--scope
 refuse.
 
 **A save that names a type the server cannot use keeps the words.** A type that does not exist, a
-field it does not declare, a value too long for its column — all of them cost the structure and
+field it does not declare, a value too long for its column: all of them cost the structure and
 keep the words. The script prints `RecordedAs:` so you can tell which happened. **Report what
 actually happened**: saying "recorded in your migraine log" when it was stored as ordinary text
 is worse than saying nothing.
 
 **A refused record save saves nothing.** If `--record-fields` is not one valid JSON object, the
-server refuses the whole request (HTTP 400, "Request body is required.") and the script exits 1
-with `Error (HTTP 400): Request body is required.` followed by `Nothing was saved.` There is
-no `NewMemoryID` and no `RecordedAs`; the user's words are NOT stored. Fix the fields and run the
-same save again, and tell the user it did not go through until it has.
+server refuses the whole request and the script exits 1. It prints the server's reason, which
+looks like this:
+
+```
+Error (HTTP 400): {"error":"Request body is required.","detail":null}
+Nothing was saved. Check that --record-fields is one valid JSON object, then run the save again.
+```
+
+There is no `NewMemoryID` and no `RecordedAs`, and the user's words are NOT stored. Fix the
+fields and run the same save again, and tell the user it did not go through until it has.
 
 **As the request itself**, when writing the record *is* what the user asked for. This one
 **refuses** rather than falling back, so a mistyped field name comes back as an error naming the

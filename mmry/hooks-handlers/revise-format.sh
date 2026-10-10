@@ -136,7 +136,7 @@ fi
 if [[ -n "$NAME" || -n "$DESCRIPTION" || -n "$HINTS" ]]; then
     mmry_rename_format "$ID" "$NAME" "$DESCRIPTION" "$HINTS" || fail
     report
-    [[ -n "$HINTS" ]] && echo "Those words now help the assistant choose this type. A save becomes a record only when it names the type and its fields."
+    [[ -n "$HINTS" ]] && echo "Those words now help the assistant choose this type. A save becomes a record when it names the type, or when its words include these and a labelled value for the type's fields, such as \"Amount: 25\"."
     exit 0
 fi
 
