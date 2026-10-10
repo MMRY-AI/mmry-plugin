@@ -81,7 +81,7 @@
             "type": "command", 
             "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'", 
             "asyncRewake": true, 
-            "rewakeSummary": "MMRY formation", 
+            "rewakeSummary": "MMRY AI: Formation Transmission", 
             "timeout": 1800
           }
         ]
