@@ -33,7 +33,8 @@ setup() {
 @test "list-formats: a type with no match hints says so, and says when a save becomes a record" {
     run bash "$HANDLERS/list-formats.sh"
     [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
-    [[ "$output" == *"a save becomes a record when it names this type, or carries these words and a labelled value for its fields"* ]] || return 1
+    [[ "$output" == *"a save becomes a record when it names this type and has values for its fields"* ]] || return 1
+    [[ "$output" != *"or contains these words"* ]] || return 1
     [[ "$output" != *"recognised by"* ]] || return 1
 }
 
@@ -492,7 +493,7 @@ _mmry_no_jq() {
 @test "revise-format: --match-hints says the words help choose the type, never that a save is filed by them (#32002)" {
     run bash "$HANDLERS/revise-format.sh" --id 42 --match-hints "migraine, headache"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"Those words now help the assistant choose this type. A save becomes a record when it names the type, or when its words include these and a labelled value for the type's fields, such as \"Amount: 25\"."* ]] || return 1
+    [[ "$output" == *"Those words now help the assistant choose this type. A save becomes a record when MMRY can tell which type it is, by its name or by these words, and has values for the type's fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."* ]] || return 1
     [[ "$output" != *"recognised"* ]] || return 1
     [[ "$output" != *"from now on"* ]] || return 1
 }
@@ -522,9 +523,10 @@ _mmry_no_jq() {
 }
 
 @test "no plugin message or guidance contradicts when a save becomes a record (#32002)" {
-    # The rule (MemoryFormatRouter): a save becomes a record when it NAMES the type, or when its
-    # words contain the type's hint words AND a labelled value for its fields. Neither "the hints
-    # alone file a save" nor "a plain save never becomes a record" is true.
+    # The rule (MemoryFormatRouter): a save becomes a record when MMRY can tell which type it
+    # belongs to (named, or chosen by hint words) AND has values for that type's fields (supplied,
+    # or labelled lines). Neither "the hints alone file a save" nor "a plain save never becomes a
+    # record" is true.
     local f
     for f in hooks-handlers/revise-format.sh hooks-handlers/list-formats.sh hooks-handlers/create-format.sh \
              hooks-handlers/mmry-client.sh hooks-handlers/save-memory.sh skills/memory-system/SKILL.md; do
@@ -533,5 +535,5 @@ _mmry_no_jq() {
         fi
     done
     # And the SKILL states the rule in both halves.
-    grep -q 'hint words \*\*and\*\* a labelled value' "$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    grep -q "belongs to \*\*and\*\* has values for that type's fields" "$PLUGIN_ROOT/skills/memory-system/SKILL.md"
 }

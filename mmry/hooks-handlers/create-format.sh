@@ -27,9 +27,9 @@
 #                   VOCABULARY: "migraine, headache, aura". list-formats.sh shows them so the
 #                   ASSISTANT recognises a later example of this type in the user's words. The
 #                   server also files a save as a record of the type when its words contain
-#                   them AND carry a labelled value for the type's fields ("Amount: 25"); hint
-#                   words with no labelled value stay an ordinary memory. Naming the type on the
-#                   save is the reliable way to make a record.
+#                   them AND the save has values for the type's fields (supplied, or labelled
+#                   lines such as "Amount: 25"); without values it stays an ordinary memory.
+#                   Naming the type and giving its fields is the reliable way to make a record.
 #   --visibility    "private" for the user alone, "global" for everyone on the account. An
 #                   account-wide type requires the user to be an administrator; if they are not
 #                   it is refused, and a private one is the thing to offer instead.

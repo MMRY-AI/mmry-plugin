@@ -77,6 +77,6 @@ echo "${count} record type(s):"
 echo ""
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] |
     "id \(.rootId) | \(.name) | \(.entries) record(s) | words that help choose it: " +
-    (if (.matchHints // "") == "" then "(none)" else .matchHints end) + " | a save becomes a record when it names this type, or carries these words and a labelled value for its fields"'
+    (if (.matchHints // "") == "" then "(none)" else .matchHints end) + " | a save becomes a record when it names this type" + (if (.matchHints // "") == "" then "" else " or contains these words" end) + " and has values for its fields"'
 echo ""
 echo "Run with --id <id> for the fields a type collects."

@@ -1049,8 +1049,9 @@ mmry_create_format() {
     #
     # MATCH_HINTS are the user's own words for an example of this type. They are shown to the
     # assistant so it recognises a later example. The server also files a save as a record of the
-    # type when its words contain them AND carry a labelled value for the type's fields; hint
-    # words alone leave an ordinary memory. Naming the type on the save is the reliable way.
+    # type when its words contain them AND the save has values for the type's fields (supplied, or
+    # labelled lines); without values it stays an ordinary memory. Naming the type and giving
+    # its fields is the reliable way.
     local name="$1" fields="$2" description="${3:-}" mode="${4:-append}"
     local identity="${5:-}" hints="${6:-}" visibility="${7:-Private}" group_id="${8:-}"
 

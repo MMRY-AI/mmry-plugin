@@ -146,11 +146,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
 headache, aura"). They are shown by `list-formats.sh` so that **you** recognise, in a later
 conversation, that what the user just said is another example of this type.
 
-**When a save becomes a record.** A save becomes a record of a type when it names the type and
-its fields, or when its words contain the type's hint words **and** a labelled value for its
-fields (lines such as `Amount: 25`). Hint words with no labelled value stay an ordinary memory,
-and so does a save that fits two types equally well. Naming the type is the reliable way, so
-when the user tells you something in their own words and it fits one of their types, **you** read
+**When a save becomes a record.** A save becomes a record when MMRY can tell which type it
+belongs to **and** has values for that type's fields. The type is the one the save names, or the
+one whose hint words appear in it as whole words (the type with the most hint words wins, a tie
+chooses none, and a type with no hint words is never chosen this way). The values are the fields
+the save supplies, or labelled lines such as `Amount: 25`. Without both, the save stays an
+ordinary memory: naming a type with no values stays ordinary, and so do hint words with no
+supplied fields and no labelled lines. Naming the type and giving its fields is the reliable
+way, so when the user tells you something in their own words and it fits one of their types, **you** read
 the values out of their words and save it as a record naming the type (see the next section).
 Run `list-formats.sh` whenever what they say looks like a recurring shape, so you know which
 types they have.

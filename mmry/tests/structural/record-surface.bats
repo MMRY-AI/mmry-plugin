@@ -139,15 +139,15 @@ RECORD_HANDLERS=(
 }
 
 @test "SKILL.md states when a save becomes a record (#32002)" {
-    # Integration, 2026-10-10 (#32002): hint words alone leave an ordinary memory; hint words
-    # plus a labelled value for the type's fields file a record. The skill must say both, and
-    # tell the assistant that naming the type is the reliable path.
+    # Integration, 2026-10-10 (#32002): a save becomes a record when MMRY can tell which type it
+    # belongs to AND has values for that type's fields. The skill must say both halves, and tell
+    # the assistant that naming the type and giving its fields is the reliable path.
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     if grep -qi 'later ordinary save. be recognised and recorded\|recorded here without the user asking' "$skill"; then
         fail "SKILL.md still claims match hints alone route a plain save into a record type"
     fi
     grep -q 'When a save becomes a record' "$skill" \
         || fail "SKILL.md does not state when a save becomes a record"
-    grep -q 'Naming the type is the reliable way' "$skill" \
+    grep -q 'Naming the type and giving its fields is the reliable way' "$skill" \
         || fail "SKILL.md does not tell the assistant to name the type"
 }
