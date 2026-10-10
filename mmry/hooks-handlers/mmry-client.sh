@@ -59,20 +59,34 @@ MMRY_PROCESS_MESSAGE=""
 # Default API URL
 _MMRY_DEFAULT_URL="https://mmryai.com"
 
+# URL-encode $1 into _MMRY_URLENC, IN THIS SHELL (#31976). The same ten characters, in the same
+# order, as the sed program this replaced (`printf | sed`, its output taken by command substitution,
+# which also dropped trailing newlines). That was two processes per value, and the per-prompt
+# formation check encodes two values: on a loaded Windows machine 1 to 2 s of its 15 s budget,
+# measured. % goes first, so a %XX written by a later step is never encoded again. Each pattern is
+# escaped rather than quoted so bash 3.2, the macOS bash, reads it the same way; no replacement
+# contains & or \, so bash 5.2's patsub_replacement cannot alter one. unit/urlencode.bats holds this
+# to the sed program, character for character.
+_mmry_urlencode_v() {
+    local s="$1"
+    s=${s//\%/%25}
+    s=${s//\ /%20}
+    s=${s//\:/%3A}
+    s=${s//\\/%5C}
+    s=${s//\#/%23}
+    s=${s//\?/%3F}
+    s=${s//\&/%26}
+    s=${s//\=/%3D}
+    s=${s//\+/%2B}
+    s=${s//\@/%40}
+    while [[ "$s" == *$'\n' ]]; do s="${s%$'\n'}"; done
+    _MMRY_URLENC="$s"
+}
+
+# The printing form, for callers that take the value by command substitution.
 _mmry_urlencode() {
-    # URL-encode a string using sed (cross-platform, no curl trick)
-    local str="$1"
-    printf '%s' "$str" | sed \
-        -e 's|%|%25|g' \
-        -e 's| |%20|g' \
-        -e 's|:|%3A|g' \
-        -e 's|\\|%5C|g' \
-        -e 's|#|%23|g' \
-        -e 's|?|%3F|g' \
-        -e 's|&|%26|g' \
-        -e 's|=|%3D|g' \
-        -e 's|+|%2B|g' \
-        -e 's|@|%40|g'
+    _mmry_urlencode_v "$1"
+    printf '%s' "$_MMRY_URLENC"
 }
 
 # THE OTHER PRODUCT'S CREDENTIAL IS NEVER A FALLBACK ON CODEX (#31245 TC6).
@@ -726,9 +740,21 @@ _mmry_setup_ref() {
     printf '/mmry:setup'
 }
 
-_mmry_get_auth_header() {
+# The header into _MMRY_AUTH_HEADER, in this shell, or return 1 (#31976). _mmry_request used to take
+# the header by command substitution, a process before every request, and the per-prompt formation
+# check makes one request before every prompt.
+_mmry_auth_header_v() {
+    _MMRY_AUTH_HEADER=""
     if [[ "$MMRY_AUTH_METHOD" == "apikey" && -n "$MMRY_API_KEY" ]]; then
-        echo "X-Api-Key: ${MMRY_API_KEY}"
+        _MMRY_AUTH_HEADER="X-Api-Key: ${MMRY_API_KEY}"
+        return 0
+    fi
+    return 1
+}
+
+_mmry_get_auth_header() {
+    if _mmry_auth_header_v; then
+        echo "$_MMRY_AUTH_HEADER"
         return 0
     fi
 
@@ -748,12 +774,15 @@ _mmry_request() {
     local path="$2"
     local body="${3:-}"
 
+    # In this shell (#31976). The failure answer is the one this function always gave: the message
+    # _mmry_get_auth_header set was made inside a command substitution and never reached here.
     local auth_header
-    auth_header="$(_mmry_get_auth_header)" || {
+    _mmry_auth_header_v || {
         MMRY_HTTP_CODE="000"
         MMRY_RESPONSE="Authentication failed"
         return 1
     }
+    auth_header="$_MMRY_AUTH_HEADER"
 
     # A CALLER MAY ASK FOR LESS TIME (#31746). 10 s to connect and 25 s in all is right for a command
     # the person ran and is waiting on. It is wrong inside a hook with a 10 or 15 second budget:
@@ -788,7 +817,14 @@ _mmry_request() {
         return 1
     }
 
-    MMRY_RESPONSE="$(cat "$tmp_resp")"
+    # Read with the read builtin rather than $(cat), which was two processes (#31976). It keeps what
+    # $(cat) kept, trailing newlines dropped; a response with no body, which curl may leave as no
+    # file at all, reads as empty.
+    MMRY_RESPONSE=""
+    if [[ -f "$tmp_resp" ]]; then
+        IFS= read -r -d '' MMRY_RESPONSE < "$tmp_resp" || true
+    fi
+    while [[ "$MMRY_RESPONSE" == *$'\n' ]]; do MMRY_RESPONSE="${MMRY_RESPONSE%$'\n'}"; done
     rm -f "$tmp_resp" "$tmp_body"
     MMRY_HTTP_CODE="$http_code"
 
@@ -1161,10 +1197,13 @@ mmry_get_formation_transmissions() {
     # session id is not ours to assume the shape of, and "since" is an ISO timestamp whose colons
     # are reserved characters in a query string: an unencoded value is a request the server is
     # entitled to read differently from the one we meant to send (#31196 QA round 2).
+    # Encoded with the variable form, which starts no process: this runs before every prompt (#31976).
     local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}"
-    local path="/api/formations/${formation_id}/transmissions?sessionId=$(_mmry_urlencode "$session_id")"
+    _mmry_urlencode_v "$session_id"
+    local path="/api/formations/${formation_id}/transmissions?sessionId=${_MMRY_URLENC}"
     if [[ -n "$since" ]]; then
-        path="${path}&since=$(_mmry_urlencode "$since")"
+        _mmry_urlencode_v "$since"
+        path="${path}&since=${_MMRY_URLENC}"
     fi
     shown="${shown//[!0-9,]/}"
     if [[ -n "${shown//,/}" ]]; then
@@ -1181,7 +1220,8 @@ mmry_get_formation_sent() {
     # this session in this formation ("member"), which is what the idle watch asks before it renews
     # itself: a member keeps listening for as long as it is in the formation, and no longer.
     local formation_id="$1" session_id="$2"
-    _mmry_request GET "/api/formations/${formation_id}/transmissions/sent?sessionId=$(_mmry_urlencode "$session_id")"
+    _mmry_urlencode_v "$session_id"
+    _mmry_request GET "/api/formations/${formation_id}/transmissions/sent?sessionId=${_MMRY_URLENC}"
 }
 
 

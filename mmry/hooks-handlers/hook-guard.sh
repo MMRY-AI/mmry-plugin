@@ -53,6 +53,24 @@ else
 fi
 
 if [[ -f "$TARGET" ]]; then
+    # THE FORMATION CHECK RUNS IN THIS SHELL, NOT A NEW ONE (#31976). It is the one handler a person
+    # waits on before every prompt, and on a loaded Windows machine starting a second bash cost 0.3
+    # to 1 s of its 15 s budget, measured. Sourcing it is the same program in the same environment:
+    # this shell already runs with set -euo pipefail, it has the same stdin, an `exit` in the handler
+    # ends this shell with the handler's code exactly as `exec` did, and the handler takes its own
+    # directory from BASH_SOURCE, which names the handler when it is sourced. `set --` clears this
+    # script's "formation-check" argument so the handler sees none, as before.
+    #
+    # Only when the handler sits beside this guard, which is every install: then the lib-host.sh
+    # already loaded here is the handler's own, and its load guard makes the handler's source of it
+    # free. A handler anywhere else is run as it always was, so it never runs on another copy's
+    # library. Every other handler is run as it always was too.
+    if [[ "$SCRIPT_NAME" == "formation-check" && "${TARGET%/*}" == "$_mmry_guard_dir" ]]; then
+        set --
+        # shellcheck source=/dev/null
+        source "$TARGET"
+        exit 0
+    fi
     exec bash "$TARGET"
 fi
 
