@@ -324,6 +324,16 @@ Messages from the formation arrive on their own, marked `FORMATION TRANSMISSION`
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.
 
+Joining prints two standing rules, and every assignment repeats them. Follow them for as long as
+this session is in the formation; they are the same on every platform:
+
+> Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running.
+>
+> When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
+
+Send the report with `formation-say.sh "<message>" <leadMemberId>`; the roster shows which member
+is the lead.
+
 ## Setting up
 
 If memories are not loading, the account may not be authenticated on this machine:

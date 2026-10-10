@@ -701,8 +701,13 @@ _poll_once() {
     fi
     FORMATION_BLOCK+="${nl}These are other assistants working the same job right now. Act on anything that${nl}"
     FORMATION_BLOCK+="affects what you are doing, especially a Blocked or a Heads up naming something you${nl}"
-    FORMATION_BLOCK+="are about to touch. Do not reply to the formation unless you have something worth${nl}"
-    FORMATION_BLOCK+="transmitting."
+    # #31744: a report to the lead is never chatter. The last sentence used to read "Do not reply
+    # to the formation unless you have something worth transmitting", which a member reasonably read
+    # as "stay quiet", and so held finished work back. It still ends with "transmitting." because
+    # the prompt path below relies on the block ending without a newline.
+    FORMATION_BLOCK+="are about to touch. A report to the lead is always worth sending: tell the lead when${nl}"
+    FORMATION_BLOCK+="you finish, are blocked, are waiting, or stop with work still running. Beyond that,${nl}"
+    FORMATION_BLOCK+="reply to the formation only when you have something worth transmitting."
     FORMATION_NEWEST="$newest"
     FORMATION_DIRECTED_IDS="${directed_ids//[!0-9,]/}"
     return 0
