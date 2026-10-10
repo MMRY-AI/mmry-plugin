@@ -107,14 +107,24 @@ If that prints an error rather than a version, install Git for Windows from
 
 ### What MMRY's commands need from Codex
 
-When your assistant saves, searches or joins a coordination group, it runs one of MMRY's scripts.
-Those scripts reach mmryai.com over the network and write in the `mmry` folder of your Codex home,
-which is outside your project. Codex's default sandbox allows neither (seen in the desktop app on
-macOS, 2026-10-04). MMRY's hooks are not affected, because Codex runs those itself.
+**Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
+search, reinforce, link, retire and reload memories, and join, message, report progress in, see the
+roster of and leave a coordination group. Codex starts them itself, outside the sandbox that keeps
+your assistant's own commands off the internet, so they reach mmryai.com without asking you for
+Internet access, in every conversation.
 
-**What happens:** the first time an MMRY command is blocked in a conversation, your assistant asks
+One of them asks once: **retiring a memory**, because it takes a memory out of recall. Codex offers
+to always allow it; choose that and you are not asked again.
+
+**Everything else is a script.** Changing who can see a memory, structured records, the other
+formation operations, setup and feedback still run as one of MMRY's scripts. Those reach mmryai.com
+over the network and write in the `mmry` folder of your Codex home, which is outside your project,
+and Codex's default sandbox allows neither (seen in the desktop app on macOS, 2026-10-04). MMRY's
+hooks are not affected, because Codex runs those itself.
+
+**What happens then:** the first time a script is blocked in a conversation, your assistant asks
 Codex for network access and write access to that folder, and Codex asks you to approve it. Approve
-it for the conversation, and every MMRY command after it works. A new conversation asks again.
+it for the conversation, and every MMRY script after it works. A new conversation asks again.
 
 **If you would rather not be asked,** you can allow it permanently in `config.toml` in your Codex
 home. This widens the sandbox for everything the assistant runs, not only MMRY:
@@ -268,7 +278,7 @@ separate credentials and separate directories on purpose.
 | Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |
-| Saving, searching or joining a group fails with "HTTP 000" or a permission error | Codex's sandbox is blocking network access or writes to the MMRY folder. Approve your assistant's request for access for the conversation, or see [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex) to allow it permanently. |
+| Saving, searching or joining a group fails with "HTTP 000" or a permission error | Your assistant ran one of MMRY's scripts instead of MMRY's own tools, and Codex's sandbox blocked it. Ask it to use MMRY's tools. If it says they are not available, start a new session; if they are still missing, see [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex). |
 | Setup says "Failed to translate" or `execvpe(/bin/bash) failed` | You ran it in PowerShell and it picked the Linux subsystem's bash. Use the Git Bash window, or the explicit PowerShell form above. |
 | Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |

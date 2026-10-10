@@ -8,8 +8,12 @@ description: The MMRY AI persistent memory system for Codex. Memories load autom
 You have a persistent memory store reached over the MMRY AI REST API. It is how context survives
 between sessions.
 
-**All operations are bash scripts.** They live in the MMRY directory inside the customer's Codex
-home, which the SessionStart hook populates at the start of every session.
+**Use MMRY's own tools first.** The everyday operations are tools from the `mmry_plugin` server
+this plugin starts (see "MMRY's tools" below). Codex runs them outside its sandbox, so they reach
+MMRY AI with no Internet access approval. Everything else is a bash script.
+
+**The bash scripts** live in the MMRY directory inside the customer's Codex home, which the
+SessionStart hook populates at the start of every session.
 
 **WRITE THE PATH AS `"${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/<script>"`.** Every command
 below does, and it matters: Codex reads `CODEX_HOME` to find its own configuration, and a customer
@@ -21,6 +25,35 @@ The examples below spell it out in full for that reason. `~/.codex/mmry/...` is 
 default install, and is fine to SAY to a customer, but do not RUN it: on a relocated home it names
 a directory that does not exist, and the failure is a confusing "No such file or directory" rather
 than anything that names the real problem.
+
+## MMRY's tools: no Internet access approval needed
+
+| Tool | Does | Instead of |
+|---|---|---|
+| `memory_save` | Save a memory; `supersedes` replaces a wrong one | save-memory.sh |
+| `memory_search` | Search by keyword; prints each match's id | search-memories.sh --ids |
+| `memory_reinforce` | Reset a memory's expiry | reinforce-memory.sh |
+| `memory_link` | Link two memories | link-memories.sh |
+| `memory_retire` | Retire (deactivate) a memory | deactivate-memory.sh |
+| `memory_load` | Reload memories now | session-start.sh |
+| `formation_join` | Join a formation, as this conversation | formation-join.sh |
+| `formation_say` | Message the formation, or one member | formation-say.sh |
+| `formation_progress` | Report Accepted, Done, Blocked or Abandoned | formation-progress.sh |
+| `formation_roster` | Members, their ids, and the lead | formation-roster.sh |
+| `formation_leave` | Leave the formation | formation-leave.sh |
+
+When a tool here does the job, use it, not the script: the script needs Internet access the
+customer has to approve in every conversation, and the tool does not. Each tool describes its own
+arguments, runs the script, and returns what the script prints. Codex tells each tool which
+conversation called it, so a formation joined with `formation_join` is this conversation's alone,
+and its messages arrive here exactly as they do after the script.
+
+`memory_retire` is the one tool Codex asks about, because it takes a memory out of recall. Tell the
+customer they can choose to always allow it, and they will not be asked again.
+
+Use the bash scripts below for everything without a tool (visibility, groups, records, the other
+formation operations, setup, feedback), and if the tools are not offered at all, which happens
+only when the server could not start.
 
 ## What happens without you doing anything
 
@@ -60,6 +93,9 @@ Why it is shaped like that, so you do not "simplify" it:
 On macOS and Linux, run the commands as written.
 
 ## If an MMRY command cannot reach MMRY AI: ask for access, once per conversation
+
+This is about the bash scripts only. MMRY's tools above never need it, so if the operation has a
+tool, use the tool instead of asking.
 
 In the Codex desktop app's default sandbox, a command you run has no network access and cannot
 write under the Codex home, so MMRY's scripts fail there. The hooks are not affected; only what you
@@ -290,6 +326,10 @@ Deactivate; never delete. The historical record is the point.
 >
 > The tools are fine for reading. `mmry_formation_list` and `mmry_formation_status` answer
 > questions without changing anything. It is joining and leaving that must go through the commands.
+>
+> This plugin's own `formation_join` and `formation_leave` tools (server `mmry_plugin`) are NOT
+> those connector tools. They run the commands below for this conversation, under the identity the
+> hooks use, and they are the way to join and leave.
 
 
 A formation carries messages between assistant sessions that cannot otherwise see each other, so
