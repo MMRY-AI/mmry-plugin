@@ -37,6 +37,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | `revise-format.sh` | Add a field to a type, rename it, retire it |
 | `save-record.sh` | Record something against a type, or update a record |
 | `query-records.sh` | Read records, filtered on their FIELDS |
+| `record-history.sh` | What a record used to hold, oldest change first |
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
@@ -62,7 +63,7 @@ mmry_get_active_sessions
 echo "$MMRY_RESPONSE"
 ```
 
-Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for structured records `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`.
+Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for structured records `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`, `mmry_get_record_history`.
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
@@ -94,6 +95,7 @@ All operations go through the MMRY AI REST API:
 | POST | `/api/data-formats/{id}/reinstate` | Offer it again |
 | POST | `/api/data-formats/{id}/entries` | Record something against it |
 | GET | `/api/data-formats/{id}/entries` | Read its records, filtered on their fields |
+| GET | `/api/data-formats/{id}/entries/{entryId}/history` | What a record used to hold |
 
 ## Structured Records
 
@@ -140,9 +142,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
   --match-hints "migraine, headache, aura"
 ```
 
-`--match-hints` is the important one and it is easy to skip. It is what lets a **later ordinary
-save** be recognised and recorded here without the user asking for it. Use the words they would
-actually write. Leave it out and the type must always be named explicitly.
+`--match-hints` are the words the user would actually write about one of these ("migraine,
+headache, aura"). They are shown by `list-formats.sh` so that **you** recognise, in a later
+conversation, that what the user just said is another example of this type.
+
+**Nothing files a plain save into a type for you.** A save made with `--context` alone, however
+closely its words match a type's hints, is stored as an ordinary memory and never becomes a
+record. A record is created only when the save names the type and carries the fields. So when
+the user tells you something in their own words and it fits one of their types, **you** read the
+values out of their words and save it as a record (see the next section). Run `list-formats.sh`
+whenever what they say looks like a recurring shape, so you know which types they have.
 
 `--mode` decides what makes two records the same one:
 
@@ -252,12 +261,53 @@ field sorts numerically, so 7 comes before 10; a `date` field sorts chronologica
 never recorded the field sorts last in both directions. Ordering by a `list` field, or by a key
 the type does not declare, comes back as an error naming the key rather than being ignored.
 
+### Correcting a record
+
+A record written anywhere, here, through the connector, in the account area or over the REST
+API, is corrected from here the same way: find its id with `query-records.sh`, then send only what
+changes with `save-record.sh --record-id`. The words can be corrected too, with `--content`.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 --filter title="Rewire the settings page"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-record.sh" --format-id 42 --record-id 9137 \
+  --content "Rewire the settings page. Done." --fields '{"status":"done"}'
+```
+
+The outcome must read `structured.updated`. Anything else, report what it says.
+
+### What a record used to hold
+
+Every change to a record is recorded as it happens, including the values it was first created
+with. Reach for this **before** telling the user a value has "always" been anything, and whenever
+they ask how something got to where it is: when a task moved to done, what a dose was before it
+was raised, whether they have already corrected this once.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/record-history.sh" --format-id 42 --record-id 9137
+```
+
+Changes come back **oldest first**, each naming the field, what it was, what it became, when, and
+who changed it. EIGHT names in the list are not fields but reserved keys, and each one arrives
+with a plain-English label you should use when you tell the customer what happened, rather than
+reading them the raw sentinel: the memory's own words, its topic, who can see it, its category,
+how long it lasts, its record name, the retired record it replaces, and the moment it was retired.
+The first two the customer can correct directly; the other six record things that happened to the
+record. `~content~` is the memory's own words and
+`~topic~` is its topic, both of which the user can also correct.
+
+**A record on another account and a record that does not exist answer identically.** Do not report
+"it exists but you cannot see it" on a not-found: you do not know that, and saying it would be the
+disclosure the sameness exists to prevent.
+
 ### One account, every surface
 
 The same record types and the same records are reached from the MMRY connector (ChatGPT, Cursor,
-Claude Desktop, Codex) through the `mmry_format_*` and `mmry_record` tools, and over the REST API.
-A type defined here is visible there, and a record written there is readable here. Say so if the
-user asks: this is one account, not one client's private feature.
+Claude Desktop, Codex) through the `mmry_format_*`, `mmry_record` and `mmry_record_history` tools,
+and over the REST API. **A customer can also correct a record themselves**, without asking anyone,
+at `mmryai.com/records` in their account area. A type defined here is visible there, a record
+written there is readable here, and a correction made in any of them is immediately true in all of
+them - there is one record and one update path, not a copy per client. Say so if the user asks:
+this is one account, not one client's private feature.
 
 ## Mid-Session Loading
 

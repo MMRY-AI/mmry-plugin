@@ -1047,8 +1047,9 @@ mmry_create_format() {
     #   [{"key":"severity","label":"Severity","type":"number"},
     #    {"key":"triggers","label":"Triggers","type":"list","of":"text"}]
     #
-    # MATCH_HINTS is what lets a LATER ORDINARY SAVE be recognised and recorded here without the
-    # user asking for it. Leave it empty and the type must always be named explicitly.
+    # MATCH_HINTS are the user's own words for an example of this type. They are shown to the
+    # assistant so it recognises a later example; the server does not route a plain save into a
+    # type by them (#31827). A record is made only when the save names the type and its fields.
     local name="$1" fields="$2" description="${3:-}" mode="${4:-append}"
     local identity="${5:-}" hints="${6:-}" visibility="${7:-Private}" group_id="${8:-}"
 
@@ -1150,6 +1151,23 @@ mmry_get_records() {
     [[ -n "$query" ]] && path+="?${query}" || true
 
     _mmry_request GET "$path"
+}
+
+mmry_get_record_history() {
+    # Usage: mmry_get_record_history FORMAT_ID RECORD_ID
+    #
+    # What a record USED TO hold, and when each value changed (#31384, ported by #31827). Changes
+    # come back oldest first, each naming the field, what it was, what it became and who changed
+    # it, and the first ones are the values the record was created with.
+    #
+    # EIGHT NAMES IN THE LIST ARE NOT FIELDS but reserved keys, each carrying a plain-English
+    # label: the memory's own words, its topic, who can see it, its category, how long it lasts,
+    # its record name, the retired record it replaces, and the moment it was retired. The first
+    # two the customer can correct directly ('~content~' is the memory's own words and '~topic~'
+    # is its topic).
+    #
+    # A record on another account and a record that does not exist answer identically.
+    _mmry_request GET "/api/data-formats/$1/entries/$2/history"
 }
 
 mmry_get_memories() {

@@ -24,9 +24,10 @@
 #                   --identity-field names the field whose value names a record. "singleton" when
 #                   there is only ever one ("my spouse", "this laptop").
 #   --match-hints   the words that mean a save belongs here, comma separated, IN THE USER'S OWN
-#                   VOCABULARY: "migraine, headache, aura". This is what lets a later ORDINARY
-#                   save be recognised and recorded here without the user asking. Leave it out
-#                   and the type must always be named explicitly.
+#                   VOCABULARY: "migraine, headache, aura". list-formats.sh shows them so the
+#                   ASSISTANT recognises a later example of this type in the user's words. The
+#                   server does not route a plain save into a type by them (#31827): a record
+#                   is made only when the save names the type and carries its fields.
 #   --visibility    "private" for the user alone, "global" for everyone on the account. An
 #                   account-wide type requires the user to be an administrator; if they are not
 #                   it is refused, and a private one is the thing to offer instead.

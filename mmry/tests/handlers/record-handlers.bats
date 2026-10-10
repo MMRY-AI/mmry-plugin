@@ -367,3 +367,110 @@ _mmry_no_jq() {
     [[ "$output" != *"Totally A Format"* ]]
     [[ "$output" == *"RecordedAs: (none"* ]]
 }
+
+# --- record-history (#31384, ported by #31827) --------------------------------
+
+@test "record-history: requires --format-id and --record-id" {
+    run bash "$HANDLERS/record-history.sh" --format-id 42
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"--format-id and --record-id are both required"* ]]
+    [[ ! -s "$LOG" ]] || ! grep -q "history" "$LOG"
+}
+
+@test "record-history: reads the history route for that record" {
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+    [[ "$status" -eq 0 ]]
+    grep -q "GET http://localhost:5291/api/data-formats/42/entries/9137/history" "$LOG"
+}
+
+@test "record-history: prints the trail oldest first, old beside new, creation values included" {
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"was: -  now: open"* ]]
+    [[ "$output" == *"was: open  now: in progress"* ]]
+    local first second
+    first="$(printf '%s\n' "$output" | grep -n 'now: open' | head -1 | cut -d: -f1)"
+    second="$(printf '%s\n' "$output" | grep -n 'now: in progress' | head -1 | cut -d: -f1)"
+    [[ -n "$first" && -n "$second" && "$first" -lt "$second" ]]
+}
+
+@test "record-history: a reserved key is shown by its plain-English label, not its sentinel" {
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+    [[ "$output" == *"The memory itself"* ]]
+    [[ "$output" != *"~content~"* ]]
+}
+
+@test "record-history: names who changed it when the server says" {
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+    [[ "$output" == *"by Probe User"* ]]
+}
+
+@test "record-history: a record with no changes says so instead of printing nothing" {
+    export MOCK_CURL_HTTP_CODE=200
+    export MOCK_CURL_RESPONSE='{"entryId":9137,"changes":0,"history":[]}'
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"Nothing has changed since this record was written."* ]]
+}
+
+@test "record-history: a not-found is an error carrying the 404, with no claim it exists" {
+    export MOCK_CURL_HTTP_CODE=404
+    export MOCK_CURL_RESPONSE='{"error":"Not found"}'
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 2000000000
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"404"* ]]
+    [[ "$output" != *"cannot see"* ]]
+}
+
+@test "record-history: an id that is not a whole number is refused before any request" {
+    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id "../../memories"
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"positive whole number"* ]]
+    ! grep -q "data-formats" "$LOG" 2>/dev/null
+}
+
+# --- correcting a record made elsewhere (#31827 requirement 2) ----------------
+
+@test "save-record: --record-id sends the id so the record is UPDATED, and reports the update" {
+    export MOCK_CURL_HTTP_CODE=200
+    export MOCK_CURL_RESPONSE='{"outcome":"structured.updated","memoryId":99,"entryId":9137}'
+    run bash "$HANDLERS/save-record.sh" --format-id 42 --record-id 9137 \
+        --content "Done." --fields '{"status":"done"}'
+    [[ "$status" -eq 0 ]]
+    grep -q '"entryId":9137' "$LOG"
+    [[ "$output" == *"Outcome: structured.updated  (memory 99)"* ]]
+}
+
+# --- the routed save keeps every shipped flag (#31827 requirement 4) -----------
+
+@test "save-memory: a routed save still sends the agent name, beside the structured block" {
+    # The record block was added AFTER the agent name (#30320) in mmry_create_memory, so no shipped
+    # caller's positional arguments moved. If they had, the agent name would land in formatName.
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope finance \
+        --topic "Lunch" --content "Spent 40 dollars on lunch." \
+        --agent-name "Records Probe" \
+        --record-type "Expenses" --record-fields '{"amount":40}'
+    [[ "$status" -eq 0 ]]
+    grep -q '"agentName":"Records Probe"' "$LOG"
+    grep -q '"structured":{"formatName":"Expenses","fields":{"amount":40}}' "$LOG"
+}
+
+@test "save-memory: a routed save refuses a malformed --supersedes like the ordinary save does" {
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope finance \
+        --topic "Lunch" --content "x" --supersedes "abc" \
+        --record-type "Expenses" --record-fields '{"amount":40}'
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"--supersedes takes the id"* ]]
+    ! grep -q "/api/memories" "$LOG" 2>/dev/null
+}
+
+@test "save-memory: a routed save forwards a valid --supersedes as supersedesId" {
+    run bash "$HANDLERS/save-memory.sh" \
+        --tier Operational --category Fact --scope finance \
+        --topic "Lunch" --content "x" --supersedes 123 \
+        --record-type "Expenses" --record-fields '{"amount":40}'
+    [[ "$status" -eq 0 ]]
+    grep -q '"supersedesId":123' "$LOG"
+}

@@ -21,6 +21,7 @@ RECORD_HANDLERS=(
     revise-format.sh
     save-record.sh
     query-records.sh
+    record-history.sh
 )
 
 @test "every structured-record handler exists in hooks-handlers/" {
@@ -77,7 +78,8 @@ RECORD_HANDLERS=(
     local missing=""
     for fn in mmry_list_formats mmry_get_format mmry_create_format mmry_revise_format \
               mmry_rename_format mmry_retire_format mmry_reinstate_format \
-              mmry_create_record mmry_get_records _mmry_json_string _mmry_format_name; do
+              mmry_create_record mmry_get_records mmry_get_record_history \
+              _mmry_json_string _mmry_format_name; do
         grep -q "^${fn}() {" "$lib" || missing+=" $fn"
     done
     [[ -z "$missing" ]] || fail "mmry-client.sh is missing:${missing}"
@@ -121,4 +123,28 @@ RECORD_HANDLERS=(
 @test "SKILL.md lists the data-format endpoints" {
     grep -q '/api/data-formats' "$PLUGIN_ROOT/skills/memory-system/SKILL.md" \
         || fail "SKILL.md's endpoint table omits /api/data-formats"
+}
+
+@test "client library reaches the record history route (#31827)" {
+    grep -q '/api/data-formats/\$1/entries/\$2/history' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh" \
+        || fail "mmry-client.sh has no record history route"
+}
+
+@test "SKILL.md documents record history and correction (#31827)" {
+    local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    grep -q '### What a record used to hold' "$skill" || fail "no 'What a record used to hold' section"
+    grep -q '### Correcting a record' "$skill" || fail "no 'Correcting a record' section"
+    grep -q 'mmryai.com/records' "$skill" || fail "SKILL.md never tells the assistant about mmryai.com/records"
+    grep -q 'mmry_record_history' "$skill" || fail "'One account, every surface' omits the connector's history tool"
+}
+
+@test "SKILL.md does not claim a plain save is filed into a type by itself (#31827)" {
+    # Integration, 2026-10-07 and 2026-10-10: a plain-words save never becomes a record on any
+    # route. A skill telling the assistant otherwise is how an expense ends up an ordinary memory.
+    local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    if grep -qi 'later ordinary save. be recognised and recorded\|recorded here without the user asking' "$skill"; then
+        fail "SKILL.md still claims match hints route a plain save into a record type"
+    fi
+    grep -q 'Nothing files a plain save into a type for you' "$skill" \
+        || fail "SKILL.md does not tell the assistant it must name the type itself"
 }
