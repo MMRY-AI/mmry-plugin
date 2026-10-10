@@ -113,7 +113,7 @@ case "$URL" in
     # Record history (#31384, ported by #31827): oldest first, the creation values included.
     */api/data-formats/*/entries/*/history)
         HTTP_CODE="200"
-        RESPONSE_BODY='{"entryId":9137,"changes":3,"history":[{"changedAt":"2026-10-01T10:00:00Z","field":"status","label":null,"kind":"field","previous":null,"current":"open","changedBy":"Probe User"},{"changedAt":"2026-10-02T10:00:00Z","field":"status","label":null,"kind":"field","previous":"open","current":"in progress","changedBy":"Probe User"},{"changedAt":"2026-10-03T10:00:00Z","field":"~content~","label":"The memory itself","kind":"reserved","previous":"Still open.","current":"Done.","changedBy":null}]}'
+        RESPONSE_BODY='{"entryId":9137,"changes":3,"history":[{"changedAt":"2026-10-01T10:00:00Z","field":"status","label":"Status","kind":"set","previous":null,"current":"open","changedBy":"Probe User"},{"changedAt":"2026-10-02T10:00:00Z","field":"status","label":"Status","kind":"changed","previous":"open","current":"in progress","changedBy":"Probe User"},{"changedAt":"2026-10-03T10:00:00Z","field":"~content~","label":"The memory itself","kind":"changed","previous":"Still open.","current":"Done.","changedBy":null}]}'
         ;;
     */api/data-formats/*/entries*)
         if [[ "$METHOD" == "POST" ]]; then
