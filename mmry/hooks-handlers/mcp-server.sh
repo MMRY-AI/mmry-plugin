@@ -37,7 +37,9 @@
 # macOS and Linux and mcp/mmry-mcp.cmd on Windows, as registered in codex-mcp.json. Claude Code
 # never reads that file and never starts this.
 
-set -uo pipefail
+# The repository convention (structural/file-integrity.bats) holds for the start-up below, which
+# must succeed or not run at all. -e is switched off once start-up is done; see "NO set -e".
+set -euo pipefail
 
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "${HANDLER_DIR}/.." && pwd)"
