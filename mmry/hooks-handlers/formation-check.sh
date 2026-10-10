@@ -174,19 +174,26 @@ source "${HANDLER_DIR}/lib-jq.sh" 2>/dev/null || exit 0
 
 # THE jq IS PROVED BY ITS FIRST REAL USE, NOT BY `jq --version` FIRST (#31976). mmry_resolve_jq asks a
 # candidate for its version before trusting it: one process, 0.4 to 1 s of the 15 s budget on a loaded
-# Windows machine, measured, spent asking a jq whether it runs right before running it. So when a jq is
-# on PATH (or named in MMRY_JQ) it is used for the payload parse below WITHOUT that question, and a
-# parse that answers is the proof: it is recorded as verified, so the client's own mmry_resolve_jq
-# returns at once. A parse that does not answer, or no payload to parse, falls back to
-# mmry_resolve_jq exactly as before - the version question, then the bundled jq - so a broken jq on
-# PATH still ends at the bundle, at the cost it always had.
+# Windows machine, measured, spent asking a jq whether it runs right before running it - and with no
+# jq on PATH, four more to find the bundle. So the jq it would choose is named without a process
+# (mmry_jq_candidate) and used for the payload parse below WITHOUT that question, and a parse that
+# answers is the proof: it is recorded as verified, so the client's own mmry_resolve_jq returns at
+# once. A parse that does not answer, or no payload to parse, falls back to mmry_resolve_jq exactly as
+# before - the version question, then the bundled jq - so a broken jq still ends where it always did,
+# at the cost it always had.
 _fc_jq_unproved=""
-if [[ -n "${MMRY_JQ:-}" ]]; then
-    _fc_jq_unproved=1
-elif [[ "${MMRY_JQ_SKIP_SYSTEM:-}" != "1" ]] && command -v jq >/dev/null 2>&1; then
-    MMRY_JQ="jq"; _fc_jq_unproved=1
-else
+_fc_jq_env="${MMRY_JQ:-}"
+# The old way, from what the environment gave: the version question, then the bundle.
+_fc_resolve_jq() {
+    _fc_jq_unproved=""
+    MMRY_JQ="$_fc_jq_env"
     mmry_resolve_jq >/dev/null 2>&1 || true
+}
+mmry_jq_candidate || true
+if [[ -n "${_MMRY_JQ_CANDIDATE:-}" ]]; then
+    MMRY_JQ="$_MMRY_JQ_CANDIDATE"; _fc_jq_unproved=1
+else
+    _fc_resolve_jq
 fi
 
 # lib-host.sh is already sourced above, before lib-jq.sh, because the credential question has to be
@@ -244,9 +251,7 @@ if [[ ! -t 0 ]]; then
         parsed="$("$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' <<< "$payload" 2>/dev/null || true)"
         # A jq that has not been proved and did not answer: prove one the old way, and ask again.
         if [[ "$parsed" != *$'	'* && -n "$_fc_jq_unproved" ]]; then
-            _fc_jq_unproved=""
-            [[ "$MMRY_JQ" == "jq" ]] && MMRY_JQ=""
-            mmry_resolve_jq >/dev/null 2>&1 || true
+            _fc_resolve_jq
             if [[ -n "${MMRY_JQ:-}" ]]; then
                 parsed="$("$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' <<< "$payload" 2>/dev/null || true)"
             fi
@@ -264,9 +269,7 @@ if [[ ! -t 0 ]]; then
 fi
 # Nothing proved the jq above (no payload, or one that did not parse): prove it the old way now.
 if [[ -n "$_fc_jq_unproved" ]]; then
-    [[ "$MMRY_JQ" == "jq" ]] && MMRY_JQ=""
-    mmry_resolve_jq >/dev/null 2>&1 || true
-    _fc_jq_unproved=""
+    _fc_resolve_jq
 fi
 # A PAYLOAD THAT ARRIVED WITHOUT THE FIELDS WE ASSUME IS A FAULT, NOT SILENCE (#31245 QA round 2).
 #

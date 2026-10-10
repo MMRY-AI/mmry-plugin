@@ -1147,9 +1147,13 @@ BSDSTAT
     local body="${BATS_TEST_TMPDIR}/transmissions.sh"
     sed -n '/^mmry_get_formation_transmissions()/,/^}/p' "${HANDLERS}/mmry-client.sh" > "$body"
     [ -s "$body" ]
-    run grep -c 'sessionId=$(_mmry_urlencode "$session_id")' "$body"
+    # Since #31976 through the variable form, which starts no process: each value is encoded into
+    # _MMRY_URLENC on the line that uses it. unit/url-encoding-equivalence.bats checks the URL itself.
+    run grep -c '_mmry_urlencode_v "$session_id"; local path=.*sessionId=${_MMRY_URLENC}' "$body"
     [ "$output" -eq 1 ]
-    run grep -c 'since=$(_mmry_urlencode "$since")' "$body"
+    run grep -c '_mmry_urlencode_v "$since"' "$body"
+    [ "$output" -eq 1 ]
+    run grep -c 'since=${_MMRY_URLENC}' "$body"
     [ "$output" -eq 1 ]
 }
 

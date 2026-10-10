@@ -1190,6 +1190,8 @@ mmry_send_formation_transmission() {
 # it costs no request of its own: it rides on the poll the check was going to make anyway, so nothing
 # is reported before the message has actually been shown. Only digits and commas are passed;
 # anything else is dropped here rather than sent.
+# Both values are encoded with the variable form, which starts no process: this runs before every
+# prompt (#31976).
 mmry_get_formation_transmissions() {
     # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601] [SHOWN_IDS]
     #
@@ -1197,10 +1199,8 @@ mmry_get_formation_transmissions() {
     # session id is not ours to assume the shape of, and "since" is an ISO timestamp whose colons
     # are reserved characters in a query string: an unencoded value is a request the server is
     # entitled to read differently from the one we meant to send (#31196 QA round 2).
-    # Encoded with the variable form, which starts no process: this runs before every prompt (#31976).
     local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}"
-    _mmry_urlencode_v "$session_id"
-    local path="/api/formations/${formation_id}/transmissions?sessionId=${_MMRY_URLENC}"
+    _mmry_urlencode_v "$session_id"; local path="/api/formations/${formation_id}/transmissions?sessionId=${_MMRY_URLENC}"
     if [[ -n "$since" ]]; then
         _mmry_urlencode_v "$since"
         path="${path}&since=${_MMRY_URLENC}"

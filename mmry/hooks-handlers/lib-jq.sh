@@ -161,6 +161,57 @@ mmry_resolve_jq() {
     MMRY_JQ=""; export MMRY_JQ; _MMRY_JQ_VERIFIED=""; return 1
 }
 
+# The jq mmry_resolve_jq would most likely choose, named WITHOUT STARTING A PROCESS (#31976), into
+# _MMRY_JQ_CANDIDATE, or empty. It is unproved: nothing here runs it. For a caller on the per-prompt
+# path whose first jq call can serve as the proof, and which falls back to mmry_resolve_jq when that
+# call does not answer (formation-check.sh does). The order is mmry_resolve_jq's: MMRY_JQ, then a jq
+# on PATH, then the bundle. The bundle's name comes from bash's own OSTYPE and HOSTTYPE instead of
+# two `uname` processes, and its directory without `cd`/`pwd`: on a loaded Windows machine with no
+# system jq, which is most Windows machines, mmry_resolve_jq's way of finding the bundle started five
+# processes, 1.7 to 2.5 s of a 15 s hook budget, measured. A wrong guess costs nothing but the
+# fallback, which is the old path.
+mmry_jq_candidate() {
+    _MMRY_JQ_CANDIDATE=""
+    if [[ -n "${MMRY_JQ:-}" ]]; then
+        _MMRY_JQ_CANDIDATE="$MMRY_JQ"; return 0
+    fi
+    if [[ "${MMRY_JQ_SKIP_SYSTEM:-}" != "1" ]] && command -v jq >/dev/null 2>&1; then
+        _MMRY_JQ_CANDIDATE="jq"; return 0
+    fi
+    local os="${MMRY_UNAME_S:-}" arch="${MMRY_UNAME_M:-${HOSTTYPE:-}}" dir
+    if [[ -z "$os" ]]; then
+        case "${OSTYPE:-}" in
+            linux*) os=Linux ;;
+            darwin*) os=Darwin ;;
+            msys*|cygwin*) os=MSYS ;;
+        esac
+    fi
+    case "$os" in
+        Linux) os=linux ;;
+        Darwin) os=macos ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT|Windows) os=windows ;;
+        *) return 0 ;;
+    esac
+    case "$arch" in
+        x86_64|amd64) arch=amd64 ;;
+        arm64|aarch64) arch=arm64 ;;
+        *) return 0 ;;
+    esac
+    if [[ -n "${MMRY_JQ_VENDOR_DIR:-}" ]]; then
+        dir="$MMRY_JQ_VENDOR_DIR"
+    elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -d "${CLAUDE_PLUGIN_ROOT}/vendor/jq" ]]; then
+        dir="${CLAUDE_PLUGIN_ROOT}/vendor/jq"
+    else
+        dir="${BASH_SOURCE[0]%/*}"
+        [[ "$dir" == "${BASH_SOURCE[0]}" ]] && dir="."
+        dir="${dir}/../vendor/jq"
+    fi
+    local path="${dir}/jq-${os}-${arch}"
+    [[ "$os" == "windows" ]] && path="${path}.exe"
+    [[ -f "$path" && -x "$path" ]] && _MMRY_JQ_CANDIDATE="$path"
+    return 0
+}
+
 # Print a clear, platform-specific message when no usable jq is available.
 # Writes to stderr so it never contaminates a handler's JSON stdout.
 mmry_jq_unavailable_message() {
