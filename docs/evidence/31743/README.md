@@ -7,8 +7,8 @@ Branch `31743/codex-tools-no-prompt`. Codex read and run: codex-cli **0.160.0** 
 
 | Claim | How | Where |
 |---|---|---|
-| Codex starts the plugin's MCP server from the plugin, on Windows, through `mcp/mmry-mcp.cmd` | real `codex app-server`, plugin installed with `codex plugin marketplace add` / `codex plugin add` into a throwaway Codex home | `live-windows-run2.txt` |
-| The server reaches MMRY AI from inside Codex: save, search, reinforce, link, retire, reload | same run, live Integration, throwaway `*@test.mnemo` subscriber | `live-windows-run2.txt` (R1 lines) |
+| Codex starts the plugin's MCP server from the plugin, on Windows, through `mcp/mmry-mcp.cmd` | real `codex app-server`, plugin installed with `codex plugin marketplace add` / `codex plugin add` into a throwaway Codex home | `live-windows-run3.txt` |
+| The server reaches MMRY AI from inside Codex: save, search, reinforce, link, retire, reload | same run, live Integration, throwaway `*@test.mnemo` subscriber | `live-windows-run3.txt` (R1 lines) |
 | Join, say, progress through the tools | same run | R2 lines |
 | Two conversations at once, each in a different formation, each receiving only its own messages | two threads in one `codex app-server`; each formation's lead sends a marked message; the plugin's own delivery hook run per conversation with the payload Codex gives it | R3 lines |
 | Each tool's request and response; annotations judged by Codex's rule; identity per call | BATS | `mmry/tests/handlers/mcp-server.bats` |
@@ -113,6 +113,7 @@ Clean up: "leave the formation" in each conversation, then retire the test memor
 
 ## Runs kept here
 
-- `live-windows-run2.txt`: plugin 90ac8e4, Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
+- `live-windows-run3.txt`: plugin de68916 (the bash 3.2 stdin fix), Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
+- `live-windows-run3.txt`: plugin 90ac8e4, Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
 - `live-windows-run1.txt`: plugin 4a58d58, the same checks before the server was renamed from
   `mmry` to `mmry_plugin`. 16 of 16 PASS. (Its commit message said 18; the run has 16 checks.)
