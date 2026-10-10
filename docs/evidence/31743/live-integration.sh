@@ -119,7 +119,7 @@ T0="$(sed -n 1p "$W/threads.txt" | tr -d '\r')"; T1="$(sed -n 2p "$W/threads.txt
 D="$(cat "$W/driver.txt")"
 
 # ---- Requirement 1 ----------------------------------------------------------------------------
-grep -q "server mmry runtimeStatus" <<< "$D" && pass "R1 Codex started the plugin's MCP server and listed its tools" || fail "R1 server not listed"
+grep -q "server mmry_plugin runtimeStatus" <<< "$D" && pass "R1 Codex started the plugin's MCP server and listed its tools" || fail "R1 server not listed"
 [[ "$(grep -c 'call t0 memory_save .*isError=false' <<< "$D")" == 2 ]] && pass "R1 save x2 reached MMRY AI from Codex" || fail "R1 save"
 grep -q 'captured idA=' <<< "$D" && grep -q 'captured idB=' <<< "$D" && pass "R1 search found both marked memories by id" || fail "R1 search"
 grep -q 'call t0 memory_reinforce .*isError=false' <<< "$D" && pass "R1 reinforce" || fail "R1 reinforce"

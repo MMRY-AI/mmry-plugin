@@ -25,32 +25,40 @@ setup() {
     [ -f "$MCP_CONFIG" ]
 }
 
-@test "codex mcp: codex-mcp.json is one mcpServers object holding exactly one server, mmry" {
-    [ "$(jq -r '.mcpServers | keys | join(",")' "$MCP_CONFIG")" = "mmry" ]
+@test "codex mcp: codex-mcp.json is one mcpServers object holding exactly one server, mmry_plugin" {
+    [ "$(jq -r '.mcpServers | keys | join(",")' "$MCP_CONFIG")" = "mmry_plugin" ]
+}
+
+@test "codex mcp: the server is NOT called mmry, the name a customer may give the MMRY connector" {
+    # Codex resolves two servers with one name by precedence, and the customer's own config.toml
+    # outranks a plugin (codex-rs/codex-mcp/src/catalog.rs, RegistrationPrecedence: Plugin < Config).
+    # A customer who added the MMRY connector as [mcp_servers.mmry] would silently replace these
+    # tools with the connector's, whose formation join enrols an identity the hooks never poll.
+    [ "$(jq -r '.mcpServers | has("mmry")' "$MCP_CONFIG")" = "false" ]
 }
 
 @test "codex mcp: the server is started by the launcher, from the plugin root" {
-    [ "$(jq -r '.mcpServers.mmry.command' "$MCP_CONFIG")" = "./mcp/mmry-mcp" ]
-    [ "$(jq -r '.mcpServers.mmry.cwd' "$MCP_CONFIG")" = "." ]
-    [ "$(jq -r '.mcpServers.mmry.args | length' "$MCP_CONFIG")" = "0" ]
+    [ "$(jq -r '.mcpServers.mmry_plugin.command' "$MCP_CONFIG")" = "./mcp/mmry-mcp" ]
+    [ "$(jq -r '.mcpServers.mmry_plugin.cwd' "$MCP_CONFIG")" = "." ]
+    [ "$(jq -r '.mcpServers.mmry_plugin.args | length' "$MCP_CONFIG")" = "0" ]
 }
 
 @test "codex mcp: the host is declared, and CODEX_HOME reaches the server, or the credential is not found" {
-    [ "$(jq -r '.mcpServers.mmry.env.MMRY_HOST' "$MCP_CONFIG")" = "codex" ]
-    jq -e '.mcpServers.mmry.env_vars | index("CODEX_HOME")' "$MCP_CONFIG" >/dev/null
+    [ "$(jq -r '.mcpServers.mmry_plugin.env.MMRY_HOST' "$MCP_CONFIG")" = "codex" ]
+    jq -e '.mcpServers.mmry_plugin.env_vars | index("CODEX_HOME")' "$MCP_CONFIG" >/dev/null
 }
 
 @test "codex mcp: no credential VALUE is written into the registration, only variable names" {
-    [ "$(jq -r '.mcpServers.mmry.env | keys | join(",")' "$MCP_CONFIG")" = "MMRY_HOST" ]
-    [ "$(jq -r '[.mcpServers.mmry.env_vars[] | type] | unique | join(",")' "$MCP_CONFIG")" = "string" ]
+    [ "$(jq -r '.mcpServers.mmry_plugin.env | keys | join(",")' "$MCP_CONFIG")" = "MMRY_HOST" ]
+    [ "$(jq -r '[.mcpServers.mmry_plugin.env_vars[] | type] | unique | join(",")' "$MCP_CONFIG")" = "string" ]
 }
 
 @test "codex mcp: Codex's own limit on a call is above the server's limit on a handler" {
     local codex_limit server_limit
-    codex_limit="$(jq -r '.mcpServers.mmry.tool_timeout_sec' "$MCP_CONFIG" | tr -d '\r')"
+    codex_limit="$(jq -r '.mcpServers.mmry_plugin.tool_timeout_sec' "$MCP_CONFIG" | tr -d '\r')"
     server_limit="$(sed -n 's/^MMRY_MCP_HANDLER_TIMEOUT="\${MMRY_MCP_HANDLER_TIMEOUT:-\([0-9]*\)}"$/\1/p' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh")"
     [ -n "$server_limit" ]
-    (( codex_limit > server_limit ))
+    (( codex_limit > server_limit )) || return 1
 }
 
 @test "codex mcp: both launchers exist beside each other, the name Codex is given with and without .cmd" {
@@ -61,14 +69,14 @@ setup() {
 @test "codex mcp: the macOS and Linux launcher is executable in git, POSIX sh, LF, and hands over to codex-hook.sh" {
     [ "$(git -C "$REPO_ROOT" ls-files -s mmry/mcp/mmry-mcp | cut -c1-6)" = "100755" ]
     [ "$(head -1 "$PLUGIN_ROOT/mcp/mmry-mcp")" = "#!/bin/sh" ]
-    ! grep -q $'\r' "$PLUGIN_ROOT/mcp/mmry-mcp"
+    ! grep -q $'\r' "$PLUGIN_ROOT/mcp/mmry-mcp" || return 1
     grep -q 'exec sh "$here/../hooks-handlers/codex-hook.sh" mcp-server' "$PLUGIN_ROOT/mcp/mmry-mcp"
 }
 
 @test "codex mcp: the Windows launcher starts @echo off and goes through codex-hook.cmd, never a bare bash" {
     [ "$(head -1 "$PLUGIN_ROOT/mcp/mmry-mcp.cmd" | tr -d '\r')" = "@echo off" ]
     grep -q 'codex-hook.cmd" mcp-server' "$PLUGIN_ROOT/mcp/mmry-mcp.cmd"
-    ! grep -iq '^[^r]*\bbash\b' <(grep -iv '^rem' "$PLUGIN_ROOT/mcp/mmry-mcp.cmd")
+    ! grep -iq '^[^r]*\bbash\b' <(grep -iv '^rem' "$PLUGIN_ROOT/mcp/mmry-mcp.cmd") || return 1
 }
 
 @test "codex mcp: the launcher's checkout line endings are pinned in .gitattributes" {
@@ -108,6 +116,6 @@ setup() {
 }
 
 @test "req4: nothing Claude Code registers names the MCP server or its launchers" {
-    ! grep -q 'mcp-server\|mmry-mcp\|codex-mcp' "$PLUGIN_ROOT/hooks/hooks.json"
-    ! grep -rq 'mcp-server\|mmry-mcp\|codex-mcp' "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/skills"
+    ! grep -q 'mcp-server\|mmry-mcp\|codex-mcp' "$PLUGIN_ROOT/hooks/hooks.json" || return 1
+    ! grep -rq 'mcp-server\|mmry-mcp\|codex-mcp' "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/skills" || return 1
 }

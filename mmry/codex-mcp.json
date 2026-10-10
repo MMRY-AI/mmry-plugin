@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "mmry": {
+    "mmry_plugin": {
       "command": "./mcp/mmry-mcp",
       "args": [],
       "cwd": ".",

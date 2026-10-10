@@ -97,7 +97,7 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 1 | jq -r '.result.protocolVersion')" = "2025-06-18" ]
     [ "$(answer 1 | jq -r '.result.capabilities.tools | type')" = "object" ]
     [ "$(answer 1 | jq -r '.result.serverInfo.name')" = "mmry" ]
-    [[ "$(answer 1 | jq -r '.result.instructions')" == *"no Internet access approval"* ]]
+    [[ "$(answer 1 | jq -r '.result.instructions')" == *"no Internet access approval"* ]] || return 1
 }
 
 @test "protocol: an unknown protocol version is answered with the newest this server speaks" {
@@ -182,7 +182,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 @test "tool: memory_save sends the content for processing and says MMRY received it" {
     mcp "$(call 10 memory_save '{"content":"DECISION: MARK-31743 use UPC.","working_dir":"'"$TEST_TMPDIR/proj"'"}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 10)" = "false" ]
-    [[ "$(text_of 10)" == *"Memory sent to MMRY AI"* ]]
+    [[ "$(text_of 10)" == *"Memory sent to MMRY AI"* ]] || return 1
     grep -q '^POST http://fake.invalid/api/memories/process .*MARK-31743 use UPC' "$REQLOG"
 }
 
@@ -194,14 +194,14 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 @test "tool: memory_save refuses with no content and sends nothing" {
     mcp "$(call 12 memory_save '{}')"
     [ "$(is_error 12)" = "true" ]
-    [[ "$(text_of 12)" == *"content is required"* ]]
+    [[ "$(text_of 12)" == *"content is required"* ]] || return 1
     [ ! -s "$REQLOG" ]
 }
 
 @test "tool: memory_search sends the query and prints each match with its id" {
     mcp "$(call 20 memory_search '{"query":"refund","scope":"backend"}')"
     [ "$(is_error 20)" = "false" ]
-    [[ "$(text_of 20)" == *"id 41 | Operational | backend | Refund Handling"* ]]
+    [[ "$(text_of 20)" == *"id 41 | Operational | backend | Refund Handling"* ]] || return 1
     grep -q '^GET http://fake.invalid/api/memories/search?.*refund' "$REQLOG"
     grep -q '^GET http://fake.invalid/api/memories/search?.*backend' "$REQLOG"
 }
@@ -209,14 +209,14 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 @test "tool: memory_reinforce posts to the memory's reinforce route" {
     mcp "$(call 30 memory_reinforce '{"id":41}')"
     [ "$(is_error 30)" = "false" ]
-    [[ "$(text_of 30)" == *"Memory reinforced."* ]]
+    [[ "$(text_of 30)" == *"Memory reinforced."* ]] || return 1
     grep -q '^POST http://fake.invalid/api/memories/41/reinforce' "$REQLOG"
 }
 
 @test "tool: memory_link posts the link with its type" {
     mcp "$(call 40 memory_link '{"source_id":41,"target_id":87,"link_type":"related"}')"
     [ "$(is_error 40)" = "false" ]
-    [[ "$(text_of 40)" == *"Memories linked."* ]]
+    [[ "$(text_of 40)" == *"Memories linked."* ]] || return 1
     grep -q '^POST http://fake.invalid/api/memories/41/links .*87.*related' "$REQLOG"
 }
 
@@ -229,7 +229,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 @test "tool: memory_retire deactivates the memory" {
     mcp "$(call 50 memory_retire '{"id":41}')"
     [ "$(is_error 50)" = "false" ]
-    [[ "$(text_of 50)" == *"Memory deactivated."* ]]
+    [[ "$(text_of 50)" == *"Memory deactivated."* ]] || return 1
     grep -q '^DELETE http://fake.invalid/api/memories/41' "$REQLOG"
 }
 
@@ -245,15 +245,16 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     # The content reaches the API byte for byte: no expansion, no command substitution.
     mcp "$(call 13 memory_save '{"content":"$(touch PWNED) `id` ${HOME} '"'"'q'"'"' \"dq\""}')"
     [ "$(is_error 13)" = "false" ]
-    [ ! -e "$PLUGIN_ROOT/PWNED" ] && [ ! -e PWNED ]
+    [ ! -e "$PLUGIN_ROOT/PWNED" ] || return 1
+    [ ! -e PWNED ] || return 1
     grep -qF '$(touch PWNED) `id` ${HOME}' "$REQLOG"
 }
 
 @test "tool: memory_load runs the session-start load for this conversation and returns its message, not hook JSON" {
     mcp "$(call 60 memory_load '{"working_dir":"'"$TEST_TMPDIR/proj"'"}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 60)" = "false" ]
-    [[ "$(text_of 60)" != *"hookSpecificOutput"* ]]
-    [[ "$(text_of 60)" != *"could not be read from stdin"* ]]
+    [[ "$(text_of 60)" != *"hookSpecificOutput"* ]] || return 1
+    [[ "$(text_of 60)" != *"could not be read from stdin"* ]] || return 1
     grep -q '^GET http://fake.invalid/api/memories/startup' "$REQLOG"
     grep -q '^POST http://fake.invalid/api/sessions .*conv-A' "$REQLOG"
 }
@@ -261,8 +262,8 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 @test "tool: formation_join enrols THIS conversation and records it locally" {
     mcp "$(call 70 formation_join '{"formation_id":77}' '{"sessionId":"conv-A","threadId":"conv-A"}')"
     [ "$(is_error 70)" = "false" ]
-    [[ "$(text_of 70)" == *"Joined formation 77: Ship it"* ]]
-    [[ "$(text_of 70)" == *"Report to the lead at every stopping point"* ]]
+    [[ "$(text_of 70)" == *"Joined formation 77: Ship it"* ]] || return 1
+    [[ "$(text_of 70)" == *"Report to the lead at every stopping point"* ]] || return 1
     grep -q '^POST http://fake.invalid/api/formations/77/join .*"sessionId":"conv-A"' "$REQLOG"
     [ "$(head -1 "$TMPDIR/.mmry-formation-conv-A")" = "77" ]
 }
@@ -272,7 +273,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     mcp "$(call 80 formation_say '{"message":"heads up"}' '{"sessionId":"conv-A"}')" \
         "$(call 81 formation_say '{"message":"for the lead","to_member_id":5}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 80)" = "false" ]
-    [[ "$(text_of 80)" == *"Sent to formation 77"* ]]
+    [[ "$(text_of 80)" == *"Sent to formation 77"* ]] || return 1
     grep -q '^POST http://fake.invalid/api/formations/77/transmissions .*"sessionId":"conv-A".*heads up' "$REQLOG"
     grep -q '^POST http://fake.invalid/api/formations/77/transmissions .*for the lead.*"recipientMemberId":5' "$REQLOG"
 }
@@ -295,7 +296,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
     mcp "$(call 100 formation_roster '{}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 100)" = "false" ]
-    [[ "$(text_of 100)" == *"5  Lead"* ]]
+    [[ "$(text_of 100)" == *"5  Lead"* ]] || return 1
     grep -q '^GET http://fake.invalid/api/formations/77 ' "$REQLOG"
 }
 
@@ -322,7 +323,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     unset MMRY_API_KEY
     mcp "$(call 140 memory_search '{"query":"x"}')" '{"jsonrpc":"2.0","id":141,"method":"ping"}'
     [ "$(is_error 140)" = "true" ]
-    [[ "$(text_of 140)" == *"no Codex credential was found"* ]]
+    [[ "$(text_of 140)" == *"no Codex credential was found"* ]] || return 1
     [ "$(answer 141 | jq -c '.result')" = "{}" ]
     [ ! -s "$REQLOG" ]
 }
@@ -340,7 +341,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ "$(head -1 "$TMPDIR/.mmry-formation-conv-B")" = "88" ]
     grep -q '/api/formations/77/join .*"sessionId":"conv-A"' "$REQLOG"
     grep -q '/api/formations/88/join .*"sessionId":"conv-B"' "$REQLOG"
-    ! grep -q '/api/formations/77/join .*conv-B' "$REQLOG"
+    ! grep -q '/api/formations/77/join .*conv-B' "$REQLOG" || return 1
 }
 
 @test "identity: interleaved calls each speak for their own conversation" {
@@ -371,7 +372,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     export CODEX_SESSION_ID="inherited-from-somewhere"
     mcp "$(call 230 formation_join '{"formation_id":77}')"
     [ "$(is_error 230)" = "true" ]
-    [[ "$(text_of 230)" == *"did not say which conversation"* ]]
+    [[ "$(text_of 230)" == *"did not say which conversation"* ]] || return 1
     [ ! -s "$REQLOG" ]
     [ ! -e "$TMPDIR/.mmry-formation-inherited-from-somewhere" ]
 }
@@ -380,7 +381,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     export CLAUDE_CODE_SESSION_ID="claude-window" CLAUDE_SESSION_ID="claude-window"
     mcp "$(call 240 formation_join '{"formation_id":77}' '{"sessionId":"conv-A"}')"
     grep -q '"sessionId":"conv-A"' "$REQLOG"
-    ! grep -q 'claude-window' "$REQLOG"
+    ! grep -q 'claude-window' "$REQLOG" || return 1
 }
 
 @test "identity: the server keeps nothing between calls; the conversation is read from each one" {
@@ -388,8 +389,8 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     mcp "$(call 250 formation_join '{"formation_id":77}' '{"sessionId":"conv-A"}')" \
         "$(call 251 formation_say '{"message":"who am I"}' '{"sessionId":"conv-B"}')"
     [ "$(is_error 251)" = "true" ]
-    [[ "$(text_of 251)" == *"not in a formation"* ]]
-    ! grep -q 'who am I' "$REQLOG"
+    [[ "$(text_of 251)" == *"not in a formation"* ]] || return 1
+    ! grep -q 'who am I' "$REQLOG" || return 1
 }
 
 @test "handlers never read the protocol stream: a burst of requests is answered one for one, in order" {

@@ -102,7 +102,7 @@ function substitute(args) {
     let text;
     let tries = 0;
     for (;;) {
-      r = await request('mcpServer/tool/call', { threadId: threads[step.t], server: step.server || 'mmry', tool: step.tool, arguments: args });
+      r = await request('mcpServer/tool/call', { threadId: threads[step.t], server: step.server || 'mmry_plugin', tool: step.tool, arguments: args });
       text = r.result ? (r.result.content || []).map((c) => c.text).join('\n') : JSON.stringify(r.error);
       if (!step.until || new RegExp(step.until).test(text) || ++tries > (step.retries || 0)) break;
       log(`call t${step.t} ${step.tool}: not there yet (try ${tries}), retrying`);
