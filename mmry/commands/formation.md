@@ -146,6 +146,29 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    **Every window joins for itself.** Membership is held per session, so starting a formation in
    one terminal does not enrol the others; each runs join with the id.
 
+4. Show the two rules the script prints after the join line, and follow them for as long as this
+   session is in the formation. See "Reporting to the lead" below.
+
+### Reporting to the lead
+
+Every member is given these two rules when it joins, and every assignment it receives repeats
+them. They read the same in Claude Code, in Codex and in a connected assistant:
+
+> Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running.
+>
+> When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
+
+**Address the report to the lead,** with `say --to <leadMemberId>`; the roster shows which member
+is the lead. A report to the lead is never chatter, so the guidance about not narrating to the
+formation does not apply to it. Where the stopping point is also a change of state, record it with
+`progress` as well.
+
+**An acknowledgement is not a read receipt.** It says what you understood, anything you cannot do,
+and when the lead should expect the result, so a misunderstanding is caught before the work rather
+than after it. "Got it" alone is not one. It is owed for an assignment, a brief or a question, and
+never for findings or status updates, which would only double the traffic. Whether a message was
+shown at all is a separate fact, and the roster's read status already answers it.
+
 ### roster
 
 ```bash
@@ -269,8 +292,10 @@ The states are **Assigned, Accepted, Done, Blocked and Abandoned**. Assigned is 
 the moment it is handed out, so the ones a session reports are the other four.
 
 **Report it when it changes, not on a schedule.** Accepting the work, finishing it, hitting
-something that stops you, and giving up are the four moments worth a report. Between them, say
-nothing: the lead is interrupted by each one.
+something that stops you, and giving up are the four state changes. Between them, record nothing:
+the lead is interrupted by each one. Waiting, and stopping with work still running, are stopping
+points too even though they are not states: tell the lead directly, as "Reporting to the lead"
+above says.
 
 **Say Blocked when you are blocked, and say Abandoned when you stop.** This is the whole point of
 the feature. A member that goes quiet used to leave no trace at all, so the closing record said the

@@ -16,6 +16,11 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
 
+# The two standing rules a member is given when it joins (#31744). One sentence pair each, ASCII
+# only, no apostrophes, so the same text can be held unchanged in a T-SQL literal on the service.
+MMRY_FORMATION_REPORT_RULE="Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running."
+MMRY_FORMATION_ACK_RULE="When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement."
+
 formation_id="${1:-}"
 if [[ -z "$formation_id" ]]; then
     echo "Which formation? Usage: $(mmry_host_formation_ref join "<formationId>")"
@@ -72,4 +77,18 @@ if [[ -n "$objective" ]]; then
 else
     echo "Joined formation ${formation_id}. Messages from the other members will now be surfaced automatically."
 fi
+
+# THE MEMBER'S STANDING RULES (#31744). Said at the moment of joining, because it is the one moment
+# every member passes through on every host. Before this a member was told only that messages
+# would reach it, so whether it ever reported back depended on the lead remembering to say so in
+# every brief; on 2026-10-04 a member held finished work for about 40 minutes behind a slow check
+# and the sponsor had to ask whether the lead had been told.
+#
+# THE WORDING IS SHARED, NOT RESTATED. The same two rules are in the connector's join response
+# and the service's assignment notice (MMRY-AI/mmry: FormationReportRule.cs, migration 066) and on
+# the formation command page. tests/structural/formation-report-rule.bats pins them here byte for
+# byte, and the service repository pins its copies to the same text (DD-109 there). Change one and
+# change all of them.
+echo "${MMRY_FORMATION_REPORT_RULE}"
+echo "${MMRY_FORMATION_ACK_RULE}"
 exit 0
