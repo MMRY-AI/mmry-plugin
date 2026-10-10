@@ -49,7 +49,7 @@ _sed_encode() {
         $'line1\nline2'
         $'trailing\n'
         $'trailing2\n\n'
-        'unicode-ünïcødé-日本'
+        $'unicode-\xc3\xbcn\xc3\xaf-\xe6\x97\xa5\xe6\x9c\xac'
         ' '
         ''
         '0a8c7b1e-2f3d-4e5f-9a8b-7c6d5e4f3a2b'
