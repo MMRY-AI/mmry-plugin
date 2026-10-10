@@ -45,7 +45,7 @@ fi
 
 # THE TWO SHAPES ARE DIFFERENT AND THAT IS THE ROUTES' DOING, NOT AN OVERSIGHT HERE.
 # GET /api/data-formats answers a flat ARRAY of chain summaries - id, name, how many records,
-# what it is recognised by - and deliberately carries no field list, because a list of twenty
+# the words that help the assistant choose it - and deliberately carries no field list, because a list of twenty
 # types would otherwise return a hundred field definitions nobody asked for. The per-type read
 # is where the fields are, which is why --id exists and why the skill says to call it before
 # recording against a type you did not just create.
@@ -60,7 +60,7 @@ if [[ -n "$FORMAT_ID" ]]; then
         "Records held: \(.format.entries)",
         "Identity: \(.format.entryKeyMode)" + (if .format.identityField then " on \(.format.identityField)" else "" end),
         "Visible to: \(.format.visibility)",
-        "Recognised by: " + (if (.format.matchHints // "") == "" then "(nothing - this type must be named explicitly)" else .format.matchHints end),
+        "Words that help choose it: " + (if (.format.matchHints // "") == "" then "(none - name this type when you record against it)" else .format.matchHints end),
         "Fields:",
         (.fields[] | "  \(.key) (\(.type))" + (if .retired then "  [no longer collected]" else "" end))'
     exit 0
@@ -76,7 +76,7 @@ fi
 echo "${count} record type(s):"
 echo ""
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] |
-    "id \(.rootId) | \(.name) | \(.entries) record(s) | recognised by: " +
-    (if (.matchHints // "") == "" then "(must be named explicitly)" else .matchHints end)'
+    "id \(.rootId) | \(.name) | \(.entries) record(s) | words that help choose it: " +
+    (if (.matchHints // "") == "" then "(none)" else .matchHints end) + " | a save is a record only when it names this type"'
 echo ""
 echo "Run with --id <id> for the fields a type collects."

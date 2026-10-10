@@ -30,9 +30,11 @@ setup() {
     grep -q "GET http://localhost:5291/api/data-formats" "$LOG"
 }
 
-@test "list-formats: a type with no match hints says it must be named explicitly" {
+@test "list-formats: a type with no match hints says so, and says a save is a record only when it names the type" {
     run bash "$HANDLERS/list-formats.sh"
-    [[ "$output" == *"must be named explicitly"* ]] || return 1
+    [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
+    [[ "$output" == *"a save is a record only when it names this type"* ]] || return 1
+    [[ "$output" != *"recognised by"* ]] || return 1
 }
 
 @test "list-formats: --id reads one type and lists its fields" {
@@ -483,4 +485,45 @@ _mmry_no_jq() {
     [[ "$output" == *"words: Migraine on Tuesday after red wine."* ]] || return 1
     [[ "$output" == *"id 1 | recorded 2026-10-07T09:00:00"* ]] || return 1
     [[ "$output" != *"(no topic)"* ]] || return 1
+}
+
+# --- #32002: what the messages say a save does ---------------------------------
+
+@test "revise-format: --match-hints says the words help choose the type, never that a save is filed by them (#32002)" {
+    run bash "$HANDLERS/revise-format.sh" --id 42 --match-hints "migraine, headache"
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"Those words now help the assistant choose this type. A save becomes a record only when it names the type and its fields."* ]] || return 1
+    [[ "$output" != *"recognised"* ]] || return 1
+    [[ "$output" != *"from now on"* ]] || return 1
+}
+
+@test "save-memory: a record save with malformed fields is refused as the SKILL describes, and stores nothing (#32002)" {
+    export MOCK_CURL_HTTP_CODE=400
+    export MOCK_CURL_RESPONSE="Request body is required."
+    run bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope finance         --topic "Lunch" --content "Spent 40 dollars on lunch."         --record-type "Expenses" --record-fields '{"amount":'
+    [[ "$status" -eq 1 ]] || return 1
+    [[ "$output" == *"Error (HTTP 400): Request body is required."* ]] || return 1
+    [[ "$output" == *"Nothing was saved."* ]] || return 1
+    [[ "$output" != *"NewMemoryID"* ]] || return 1
+    [[ "$output" != *"RecordedAs"* ]] || return 1
+    # The malformed fields really left the machine as sent, and exactly one save was attempted.
+    grep -qF '"fields":{"amount":' "$LOG"
+    [[ "$(grep -c 'POST http://localhost:5291/api/memories' "$LOG")" -eq 1 ]]
+}
+
+@test "SKILL.md describes the refusal the script prints (#32002)" {
+    local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    grep -qF 'Error (HTTP 400): Request body is required.' "$skill" || return 1
+    grep -qF 'Nothing was saved.' "$skill" || return 1
+    grep -q 'A refused record save saves nothing' "$skill" || return 1
+    ! grep -q 'This can never cost the save' "$skill"
+}
+
+@test "no plugin message or guidance says a plain save is recognised or filed as a record (#32002)" {
+    local f
+    for f in hooks-handlers/revise-format.sh hooks-handlers/list-formats.sh hooks-handlers/create-format.sh              hooks-handlers/mmry-client.sh skills/memory-system/SKILL.md; do
+        if grep -qiE 'recognised as belonging|recognised by|what the router|will be recognised|saves stop being recognised|never cost the save|must be named explicitly' "$PLUGIN_ROOT/$f"; then
+            fail "$f still carries an automatic-recognition claim"
+        fi
+    done
 }

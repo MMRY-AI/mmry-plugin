@@ -89,7 +89,7 @@ All operations go through the MMRY AI REST API:
 | POST | `/api/data-formats` | Define a structured record type |
 | GET | `/api/data-formats` | List the user's record types |
 | GET | `/api/data-formats/{id}` | One record type in full |
-| PUT | `/api/data-formats/{id}` | Rename it, or change what it is recognised by |
+| PUT | `/api/data-formats/{id}` | Rename it, or change the words that help choose it |
 | POST | `/api/data-formats/{id}/versions` | Publish a new shape for it |
 | POST | `/api/data-formats/{id}/retire` | Stop offering it (nothing is deleted) |
 | POST | `/api/data-formats/{id}/reinstate` | Offer it again |
@@ -184,10 +184,17 @@ So this one writes **one** memory directly, and `--tier`, `--category`, `--scope
 `--content` are all required. The script says which are missing rather than letting the server
 refuse.
 
-**This can never cost the save.** A type that does not exist, a field it does not declare, a
-value too long for its column — all of them cost the structure and keep the words. The script
-prints `RecordedAs:` so you can tell which happened. **Report what actually happened**: saying
-"recorded in your migraine log" when it was stored as ordinary text is worse than saying nothing.
+**A save that names a type the server cannot use keeps the words.** A type that does not exist, a
+field it does not declare, a value too long for its column — all of them cost the structure and
+keep the words. The script prints `RecordedAs:` so you can tell which happened. **Report what
+actually happened**: saying "recorded in your migraine log" when it was stored as ordinary text
+is worse than saying nothing.
+
+**A refused record save saves nothing.** If `--record-fields` is not one valid JSON object, the
+server refuses the whole request (HTTP 400, "Request body is required.") and the script exits 1
+with `Error (HTTP 400): Request body is required.` followed by `Nothing was saved.` There is
+no `NewMemoryID` and no `RecordedAs`; the user's words are NOT stored. Fix the fields and run the
+same save again, and tell the user it did not go through until it has.
 
 **As the request itself**, when writing the record *is* what the user asked for. This one
 **refuses** rather than falling back, so a mistyped field name comes back as an error naming the
@@ -216,7 +223,7 @@ they have.
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 \
   --fields '[{"key":"severity","type":"number"},{"key":"triggers","type":"list","of":"text"}]'
 
-# change what it is called, what it is for, or what a save is recognised by
+# change what it is called, what it is for, or the words that help you choose it
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --rename "Headache log"
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --match-hints "migraine, headache, aura"
 

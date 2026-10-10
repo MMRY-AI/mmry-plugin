@@ -1085,7 +1085,7 @@ mmry_revise_format() {
 
 mmry_rename_format() {
     # Usage: mmry_rename_format ID [NAME] [DESCRIPTION] [MATCH_HINTS]
-    # Changes what a type is CALLED, what it is for, or what the router recognises it by.
+    # Changes what a type is CALLED, what it is for, or the words that help the assistant choose it.
     # Touches no field and no record. Omitted values are left alone rather than cleared.
     local body
     body="$(_mmry_build_json \

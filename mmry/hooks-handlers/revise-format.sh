@@ -15,8 +15,8 @@
 # choosing between four sibling scripts chooses wrong. The verbs are the product's:
 #
 #   --add-fields / --fields   PUBLISH A NEW VERSION. This is the one for "add a field".
-#   --rename / --describe /   CORRECT WHAT IT IS CALLED, what it is for, or what the router
-#     --match-hints           recognises it by. Touches no field and no record.
+#   --rename / --describe /   CORRECT WHAT IT IS CALLED, what it is for, or the words that help
+#     --match-hints           the assistant choose it. Touches no field and no record.
 #   --retire                  STOP IT COLLECTING and keep everything it holds.
 #   --reinstate               START IT COLLECTING AGAIN.
 #
@@ -136,7 +136,7 @@ fi
 if [[ -n "$NAME" || -n "$DESCRIPTION" || -n "$HINTS" ]]; then
     mmry_rename_format "$ID" "$NAME" "$DESCRIPTION" "$HINTS" || fail
     report
-    [[ -n "$HINTS" ]] && echo "Saves using those words will be recognised as belonging here from now on."
+    [[ -n "$HINTS" ]] && echo "Those words now help the assistant choose this type. A save becomes a record only when it names the type and its fields."
     exit 0
 fi
 
