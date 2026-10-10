@@ -108,6 +108,52 @@ case "$URL" in
             RESPONSE_BODY='{"id":1,"apiKey":"mock-generated-key-abc123","keyPrefix":"abcd1234","label":"test"}'
         fi
         ;;
+    # ── structured record types (#31460) ──
+    # Order matters: the most specific pattern first, because case takes the FIRST match.
+    # Record history (#31384, ported by #31827): oldest first, the creation values included.
+    */api/data-formats/*/entries/*/history)
+        HTTP_CODE="200"
+        RESPONSE_BODY='{"entryId":9137,"changes":3,"history":[{"changedAt":"2026-10-01T10:00:00Z","field":"status","label":"Status","kind":"set","previous":null,"current":"open","changedBy":"Probe User"},{"changedAt":"2026-10-02T10:00:00Z","field":"status","label":"Status","kind":"changed","previous":"open","current":"in progress","changedBy":"Probe User"},{"changedAt":"2026-10-03T10:00:00Z","field":"~content~","label":"The memory itself","kind":"changed","previous":"Still open.","current":"Done.","changedBy":null}]}'
+        ;;
+    */api/data-formats/*/entries*)
+        if [[ "$METHOD" == "POST" ]]; then
+            HTTP_CODE="201"
+            RESPONSE_BODY='{"outcome":"structured.created","memoryId":99,"entryId":7}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='{"total":2,"format":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"recordedAt":"2026-10-07T09:00:00","note":"Migraine on Tuesday after red wine.","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"entryKey":null,"recordedAt":"2026-10-10T09:00:00","note":"Mild one on Friday.","values":{"severity":3,"triggers":null}}]}'
+        fi
+        ;;
+    */api/data-formats/*/versions)
+        HTTP_CODE="201"
+        RESPONSE_BODY='{"format":{"rootId":42,"name":"Migraine log","version":2,"versions":2}}'
+        ;;
+    */api/data-formats/*/retire)
+        HTTP_CODE="200"
+        RESPONSE_BODY='{"entries":41}'
+        ;;
+    */api/data-formats/*/reinstate)
+        HTTP_CODE="200"
+        RESPONSE_BODY='{"entries":41}'
+        ;;
+    */api/data-formats/*)
+        if [[ "$METHOD" == "PUT" ]]; then
+            HTTP_CODE="200"
+            RESPONSE_BODY='{"format":{"rootId":42,"name":"Headache log","version":1,"versions":1}}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='{"format":{"rootId":42,"name":"Migraine log","version":1,"versions":1,"entries":41,"entryKeyMode":"append","identityField":null,"visibility":"Private","matchHints":"migraine, headache"},"fields":[{"key":"severity","type":"number","retired":false},{"key":"triggers","type":"list","retired":false}]}'
+        fi
+        ;;
+    */api/data-formats|*/api/data-formats\?*)
+        if [[ "$METHOD" == "POST" ]]; then
+            HTTP_CODE="201"
+            RESPONSE_BODY='{"format":{"rootId":42,"name":"Migraine log","version":1,"versions":1}}'
+        else
+            HTTP_CODE="200"
+            RESPONSE_BODY='[{"rootId":42,"name":"Migraine log","entries":41,"matchHints":"migraine, headache"},{"rootId":43,"name":"Expenses","entries":3,"matchHints":""}]'
+        fi
+        ;;
     */api/groups/mine)
         HTTP_CODE="200"
         RESPONSE_BODY='[{"id":1,"groupName":"Finance Team","ownerUserId":10},{"id":2,"groupName":"Engineering","ownerUserId":10}]'
