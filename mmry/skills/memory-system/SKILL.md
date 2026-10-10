@@ -152,9 +152,10 @@ one whose hint words appear in it as whole words (the type with the most hint wo
 chooses none, and a type with no hint words is never chosen this way). The values are the fields
 the save supplies, or labelled lines such as `Amount: 25`. Without both, the save stays an
 ordinary memory: naming a type with no values stays ordinary, and so do hint words with no
-supplied fields and no labelled lines. Naming the type and giving its fields is the reliable
-way, so when the user tells you something in their own words and it fits one of their types, **you** read
-the values out of their words and save it as a record naming the type (see the next section).
+supplied fields and no labelled lines.
+Naming the type and giving its fields is the reliable way, so when the user tells you something
+in their own words and it fits one of their types, **you** read the values out of their words and
+save it as a record naming the type (see the next section).
 Run `list-formats.sh` whenever what they say looks like a recurring shape, so you know which
 types they have.
 

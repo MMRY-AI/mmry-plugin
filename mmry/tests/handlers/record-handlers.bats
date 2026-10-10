@@ -34,7 +34,9 @@ setup() {
     run bash "$HANDLERS/list-formats.sh"
     [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
     [[ "$output" == *"a save becomes a record when it names this type and has values for its fields"* ]] || return 1
-    [[ "$output" != *"or contains these words"* ]] || return 1
+    # A type with hints says it can also be chosen by its words; a type with none must not.
+    echo "$output" | grep "words that help choose it: (none)" | grep -q "or contains these words" && return 1
+    echo "$output" | grep -v "(none)" | grep -q "or contains these words"
     [[ "$output" != *"recognised by"* ]] || return 1
 }
 
