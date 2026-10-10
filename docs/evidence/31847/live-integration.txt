@@ -1,0 +1,67 @@
+#31847 live run  2026-10-08T22:17:34Z
+API      https://mnemo-integration-d8h6bzh2bxgrc3e4.westus3-01.azurewebsites.net
+health   {"status":"healthy","timestamp":"2026-10-08T22:17:34.7898627Z","revision":"32caee01a36b25c98c955f59a3d278991ba4d0cd"}
+plugin   85512d42cce582be9ec31d8fcc6f2e0cd2bdf88d
+
+subscriber Corr31847_1791497854 registered; API key issued (not shown)
+
+== TC1 Claude Code layout
+original save: exit 0: Stored 1 memory under Strategic tier.
+original id 31969: {"id":31969,"visibility":"Global","permissionGroupID":null,"memoryTier":"Strategic","content":"FACT: The Corr31847 office is on the third floor. M31847a1791497854"}
+plugin search --ids 'M31847a1791497854': id 31969 | Strategic | office/locations | Corr31847 office location 
+PASS  TC1 Claude Code layout: the plugin's search --ids shows id 31969
+correction save --supersedes 31969: exit 0: Stored 1 memory under Strategic tier. It replaces memory 31969, which is no longer active.
+PASS  TC1 Claude Code layout: correction save exit 0
+PASS  TC1 Claude Code layout: earlier memory 31969 no longer readable (GET 404)
+search 'M31847a1791497854' -> ids [31970]
+PASS  TC1 Claude Code layout: search returns only the correction (31970)
+correction: {"id":31970,"visibility":"Global","permissionGroupID":null,"memoryTier":"Strategic","content":"FACT: The Corr31847 office is on the fourth floor, it moved this week. M31847a1791497854"}
+
+== TC2 Codex layout
+original save: exit 0: Stored 1 memory under Strategic tier.
+original id 31971: {"id":31971,"visibility":"Global","permissionGroupID":null,"memoryTier":"Strategic","content":"FACT: The Corr31847 build server is named atlas. M31847b1791497854"}
+plugin search --ids 'M31847b1791497854': id 31971 | Strategic | infrastructure | Corr31847 build server hostname 
+PASS  TC2 Codex layout: the plugin's search --ids shows id 31971
+correction save --supersedes 31971: exit 0: Stored 1 memory under Strategic tier. It replaces memory 31971, which is no longer active.
+PASS  TC2 Codex layout: correction save exit 0
+PASS  TC2 Codex layout: earlier memory 31971 no longer readable (GET 404)
+search 'M31847b1791497854' -> ids [31972]
+PASS  TC2 Codex layout: search returns only the correction (31972)
+correction: {"id":31972,"visibility":"Global","permissionGroupID":null,"memoryTier":"Strategic","content":"FACT: The Corr31847 build server is named zephyr, atlas was retired. M31847b1791497854"}
+
+== TC3 private memory
+original save: exit 0: Stored 1 memory under Tactical tier.
+original id 31973: {"id":31973,"visibility":"Private","permissionGroupID":null,"memoryTier":"Tactical","content":"FACT: Corr31847 private note, my review is on Tuesday. M31847c1791497854"}
+plugin search --ids 'M31847c1791497854': id 31973 | Tactical | personal/schedule | Review scheduled for Tuesday 
+PASS  TC3 private memory: the plugin's search --ids shows id 31973
+correction save --supersedes 31973: exit 0: Stored 1 memory under Tactical tier. It replaces memory 31973, which is no longer active.
+PASS  TC3 private memory: correction save exit 0
+PASS  TC3 private memory: earlier memory 31973 no longer readable (GET 404)
+search 'M31847c1791497854' -> ids [31974]
+PASS  TC3 private memory: search returns only the correction (31974)
+correction: {"id":31974,"visibility":"Private","permissionGroupID":null,"memoryTier":"Tactical","content":"FACT: Corr31847 private note, my review moved to Thursday. M31847c1791497854"}
+PASS  TC3 private: correction is Private
+
+group created: 5967; tester added as member: HTTP 204
+
+== TC3 group memory
+original save: exit 0: Stored 1 memory under Tactical tier.
+original id 31975: {"id":31975,"visibility":"Group","permissionGroupID":5967,"memoryTier":"Tactical","content":"FACT: Corr31847 group note, the team standup is at 9. M31847d1791497854"}
+plugin search --ids 'M31847d1791497854': id 31975 | Tactical | team/Corr31847 | Daily standup time 
+PASS  TC3 group memory: the plugin's search --ids shows id 31975
+correction save --supersedes 31975: exit 0: Stored 1 memory under Tactical tier. It replaces memory 31975, which is no longer active.
+PASS  TC3 group memory: correction save exit 0
+PASS  TC3 group memory: earlier memory 31975 no longer readable (GET 404)
+search 'M31847d1791497854' -> ids [31976]
+PASS  TC3 group memory: search returns only the correction (31976)
+correction: {"id":31976,"visibility":"Group","permissionGroupID":5967,"memoryTier":"Tactical","content":"FACT: Corr31847 group note, the team standup is now at 10. M31847d1791497854"}
+PASS  TC3 group: correction is Group, group 5967
+
+== TC3 a different visibility is refused
+original: Stored 1 memory under Strategic tier.
+original id 31977: {"id":31977,"visibility":"Private","permissionGroupID":null,"memoryTier":"Strategic","content":"FACT: Corr31847 private salary note. M31847e1791497854"}
+correction --visibility global --supersedes 31977: exit 1: MMRY AI: Nothing was saved. Memory 31977 is Private, and a replacement keeps the visibility of the memory it replaces. Save again without a visibility, or change the old memory's visibility first.
+PASS  TC3 refuse: exit 1, nothing saved
+PASS  TC3 refuse: only the original exists, still private: {"id":31977,"visibility":"Private","permissionGroupID":null,"memoryTier":"Strategic","content":"FACT: Corr31847 private salary note. M31847e1791497854"}
+
+RESULT: 0 failure(s)

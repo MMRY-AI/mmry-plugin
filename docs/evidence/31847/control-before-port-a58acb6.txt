@@ -1,0 +1,62 @@
+#31847 live run  2026-10-08T22:18:12Z
+API      https://mnemo-integration-d8h6bzh2bxgrc3e4.westus3-01.azurewebsites.net
+health   {"status":"healthy","timestamp":"2026-10-08T22:18:12.2448985Z","revision":"32caee01a36b25c98c955f59a3d278991ba4d0cd"}
+plugin   a58acb6ce2f5de1c2acf09397c8f24f21566579d
+
+subscriber Corr31847_1791497892 registered; API key issued (not shown)
+
+== TC1 Claude Code layout
+original save: exit 0: Stored 1 memory under Operational tier.
+original id 31978: {"id":31978,"visibility":"Global","permissionGroupID":null,"memoryTier":"Operational","content":"FACT: The Corr31847 office is on the third floor. M31847a1791497892"}
+plugin search --ids 'M31847a1791497892': 
+FAIL  TC1 Claude Code layout: search --ids did not show id 31978
+correction save --supersedes 31978: exit 0: Stored 1 memory under Tactical tier.
+PASS  TC1 Claude Code layout: correction save exit 0
+FAIL  TC1 Claude Code layout: earlier memory GET 200
+search 'M31847a1791497892' -> ids [31978,31979]
+FAIL  TC1 Claude Code layout: search returned [31978,31979]
+
+== TC2 Codex layout
+original save: exit 0: Stored 1 memory under Operational tier.
+original id 31980: {"id":31980,"visibility":"Global","permissionGroupID":null,"memoryTier":"Operational","content":"FACT: The Corr31847 build server is named atlas. M31847b1791497892"}
+plugin search --ids 'M31847b1791497892': 
+FAIL  TC2 Codex layout: search --ids did not show id 31980
+correction save --supersedes 31980: exit 0: Stored 1 memory under Operational tier.
+PASS  TC2 Codex layout: correction save exit 0
+FAIL  TC2 Codex layout: earlier memory GET 200
+search 'M31847b1791497892' -> ids [31981,31980]
+FAIL  TC2 Codex layout: search returned [31981,31980]
+
+== TC3 private memory
+original save: exit 0: Stored 1 memory under Tactical tier.
+original id 31982: {"id":31982,"visibility":"Private","permissionGroupID":null,"memoryTier":"Tactical","content":"FACT: Corr31847 private note, my review is on Tuesday. M31847c1791497892"}
+plugin search --ids 'M31847c1791497892': 
+FAIL  TC3 private memory: search --ids did not show id 31982
+correction save --supersedes 31982: exit 0: Stored 1 memory under Tactical tier.
+PASS  TC3 private memory: correction save exit 0
+FAIL  TC3 private memory: earlier memory GET 200
+search 'M31847c1791497892' -> ids [31983,31982]
+FAIL  TC3 private memory: search returned [31983,31982]
+
+group created: 5968; tester added as member: HTTP 204
+
+== TC3 group memory
+original save: exit 0: Stored 1 memory under Operational tier.
+original id 31984: {"id":31984,"visibility":"Group","permissionGroupID":5968,"memoryTier":"Operational","content":"FACT: Corr31847 group note, the team standup is at 9. M31847d1791497892"}
+plugin search --ids 'M31847d1791497892': 
+FAIL  TC3 group memory: search --ids did not show id 31984
+correction save --supersedes 31984: exit 0: Stored 1 memory under Operational tier.
+PASS  TC3 group memory: correction save exit 0
+FAIL  TC3 group memory: earlier memory GET 200
+search 'M31847d1791497892' -> ids [31985,31984]
+FAIL  TC3 group memory: search returned [31985,31984]
+
+== TC3 a different visibility is refused
+original: No memories warranted saving from this context.
+jq: error (at <stdin>:0): Cannot index array with string ("id")
+original id : 
+correction --visibility global --supersedes : exit 0: Stored 1 memory under Strategic tier.
+FAIL  TC3 refuse: exit 0
+FAIL  TC3 refuse: ids [31986]
+
+RESULT: 14 failure(s)

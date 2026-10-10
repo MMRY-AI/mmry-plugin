@@ -1350,7 +1350,7 @@ mmry_process_context() {
     # Send session context to the server-side AI layer for processing.
     # Usage: mmry_process_context "context" "hookType" \
     #            ["workingDir" "sessionId" "projectId" "taskId" \
-    #             "visibility" "permissionGroupId" "agentName"]
+    #             "visibility" "permissionGroupId" "agentName" "supersedesId"]
     #
     # Visibility/permissionGroupId are forwarded uniformly to every memory
     # the server extracts from this single context (Option A -- no per-memory
@@ -1366,6 +1366,9 @@ mmry_process_context() {
     # #30320: the creating agent's name, carried onto every memory the server extracts from this
     # context. Resolve it with mmry_resolve_agent_name first; empty is omitted from the body.
     local agent_name="${9:-}"
+    # #31740: the memory this save replaces. Empty is omitted by _mmry_build_json, so a save
+    # without it sends exactly the request it always has.
+    local supersedes_id="${10:-}"
 
     local body
     body=$(_mmry_build_json \
@@ -1377,7 +1380,8 @@ mmry_process_context() {
         "taskId"              "$task_id" \
         "visibility"          "$visibility" \
         "#permissionGroupID"  "$permission_group_id" \
-        "agentName"           "$agent_name")
+        "agentName"           "$agent_name" \
+        "#supersedesId"       "$supersedes_id")
 
     _mmry_request POST "/api/memories/process" "$body"
     local rc=$?
@@ -1388,6 +1392,33 @@ mmry_process_context() {
     MMRY_PROCESS_MESSAGE=""
     if [[ -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
         MMRY_PROCESS_MESSAGE="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.message // empty' 2>/dev/null || true)"
+    fi
+
+    # #31740: whether the API retired the memory this save named. "true" only when the response
+    # says so; empty when it says nothing, which is what a server without #31740 does, so the
+    # caller cannot mistake an ignored replacement for an applied one. Read only when one was
+    # asked for, so an ordinary save spawns nothing extra.
+    # And how many memories the save stored (#31740 QA round 1): with a replacement, "nothing was
+    # stored" must never be reported as "saved, the old one is still active".
+    # And the reason (#31740 QA round 2): "unverified" means the old memory MAY still be active,
+    # which the caller must not report as "was not replaced".
+    MMRY_SUPERSEDE_APPLIED=""
+    MMRY_PROCESS_STORED=""
+    MMRY_SUPERSEDE_REASON=""
+    if [[ -n "$supersedes_id" && -n "$MMRY_RESPONSE" && -n "${MMRY_JQ:-}" ]]; then
+        local _sup="" _rest=""
+        _sup="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            '[(if (.supersede | type) == "object" then (.supersede.applied | tostring) else "" end),
+              (if (.stored | type) == "number" then (.stored | tostring) else "" end),
+              (if (.supersede | type) == "object" and (.supersede.reason | type) == "string"
+                 then (.supersede.reason | gsub("[|\r\n]"; "")) else "" end)] | join("|")' \
+            2>/dev/null || true)"
+        MMRY_SUPERSEDE_APPLIED="${_sup%%|*}"
+        if [[ "$_sup" == *"|"* ]]; then
+            _rest="${_sup#*|}"
+            MMRY_PROCESS_STORED="${_rest%%|*}"
+            [[ "$_rest" == *"|"* ]] && MMRY_SUPERSEDE_REASON="${_rest#*|}"
+        fi
     fi
 
     # #29912 — record successful save so stop-check.sh can compute time-since-last-save

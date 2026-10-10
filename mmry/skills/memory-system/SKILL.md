@@ -119,7 +119,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --session-id "$CLAUDE_SESSION_ID"
 ```
 
-Optional parameters (`--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`, `--agent-name`) can be omitted — they default to empty/NULL. **Always include `--session-id "$CLAUDE_SESSION_ID"`.** `--working-dir` is optional — if omitted, it defaults to the session launch directory (persisted at session start). Returns `NewMemoryID` on success.
+Optional parameters (`--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`, `--agent-name`) can be omitted — they default to empty/NULL. **Always include `--session-id "$CLAUDE_SESSION_ID"`.** `--working-dir` is optional — if omitted, it defaults to the session launch directory (persisted at session start). It prints a short confirmation from MMRY AI. It does not print the new memory's id, so do not tell the user one.
 
 **Which agent saved it.** Each memory records the name of the agent that created it. You do not
 need to do anything for this: when the session was started as a named agent (`claude --agent
@@ -214,27 +214,41 @@ mmry_delete_link 42 87
 
 ### Supersedes Pattern
 
-When a decision changes, store the new memory and link it as `supersedes`:
-```bash
-# Store updated decision — returns NewMemoryID (e.g., 95)
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
-  --tier "Operational" --category "Decision" --scope "backend" \
-  --topic "Primary Product ID" \
-  --content "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
-  --source "eric" --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
-
-# Link to the old decision it replaces
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/link-memories.sh" 95 42 "supersedes"
-```
-
-Or use the `--supersedes` flag to do both in one step:
+When a fact or decision changes, save the new memory with `--supersedes <old id>`. MMRY AI saves
+it, retires the old memory so it stops being recalled, and links the two:
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
-  --tier "Operational" --category "Decision" --scope "backend" \
-  --topic "Primary Product ID" \
-  --content "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
-  --source "eric" --supersedes 42 --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
+  --context "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
+  --supersedes 42 --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
 ```
+
+Read the exit status, because it says whether the replacement happened:
+
+| Exit | Meaning | What to tell the user |
+|------|---------|-----------------------|
+| 0 | Saved, and memory 42 is retired | The correction is saved and replaces the old memory. |
+| 1 | Nothing saved | The message says why: memory 42 does not exist, is already retired or is not one this user can see; it is a Foundation memory; a different visibility was asked for; or MMRY AI could not save it at all. Say the correction was NOT saved, and act on the reason. |
+| 3 | Saved, but memory 42 may still be active | Both may be live. Say so plainly; do not claim the old one was replaced. |
+
+The replacement keeps the old memory's tier, visibility and group: a private memory stays private,
+a group memory stays with its group, and so does its correction. So do not pass `--visibility` or
+`--permission-group-id` with `--supersedes`, unless it is the one the old memory already has; a
+different one is refused. A Foundation memory cannot be replaced by a save at all; the account owner
+changes those in the MMRY AI portal.
+
+**Where the id comes from.** Search for the memory being corrected with `--ids`, which prints each
+match's id (`id 42 | tier | scope | topic`):
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" --ids "primary product id"
+```
+Use the id of the match that says the wrong thing. Never guess one. The memories loaded at session
+start are the Foundation set, which a save cannot replace. If no match is clearly the wrong memory,
+save the correction without `--supersedes` and tell the user the earlier memory is still active
+alongside it. Do not show ids to the user unless they ask; `/mmry:search` results stay as they are.
+
+**Corrections.** When the user says a remembered fact is wrong, or you find one that is out of date,
+this is how to fix it: save the corrected version with `--supersedes <id of the wrong one>`, so only
+the correction is recalled from then on.
 
 ## Search
 
