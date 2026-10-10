@@ -90,6 +90,12 @@ Setup creates `~/.claude/mmry-config.json` automatically. You can also create it
 
 **Environment variable overrides:** `MMRY_API_URL`, `MMRY_API_KEY`
 
+**Agent name.** Every memory records the name of the agent that created it, so a team running
+several named agents can see which one contributed what. On Claude Code the name is picked up
+automatically when a session is started with `claude --agent <name>`. Anywhere else, including
+Codex, set `MMRY_AGENT_NAME` in the environment the assistant runs in. Up to 100 characters; a
+longer name is not sent, and the memory is saved without one.
+
 ### Foundation re-injection (optional)
 
 Foundation memories are restated to Claude on every prompt so they consistently guide responses. These optional keys tune that behavior:

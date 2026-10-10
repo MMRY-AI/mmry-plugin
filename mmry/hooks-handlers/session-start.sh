@@ -186,6 +186,17 @@ fi
 
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
 
+# THE AGENT THIS SESSION RUNS AS (#30320). Claude Code puts agent_type in the SessionStart payload
+# when the session was started with `claude --agent <name>`. Saves are made by save-memory.sh in a
+# Bash tool shell, which never sees this payload, so the name is handed over through
+# CLAUDE_ENV_FILE, which Claude Code sources before each Bash tool command. Only from a payload
+# that was actually read: /mmry:load-memories runs this script with no payload, and treating that
+# as "no agent" would clear the name the real SessionStart recorded.
+if [[ "$HOOK_READ_STATUS" == "ok" ]]; then
+    _mmry_agent_type="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.agent_type // empty' 2>/dev/null || true)"
+    mmry_record_session_agent "$_mmry_agent_type" || true
+fi
+
 # SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
 #
 # The per-prompt hook records each verified delivery so it can tell two states apart that
