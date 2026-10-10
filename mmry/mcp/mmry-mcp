@@ -1,0 +1,12 @@
+#!/bin/sh
+# mmry-mcp - how Codex starts MMRY's MCP server on macOS and Linux (#31743).
+#
+# codex-mcp.json names "./mcp/mmry-mcp" with the plugin root as the working folder. Codex has one
+# command line for every platform, so the name carries no extension: here it is this file, run by
+# its first line; on Windows Codex looks the same name up with PATHEXT and finds mmry-mcp.cmd beside
+# it. Both hand over to codex-hook.sh, the entry point every MMRY hook on Codex already uses, which
+# declares the host and starts hooks-handlers/mcp-server.sh with stdin and stdout passed through.
+#
+# POSIX sh on purpose: on Linux /bin/sh is often dash, and codex-hook.sh re-runs itself under bash.
+here=$(dirname "$0")
+exec sh "$here/../hooks-handlers/codex-hook.sh" mcp-server "$@"

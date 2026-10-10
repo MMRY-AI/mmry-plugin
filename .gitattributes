@@ -34,3 +34,8 @@
 # The cut program the per-prompt hook runs for non-ASCII sets (#31411). A CRLF checkout on
 # Windows would hand awk a carriage return at the end of every line of its program.
 *.awk text eol=lf
+
+# The Codex MCP server's macOS and Linux launcher (#31743) has no extension, because Codex names one
+# command for every platform and Windows finds mmry-mcp.cmd from the same name. A CRLF checkout would
+# make its first line ask for an interpreter called "sh\r".
+mmry/mcp/mmry-mcp text eol=lf

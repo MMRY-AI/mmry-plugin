@@ -5,6 +5,7 @@
   "hooks": "./hooks/codex-hooks.json",
   "skills": "./skills-codex/",
   "commands": "./commands-codex/",
+  "mcpServers": "./codex-mcp.json",
   "interface": {
     "displayName": "MMRY AI",
     "shortDescription": "Persistent memory that follows you between sessions.",
