@@ -173,7 +173,29 @@ if [[ -z "$SESSION_ID" && "$HOOK_READ_STATUS" == "ok" ]]; then
     MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: the $(mmry_host_label) hook payload was read successfully but carried no 'session_id' field (fields present: ${_mmry_keys:-none - it did not parse as JSON}). MMRY assumes the Claude Code payload field names; this session is being registered without a real id, so coordination features will not work. Tell the user and ask them to report it. "
 fi
 
+# LEFTOVER FORMATION MEMBERSHIPS (#31844). Other sessions' records that are stale, unwatched, and
+# that the service says are no longer members are removed here; the rule, its bounds and why a
+# genuine member is never removed are in formation-state.sh. ONLY WITH THE PAYLOAD'S OWN ID (QA
+# round 2, D1): the id that protects this session's own record must be this session's, so the
+# environment fallback below is deliberately not used, and a start without a payload id sweeps
+# nothing. Before the memory load, whose failure paths exit early. In-process and best-effort.
+if [[ -n "$SESSION_ID" && -f "${PLUGIN_ROOT}/hooks-handlers/formation-state.sh" ]]; then
+    { source "${PLUGIN_ROOT}/hooks-handlers/formation-state.sh" 2>/dev/null \
+        && mmry_formation_sweep "$SESSION_ID"; } 2>/dev/null || true
+fi
+
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
+
+# THE AGENT THIS SESSION RUNS AS (#30320). Claude Code puts agent_type in the SessionStart payload
+# when the session was started with `claude --agent <name>`. Saves are made by save-memory.sh in a
+# Bash tool shell, which never sees this payload, so the name is handed over through
+# CLAUDE_ENV_FILE, which Claude Code sources before each Bash tool command. Only from a payload
+# that was actually read: /mmry:load-memories runs this script with no payload, and treating that
+# as "no agent" would clear the name the real SessionStart recorded.
+if [[ "$HOOK_READ_STATUS" == "ok" ]]; then
+    _mmry_agent_type="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.agent_type // empty' 2>/dev/null || true)"
+    mmry_record_session_agent "$_mmry_agent_type" || true
+fi
 
 # SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
 #
@@ -210,7 +232,9 @@ rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
 # Records named by session id (#31583 QA round 6) are never cleared by the session that wrote them,
 # because it cannot know it has ended. They are a few dozen bytes each; anything a week old is from
 # a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
-find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' \) -mtime +7 -delete 2>/dev/null || true
+# The per-prompt hook's prepared set, claim, result and cut-short markers (#31893) are one each per
+# session (a claim also leaves one small file per change of the set), and go the same way.
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' \) -mtime +7 -delete 2>/dev/null || true
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.

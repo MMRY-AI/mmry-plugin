@@ -20,6 +20,8 @@ Save a memory to MMRY AI. If the user provided a description after the command, 
 
    The server resolves the working directory from the registered session — no need to pass `--working-dir` explicitly. Pass it only when overriding the session-recorded value.
 
+   The name of the agent saving the memory is sent automatically when the session was started as a named agent, or when the user set `MMRY_AGENT_NAME`. Add `--agent-name "<name>"` only to name a different agent (for example, a subagent saving on its own behalf). Do not write the agent's name into the context to label it.
+
    Replace `CONTEXT` with the substantive content you want to save. Be specific and actionable, not vague. Include enough surrounding context that the server can file it correctly (e.g., what project or topic it relates to, why it matters).
 
 3. Confirm to the user that the memory was sent for processing. Keep it brief — one sentence. Do **not** announce internal classification details (the server decides those).

@@ -13,11 +13,19 @@ set -euo pipefail
 # The directory comes from BASH_SOURCE without a fork (#31746). It was `$(cd "$(dirname ...)" && pwd)`,
 # two processes paid by every handler that sources this file, the per-prompt formation check among
 # them. Sourcing a sibling needs a path, not an absolute one; hook-guard.sh explains the idiom.
+# DEFINITIONS ONLY, ON REQUEST (#31893). The per-prompt Foundation hook needs the set verifier below and
+# nothing that starts a process: resolving jq costs a `jq --version` and loading the config a jq parse,
+# five processes on Windows, which under load is five seconds of a 20-second hook. With
+# MMRY_CLIENT_DEFINE_ONLY=1 this file defines its functions and its defaults and starts nothing; jq is
+# not resolved and the config is not loaded, so a caller that sets it may call only functions that
+# need neither. Every other caller is unchanged.
+if [[ "${MMRY_CLIENT_DEFINE_ONLY:-}" != "1" ]]; then
 _mmry_client_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_mmry_client_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_client_dir="."
 source "${_mmry_client_dir}/lib-jq.sh"
 unset _mmry_client_dir
 mmry_resolve_jq || true
+fi
 
 # ============================================================================
 # 1. CONFIG LOADING
@@ -445,6 +453,9 @@ mmry_read_foundation_set() {
     MMRY_FND_VERDICT=""
     MMRY_FND_SET=""
     MMRY_FND_SETID=""
+    # The file exactly as read, on rc 0 only (#31893): the per-prompt hook keeps it beside the parts it
+    # prepared and serves them only while the file still reads the same.
+    MMRY_FND_RAW=""
 
     # THE ONE READ (#31597). Every answer below comes from this copy and nothing reopens the file,
     # so a replacement that lands while this runs either happened before the read, and the new set
@@ -513,7 +524,37 @@ mmry_read_foundation_set() {
     fi
 
     local act_cksum act_count
-    read -r act_cksum act_count < <(printf '%s' "$body" | cksum 2>/dev/null)
+    # WITHIN A TIME LIMIT WHEN THE CALLER GIVES ONE (#31893). The per-prompt hook verifies in its own
+    # process, with no worker to kill, so it passes the seconds it has left in MMRY_FND_CKSUM_SECS and a
+    # cksum that has not answered by then is a verdict of its own, "slow", rc 4, never a wait past the
+    # hook's limit. The cksum is left to finish on its own; it holds none of the caller's descriptors
+    # beyond its pipe, so nothing that reads the hook waits for it. Without the variable, unchanged.
+    #
+    # THE CLOCK DECIDES A TIMEOUT, NOT THE STATUS (#31893 QA round 2, as lib-hookread.sh does). bash 4
+    # and later report a read -t that ran out of time with a status above 128; the bash 3.2 macOS ships
+    # returns 1, the same as a read that found nothing. Trusting the status alone made a slow check on a
+    # Mac "unreadable", a refusal, and the person was shown a notice with a false cause. So a read that
+    # failed once the time given has passed is a timeout, whatever its status.
+    #
+    # ONE PROCESS FOR THE CHECK, NOT THREE (#31893 QA round 2). The set ends in the writer's newline, so
+    # a here-string, which adds one, gives cksum exactly the same bytes as printf '%s' did, and cksum
+    # replaces the subshell instead of being one end of a pipeline beside a forked printf. A set that does
+    # not end in a newline takes the pipeline, as before. On a loaded Windows machine each process saved
+    # is a second or more of the prompt's 20.
+    if [[ "${MMRY_FND_CKSUM_SECS:-}" =~ ^[1-9][0-9]*$ ]]; then
+        local _ck_rc=0 _ck_t0=$SECONDS
+        if [[ "$body" == *$'\n' ]]; then
+            read -r -t "$MMRY_FND_CKSUM_SECS" act_cksum act_count < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; exec cksum 2>/dev/null <<<"${body%$'\n'}") || _ck_rc=$?
+        else
+            read -r -t "$MMRY_FND_CKSUM_SECS" act_cksum act_count < <(exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; printf '%s' "$body" | cksum 2>/dev/null) || _ck_rc=$?
+        fi
+        if (( _ck_rc > 128 )) || { (( _ck_rc != 0 )) && (( SECONDS - _ck_t0 >= MMRY_FND_CKSUM_SECS )); }; then
+            MMRY_FND_VERDICT='slow|the cached directives could not be checked in the time this prompt allows'
+            return 4
+        fi
+    else
+        read -r act_cksum act_count < <(printf '%s' "$body" | cksum 2>/dev/null)
+    fi
     if [[ ! "$act_cksum" =~ ^[0-9]+$ ]]; then
         MMRY_FND_VERDICT='unreadable|the cached directives could not be read for verification'
         return 3
@@ -540,6 +581,7 @@ mmry_read_foundation_set() {
     body="${body%$'\n'}"
     MMRY_FND_SET="$body"
     MMRY_FND_SETID="$exp_cksum"
+    MMRY_FND_RAW="$raw"
     # The checksum is the verdict's fourth field (#31411 QA round 2): the hook names the set's
     # version in every part and record, and the by-reference copy is checked against it.
     MMRY_FND_VERDICT="ok ${exp_entries} ${act_bytes} ${exp_cksum}"
@@ -847,11 +889,13 @@ _mmry_build_json() {
 # ============================================================================
 
 mmry_create_memory() {
-    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID]
+    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID] [AGENT_NAME]
     local tier="$1" category="$2" scope="$3" topic="$4" content="$5"
     local source="${6:-}" task_id="${7:-}" working_dir="${8:-}"
     local project_id="${9:-}" session_id="${10:-}" visibility="${11:-}"
     local permission_group_id="${12:-}" supersedes_id="${13:-}"
+    # #30320: the creating agent's name. Empty is omitted from the body, as every field here is.
+    local agent_name="${14:-}"
 
     local body
     body="$(_mmry_build_json \
@@ -867,7 +911,8 @@ mmry_create_memory() {
         "sessionID" "$session_id" \
         "visibility" "$visibility" \
         "#permissionGroupID" "$permission_group_id" \
-        "#supersedesId" "$supersedes_id")"
+        "#supersedesId" "$supersedes_id" \
+        "agentName" "$agent_name")"
 
     _mmry_request POST "/api/memories" "$body"
 }
@@ -1305,7 +1350,7 @@ mmry_process_context() {
     # Send session context to the server-side AI layer for processing.
     # Usage: mmry_process_context "context" "hookType" \
     #            ["workingDir" "sessionId" "projectId" "taskId" \
-    #             "visibility" "permissionGroupId"]
+    #             "visibility" "permissionGroupId" "agentName" "supersedesId"]
     #
     # Visibility/permissionGroupId are forwarded uniformly to every memory
     # the server extracts from this single context (Option A -- no per-memory
@@ -1318,9 +1363,12 @@ mmry_process_context() {
     local task_id="${6:-}"
     local visibility="${7:-}"
     local permission_group_id="${8:-}"
+    # #30320: the creating agent's name, carried onto every memory the server extracts from this
+    # context. Resolve it with mmry_resolve_agent_name first; empty is omitted from the body.
+    local agent_name="${9:-}"
     # #31740: the memory this save replaces. Empty is omitted by _mmry_build_json, so a save
     # without it sends exactly the request it always has.
-    local supersedes_id="${9:-}"
+    local supersedes_id="${10:-}"
 
     local body
     body=$(_mmry_build_json \
@@ -1332,6 +1380,7 @@ mmry_process_context() {
         "taskId"              "$task_id" \
         "visibility"          "$visibility" \
         "#permissionGroupID"  "$permission_group_id" \
+        "agentName"           "$agent_name" \
         "#supersedesId"       "$supersedes_id")
 
     _mmry_request POST "/api/memories/process" "$body"
@@ -1391,6 +1440,72 @@ _mmry_mark_save_success() {
     rm -f "${d}/.mmry-stop-count" 2>/dev/null || true
 }
 
+# ============================================================================
+# AGENT NAME (#30320, DD-102 in the API repository)
+# ============================================================================
+#
+# A memory records the name of the agent that created it. Where the name comes from, in order:
+#
+#   1. --agent-name on save-memory.sh / process-context.sh: the assistant names itself.
+#   2. MMRY_AGENT_NAME: a name the user configured in their own environment. This is the route
+#      on Codex, and anywhere else the host does not report an agent.
+#   3. MMRY_SESSION_AGENT_NAME: what Claude Code reported. Its hook payload carries agent_type
+#      when the session was started with `claude --agent <name>`; session-start.sh reads it there
+#      and exports it through CLAUDE_ENV_FILE, which Claude Code sources before every Bash tool
+#      command. That is how the name reaches save-memory.sh, which the assistant runs in a Bash
+#      tool shell, not in a hook.
+#
+# None of them set means no agent name, and the server stores none.
+
+MMRY_AGENT_NAME_MAX=100
+
+# Prints the agent name to send, or nothing. A name that cannot be sent as given - longer than
+# the server accepts, or carrying control characters - is NOT sent, and the save goes ahead
+# without one: losing the memory to its label would be the wrong trade, and cutting the name
+# short would store a name the agent does not have. A one-line note says so on stderr.
+mmry_resolve_agent_name() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && name="${MMRY_AGENT_NAME:-}"
+    [[ -z "$name" ]] && name="${MMRY_SESSION_AGENT_NAME:-}"
+    # Trim surrounding whitespace (bash 3.2 compatible: no extglob needed).
+    name="${name#"${name%%[![:space:]]*}"}"
+    name="${name%"${name##*[![:space:]]}"}"
+    [[ -z "$name" ]] && return 0
+    case "$name" in
+        *[[:cntrl:]]*)
+            echo "MMRY AI: the agent name contains control characters, so it was not sent; the memory is saved without one." >&2
+            return 0 ;;
+    esac
+    if (( ${#name} > MMRY_AGENT_NAME_MAX )); then
+        echo "MMRY AI: the agent name is longer than ${MMRY_AGENT_NAME_MAX} characters, so it was not sent; the memory is saved without one." >&2
+        return 0
+    fi
+    printf '%s' "$name"
+}
+
+# Writes this session's agent name to Claude Code's per-session environment file, so the Bash
+# tool shells the assistant runs save-memory.sh in can see it. Usage:
+#   mmry_record_session_agent "<agent_type from the SessionStart payload, or empty>"
+# Does nothing when CLAUDE_ENV_FILE is unset, which is every host other than Claude Code and every
+# run outside a SessionStart hook. An empty name writes an unset, so a resumed or cleared session
+# without --agent does not inherit a name from an earlier start that shared the file.
+mmry_record_session_agent() {
+    local agent="${1:-}"
+    [[ -n "${CLAUDE_ENV_FILE:-}" ]] || return 0
+    agent="${agent#"${agent%%[![:space:]]*}"}"
+    agent="${agent%"${agent##*[![:space:]]}"}"
+    case "$agent" in *[[:cntrl:]]*) agent="" ;; esac
+    if (( ${#agent} > MMRY_AGENT_NAME_MAX )); then agent=""; fi
+    if [[ -z "$agent" ]]; then
+        printf 'unset MMRY_SESSION_AGENT_NAME\n' >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+        return 0
+    fi
+    # Single-quoted, with any single quote closed, escaped and reopened, so the file sources to
+    # exactly this value whatever characters the name contains.
+    local q="'\\''"
+    printf "export MMRY_SESSION_AGENT_NAME='%s'\n" "${agent//\'/$q}" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+}
+
 mmry_health() {
     # Health check — does not require auth
     local tmp_resp
@@ -1407,4 +1522,4 @@ mmry_health() {
 # 7. AUTO-INIT
 # ============================================================================
 
-mmry_load_config
+[[ "${MMRY_CLIENT_DEFINE_ONLY:-}" == "1" ]] || mmry_load_config

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # save-memory.sh — Send context to MMRY AI API for server-side processing.
 # Thin client: the server decides tier, category, scope, and formatting.
-# Usage: bash save-memory.sh --context "..." [--working-dir DIR] [--session-id ID]
+# Usage: bash save-memory.sh --context "..." [--working-dir DIR] [--session-id ID] [--agent-name NAME]
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
 # Parse arguments ��� accept both new and legacy formats
-CONTEXT="" WORKING_DIR="" SESSION_ID="" PROJECT_ID="" TASK_ID=""
+CONTEXT="" WORKING_DIR="" SESSION_ID="" PROJECT_ID="" TASK_ID="" AGENT_NAME=""
 
 # Legacy arguments (ignored — server classifies now)
 TIER="" CATEGORY="" SCOPE="" TOPIC="" CONTENT="" SOURCE=""
@@ -26,6 +26,8 @@ while [[ $# -gt 0 ]]; do
         --session-id)   SESSION_ID="$2"; shift 2 ;;
         --project-id)   PROJECT_ID="$2"; shift 2 ;;
         --task-id)      TASK_ID="$2"; shift 2 ;;
+        # #30320: the creating agent's name. Optional; see mmry_resolve_agent_name for the fallbacks.
+        --agent-name)   AGENT_NAME="$2"; shift 2 ;;
         # Legacy arguments — build context from them for backward compatibility
         --tier)         TIER="$2"; shift 2 ;;
         --category)     CATEGORY="$2"; shift 2 ;;
@@ -91,9 +93,12 @@ if [[ -n "$PERMISSION_GROUP_ID_GIVEN" && ! "$PERMISSION_GROUP_ID" =~ ^[1-9][0-9]
     exit 1
 fi
 
+# #30320: the flag, else a configured name, else the one Claude Code reported for this session.
+AGENT_NAME="$(mmry_resolve_agent_name "$AGENT_NAME")"
+
 # Exit status: 0 saved (and, with --supersedes, the old memory retired); 1 nothing saved;
 # 3 saved, but the memory named by --supersedes may still be active.
-if mmry_process_context "$CONTEXT" "manual" "$WORKING_DIR" "$SESSION_ID" "$PROJECT_ID" "$TASK_ID" "$VISIBILITY" "$PERMISSION_GROUP_ID" "$SUPERSEDES"; then
+if mmry_process_context "$CONTEXT" "manual" "$WORKING_DIR" "$SESSION_ID" "$PROJECT_ID" "$TASK_ID" "$VISIBILITY" "$PERMISSION_GROUP_ID" "$AGENT_NAME" "$SUPERSEDES"; then
     # Bug #8 (#29950): print the server's short ack when available, otherwise fall back.
     echo "${MMRY_PROCESS_MESSAGE:-Memory sent to MMRY AI for processing.}"
     if [[ -n "$SUPERSEDES" && "${MMRY_SUPERSEDE_APPLIED:-}" != "true" && "${MMRY_PROCESS_STORED:-}" == "0" ]]; then

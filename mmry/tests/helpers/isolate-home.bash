@@ -78,6 +78,17 @@ mmry_isolate_home() {
     export HOME
     mkdir -p "$HOME/.claude"
 
+    # THE TEMP FOLDER IS ISOLATED TOO (#31844). session-init.sh now removes other sessions' formation
+    # membership files from ${TMPDIR:-/tmp} when they are older than the stale period, and a dozen
+    # suites run session-init.sh with whatever TMPDIR they inherited. Inherited from a developer's
+    # shell, that is the developer's real temp folder, holding the real records of the formations
+    # running on that machine: a test run would have swept them. Every suite gets a temp folder of
+    # its own inside the isolated base, so nothing a test starts can reach the real one. A test that
+    # needs the real /tmp says so explicitly (env -u TMPDIR), as formation-gate.bats does.
+    TMPDIR="$base/tmp"
+    export TMPDIR
+    mkdir -p "$TMPDIR"
+
     # Deliberately NOT creating a config here. An empty HOME means the discovery order runs
     # off the end and the client falls back to its compiled-in defaults, which is the state
     # every suite that does not write its own config already assumes it is testing.

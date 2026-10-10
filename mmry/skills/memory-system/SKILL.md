@@ -119,7 +119,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --session-id "$CLAUDE_SESSION_ID"
 ```
 
-Optional parameters (`--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`) can be omitted — they default to empty/NULL. **Always include `--session-id "$CLAUDE_SESSION_ID"`.** `--working-dir` is optional — if omitted, it defaults to the session launch directory (persisted at session start). It prints a short confirmation from MMRY AI. It does not print the new memory's id, so do not tell the user one.
+Optional parameters (`--task-id`, `--project-id`, `--visibility`, `--permission-group-id`, `--supersedes`, `--agent-name`) can be omitted — they default to empty/NULL. **Always include `--session-id "$CLAUDE_SESSION_ID"`.** `--working-dir` is optional — if omitted, it defaults to the session launch directory (persisted at session start). It prints a short confirmation from MMRY AI. It does not print the new memory's id, so do not tell the user one.
+
+**Which agent saved it.** Each memory records the name of the agent that created it. You do not
+need to do anything for this: when the session was started as a named agent (`claude --agent
+<name>`), MMRY AI picks the name up at session start and sends it with every save, and a name the
+user set in `MMRY_AGENT_NAME` is used otherwise. Pass `--agent-name "<name>"` only to name a
+different agent, for example when you are a subagent saving on your own behalf. Never write the
+agent's name into the memory text to label it.
 
 ## When to Store a Memory
 Store a memory when any of the following happen:

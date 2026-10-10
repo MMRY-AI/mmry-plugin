@@ -137,6 +137,247 @@ mmry_formation_state_seen() {
     return 0
 }
 
+# REFRESH WITHOUT A PROCESS (#31844). Rewrites the record exactly as it stands, which is the cheapest
+# way to bring its mtime up to date: a `touch` would be one more process on every member's check.
+# The mtime is how the sweep below tells a live member from a session that ended without leaving,
+# so every check a member makes calls this. The callers hold the delivery mutex while they do, the
+# same mutex every "seen" write is made under, so a refresh cannot write back a last-seen value
+# another reader has just advanced. A record that is not there is not created.
+mmry_formation_state_refresh() {
+    mmry_formation_state_read "${1:-}" || return 0
+    mmry_formation_state_seen "$MMRY_FS_LAST_SEEN" "${1:-}" || true
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------
+# LEFTOVER MEMBERSHIPS (#31844).
+#
+# A session that ends without leaving its formation - the window closed, the machine restarted, the
+# client crashed - leaves its record here for ever. Nothing else removes it, and until #31844 the
+# hooks' membership gate opened for any file in this folder, so one ended session made every later
+# session on the machine pay for the full formation check. Measured on one Windows machine on
+# 2026-10-08: 41 entries, the oldest five weeks old.
+#
+# THE RULE. Another session's record is removed at a session start only when ALL of these hold:
+#   1. nobody has written it for MMRY_FORMATION_STALE_SECONDS (three days);
+#   2. that session's idle watch is not running (its poll lock holds no live pid);
+#   3. THE SERVICE SAYS, in so many words, that the session is not a member of the formation the
+#      record names (#31844 QA round 2).
+# A live member keeps its record fresh without trying: every check it makes refreshes it (see
+# mmry_formation_state_refresh above), and its idle watch refreshes it at every pause. But age alone
+# cannot tell an ended session from a member that has simply been quiet, and QA found three genuine
+# members whose records go stale: a Codex member (Codex has no idle watch) idle for three days; a
+# Claude Code member whose watch stopped after two unreachable-service results, then sat idle; and a
+# Claude Code member closed on Friday and resumed on Tuesday after another window had started first.
+# Nothing re-creates a removed record, so for each of those the gate closed and directed messages
+# silently stopped. Rule 3 is what makes removal safe: only the service knows who is in a formation.
+#
+# Any answer that is not a clean "member": false keeps the record - the service unreachable, a
+# server fault, a refused credential, a 404 from a service too old for the route, a body that is not
+# the expected object. A record kept today is asked about again at the next session start.
+#
+# REACHED, AND NOTHING BUT A RECORD REMOVED (#31844 QA round 3). A clean member:true refreshes the
+# record, the questions go oldest first, and only a name of the record form that is exactly one of
+# the records collected can be removed. The detail is above mmry_formation_sweep.
+#
+# BOUNDED (#31844 QA round 2). The questions are asked at session start, which has a 30 s budget the
+# memory load also needs, so at most MMRY_FORMATION_SWEEP_MAX_ASKS of them, each limited to a few
+# seconds, and none is started once MMRY_FORMATION_SWEEP_BUDGET seconds would be exceeded. The first
+# answer that says the service cannot be asked (no connection, a 5xx, 401, 403, 429) stops the
+# questions for this start: forty stale records against a service that is down cost one timeout, not
+# forty. Records not reached are kept and asked about at a later start.
+#
+# NO SWEEP WITHOUT THE HOST'S OWN SESSION ID (#31844 QA round 2, D1). The starting session's own
+# record is never swept, however old: a resumed session keeps its id. That protection is only as good
+# as the id, so the caller passes the id from the hook payload - never an environment variable that
+# may be empty or inherited from another session - and a call with no id sweeps nothing at all.
+#
+# A record whose name is not the session id as written (an id with bytes that had to be replaced to
+# make a file name; a "_" is the sign of it) is never asked about: the service would be asked about a
+# session that does not exist, would truthfully say "not a member", and a member would be removed.
+#
+# The numbers are not customer settings. The variables exist so the suite can name them, as with the
+# idle watch's window in formation-check.sh.
+# ---------------------------------------------------------------------------------------------
+MMRY_FORMATION_STALE_SECONDS="${MMRY_FORMATION_STALE_SECONDS:-259200}"
+MMRY_FORMATION_SWEEP_MAX_ASKS="${MMRY_FORMATION_SWEEP_MAX_ASKS:-8}"
+MMRY_FORMATION_SWEEP_BUDGET="${MMRY_FORMATION_SWEEP_BUDGET:-8}"
+
+# True when a name in this folder is a membership record and not one of the locks and markers that
+# share its prefix. Those belong to formation-check.sh and are judged by their own rules there.
+# hooks/hooks.json, hooks/codex-hooks.json and codex-hook.cmd carry this same list in their gates.
+mmry_formation_is_membership_name() {
+    case "$1" in
+        .mmry-formation-cs-*|.mmry-formation-poll-*|.mmry-formation-handover-*|.mmry-formation-renewed-*) return 1 ;;
+        .mmry-formation-?*) return 0 ;;
+    esac
+    return 1
+}
+
+# Ask the service whether session $2 is a member of formation $1, within $3 seconds. Sets
+# MMRY_FS_ANSWER to "member", "not-member", "unknown" (keep this record, ask about the next) or
+# "stop" (keep this record and ask nothing more this time). Needs mmry-client.sh and MMRY_JQ.
+_mmry_formation_sweep_ask() {
+    local fid="$1" sid="$2" member=""
+    local MMRY_HTTP_MAX_TIME="$3" MMRY_HTTP_CONNECT_TIMEOUT="$3"
+    (( MMRY_HTTP_CONNECT_TIMEOUT > 3 )) && MMRY_HTTP_CONNECT_TIMEOUT=3
+    MMRY_FS_ANSWER="unknown"
+    MMRY_HTTP_CODE=""
+    MMRY_RESPONSE=""
+    mmry_get_formation_sent "$fid" "$sid" 2>/dev/null || true
+    case "${MMRY_HTTP_CODE:-000}" in
+        2[0-9][0-9]) ;;
+        000|5[0-9][0-9]|401|403|429) MMRY_FS_ANSWER="stop"; return 0 ;;
+        *) return 0 ;;
+    esac
+    member="$("$MMRY_JQ" -r 'if type == "object" and (.member | type) == "boolean" then (.member | tostring) else "unknown" end' \
+        <<< "${MMRY_RESPONSE:-}" 2>/dev/null || true)"
+    member="${member%$'\r'}"
+    if [[ "$member" == "false" ]]; then
+        MMRY_FS_ANSWER="not-member"
+    elif [[ "$member" == "true" ]]; then
+        MMRY_FS_ANSWER="member"
+    fi
+    return 0
+}
+
+# The names a record can have: the prefix and the session id as mmry_formation_safe_sid writes it,
+# nothing else (#31844 QA round 3). The letters are spelled out for the reason given there: a range
+# in a bracket expression is locale-dependent. A name with any other byte - a newline above all - is
+# not a record this plugin wrote, and is never looked at, asked about or removed.
+_MMRY_FS_RECORD_RE='^\.mmry-formation-[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]+$'
+
+# A member the service has just vouched for (#31844 QA round 3): bring its record's time up to date,
+# so it is not stale - not asked about again - for a full period. The same in-place rewrite its own
+# checks make, under the same delivery mutex they make it under, so it cannot write back a last-seen
+# value the member has just advanced. The mutex is only TRIED: if the member holds it, it is
+# delivering right now and refreshes the record itself; a `touch -c`, which writes no content and so
+# races nothing, brings the time up to date meanwhile.
+_mmry_formation_sweep_refresh() {
+    local sid="$1" path="$2" lock="${MMRY_TMPDIR}/.mmry-formation-cs-$1"
+    if mkdir "$lock" 2>/dev/null; then
+        printf '%s\n' "$$" > "${lock}/pid" 2>/dev/null || true
+        mmry_formation_state_refresh "$sid" || true
+        rm -f "${lock}/pid" 2>/dev/null || true
+        rmdir "$lock" 2>/dev/null || true
+    else
+        touch -c -- "$path" 2>/dev/null || true
+    fi
+    return 0
+}
+
+# Remove other sessions' stale records. $1 = the calling session's id FROM THE HOOK PAYLOAD; its
+# record is never touched, and without it nothing is swept. Best-effort on every path and silent:
+# this runs at session start, and a session that fails to start because a temp file could not be
+# read is a far worse fault than a temp file left in place.
+# Costs nothing when there is no other record to look at. Otherwise one `stat` for all of them (two
+# on BSD, whose stat spells it differently), and only for a record that is stale and has no live
+# watch, one bounded question to the service each, then one `rm` if anything is to go.
+#
+# EVERY STALE RECORD IS REACHED (#31844 QA round 3). The questions go OLDEST FIRST, and a record the
+# service clearly calls a member is refreshed, so it leaves the stale set for a full period. Each
+# start that can ask K questions therefore settles the K oldest stale records for good - removed, or
+# refreshed to the back - and a record is reached within ceil(R / K) starts, where R is the number
+# of stale records at least as old as it. (Before, the order was the same at every start and a member
+# was never refreshed, so a cap's worth of quiet members ahead of an ended record kept it for ever.)
+# An answer that is not a clean member:true never refreshes: a service that is down would otherwise
+# keep every ended record alive.
+#
+# ONLY A COLLECTED RECORD IS EVER REMOVED (#31844 QA round 3, security). stat's output is text, and a
+# file name can carry a newline, so a line of it is a claim about a path, not a path. A name that is
+# not of the record form is never collected, and a line whose path is not exactly one of the records
+# collected is ignored, so nothing but a record in MMRY_TMPDIR can reach the `rm`.
+mmry_formation_sweep() {
+    local own_name="" max="${MMRY_FORMATION_STALE_SECONDS:-}" f name
+    [[ "$max" =~ ^[0-9]+$ ]] || return 0
+    (( max > 0 )) || return 0
+    [[ -n "${1:-}" ]] || return 0
+    mmry_formation_safe_sid "$1"
+    own_name=".mmry-formation-${MMRY_FS_SAFE}"
+    local -a cands=()
+    for f in "${MMRY_TMPDIR}"/.mmry-formation-*; do
+        [[ -f "$f" ]] || continue
+        name="${f##*/}"
+        [[ "$name" =~ $_MMRY_FS_RECORD_RE ]] || continue
+        mmry_formation_is_membership_name "$name" || continue
+        [[ "$name" == "$own_name" ]] && continue
+        cands+=("$f")
+    done
+    (( ${#cands[@]} > 0 )) || return 0
+
+    local now=""
+    now="$(date +%s 2>/dev/null)" || now=""
+    [[ "$now" =~ ^[0-9]+$ ]] || return 0
+    local stats=""
+    stats="$(stat -c '%Y %n' -- "${cands[@]}" 2>/dev/null)" || true
+    [[ -n "$stats" ]] || { stats="$(stat -f '%m %N' -- "${cands[@]}" 2>/dev/null)" || true; }
+    [[ -n "$stats" ]] || return 0
+
+    # Stale and unwatched, in order of age, oldest first; equal ages keep the folder's order.
+    local -a stale=() ages=()
+    local line mtime path sid pid c known i
+    while IFS= read -r line; do
+        mtime="${line%% *}"
+        path="${line#* }"
+        [[ "$mtime" =~ ^[0-9]+$ && "$path" != "$line" ]] || continue
+        known=0
+        for c in "${cands[@]}"; do [[ "$c" == "$path" ]] && { known=1; break; }; done
+        (( known )) || continue
+        (( now - mtime > max )) || continue
+        name="${path##*/}"
+        sid="${name#.mmry-formation-}"
+        # A watch that is still running is a live member, whatever the record's age says.
+        pid=""
+        if [[ -f "${MMRY_TMPDIR}/.mmry-formation-poll-${sid}/pid" ]]; then
+            { IFS= read -r pid || true; } < "${MMRY_TMPDIR}/.mmry-formation-poll-${sid}/pid" 2>/dev/null || true
+        fi
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+        i=${#stale[@]}
+        while (( i > 0 )) && (( ages[i - 1] > mtime )); do
+            stale[i]="${stale[i - 1]}"; ages[i]="${ages[i - 1]}"; i=$(( i - 1 ))
+        done
+        stale[i]="$path"; ages[i]="$mtime"
+    done <<< "$stats"
+    (( ${#stale[@]} > 0 )) || return 0
+
+    # Old and unwatched is not enough: only the service can say the session has left (rule 3).
+    # Without the client there is nobody to ask, and every record is kept.
+    declare -F mmry_get_formation_sent >/dev/null 2>&1 || return 0
+    [[ -n "${MMRY_JQ:-}" ]] || return 0
+    local asks_max="${MMRY_FORMATION_SWEEP_MAX_ASKS:-}" budget="${MMRY_FORMATION_SWEEP_BUDGET:-}"
+    [[ "$asks_max" =~ ^[0-9]+$ ]] || asks_max=8
+    [[ "$budget" =~ ^[0-9]+$ ]] || budget=8
+    local per=4 asks=0 started="$SECONDS" fid=""
+    (( per > budget )) && per="$budget"
+    local -a doomed=()
+    for path in "${stale[@]}"; do
+        name="${path##*/}"
+        sid="${name#.mmry-formation-}"
+        fid=""
+        { IFS= read -r fid || true; } < "$path" 2>/dev/null || true
+        fid="${fid%$'\r'}"
+        # A record that names no formation is not a membership: set refuses a non-numeric id, and
+        # the delivery hook ignores such a record. Nobody can be in it, so there is nothing to ask.
+        if ! [[ "$fid" =~ ^[0-9]+$ ]]; then
+            doomed+=("$path")
+            continue
+        fi
+        [[ "$sid" == *_* ]] && continue
+        (( asks < asks_max && per > 0 )) || break
+        (( SECONDS - started + per <= budget )) || break
+        asks=$(( asks + 1 ))
+        _mmry_formation_sweep_ask "$fid" "$sid" "$per" || true
+        [[ "$MMRY_FS_ANSWER" == "stop" ]] && break
+        [[ "$MMRY_FS_ANSWER" == "member" ]] && _mmry_formation_sweep_refresh "$sid" "$path"
+        [[ "$MMRY_FS_ANSWER" == "not-member" ]] && doomed+=("$path")
+    done
+    (( ${#doomed[@]} > 0 )) || return 0
+    rm -f -- "${doomed[@]}" 2>/dev/null || true
+    return 0
+}
+
 # Sourced as a library: the functions above are all the caller wants. Run as a command: carry on.
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     return 0
@@ -175,8 +416,12 @@ case "$cmd" in
         rm -f "$MMRY_FS_PATH" 2>/dev/null || true
         exit 0
         ;;
+    sweep)
+        mmry_formation_sweep "${2:-}" || true
+        exit 0
+        ;;
     *)
-        echo "usage: formation-state.sh {set|get|seen|clear} ..." >&2
+        echo "usage: formation-state.sh {set|get|seen|clear|sweep} ..." >&2
         exit 1
         ;;
 esac

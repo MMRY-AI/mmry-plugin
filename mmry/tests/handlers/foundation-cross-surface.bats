@@ -265,6 +265,17 @@ _slow_jq() {
     printf '%s' "$shim"
 }
 
+# Since #31893 an ordinary prompt starts no jq: it is served from the set one firing prepared, and only
+# verifying the set again (after the preparation is forgotten) runs anything, a cksum. This slows that.
+_slow_cksum_dir() {
+    local d="$TEST_TMPDIR/slow-cksum" real
+    real="$(command -v cksum)"
+    mkdir -p "$d"
+    printf '#!/usr/bin/env bash\nsleep %s\nexec "%s" "$@"\n' "$1" "$real" > "$d/cksum"
+    chmod +x "$d/cksum"
+    printf '%s' "$d"
+}
+
 # No sleeps between the steps, on purpose: the failure lands in the same second as the delivery
 # before it and the recovery after it, which is the case the old file-time ordering got wrong.
 @test "cross-surface: #31583 4e a prompt that fails after a delivery is reported as NOT delivered, then recovers" {
@@ -278,8 +289,10 @@ _slow_jq() {
     [[ "$output" == *'Delivered:    IN FULL on the most recent prompt'* ]] || return 1
 
     # The failure: the same set, stopped at a one-second deadline. The hook says so on the turn.
-    MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$HOOK"
-    [[ "$output" == *'NOT applied'* ]] || return 1
+    rm -f "$TEST_TMPDIR"/.mmry-foundation-prepared.* "$TEST_TMPDIR"/.mmry-foundation-claim.*
+    PATH="$(_slow_cksum_dir 20):$PATH" MMRY_FOUNDATION_DEADLINE_SECS=1 run bash "$HOOK"
+    # The assistant is told; since #31893 the person is not shown a slow prompt.
+    [[ "$output" == *'cut short'* ]] || return 1
 
     # And now the command says so too, instead of IN FULL.
     run bash "$STATUSCMD"

@@ -152,7 +152,11 @@ desc_m05="orphaned out-file sweep disabled"
 # a lost one, which is the entire feature. Kept as a regression: this one was found by
 # mutation during the build and closed then.
 # REPOINTED (#31411 QA round 2): the marker is written by temp and rename now, _mmry_fnd_write.
-mutate_m06() { _mrep "$1/$HANDLER_REL" '    _mmry_fnd_write "$_INFLIGHT" "" || true' '    :'; }
+# REPOINTED (#31893): an empty marker on a free path is made with a redirect, no process; both writes go.
+mutate_m06() {
+    _mrep "$1/$HANDLER_REL" '        _mmry_fnd_write "$_INFLIGHT" "" || true' '        :'
+    _mrep "$1/$HANDLER_REL" '        : > "$_INFLIGHT" 2>/dev/null || true' '        :'
+}
 targets_m06="$HANDLER_TESTS"
 desc_m06="in-flight marker is never written"
 
@@ -505,7 +509,10 @@ targets_m39="$PARTS_TESTS"
 desc_m39="#31411 QA H7 the early exit assumes full parts, so a set of half-full parts loses its last parts"
 
 # H9: parts 2 to 6 stop recording their failures.
-mutate_m40() { _mrep "$1/$HANDLER_REL" '        _mmry_outcome "failed ${_FOUND_OUTCOME}"' '        (( MMRY_FND_PART > 1 )) || _mmry_outcome "failed ${_FOUND_OUTCOME}"'; }
+# Retargeted in #31893 QA round 2: the outcome is written by _mmry_fnd_finish, and a part 2-6 now
+# finishes with no outcome at all, which is the same defect.
+mutate_m40() { _mrep "$1/$HANDLER_REL" '        _mmry_fnd_finish "failed ${_FOUND_OUTCOME}" "$_fnd_cut"' '        (( MMRY_FND_PART > 1 )) && _mmry_fnd_finish "" "$_fnd_cut"
+        _mmry_fnd_finish "failed ${_FOUND_OUTCOME}" "$_fnd_cut"'; }
 targets_m40="$PARTS_TESTS"
 desc_m40="#31583 QA H9 a part 2-6 that fails records nothing, so the status cannot say which or why"
 
@@ -565,7 +572,8 @@ targets_m48="$PARTS_TESTS"
 desc_m48="#31583 QA r3 P8 the status looks only under the session id and says nothing yet after a delivery"
 
 # R4(b): a failed emit records nothing of its own.
-mutate_m49() { _mrep "$1/$HANDLER_REL" '        _mmry_outcome "failed emit"' '        :'; }
+# Retargeted in #31893 QA round 2: the failed emit's outcome is handed to _mmry_fnd_finish.
+mutate_m49() { _mrep "$1/$HANDLER_REL" '        _fnd_o="failed emit"' '        :'; }
 targets_m49="$PARTS_TESTS"
 desc_m49="#31583 QA r3 R4(b) a failed emit is not recorded as one"
 
@@ -618,8 +626,9 @@ targets_m54="$WRITER_TESTS"
 desc_m54="#31597 the writer drops the trailer, so the set's last newline is lost to the read"
 
 # The part label stops naming the version, so the assistant cannot see the parts disagree.
+# REPOINTED (#31893): the framing is written once, in _mmry_fnd_payload, for both paths.
 mutate_m55() {
-    _sedi 's|of the set, version \${_fnd_setid}\. The parts arrive|of the set. The parts arrive|' "$1/$HANDLER_REL"
+    _sedi 's|of the set, version \$3\. The parts arrive|of the set. The parts arrive|' "$1/$HANDLER_REL"
 }
 targets_m55="$PARTS_TESTS"
 desc_m55="#31597 the part label no longer names the version of the set"
@@ -673,7 +682,8 @@ desc_m99="deliberately matches nothing; exercises the harness's own guard"
 # P4 (Lead/PM decision, 2026-10-05): parts 2-6 stop asking what part 1 recorded, so whole-set damage
 # shows a banner per part again. Numbered m59 so the same commit carries onto #31597's branch, where
 # m53-m58 are taken, and added to the list here for the same reason.
-mutate_m59() { _mrep "$1/$HANDLER_REL" '            _fnd_p1="$(_mmry_fnd_part1_said 8)" || _fnd_p1=""' '            _fnd_p1=""'; }
+# Retargeted in #31893 QA round 2: part 1's answer comes back in _FND_P1, not through "$( )".
+mutate_m59() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_part1_said 8 && _fnd_p1="$_FND_P1"' '            :'; }
 targets_m59="$PARTS_TESTS"
 desc_m59="#31583 P4 whole-set damage shows one banner per part again"
 ALL_MUTATIONS="$ALL_MUTATIONS m59"
