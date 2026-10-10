@@ -87,3 +87,10 @@ setup() {
     [[ "$posttool_cmd" == *'hook-guard.sh'* ]]
     [[ "$posttool_cmd" == *'plan-accepted-check'* ]]
 }
+
+# #31856: the label shown when a formation message wakes an idle session.
+@test "hooks.json wake label for formation-check is exactly 'MMRY AI: Formation Transmission'" {
+    local label
+    label="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.Stop||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check"));if(s.length!==1)process.exit(2);process.stdout.write(String(s[0].rewakeSummary))' "$HOOKS_FILE")"
+    [[ "$label" == "MMRY AI: Formation Transmission" ]]
+}
