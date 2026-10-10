@@ -43,7 +43,8 @@ if [[ -z "$P" ]]; then
 fi
 
 # Clean old hooks dir, create target directories
-rm -rf "${MMRY_STATE_DIR}/hooks" 2>/dev/null
+# `|| true` (#31844): under set -e a failing rm ended the session start here, before memories loaded.
+rm -rf "${MMRY_STATE_DIR}/hooks" 2>/dev/null || true
 mkdir -p "${MMRY_STATE_DIR}/hooks-handlers" "${MMRY_STATE_DIR}/setup"
 
 # WRITE DOWN WHICH HOST THIS INSTALL BELONGS TO, BESIDE THE FILES (#31245 QA round 3).
@@ -162,6 +163,12 @@ if [[ "$(mmry_host)" == "codex" && -f "$P/vendor/jq/CHECKSUMS.txt" ]]; then
             && chmod +x "${MMRY_STATE_DIR}"/vendor/jq/jq-* 2>/dev/null || true
     fi
 fi
+
+# LEFTOVER FORMATION MEMBERSHIPS (#31844) are cleared by session-start.sh, not here. The sweep must
+# know this session's own id for certain, and only the hook payload says that: this file does not
+# read stdin, and the environment variable it used to consult can be empty or inherited from another
+# session (#31844 QA round 2, D1). session-start.sh also has the client the sweep now needs, to ask
+# the service before it removes anything.
 
 # Delegate to the main session-start logic
 bash "$P/hooks-handlers/session-start.sh"

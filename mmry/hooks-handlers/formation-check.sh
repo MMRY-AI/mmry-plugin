@@ -533,6 +533,10 @@ _poll_once() {
     last_seen="$MMRY_FS_LAST_SEEN"
     # Directed messages already printed and not yet reported to the service as read (#31721).
     _fc_shown_owed="$MMRY_FS_SHOWN"
+    # STILL HERE (#31844). Bring the record's time up to date before anything can fail, so a member
+    # whose service is unreachable still looks alive to the session-start sweep. Under the mutex,
+    # because the refresh writes back the last-seen value it reads. No process.
+    mmry_formation_state_refresh "$session_id" || true
 
     # Not enough time left to ask and still answer inside the budget: ask nothing (#31746).
     _fc_limit_request || { _release_mutex; return 1; }
@@ -743,6 +747,17 @@ _idle_sleep() {
 # a service too old to have the route, no answer, a body that is not the expected object - returns 1,
 # and the watch stops instead of renewing. A renewal wakes the session, so it is made on a fact, never
 # on a guess. One retry covers a single dropped request at the one moment it matters.
+# THE SERVICE SAYS THIS SESSION IS NOT A MEMBER (#31844). It left elsewhere, was removed, or the
+# formation ended. The local record would otherwise outlive the membership and keep the hooks' gate
+# open for this session. Only a record that still names the formation the service was asked about
+# is removed: a session that joined another formation while the question was in flight keeps that.
+_fc_forget_membership() {
+    mmry_formation_state_read "$session_id" || return 0
+    [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || return 0
+    rm -f "$MMRY_FS_PATH" 2>/dev/null || true
+    return 0
+}
+
 _idle_confirmed_member() {
     mmry_formation_state_read "$session_id" || return 1
     [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || return 1
@@ -754,7 +769,7 @@ _idle_confirmed_member() {
                 <<< "${MMRY_RESPONSE:-}" 2>/dev/null || true)"
             member="${member%$'\r'}"
             [[ "$member" == "true" ]] && return 0
-            [[ "$member" == "false" ]] && return 1
+            [[ "$member" == "false" ]] && { _fc_forget_membership; return 1; }
         fi
         # Only a request that never got an answer, or got a server fault, is worth asking again.
         [[ "${MMRY_HTTP_CODE:-000}" =~ ^(000|5[0-9][0-9])$ ]] || return 1
@@ -940,8 +955,11 @@ case "$mode" in
             # The window is honoured to its end: the last wait is cut short at the deadline and one
             # final ask is made there, rather than giving up as much as a whole interval early.
             (( _now + _fc_interval <= _deadline )) || _fc_interval=$(( _deadline - _now ))
-            # Keep the poller lock's mtime honest so a live poller is never mistaken for a stale one.
-            touch "$_poller_dir" 2>/dev/null || true
+            # Keep the poller lock's mtime honest so a live poller is never mistaken for a stale one,
+            # and the membership record's with it in the same process (#31844), so an idle member is
+            # never mistaken for a session that ended without leaving. -c: a record removed by leaving
+            # in the meantime is not brought back by this.
+            touch -c "$_poller_dir" "$MMRY_FS_PATH" 2>/dev/null || true
             # Sleep in slices, so a turn that has just ended can take over within 3 s (see HANDOVER).
             # A watch asked to stand down exits quietly: it does not renew, because the watch that
             # asked is already listening.

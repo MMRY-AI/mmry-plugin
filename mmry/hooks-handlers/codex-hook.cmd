@@ -48,6 +48,10 @@ rem     TMP and %LOCALAPPDATA%\Temp are all looked in, because a stray extra mat
 rem     that would have run anyway, and a missed one loses a message.
 rem `for` with a wildcard matches FILES only, so the delivery locks (.mmry-formation-cs-*, -poll-*),
 rem which are directories, do not open the gate. Builtins only: set, if and for start no process.
+rem MEMBERSHIP FILES ONLY (#31844). The locks and markers that share the prefix are sometimes FILES
+rem (a crashed holder, an older version), and every one of them opened this gate. Each match is
+rem handed to :gate_consider, at the end of this file, which ignores those names. `call` to a label
+rem starts no process either.
 if /i not "%~1"=="formation-check" goto :after_formation_gate
 set "MMRY_MEMBER="
 if not defined TMPDIR goto :gate_usertemp
@@ -56,12 +60,12 @@ set "MMRY_GATE_ABS="
 if "%MMRY_GATE_DIR:~1,1%"==":" set "MMRY_GATE_ABS=1"
 if "%MMRY_GATE_DIR:~0,2%"=="\\" set "MMRY_GATE_ABS=1"
 if not defined MMRY_GATE_ABS goto :after_formation_gate
-for %%F in ("%MMRY_GATE_DIR%\.mmry-formation-*") do set "MMRY_MEMBER=1"
+for %%F in ("%MMRY_GATE_DIR%\.mmry-formation-*") do call :gate_consider "%%~nxF"
 goto :gate_decide
 :gate_usertemp
-if defined TEMP for %%F in ("%TEMP%\.mmry-formation-*") do set "MMRY_MEMBER=1"
-if defined TMP for %%F in ("%TMP%\.mmry-formation-*") do set "MMRY_MEMBER=1"
-if defined LOCALAPPDATA for %%F in ("%LOCALAPPDATA%\Temp\.mmry-formation-*") do set "MMRY_MEMBER=1"
+if defined TEMP for %%F in ("%TEMP%\.mmry-formation-*") do call :gate_consider "%%~nxF"
+if defined TMP for %%F in ("%TMP%\.mmry-formation-*") do call :gate_consider "%%~nxF"
+if defined LOCALAPPDATA for %%F in ("%LOCALAPPDATA%\Temp\.mmry-formation-*") do call :gate_consider "%%~nxF"
 :gate_decide
 if not defined MMRY_MEMBER exit /b 0
 :after_formation_gate
@@ -115,4 +119,16 @@ exit /b 0
 
 :no_git
 if /i "%MMRY_HANDLER%"=="session-init" echo MMRY AI could not start on this Windows machine: Git for Windows was not found. Tell the user, in these words: MMRY needs Git for Windows. Install it from https://gitforwindows.org with its default options, then start a new session.
+exit /b 0
+
+rem The formation gate's filter (#31844): %1 is the name of one file matching .mmry-formation-*.
+rem It counts as membership unless it is one of formation-check.sh's locks or markers, the same list
+rem formation-state.sh (mmry_formation_is_membership_name) and both hooks files carry.
+:gate_consider
+set "MMRY_GATE_NAME=%~1"
+if /i "%MMRY_GATE_NAME:~0,19%"==".mmry-formation-cs-" exit /b 0
+if /i "%MMRY_GATE_NAME:~0,21%"==".mmry-formation-poll-" exit /b 0
+if /i "%MMRY_GATE_NAME:~0,25%"==".mmry-formation-handover-" exit /b 0
+if /i "%MMRY_GATE_NAME:~0,24%"==".mmry-formation-renewed-" exit /b 0
+set "MMRY_MEMBER=1"
 exit /b 0

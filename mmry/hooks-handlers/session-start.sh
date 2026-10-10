@@ -173,6 +173,17 @@ if [[ -z "$SESSION_ID" && "$HOOK_READ_STATUS" == "ok" ]]; then
     MMRY_HOOK_FAULT_NOTE="${MMRY_HOOK_FAULT_NOTE}WARNING FROM MMRY AI: the $(mmry_host_label) hook payload was read successfully but carried no 'session_id' field (fields present: ${_mmry_keys:-none - it did not parse as JSON}). MMRY assumes the Claude Code payload field names; this session is being registered without a real id, so coordination features will not work. Tell the user and ask them to report it. "
 fi
 
+# LEFTOVER FORMATION MEMBERSHIPS (#31844). Other sessions' records that are stale, unwatched, and
+# that the service says are no longer members are removed here; the rule, its bounds and why a
+# genuine member is never removed are in formation-state.sh. ONLY WITH THE PAYLOAD'S OWN ID (QA
+# round 2, D1): the id that protects this session's own record must be this session's, so the
+# environment fallback below is deliberately not used, and a start without a payload id sweeps
+# nothing. Before the memory load, whose failure paths exit early. In-process and best-effort.
+if [[ -n "$SESSION_ID" && -f "${PLUGIN_ROOT}/hooks-handlers/formation-state.sh" ]]; then
+    { source "${PLUGIN_ROOT}/hooks-handlers/formation-state.sh" 2>/dev/null \
+        && mmry_formation_sweep "$SESSION_ID"; } 2>/dev/null || true
+fi
+
 SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}}"
 
 # SESSION-SCOPE THE FOUNDATION DELIVERY RECORD (#31583 QA round 4, finding 4c).
