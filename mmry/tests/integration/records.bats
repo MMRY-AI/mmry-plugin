@@ -11,7 +11,9 @@
 #
 # NEEDS (each test skips with the reason if it is missing; Integration only, never production):
 #   MMRY_INTEGRATION_API_KEY  an API key for a throwaway Integration account
-#   MMRY_INTEGRATION_JWT      a login token for the SAME account (connector tests only)
+#   MMRY_INTEGRATION_JWT      a login token for the SAME account (connector tests only). It is
+#                             short-lived (it expired within the hour on 2026-10-10), so take a
+#                             fresh one from POST /api/auth/login immediately before the run.
 #   MMRY_INTEGRATION_URL      optional, defaults to https://integration.mmryai.com
 
 load '../helpers/test-helper'
