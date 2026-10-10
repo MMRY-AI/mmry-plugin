@@ -132,14 +132,14 @@ _flat() { printf '%s' "$output" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
     # The rule is printed after a join the service granted, and only then. A refused join must not
     # print it: the session is not a member and there is no lead to report to.
     _join claude
-    [[ "$output" == *"Joined formation 4242: TEST DATA 31744 ship the validator."* ]]
+    [[ "$output" == *"Joined formation 4242: TEST DATA 31744 ship the validator."* ]] || return 1
 
     local bin; bin="$(_fake_curl_dir)"
     PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{}' \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
         run bash "${HANDLERS}/formation-join.sh" 4242
     [ "$status" -ne 0 ]
-    [[ "$output" != *"Report to the lead"* ]]
+    [[ "$output" != *"Report to the lead"* ]] || return 1
 }
 
 # ---- Requirement 3: the delivery text --------------------------------------------------------------
@@ -148,22 +148,22 @@ _flat() { printf '%s' "$output" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
     _deliver claude
     [ "$status" -eq 2 ]
     local flat; flat="$(_flat)"
-    [[ "$flat" == *"A report to the lead is always worth sending: tell the lead when you finish, are blocked, are waiting, or stop with work still running."* ]]
+    [[ "$flat" == *"A report to the lead is always worth sending: tell the lead when you finish, are blocked, are waiting, or stop with work still running."* ]] || return 1
 }
 
 @test "req3: and on Codex the delivered text is the same" {
     _deliver codex
     local flat; flat="$(_flat)"
-    [[ "$flat" == *"A report to the lead is always worth sending: tell the lead when you finish, are blocked, are waiting, or stop with work still running."* ]]
+    [[ "$flat" == *"A report to the lead is always worth sending: tell the lead when you finish, are blocked, are waiting, or stop with work still running."* ]] || return 1
 }
 
 @test "req3: no wording that discourages a report to the lead is left in the delivery text" {
     _deliver claude
     local flat; flat="$(_flat)"
-    [[ "$flat" == *"FormationService.cs"* ]]    # the control: this IS the delivered block
-    [[ "$flat" != *"Do not reply"* ]]
-    [[ "$flat" != *"unless you have something worth"* ]]
-    [[ "$flat" != *"say nothing"* ]]
+    [[ "$flat" == *"FormationService.cs"* ]] || return 1    # the control: this IS the delivered block
+    [[ "$flat" != *"Do not reply"* ]] || return 1
+    [[ "$flat" != *"unless you have something worth"* ]] || return 1
+    [[ "$flat" != *"say nothing"* ]] || return 1
     # And in the source, so a branch of the block not reached by this fixture cannot carry it.
     # Comment lines are excluded: the comment above the block quotes the old sentence on purpose.
     run bash -c 'grep -v -E "^[[:space:]]*#" "$1" | grep -c -E "Do not reply to the formation|unless you have something worth"' _ "${HANDLERS}/formation-check.sh"
@@ -205,12 +205,12 @@ _flat() { printf '%s' "$output" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
 @test "req5: the acknowledgement is asked for on assignments, briefs and questions only" {
     # Each part the ticket names, present; and the exclusion, present, so it is never read as a
     # duty to acknowledge everything.
-    [[ "$ACK_RULE" == *"an assignment, a brief or a question"* ]]
-    [[ "$ACK_RULE" == *"what you understood"* ]]
-    [[ "$ACK_RULE" == *"anything you cannot do"* ]]
-    [[ "$ACK_RULE" == *"when to expect the result"* ]]
-    [[ "$ACK_RULE" == *"fold that into your first update"* ]]
-    [[ "$ACK_RULE" == *"Findings and status updates need no acknowledgement."* ]]
+    [[ "$ACK_RULE" == *"an assignment, a brief or a question"* ]] || return 1
+    [[ "$ACK_RULE" == *"what you understood"* ]] || return 1
+    [[ "$ACK_RULE" == *"anything you cannot do"* ]] || return 1
+    [[ "$ACK_RULE" == *"when to expect the result"* ]] || return 1
+    [[ "$ACK_RULE" == *"fold that into your first update"* ]] || return 1
+    [[ "$ACK_RULE" == *"Findings and status updates need no acknowledgement."* ]] || return 1
     _join claude
     _has_line "$ACK_RULE"
 }
