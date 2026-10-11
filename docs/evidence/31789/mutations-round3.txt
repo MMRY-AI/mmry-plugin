@@ -1,0 +1,29 @@
+#31789 mutation round 3 (QA round 1 fixes), plugin 2b3221a, Windows, docs suite only
+Scored with run-31789-mutations.sh's own definitions against structural/codex-formation-lead-docs.bats.
+The full runner baselines every suite first; that run was cut by a 900 s timeout before scoring, so these were scored against the one suite each names.
+
+baseline docs: 12 passed
+REFUSED  skill-old-passage: the skill again tells the model every operation, list and claim included, is available  [6 TC5: the Codex skill claims exactly the proven operations, each mapped to a test case;7 TC5: the Codex skill claims no unproven operation and states listing and claiming as not yet tested]
+      #   `claim="$(_skill_claim)"' failed
+      #   `[[ "$low" != *"every formation operation"* ]] || { echo "the skill claims every formation operation"; return 1; }' failed
+REFUSED  skill-claims-list: the skill's tested sentence adds listing  [6 TC5: the Codex skill claims exactly the proven operations, each mapped to a test case]
+      #   `[[ "$rest" != *"$op"* ]] || { echo "the skill's tested sentence names '$op' outside the proven set: $claim"; return 1; }' failed
+      # the skill's tested sentence names 'list' outside the proven set: The formation operations tested on Codex are: start, join, say (to the formation or to one member), assign, progress, roster, report, debrief, list and leave, all as tools.
+REFUSED  skill-drops-broadcast: the skill's tested sentence stops claiming a message to the formation  [6 TC5: the Codex skill claims exactly the proven operations, each mapped to a test case]
+      #   `[[ "$rest" == *"$op"* ]] || { echo "the skill does not claim the proven '$op' ($tc): $claim"; return 1; }' failed
+      # the skill does not claim the proven 'say (to the formation or to one member)' (TC3): The formation operations tested on Codex are: start, join, say, assign, progress, roster, report, debrief and leave, all as tools.
+REFUSED  skill-scripts-untold: the skill's script section stops saying listing and claiming are untested  [7 TC5: the Codex skill claims no unproven operation and states listing and claiming as not yet tested]
+      #   `|| { echo "the scripts section does not say they are untested"; return 1; }' failed
+      # the scripts section does not say they are untested
+REFUSED  readme-every-op: the repository README claims every formation operation on Codex  [8 TC5: neither plugin README claims an unproven formation operation on Codex]
+      #   `[[ "$low" != *"every formation operation"* ]] || { echo "$f claims every formation operation"; return 1; }' failed
+      # README.md claims every formation operation
+REFUSED  plugin-readme-claims: the plugin README claims listing and claiming formations on Codex  [8 TC5: neither plugin README claims an unproven formation operation on Codex]
+      #   `[[ "$line" == *"not been tested"* ]] || { echo "$f claims listing or claiming: $line"; return 1; }' failed
+      # mmry/README.md claims listing or claiming: persistent memory for claude code and openai codex. on claude code it loads memories at session start and prompts to save at session end, before context compression, and when plans are accepted. on codex the session-start load, the foundation memories restated each prompt, coordination-group messages, and listing and claiming in a formation all work; the save prompt arrives with your next message when something is unsaved, and there is no prompt at context compression or plan acceptance because codex gives a plugin no moment for either. see [docs/codex.md](../docs/codex.md).
+REFUSED  docs-claim-list: the Codex page claims listing formations  [2 TC5: every proven operation is claimed, and each names its test case;4 TC5: the claim names nothing beyond the proven set]
+      #   `[ -z "$missing" ] || { echo "proven operations the page does not claim:${missing}"; return 1; }' failed
+      # proven operations the page does not claim:
+REFUSED  docs-all-of-them: the Codex page claims every formation operation again  [1 TC5: the page has a formation claim, and it is the one this test reads;5 TC5: no sentence anywhere on the page claims every formation operation]
+      #   `[[ "$(_bullet)" == *"Formations work, for the operations tested on Codex"* ]] || { _bullet; return 1; }' failed
+      # - **Formations work, all of them.** Every formation operation works. Start a formation and share its id,   join one by its id, message the formation or one member, see the roster, assign work to a member,   report progress, read the close-out record, close the formation out with a debrief, and leave.   Messages reach you as you work, on the next thing that happens in the session, which is why we   recommend a Claude Code session lead (see   [3. A message will not wake an idle session](#3-a-message-will-not-wake-an-idle-session)).   Listing the formations on your account and claiming an area of the work have not been tested   from Codex yet, so this page does not list them.

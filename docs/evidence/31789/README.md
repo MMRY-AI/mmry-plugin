@@ -75,9 +75,9 @@ Claude Code output is unchanged, byte for byte (the same BATS files pin it).
 | TC4: the lead reads the record, debriefs; the formation closes; the record is read back after the close; the member leaves | same run | `TC4` lines |
 | R3: the start and assign replies carry the next-action wording | same run, and BATS on Codex with a Claude Code control | `R0/R3`, `R3` lines; `codex-formation-lead.bats` |
 | Each lead tool's request and response, refusals, quoting, identity, annotations by Codex's rule | BATS | `mmry/tests/handlers/mcp-server.bats` |
-| TC5 / R4: the Codex page claims only operations test cases 1 to 4 prove | BATS | `mmry/tests/structural/codex-formation-lead-docs.bats` |
+| TC5 / R4: the Codex page, the Codex skill and both READMEs claim only operations test cases 1 to 4 prove, and state listing and claiming as not yet tested | BATS | `mmry/tests/structural/codex-formation-lead-docs.bats` |
 | Nothing a Codex model reads names a script for an operation a tool covers, now including start, assign, report and debrief | BATS (#31743's pins, extended) and the live run | `codex-tools-first.bats`, `codex-tools-first-output.bats`, `tools-first` line |
-| Each guard bites: 21 mutations, 21 refused. Round 1 (20): 19 refused, and access-hint-lead SURVIVED, because nothing pinned the lead tools in the sandbox-access hint; a pin was added. Round 2: that one and a sharper one (the tool names dropped) both refused | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh`; `mutations-round1.txt`, `mutations-round2.txt` |
+| Each guard bites: 27 mutations, 27 refused. Round 1 (20): 19 refused, and access-hint-lead SURVIVED, because nothing pinned the lead tools in the sandbox-access hint; a pin was added. Round 2: that one and a sharper one (the tool names dropped) both refused. Round 3: six against the skill and README pins, one restoring the skill passage QA round 1 failed, all refused | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh`; `mutations-round1.txt`, `mutations-round2.txt`, `mutations-round3.txt` |
 
 What the app-server run does NOT prove: anything the MODEL does. A call through
 `mcpServer/tool/call` is not put through the approval policy and runs no hooks, so the harness runs
@@ -174,6 +174,10 @@ showing the tool calls, the absence of an Internet access prompt, and the lead's
 
 ## Runs kept here
 
+- `live-windows-run4.txt`: plugin 2b3221a, Windows 11, codex-cli 0.160.0, Integration revision 1de4775.
+  **25 of 25 PASS**, `fails=0`. Formation 8934. Adds the broadcast step to TC3: the member messages
+  the whole formation, and the lead's next prompt shows it unmarked, beside the directed report.
+  Idle watch: `turn/started=0` for 60 s. Runs 1 to 3 predate that step and have 23 checks.
 - `live-windows-run3.txt`: plugin 260e42c, Windows 11, codex-cli 0.160.0, Integration. **23 of 23 PASS**,
   `fails=0`. Formation 8932. The throwaway account's password is now made per run and never shown.
   Idle watch: `turn/started=0` for 60 s.
