@@ -75,6 +75,25 @@ export MMRY_API_KEY MMRY_API_URL="$API" MMRY_NO_SELF_UPDATE=1
 unset TOKEN REG
 say "subscriber Mcp31743_$TS registered; API key issued (in the environment only, not shown)"
 
+# ---- #31743 fix round 1: nothing the model is told names a script for a tool-covered operation --
+# The live Mac CLI run of TC1 ran save-memory.sh before memory_save. One of the texts it could have
+# followed is the session-start welcome a FRESH account gets, which named save-memory.sh. This is
+# that hook, run from this checkout through codex-hook.sh as Codex runs it, for a new conversation
+# on this new account.
+TOOL_COVERED_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|roster|leave))[.]sh'
+SS="$(printf '{"session_id":"%s","hook_event_name":"SessionStart","source":"startup","cwd":"%s"}' "$(uuid)" "$(native "$W/proj" | sed 's/\\/\\\\/g')" \
+    | ( cd "$W/proj" && sh "$PLUGIN/hooks-handlers/codex-hook.sh" session-init 2>/dev/null ) | "$JQ" -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+say "session start on the fresh account: $(printf '%s' "$SS" | head -c 400)"
+if [[ -z "$SS" ]]; then
+    fail "TC1-cause session start said nothing"
+elif grep -qE "$TOOL_COVERED_RE" <<< "$SS"; then
+    fail "TC1-cause session start names a tool-covered script"
+elif [[ "$SS" == *"fresh start"* && "$SS" != *"mmry_plugin memory_save tool"* ]]; then
+    fail "TC1-cause the fresh-account welcome does not name the memory_save tool"
+else
+    pass "TC1-cause session start names no tool-covered script$([[ "$SS" == *"fresh start"* ]] && printf ' (fresh-account welcome names memory_save)')"
+fi
+
 # The plugin's own scripts, as the lead of each formation runs them from a shell.
 as_session() { # session-id script args...
     local sid="$1" script="$2"; shift 2
@@ -134,6 +153,12 @@ grep -q "call t0 formation_join .*isError=false" <<< "$D" && grep -q "Joined for
 grep -q "call t0 formation_say .*isError=false" <<< "$D" && pass "R2 say" || fail "R2 say"
 grep -q "call t0 formation_progress .*isError=false" <<< "$D" && pass "R2 progress" || fail "R2 progress"
 grep -q "call t0 memory_load .*isError=false" <<< "$D" && pass "reload (memory_load)" || fail "reload"
+# #31743 fix round 1: every tool answer above, roster footers and remedies included.
+if grep -qE "$TOOL_COVERED_RE" <<< "$D"; then
+    fail "TC1-cause a tool answer names a tool-covered script: $(grep -oE ".{0,80}$TOOL_COVERED_RE" <<< "$D" | head -1)"
+else
+    pass "TC1-cause no tool answer names a tool-covered script"
+fi
 
 # ---- Requirement 3: each conversation is its own member, in its own formation -----------------
 [[ -f "$W/tmp/.mmry-formation-$T0" ]] && [[ "$(head -1 "$W/tmp/.mmry-formation-$T0" | tr -d '\r')" == "$F1" ]] \
