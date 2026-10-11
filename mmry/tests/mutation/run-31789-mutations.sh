@@ -77,10 +77,8 @@ add access-hint-lead "the sandbox-access hint stops naming the lead's tools" "$L
 
 # ---- the lead notice (R0, R3) ---------------------------------------------------------------------
 add no-start-notice "the Codex start confirmation says nothing about the lead limit" "$LIB" "$S_LEAD" \
-    '        start)
-            printf '"'"'%s\n'"'"' "Tell the customer' \
-    '        start)
-            return 1; printf '"'"'%s\n'"'"' "Tell the customer'
+    '            printf '"'"'%s\n'"'"' "Tell the customer' \
+    '            return 1; printf '"'"'%s\n'"'"' "Tell the customer'
 add notice-ungated "the lead notice is printed on Claude Code too" "$LIB" "$S_LEAD" \
     '    [[ "$_MMRY_HOST_V" == "codex" ]] || return 1
     case "$1" in
@@ -88,7 +86,8 @@ add notice-ungated "the lead notice is printed on Claude Code too" "$LIB" "$S_LE
     '    case "$1" in
         start)'
 add no-recommendation "the start notice stops recommending a Claude Code lead" "$LIB" "$S_LEAD" \
-    'Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here. ' ''
+    'rec="Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here."' \
+    'rec="Codex is fine for joining a formation."'
 add no-assign-notice "the Codex assign confirmation says nothing about the next action" "mmry/hooks-handlers/formation-assign.sh" "$S_LEAD" \
     '    mmry_host_lead_notice assign || true' '    :'
 

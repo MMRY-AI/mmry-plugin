@@ -78,8 +78,12 @@ codex plugin add mmry@mmry-plugin >/dev/null 2>&1 || { say "plugin add failed"; 
 say "installed: $(codex mcp list 2>&1 | awk 'NR==2 {print $1, $2}')"
 
 # ---- a throwaway subscriber; the key lives in this process's environment only ----------------
+# The password is made here, for this run, and never printed or written down: nothing signs in
+# with it again. Upper, lower, digit and symbol, as the API requires.
+PW="Tt9!$(node -e 'process.stdout.write(require("crypto").randomBytes(12).toString("hex"))')"
 REG="$(curl -s -m 120 -X POST "$API/api/auth/register" -H 'Content-Type: application/json' \
-    -d "{\"subscriberName\":\"Lead31789_$TS\",\"firstName\":\"Lead\",\"lastName\":\"Tester\",\"email\":\"lead31789_$TS@test.mnemo\",\"password\":\"TestPassword123!\"}")"
+    -d "{\"subscriberName\":\"Lead31789_$TS\",\"firstName\":\"Lead\",\"lastName\":\"Tester\",\"email\":\"lead31789_$TS@test.mnemo\",\"password\":\"$PW\"}")"
+unset PW
 TOKEN="$(printf '%s' "$REG" | "$JQ" -r '.token // empty')"
 [[ -n "$TOKEN" ]] || { say "register failed: $(printf '%s' "$REG" | head -c 300)"; exit 2; }
 MMRY_API_KEY="$(curl -s -m 120 -X POST "$API/api/auth/apikey" -H "Authorization: Bearer $TOKEN" \

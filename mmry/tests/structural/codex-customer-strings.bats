@@ -160,6 +160,10 @@ _allowed_reason() {
         "mmry-client.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME:-}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "lib-foundation-switch.sh|cfg=\"\${HOME}/.claude/mmry-config.json\"") printf 'N'; return 0 ;;
+        # (L) #31789: the Codex lead notice recommends Claude Code BY NAME, because a Claude Code
+        #     session leading is the remedy for a Codex lead that cannot hear its members while
+        #     idle. mmry_host_lead_notice returns before this line on any host but Codex.
+        "lib-host.sh|rec=\"Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here.\"") printf 'L'; return 0 ;;
     esac
     return 1
 }

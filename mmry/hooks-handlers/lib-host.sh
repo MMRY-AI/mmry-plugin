@@ -743,7 +743,10 @@ mmry_host_lead_notice() {
     [[ "$_MMRY_HOST_V" == "codex" ]] || return 1
     case "$1" in
         start)
-            printf '%s\n' "Tell the customer this when you give them the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its next action: their messages and reports arrive with this conversation's next tool call or the customer's next message, never while it sits idle. Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here. If this conversation does lead, check in while the work runs: call $(mmry_host_tool_ref formation_roster), which shows each member's state and delivers anything waiting, or ask the customer to send a message here."
+            # The recommendation names the other product on purpose: it is the remedy (R0).
+            local rec
+            rec="Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here."
+            printf '%s\n' "Tell the customer this when you give them the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its next action: their messages and reports arrive with this conversation's next tool call or the customer's next message, never while it sits idle. ${rec} If this conversation does lead, check in while the work runs: call $(mmry_host_tool_ref formation_roster), which shows each member's state and delivers anything waiting, or ask the customer to send a message here."
             ;;
         assign)
             printf '%s\n' "Their reply and their report reach you on your next action, not while this conversation sits idle: check in with $(mmry_host_tool_ref formation_roster), or ask the customer to send a message here."

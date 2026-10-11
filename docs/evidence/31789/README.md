@@ -170,4 +170,9 @@ showing the tool calls, the absence of an Internet access prompt, and the lead's
 
 ## Runs kept here
 
-(See the files beside this one; each records the plugin commit, the Codex version and the OS.)
+- `live-windows-run2.txt`: plugin ed5d6d3, Windows 11, codex-cli 0.160.0, Integration. **24 of 24 PASS**,
+  `fails=0`. Formation 8931. The idle watch: `turn/started=0 notifications=0` for 60 s after the
+  member's Done report and message; the lead's next prompt then delivered both.
+- `live-windows-run1.txt`: plugin 71fd92e, the same flow. 23 of 24: every product check passed, and
+  the one FAIL was the harness matching compact JSON where the hook prints it indented (fixed in the
+  harness, not the product). Formation 8930; the same idle result.
