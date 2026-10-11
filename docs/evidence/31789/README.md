@@ -71,7 +71,7 @@ Claude Code output is unchanged, byte for byte (the same BATS files pin it).
 | TC1: a lead starts a formation and is given its id; a second conversation joins by it | same run, Integration, throwaway `*@test.mnemo` subscriber | `TC1` lines |
 | TC2: the lead assigns work; the member sees it, marked as directed at it | same run; the member's delivery hook run as Codex runs it | `TC2` lines |
 | R0: nothing starts a turn on an idle lead in 60 s after a member's report | same run, `watch` step | `R0` lines |
-| TC3: the member reports Done and messages the lead; the lead sees it on its next prompt, and its roster shows Done | same run; the lead's UserPromptSubmit delivery hook | `TC3` lines |
+| TC3: the member reports Done, messages the lead, and messages the whole formation; the lead sees both messages on its next prompt (the broadcast unmarked, because it went to everyone), and its roster shows Done | same run; the lead's UserPromptSubmit delivery hook | `TC3` lines |
 | TC4: the lead reads the record, debriefs; the formation closes; the record is read back after the close; the member leaves | same run | `TC4` lines |
 | R3: the start and assign replies carry the next-action wording | same run, and BATS on Codex with a Claude Code control | `R0/R3`, `R3` lines; `codex-formation-lead.bats` |
 | Each lead tool's request and response, refusals, quoting, identity, annotations by Codex's rule | BATS | `mmry/tests/handlers/mcp-server.bats` |
@@ -142,10 +142,14 @@ assistant takes and whether any **Internet access** prompt appears.
 
 1. MEMBER: "Report my progress as Done: the tests are written, and tell the lead."
    Pass: `formation_progress` with Done, and `formation_say` directed to the lead.
-2. Leave LEAD alone for **two minutes**. Do not type in it. Pass (R0): nothing appears in LEAD on its
+2. MEMBER: "Tell the whole formation the checkout tests are in."
+   Pass: `formation_say` with no recipient; "Sent to formation N. The other members will see it
+   after their next tool call."
+3. Leave LEAD alone for **two minutes**. Do not type in it. Pass (R0): nothing appears in LEAD on its
    own. This is the limit the product now states.
-3. LEAD: "Any news from the formation?"
-   Pass: the member's message arrives with this prompt; "Show me the roster" shows the member as
+4. LEAD: "Any news from the formation?"
+   Pass: both of the member's messages arrive with this prompt, the one to the lead marked
+   `DIRECTED TO YOU` and the one to the formation not; "Show me the roster" shows the member as
    Done.
 
 ### TC4: close out

@@ -9,11 +9,13 @@
 #      and t1 a member, and drives the whole lead flow through MMRY's own tools:
 #        TC1  t0 formation_start; the reply carries the id; t1 formation_join by that id
 #        TC2  t0 formation_assign to t1; t1's delivery hook shows the assignment, directed at it
-#        R0   t1 reports Done and messages the lead; the lead conversation is then left IDLE for a
+#        R0   t1 reports Done, messages the lead, and messages the whole formation (a broadcast,
+#             no recipient); the lead conversation is then left IDLE for a
 #             minute and every notification the app-server sends about it is recorded: an idle
 #             lead that anything woke would show a turn starting
-#        TC3  the lead's next prompt (its UserPromptSubmit delivery hook) shows the Done report
-#             and the message; t0 formation_roster shows the member's Done state
+#        TC3  the lead's next prompt (its UserPromptSubmit delivery hook) shows the Done report,
+#             the directed message and the broadcast (unmarked, because it was addressed to
+#             nobody in particular); t0 formation_roster shows the member's Done state
 #        TC4  t0 formation_report, then formation_debrief; the close-out record is read back with
 #             formation_report by id after the close; t1 formation_leave
 #        R3   the start and assign replies carry the next-action wording
@@ -125,6 +127,7 @@ cat > "$W/plan.json" <<EOF
   {"exec": [$DELIVER_J, "\${t1}", "PostToolUse"], "label": "deliver-to-member"},
   {"t": 1, "tool": "formation_progress", "args": {"state": "Done", "note": "DONE-$MARK tests written and passing"}},
   {"t": 1, "tool": "formation_say", "args": {"message": "REPORT-$MARK done: the checkout tests are written and pass", "to_member_id": "\${lid}"}},
+  {"t": 1, "tool": "formation_say", "args": {"message": "BROADCAST-$MARK to everyone: the checkout tests are in, pull before you run them"}},
   {"watch": 60000, "t": 0},
   {"exec": [$DELIVER_J, "\${t0}", "UserPromptSubmit"], "label": "deliver-to-lead-next-prompt"},
   {"t": 0, "tool": "formation_roster"},
@@ -193,10 +196,18 @@ grep -q 'turn/started=0 ' <<< "$WATCH" \
 
 # ---- TC3 -------------------------------------------------------------------------------------------
 grep -q 'call t1 formation_progress .*isError=false' <<< "$D" && pass "TC3 the member reported Done" || fail "TC3 progress"
-grep -q 'call t1 formation_say .*isError=false' <<< "$D" && pass "TC3 the member messaged the lead" || fail "TC3 say"
+SAY1="$(answer 1 formation_say 1)"
+grep -q 'isError=false' <<< "$SAY1" && grep -q "Sent to member $LID in formation $FID, and to nobody else" <<< "$SAY1" \
+    && pass "TC3 the member messaged one member, the lead" || fail "TC3 directed say: $(head -c 300 <<< "$SAY1")"
+SAY2="$(answer 1 formation_say 2)"
+grep -q 'isError=false' <<< "$SAY2" && grep -q "Sent to formation $FID. The other members will see it" <<< "$SAY2" \
+    && pass "TC3 the member messaged the whole formation (a broadcast, no recipient)" || fail "TC3 broadcast say: $(head -c 300 <<< "$SAY2")"
 DL="$(exec_out deliver-to-lead-next-prompt)"
 say "delivery to the lead on its next prompt: $(head -c 900 <<< "$DL")"
 grep -q "REPORT-$MARK" <<< "$DL" && pass "TC3 the lead sees the member's report on its next prompt" || fail "TC3 lead did not see the report"
+# The broadcast reaches the lead too, and is not marked as directed: it went to the formation.
+grep -q "] BROADCAST-$MARK" <<< "$DL" && ! grep -q "DIRECTED TO YOU: BROADCAST-$MARK" <<< "$DL" \
+    && pass "TC3 the lead sees the formation-wide message on its next prompt, as a broadcast" || fail "TC3 lead did not see the broadcast"
 grep -q '"hookEventName": *"UserPromptSubmit"' <<< "$DL" && pass "TC3 it arrived as the next prompt's context (UserPromptSubmit)" || fail "TC3 not a UserPromptSubmit delivery"
 ROSTER2="$(answer 0 formation_roster 2)"
 grep -q "Done" <<< "$ROSTER2" && grep -q "DONE-$MARK\|Done" <<< "$ROSTER2" \
