@@ -193,7 +193,7 @@ grep -q 'call t1 formation_say .*isError=false' <<< "$D" && pass "TC3 the member
 DL="$(exec_out deliver-to-lead-next-prompt)"
 say "delivery to the lead on its next prompt: $(head -c 900 <<< "$DL")"
 grep -q "REPORT-$MARK" <<< "$DL" && pass "TC3 the lead sees the member's report on its next prompt" || fail "TC3 lead did not see the report"
-grep -q '"hookEventName":"UserPromptSubmit"' <<< "$DL" && pass "TC3 it arrived as the next prompt's context (UserPromptSubmit)" || fail "TC3 not a UserPromptSubmit delivery"
+grep -q '"hookEventName": *"UserPromptSubmit"' <<< "$DL" && pass "TC3 it arrived as the next prompt's context (UserPromptSubmit)" || fail "TC3 not a UserPromptSubmit delivery"
 ROSTER2="$(answer 0 formation_roster 2)"
 grep -q "Done" <<< "$ROSTER2" && grep -q "DONE-$MARK\|Done" <<< "$ROSTER2" \
     && pass "TC3 the lead's roster shows the member's Done" || fail "TC3 roster: $(head -c 400 <<< "$ROSTER2")"

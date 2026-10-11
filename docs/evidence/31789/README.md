@@ -1,0 +1,173 @@
+# #31789 evidence: a Codex customer starts and leads a formation
+
+Branch `31789/codex-formation-lead`, stacked on #31743 (`31743/codex-tools-no-prompt`, PR #88).
+Codex read and run: codex-cli **0.160.0** (openai/codex `rust-v0.160.0`).
+
+## Requirement 0: can an idle Codex lead hear its members? No.
+
+Eric Barone, 2026-10-07: "a lead has to be listening all the time, or it needs constant
+babysitting." The question was whether anything can deliver a member's message to a Codex lead
+conversation that is sitting idle, without anyone typing. It was settled from Codex's source at
+`rust-v0.160.0` and from the real `codex app-server`, not from belief.
+
+### From the source
+
+Every route by which something reaches the model, or starts a turn, was followed:
+
+| Route | What it does | Where |
+|---|---|---|
+| A hook's output (synchronous) | Reaches the model only inside a turn that is already running: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop. No hook event fires on an idle thread. | `codex-rs/hooks/src/events/*.rs`; `core/src/hook_runtime.rs` |
+| An async hook (`"async": true`, new since Claude Code's `asyncRewake` was ruled out) | Its context is queued and drained only at a turn boundary: before the next user prompt, or after a sampling step of a running turn. It never starts a turn. | `core/src/hook_runtime.rs` `drain_async_hook_results`; called from `core/src/session/turn.rs` lines 175 and 553 |
+| A Stop hook that blocks | Continues the CURRENT turn with its reason as a new prompt, with no cap and no timeout ceiling (`normalize_command_hook` defaults to 600 s and caps only SessionEnd and Interrupt). So a Stop hook that waits for a member's message holds the turn open; it does not wake an idle one. While it waits the conversation is busy and the customer's own message waits behind it. | `core/src/session/turn.rs` 655-690; `hooks/src/engine/discovery.rs` `normalize_command_hook` |
+| A notification from an MCP server (MMRY's tool server) | Logged, nothing else: progress, logging, resource and list-changed notifications go to the log. | `rmcp-client/src/logging_client_handler.rs` |
+| An MCP event stream (`events/stream`) | Refused for any server but Codex's own hosted apps ("MCP event subscriptions are only supported for hosted apps"), and forwarded to the client, not to a turn. | `app-server/src/request_processors/mcp_event_stream.rs` |
+| Mail between agents, durable sleep | These DO start a turn on an idle thread (`maybe_start_turn_for_pending_work`), but both are internal to one Codex process: mail between Codex's own agents, and a sleep an extension records. Neither is reachable from a plugin or from another process. | `core/src/session/handlers.rs` `inter_agent_communication`; `core/src/tasks/mod.rs` `has_outstanding_durable_sleep` |
+| The `clock.sleep` tool | A model tool (feature `sleep_tool`, listed by `codex features list` as `stable true` on this machine) that pauses INSIDE a running turn and ends early on new input for that turn. It keeps a turn running; it does not wake an idle one. | `core/src/tools/handlers/sleep.rs`; `core/src/tools/spec_plan.rs` 1234 |
+| Starting a turn from outside | `turn/start` belongs to the client that owns the thread (the CLI or the desktop app). A plugin has no channel to it. | `app-server-protocol` methods |
+
+So a Codex lead hears its members only on its next action: its next tool call (PostToolUse fires
+for MCP tools, `core/src/tools/handlers/mcp.rs` 478), the customer's next message
+(UserPromptSubmit), or the next session start.
+
+The only way to keep a Codex lead "listening" is to keep its turn running (a Stop hook that waits
+and blocks, or a model looping on `clock.sleep` and a tool call). That is continuous listening, which
+the ticket puts in #31721, and it has costs this ticket does not take on: the conversation is
+busy the whole time, every wake is a model call, and the customer's own messages wait behind it.
+Not built here.
+
+### From the real codex app-server
+
+`live-integration.sh` leaves the lead conversation idle for 60 seconds after the member has
+reported Done and sent the lead a message, and records every notification the app-server sends
+about that conversation. Result: see "Runs kept here" below (`turn/started=0`). The member's
+message was waiting, and was delivered by the lead's next prompt (the UserPromptSubmit hook run
+straight after the watch).
+
+### What follows (the R0 test case, second branch)
+
+The product and the docs say plainly that Codex can join a formation but should not lead one, and
+steer the lead role to Claude Code:
+
+- `formation_start` on Codex replies with the id, then: "Tell the customer this when you give them
+  the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its
+  next action ... we recommend it does not lead one: start the formation from a Claude Code session,
+  which hears its members while idle, and join it from here. If this conversation does lead, check
+  in while the work runs ..." (`lib-host.sh` `mmry_host_lead_notice`; asserted in
+  `mmry/tests/handlers/codex-formation-lead.bats` and live below).
+- `formation_assign` on Codex adds: "Their reply and their report reach you on your next action, not
+  while this conversation sits idle: check in with the mmry_plugin formation_roster tool, or ask the
+  customer to send a message here."
+- docs/codex.md, gap 3: "This is why we recommend you lead a formation from Claude Code." The Codex
+  skill has a "Leading a formation on Codex" section; the README's idle row recommends it too
+  (`mmry/tests/structural/codex-formation-lead-docs.bats`).
+
+Claude Code output is unchanged, byte for byte (the same BATS files pin it).
+
+## What is proven here, and how
+
+| Claim | How | Where |
+|---|---|---|
+| Codex lists and runs the lead's tools from the plugin's server | real `codex app-server`, plugin installed with `codex plugin marketplace add` / `codex plugin add` into a throwaway Codex home | `live-*.txt`, `setup` lines |
+| TC1: a lead starts a formation and is given its id; a second conversation joins by it | same run, Integration, throwaway `*@test.mnemo` subscriber | `TC1` lines |
+| TC2: the lead assigns work; the member sees it, marked as directed at it | same run; the member's delivery hook run as Codex runs it | `TC2` lines |
+| R0: nothing starts a turn on an idle lead in 60 s after a member's report | same run, `watch` step | `R0` lines |
+| TC3: the member reports Done and messages the lead; the lead sees it on its next prompt, and its roster shows Done | same run; the lead's UserPromptSubmit delivery hook | `TC3` lines |
+| TC4: the lead reads the record, debriefs; the formation closes; the record is read back after the close; the member leaves | same run | `TC4` lines |
+| R3: the start and assign replies carry the next-action wording | same run, and BATS on Codex with a Claude Code control | `R0/R3`, `R3` lines; `codex-formation-lead.bats` |
+| Each lead tool's request and response, refusals, quoting, identity, annotations by Codex's rule | BATS | `mmry/tests/handlers/mcp-server.bats` |
+| TC5 / R4: the Codex page claims only operations test cases 1 to 4 prove | BATS | `mmry/tests/structural/codex-formation-lead-docs.bats` |
+| Nothing a Codex model reads names a script for an operation a tool covers, now including start, assign, report and debrief | BATS (#31743's pins, extended) and the live run | `codex-tools-first.bats`, `codex-tools-first-output.bats`, `tools-first` line |
+| Each guard bites | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh` |
+
+What the app-server run does NOT prove: anything the MODEL does. A call through
+`mcpServer/tool/call` is not put through the approval policy and runs no hooks, so the harness runs
+the delivery hooks itself, exactly as Codex runs them. That a model in Codex picks these tools from a
+plain-words request, with no Internet access prompt, and that the customer reads the lead notice,
+is the live procedure below.
+
+## Re-running the automated live check
+
+```bash
+cd docs/evidence/31789 && bash live-integration.sh
+```
+
+Needs `codex` (0.160 or later), `node` and `curl`. Throwaway home, temp folder, Codex home and
+Integration subscriber; the key stays in the environment. Runs on Windows (Git Bash) and macOS.
+Expect `fails=0`. Do not edit the script while it runs: bash reads it as it goes.
+
+## The live procedure for the Codex members (Mac and Windows)
+
+Test cases 1 to 4 need a real model in a real Codex. Run them on **macOS** and on **Windows**, in
+the **Codex CLI** (the surface MMRY is documented for; add the desktop app if you can, and record
+it as its own column). Default policy: start Codex with no sandbox or approval flags.
+
+### Setup (once per machine)
+
+1. Clone the branch: `git clone -b 31789/codex-formation-lead https://github.com/MMRY-AI/mmry-plugin.git`
+2. Install it: `codex plugin marketplace add <path of that clone>` then
+   `codex plugin add mmry@mmry-plugin`. If an earlier MMRY is installed, first
+   `codex plugin remove mmry@mmry-plugin`. Restart Codex; trust MMRY's hooks when asked.
+3. Confirm the server and the lead's tools: `codex mcp list` shows `mmry_plugin`; in a conversation,
+   ask "which mmry_plugin tools do you have?" and check `formation_start`, `formation_assign`,
+   `formation_report` and `formation_debrief` are among them.
+4. Sign in to Integration with a throwaway `@test.mnemo` account:
+   `bash <clone>/mmry/setup/mmry-setup.sh --api-url https://mnemo-integration-d8h6bzh2bxgrc3e4.westus3-01.azurewebsites.net --host codex`
+   (Windows: from Git Bash).
+
+Open **two Codex conversations side by side** (two terminal windows running `codex` in the same
+project folder). Call them LEAD and MEMBER. Record, for every prompt below, the FIRST action the
+assistant takes and whether any **Internet access** prompt appears.
+
+### TC1: start in plain words, share the id, join by it
+
+1. LEAD: "Start a formation for the checkout tests."
+   Pass: the first action is the `mmry_plugin` `formation_start` tool; the reply shows the formation
+   id (call it N); no Internet access prompt; and the assistant tells you, in its own words, that a
+   Codex lead hears its members only on its next action, that we recommend a Claude Code session
+   lead, and how to check in. (R0 and R3. Whether it reads plainly is your judgement; write one line
+   on it.)
+2. MEMBER: "Join formation N."
+   Pass: `formation_join` with N; "Joined formation N".
+
+### TC2: assign, and the member sees it
+
+1. LEAD: "Show me the roster." Note the member's id M.
+2. LEAD: "Assign member M to write the checkout tests."
+   Pass: `formation_assign`; "Member M in formation N is now Wingman, working on: ..."; the reply
+   says their report reaches the lead on its next action.
+3. MEMBER: send any prompt, for example "Anything for me?"
+   Pass: the assignment appears, marked `MMRY AI Formation Transmission` and `DIRECTED TO YOU`.
+
+### TC3: Done, and the lead sees it on its next prompt (and not before)
+
+1. MEMBER: "Report my progress as Done: the tests are written, and tell the lead."
+   Pass: `formation_progress` with Done, and `formation_say` directed to the lead.
+2. Leave LEAD alone for **two minutes**. Do not type in it. Pass (R0): nothing appears in LEAD on its
+   own. This is the limit the product now states.
+3. LEAD: "Any news from the formation?"
+   Pass: the member's message arrives with this prompt; "Show me the roster" shows the member as
+   Done.
+
+### TC4: close out
+
+1. LEAD: "Show me the formation's close-out record." Pass: `formation_report`; it names the member,
+   the assignment and Done.
+2. LEAD: "Close out the formation: the checkout tests are written and passing, nothing went wrong."
+   Pass: `formation_debrief`. Codex asks once to approve it (it ends the formation for everyone);
+   choose the option to always allow it. The reply prints the record and "Formation N closed out".
+3. LEAD: "Show me the close-out record of formation N." Pass: the record is still readable.
+4. MEMBER: "Leave the formation." Pass: `formation_leave`.
+
+Fail anywhere: an Internet access prompt; any `.sh` command run for start, join, assign, roster,
+report, debrief, say, progress or leave, even one followed by the tool; a tool error; or a lead
+reply that does not mention the next-action limit.
+
+### What to send back
+
+For each column (Mac CLI, Windows CLI, and desktop app if run) and each TC: pass or fail, the Codex
+version, the plugin commit (`git -C <clone> rev-parse HEAD`), and a transcript or screenshots
+showing the tool calls, the absence of an Internet access prompt, and the lead's start reply.
+
+## Runs kept here
+
+(See the files beside this one; each records the plugin commit, the Codex version and the OS.)
