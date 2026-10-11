@@ -77,7 +77,7 @@ Claude Code output is unchanged, byte for byte (the same BATS files pin it).
 | Each lead tool's request and response, refusals, quoting, identity, annotations by Codex's rule | BATS | `mmry/tests/handlers/mcp-server.bats` |
 | TC5 / R4: the Codex page claims only operations test cases 1 to 4 prove | BATS | `mmry/tests/structural/codex-formation-lead-docs.bats` |
 | Nothing a Codex model reads names a script for an operation a tool covers, now including start, assign, report and debrief | BATS (#31743's pins, extended) and the live run | `codex-tools-first.bats`, `codex-tools-first-output.bats`, `tools-first` line |
-| Each guard bites | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh` |
+| Each guard bites: 21 mutations, 21 refused. Round 1 (20): 19 refused, and access-hint-lead SURVIVED, because nothing pinned the lead tools in the sandbox-access hint; a pin was added. Round 2: that one and a sharper one (the tool names dropped) both refused | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh`; `mutations-round1.txt`, `mutations-round2.txt` |
 
 What the app-server run does NOT prove: anything the MODEL does. A call through
 `mcpServer/tool/call` is not put through the approval policy and runs no hooks, so the harness runs

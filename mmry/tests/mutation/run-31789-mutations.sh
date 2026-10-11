@@ -71,9 +71,16 @@ add start-ref-script "start is referred to as its script on Codex" "$LIB" "$S_OU
     '        start-off)
             if (( $# == 0 )); then
                 mmry_host_tool_ref formation_start'
-add access-hint-lead "the sandbox-access hint stops naming the lead's tools" "$LIB" "$S_OUT" \
+add access-hint-lead "the sandbox-access hint stops naming the lead's operations in words" "$LIB" "$S_OUT" \
     '        echo "formation start, join, say, assign, progress report, roster, report, debrief or leave,"' \
     '        echo "formation join, say, progress report, roster or leave,"'
+# Round 1 found access-hint-lead SURVIVED: nothing pinned the hint's list. The pin added for it is
+# also checked against the tool names themselves being dropped.
+add access-hint-tools "the sandbox-access hint stops naming the lead's tools" "$LIB" "$S_OUT" \
+    '        echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
+        echo "formation_roster, formation_report, formation_debrief, formation_leave), which needs"' \
+    '        echo "formation_join, formation_say, formation_progress,"
+        echo "formation_roster, formation_leave), which needs"'
 
 # ---- the lead notice (R0, R3) ---------------------------------------------------------------------
 add no-start-notice "the Codex start confirmation says nothing about the lead limit" "$LIB" "$S_LEAD" \

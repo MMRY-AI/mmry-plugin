@@ -268,3 +268,23 @@ _codex_handler() {
     [ -n "$tools_at" ] && [ "$tools_at" -lt "$req_at" ] || { echo "$out"; return 1; }
     _assert_no_tool_covered_script "$out"
 }
+
+@test "access hint: it names every tool the server offers, the lead's included, and the lead's operations in words (#31789)" {
+    # Derived from the server, so a tool added there and missing here fails. Found by
+    # run-31789-mutations.sh: the hint could stop naming start, assign, report and debrief and no
+    # test noticed.
+    printf '%s' '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"k"}' > "$CODEX_DIR/mmry-config.json"
+    local out t missing=""
+    out="$(env -u MMRY_API_KEY -u MMRY_API_URL -u MMRY_AUTH_METHOD MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash -c '
+        source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1 || exit 9
+        MMRY_HTTP_CODE=000 MMRY_RESPONSE="curl failed"
+        _mmry_format_error save' _ "$PLUGIN_ROOT" 2>&1)"
+    [[ "$out" == *"do not ask for access: call the"* ]] || { echo "$out"; return 1; }
+    while IFS= read -r t; do
+        [[ "$out" == *"$t"* ]] || missing="${missing} ${t}"
+    done < <(_server_tools)
+    [ -z "$missing" ] || { echo "the access hint does not name:${missing}"; echo "$out"; return 1; }
+    local flat; flat="$(printf '%s' "$out" | tr '\n' ' ')"
+    [[ "$flat" == *"formation start, join, say, assign,"* ]] || { echo "$out"; return 1; }
+    [[ "$flat" == *"report, debrief or leave"* ]] || { echo "$out"; return 1; }
+}
