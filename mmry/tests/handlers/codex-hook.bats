@@ -231,10 +231,13 @@ stop_run() {
     [[ "$output" == *'Save what is new'* ]] || { echo "directive missing: $output"; return 1; }
 }
 
-@test "codex: the save directive names an absolute path, never \${CLAUDE_PLUGIN_ROOT}" {
+@test "codex: the save directive names MMRY's memory_save tool, never a script or \${CLAUDE_PLUGIN_ROOT}" {
+    # #31743: the tool saves with no Internet access approval; save-memory.sh, run by the model in
+    # Codex's sandbox, gets HTTP 000. The live Mac CLI run went to whichever script it was shown.
     run stop_run codex
     refute_output --partial 'CLAUDE_PLUGIN_ROOT'
-    assert_output --partial "/.codex/mmry/hooks-handlers/save-memory.sh"
+    refute_output --partial 'save-memory.sh'
+    assert_output --partial "the mmry_plugin memory_save tool"
 }
 
 @test "codex: the save prompt goes to stdout as JSON, and stderr stays clean" {

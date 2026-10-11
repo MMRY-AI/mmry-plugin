@@ -142,7 +142,9 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
     out="$(_codex_part 1)"
     msg="$(printf '%s' "$out" | _msg)"
     [[ "$msg" == *"NOT applied to this turn"* ]] || { echo "not the refusal path: $out"; return 1; }
-    [[ "$msg" == *"bash ${CODEX_DIR}/mmry/hooks-handlers/session-start.sh"* ]] || { echo "$msg"; return 1; }
+    # #31743: the reload is MMRY's memory_load tool on Codex; foundation-status has no tool.
+    [[ "$msg" == *"the mmry_plugin memory_load tool"* ]] || { echo "$msg"; return 1; }
+    [[ "$msg" != *"session-start.sh"* ]] || { echo "named the reload script, not the tool: $msg"; return 1; }
     [[ "$msg" == *"bash ${CODEX_DIR}/mmry/hooks-handlers/foundation-status.sh"* ]] || { echo "$msg"; return 1; }
     [[ "$msg" != *"/mmry:"* ]] || { echo "named a slash command Codex cannot type: $msg"; return 1; }
     # The script it names is one session-init.sh copies into that directory.
@@ -168,13 +170,14 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
     [[ "$output" != *".claude"* ]] || { echo "named the other product's file: $output"; return 1; }
 }
 
-@test "codex parts: and its remedies are the Codex script, never a slash command" {
+@test "codex parts: and its remedies are the Codex tool, never a script or a slash command" {
     # No cache at all: the status command's rebuild advice.
     run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u MMRY_FOUNDATION_REINJECT CODEX_HOME="$CODEX_DIR" MMRY_HOST=codex \
         bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Action:"* ]] || { echo "no remedy offered, so this checked nothing: $output"; return 1; }
-    [[ "$output" == *"bash ${CODEX_DIR}/mmry/hooks-handlers/session-start.sh"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"the mmry_plugin memory_load tool"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"session-start.sh"* ]] || { echo "named the reload script, not the tool: $output"; return 1; }
     [[ "$output" != *"/mmry:"* ]] || { echo "named a slash command: $output"; return 1; }
 }
 
