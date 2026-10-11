@@ -734,6 +734,11 @@ _mmry_host_formation_tool() {
 # formation, and of assigning work in one, says so plainly, says what to do instead, and
 # recommends that a Claude Code session lead. docs/evidence/31789/README.md has the evidence.
 #
+# BOTH LINES OPEN "Tell the customer this in your reply" (#31789 QA round 2). Unlabelled, the
+# assign line read as a note to the model: on Mac and on Windows the lead's reply to the customer
+# kept the confirmation and dropped the next-action line. The assign line now carries a sentence
+# the model can say as it stands. The skill says the same from the other side.
+#
 # Codex only. On any other host this prints nothing and returns 1, because a Claude Code lead is
 # woken by its members' messages and its confirmations are unchanged, byte for byte.
 #
@@ -746,10 +751,10 @@ mmry_host_lead_notice() {
             # The recommendation names the other product on purpose: it is the remedy (R0).
             local rec
             rec="Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here."
-            printf '%s\n' "Tell the customer this when you give them the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its next action: their messages and reports arrive with this conversation's next tool call or the customer's next message, never while it sits idle. ${rec} If this conversation does lead, check in while the work runs: call $(mmry_host_tool_ref formation_roster), which shows each member's state and delivers anything waiting, or ask the customer to send a message here."
+            printf '%s\n' "Tell the customer this in your reply when you give them the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its next action: their messages and reports arrive with this conversation's next tool call or the customer's next message, never while it sits idle. ${rec} If this conversation does lead, check in while the work runs: call $(mmry_host_tool_ref formation_roster), which shows each member's state and delivers anything waiting, or ask the customer to send a message here."
             ;;
         assign)
-            printf '%s\n' "Their reply and their report reach you on your next action, not while this conversation sits idle: check in with $(mmry_host_tool_ref formation_roster), or ask the customer to send a message here."
+            printf '%s\n' "Tell the customer this in your reply, every time you assign work, in words like these: \"Their report reaches me only when you next send a message here, not while this conversation sits idle, so check in with me once they have had time to work.\" Members' replies and reports reach you only on your next action; to check in yourself, call $(mmry_host_tool_ref formation_roster)."
             ;;
         *) return 1 ;;
     esac

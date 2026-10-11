@@ -141,6 +141,32 @@ add plugin-readme-claims "the plugin README claims listing and claiming formatio
     'the Foundation memories restated each prompt and coordination-group messages all work;' \
     'the Foundation memories restated each prompt, coordination-group messages, and listing and claiming in a formation all work;'
 
+# Round 3 (#31789 QA round 2): live, the lead's reply after formation_assign dropped the next-action
+# line. The skill now tells the model to relay it, and the tool labels it for the customer.
+add skill-no-relay "the skill stops telling the model to relay the next-action line after start and assign" "mmry/skills-codex/memory-system/SKILL.md" "$S_DOCS" \
+    '**Relay the next-action line to the customer, in your own reply, after every `formation_start` and
+every `formation_assign`.** Both results include a line that begins "Tell the customer this in
+your reply". It is for the customer, not for you: never leave it out, even when the rest of your
+reply is a one-line confirmation. After `formation_assign`, tell the customer that the member'"'"'s
+report arrives when they next send a message here, not on its own, and to check in then. For
+example: "Member 7 has the checkout tests. Their report reaches me only when you next send a
+message here, so check in with me once they have had time to work." After `formation_start`, give
+the id, say the same of every member, and give the recommendation above.' ''
+add skill-relay-start-only "the skill's relay instruction covers start but not assign" "mmry/skills-codex/memory-system/SKILL.md" "$S_DOCS" \
+    'after every `formation_start` and
+every `formation_assign`.**' 'after every `formation_start`.**'
+add assign-unlabelled "the assign line is no longer labelled for the customer" "$LIB" "$S_LEAD" \
+    '"Tell the customer this in your reply, every time you assign work, in words like these: \"' '"\"'
+add assign-notice-last "the assign line goes back to being the last line" "mmry/hooks-handlers/formation-assign.sh" "$S_LEAD" \
+    'if declare -F mmry_host_lead_notice >/dev/null 2>&1; then
+    mmry_host_lead_notice assign || true
+fi
+printf '"'"'They will see it after their next tool call, marked as directed at them. No other member was told.\n'"'"'' \
+    'printf '"'"'They will see it after their next tool call, marked as directed at them. No other member was told.\n'"'"'
+if declare -F mmry_host_lead_notice >/dev/null 2>&1; then
+    mmry_host_lead_notice assign || true
+fi'
+
 run_suite() { ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats "$3" ) > "$2" 2>&1; }
 
 copy() {

@@ -181,8 +181,9 @@ grep -q "Codex cannot wake an idle conversation" <<< "$START" && pass "R0/R3 the
 ASSIGN="$(answer 0 formation_assign)"
 grep -q 'isError=false' <<< "$ASSIGN" && grep -q "Member $MID in formation $FID is now Wingman, working on: ASSIGN-$MARK" <<< "$ASSIGN" \
     && pass "TC2 the lead assigned work to member $MID" || fail "TC2 assign: $(head -c 300 <<< "$ASSIGN")"
-grep -q "reach you on your next action, not while this conversation sits idle" <<< "$ASSIGN" \
-    && pass "R3 the live assign reply carries the next-action wording" || fail "R3 assign wording"
+grep -q "Tell the customer this in your reply, every time you assign work" <<< "$ASSIGN" \
+    && grep -q "reaches me only when you next send a message here, not while this conversation sits idle" <<< "$ASSIGN" \
+    && pass "R3 the live assign reply carries the next-action wording, labelled for the customer" || fail "R3 assign wording"
 DM="$(exec_out deliver-to-member)"
 say "delivery to the member: $(head -c 700 <<< "$DM")"
 grep -q "ASSIGN-$MARK" <<< "$DM" && grep -q "DIRECTED TO YOU" <<< "$DM" \

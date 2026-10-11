@@ -62,7 +62,7 @@ _server_tools() {
 _assert_lead_notice_start() {
     local out="$1" phrase
     for phrase in \
-        "Tell the customer this" \
+        "Tell the customer this in your reply" \
         "Codex cannot wake an idle conversation" \
         "hears its members only on its next action" \
         "never while it sits idle" \
@@ -126,11 +126,23 @@ _assert_customer_typography() {
     bash "$HH/formation-state.sh" set 42 "conv-lead3-$$"
     local out; out="$(CODEX_SESSION_ID="conv-lead3-$$" _codex "$HH/formation-assign.sh" 7 "write the migration")"
     [[ "$out" == *"Member 7 in formation 42 is now Wingman, working on: write the migration."* ]] || { echo "$out"; return 1; }
-    [[ "$out" == *"reach you on your next action, not while this conversation sits idle"* ]] || { echo "$out"; return 1; }
-    [[ "$out" == *"check in with the mmry_plugin formation_roster tool"* ]] || { echo "$out"; return 1; }
-    [[ "$out" == *"ask the customer to send a message here"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"Tell the customer this in your reply, every time you assign work"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"Their report reaches me only when you next send a message here, not while this conversation sits idle, so check in with me once they have had time to work."* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"reach you only on your next action"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"call the mmry_plugin formation_roster tool"* ]] || { echo "$out"; return 1; }
     _assert_customer_typography "$out"
     bash "$HH/formation-state.sh" clear "conv-lead3-$$" >/dev/null 2>&1 || true
+}
+
+@test "R3 assign (QA round 2): the line to tell the customer comes straight after the confirmation, not last" {
+    # On Mac and Windows the lead's reply kept the confirmation and the member line, and dropped the
+    # next-action line that came last. It is now line 2, labelled for the customer.
+    bash "$HH/formation-state.sh" set 42 "conv-lead4-$$"
+    local out; out="$(CODEX_SESSION_ID="conv-lead4-$$" _codex "$HH/formation-assign.sh" 7 "write the migration")"
+    local second; second="$(printf '%s\n' "$out" | sed -n 2p)"
+    [[ "$second" == "Tell the customer this in your reply, every time you assign work"* ]] || { echo "$out"; return 1; }
+    [[ "$(printf '%s\n' "$out" | sed -n 3p)" == "They will see it after their next tool call"* ]] || { echo "$out"; return 1; }
+    bash "$HH/formation-state.sh" clear "conv-lead4-$$" >/dev/null 2>&1 || true
 }
 
 @test "req: on Claude Code the assign confirmation is unchanged, byte for byte" {

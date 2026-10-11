@@ -48,15 +48,21 @@ straight after the watch).
 The product and the docs say plainly that Codex can join a formation but should not lead one, and
 steer the lead role to Claude Code:
 
-- `formation_start` on Codex replies with the id, then: "Tell the customer this when you give them
-  the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its
+- `formation_start` on Codex replies with the id, then: "Tell the customer this in your reply when
+  you give them the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its
   next action ... we recommend it does not lead one: start the formation from a Claude Code session,
   which hears its members while idle, and join it from here. If this conversation does lead, check
   in while the work runs ..." (`lib-host.sh` `mmry_host_lead_notice`; asserted in
   `mmry/tests/handlers/codex-formation-lead.bats` and live below).
-- `formation_assign` on Codex adds: "Their reply and their report reach you on your next action, not
-  while this conversation sits idle: check in with the mmry_plugin formation_roster tool, or ask the
-  customer to send a message here."
+- `formation_assign` on Codex adds, straight after the confirmation: "Tell the customer this in
+  your reply, every time you assign work, in words like these: "Their report reaches me only when
+  you next send a message here, not while this conversation sits idle, so check in with me once they
+  have had time to work." Members' replies and reports reach you only on your next action; to check
+  in yourself, call the mmry_plugin formation_roster tool."
+- QA round 2 (TC2, Mac and Windows): the lead's reply after `formation_assign` dropped the old,
+  unlabelled next-action line. Both lines now open "Tell the customer this in your reply", the assign
+  line comes before the line about the member rather than last, and the Codex skill's "Leading a
+  formation on Codex" section tells the model to relay the line after every start and every assign.
 - docs/codex.md, gap 3: "This is why we recommend you lead a formation from Claude Code." The Codex
   skill has a "Leading a formation on Codex" section; the README's idle row recommends it too
   (`mmry/tests/structural/codex-formation-lead-docs.bats`).
@@ -133,8 +139,9 @@ assistant takes and whether any **Internet access** prompt appears.
 
 1. LEAD: "Show me the roster." Note the member's id M.
 2. LEAD: "Assign member M to write the checkout tests."
-   Pass: `formation_assign`; "Member M in formation N is now Wingman, working on: ..."; the reply
-   says their report reaches the lead on its next action.
+   Pass: `formation_assign`; "Member M in formation N is now Wingman, working on: ..."; and the
+   assistant's own reply to you says the member's report arrives when you next send a message
+   there, not on its own, and to check in then. A reply that only confirms the assignment fails.
 3. MEMBER: send any prompt, for example "Anything for me?"
    Pass: the assignment appears, marked `MMRY AI Formation Transmission` and `DIRECTED TO YOU`.
 

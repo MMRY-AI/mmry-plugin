@@ -365,7 +365,8 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     mcp "$(call 410 formation_assign '{"member_id":6,"assignment":"write the tests"}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 410)" = "false" ]
     [[ "$(text_of 410)" == *"Member 6 in formation 77 is now Wingman, working on: write the tests."* ]] || return 1
-    [[ "$(text_of 410)" == *"reach you on your next action, not while this conversation sits idle"* ]] || return 1
+    [[ "$(text_of 410)" == *"Tell the customer this in your reply, every time you assign work"* ]] || return 1
+    [[ "$(text_of 410)" == *"reaches me only when you next send a message here, not while this conversation sits idle"* ]] || return 1
     grep -q '^PUT http://fake.invalid/api/formations/77/members/6 .*write the tests' "$REQLOG"
 }
 

@@ -234,6 +234,15 @@ Code and join it from Codex. If they lead from here anyway, check in while the w
 customer to send a message to this conversation whenever they want an update. Never tell a customer
 a member's message will reach an idle Codex lead on its own.
 
+**Relay the next-action line to the customer, in your own reply, after every `formation_start` and
+every `formation_assign`.** Both results include a line that begins "Tell the customer this in
+your reply". It is for the customer, not for you: never leave it out, even when the rest of your
+reply is a one-line confirmation. After `formation_assign`, tell the customer that the member's
+report arrives when they next send a message here, not on its own, and to check in then. For
+example: "Member 7 has the checkout tests. Their report reaches me only when you next send a
+message here, so check in with me once they have had time to work." After `formation_start`, give
+the id, say the same of every member, and give the recommendation above.
+
 Messages from the formation arrive on their own, marked `MMRY AI Formation Transmission`. A line marked
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.

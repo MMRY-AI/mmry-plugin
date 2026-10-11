@@ -174,6 +174,28 @@ _skill_claim() {
     [[ "$skill" == *"Never tell a customer a member's message will reach an idle Codex lead on its own"* ]] || return 1
 }
 
+@test "R3 (QA round 2): the skill tells the model to relay the next-action line after every assign and every start" {
+    # Live on Mac and on Windows the lead's reply after formation_assign dropped the next-action
+    # line the tool returned. The skill must tell the model, in so many words, that the line is for
+    # the customer and goes in its own reply, after assign AND after start.
+    local section
+    section="$(tr -d '\r' < "$SKILL" | awk '/^### Leading a formation on Codex/{on=1; next} on && /^##/{exit} on' | tr '\n' ' ')"
+    [ -n "$section" ] || { echo "no Leading a formation on Codex section"; return 1; }
+    local phrase
+    for phrase in \
+        'Relay the next-action line to the customer, in your own reply, after every `formation_start` and every `formation_assign`.' \
+        'Tell the customer this in your reply' \
+        'It is for the customer, not for you: never leave it out' \
+        'After `formation_assign`, tell the customer that the member'"'"'s report arrives when they next send a message here, not on its own, and to check in then.' \
+        'Their report reaches me only when you next send a message here' \
+        'After `formation_start`, give the id, say the same of every member'; do
+        [[ "$section" == *"$phrase"* ]] || { echo "the lead section lacks: $phrase"; return 1; }
+    done
+    # The label the skill names is the label both tools actually print, start and assign.
+    [ "$(grep -c '"Tell the customer this in your reply' "$PLUGIN_ROOT/hooks-handlers/lib-host.sh")" -eq 2 ] \
+        || { echo "start and assign must both carry the label the skill names"; return 1; }
+}
+
 @test "R0: the README's idle row recommends a Claude Code lead" {
     local row; row="$(grep -i '^| *A message that arrives while your assistant is idle' "$README" | tr -d '\r')"
     [[ "$row" == *"we recommend a Claude Code session lead a formation"* ]] || { echo "$row"; return 1; }
