@@ -159,6 +159,7 @@ Clean up: "leave the formation" in each conversation, then retire the test memor
 
 ## Runs kept here
 
+- `live-windows-run4.txt`: plugin 90de960 (fix round 1), Windows 11, codex-cli 0.160.0, Integration. 18 of 18 PASS: the 16 earlier checks plus the two `TC1-cause` checks (a fresh account's session start names `memory_save` and no script; no tool answer in the run names a tool-covered script).
 - `live-windows-run3.txt`: plugin de68916 (the bash 3.2 stdin fix), Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
 - `live-windows-run2.txt`: plugin 90ac8e4, Windows 11, codex-cli 0.160.0, Integration. 16 of 16 PASS.
 - `live-windows-run1.txt`: plugin 4a58d58, the same checks before the server was renamed from
