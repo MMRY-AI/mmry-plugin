@@ -187,7 +187,7 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
     [[ "$output" == *"run /mmry:load-memories"* ]] || { echo "$output"; return 1; }
 }
 
-@test "codex parts: a Foundation store failure at session start gives the Codex assistant a script to run" {
+@test "codex parts: a Foundation store failure at session start gives the Codex assistant the reload tool" {
     setup_mock_curl
     local root="$TEST_TMPDIR/plugin" client
     cp -R "$PLUGIN_ROOT" "$root"
@@ -201,6 +201,8 @@ _msg() { jq -j '.systemMessage // ""' | tr -d '\r'; }
         bash -c "bash '$root/hooks-handlers/session-start.sh' 2>/dev/null"
     [ "$status" -eq 0 ]
     [[ "$output" == *"could not be stored"* ]] || { echo "not the failure path: ${output:0:400}"; return 1; }
-    [[ "$output" == *"offer to run bash ${CODEX_DIR}/mmry/hooks-handlers/session-start.sh to try again"* ]] || { echo "${output:0:1500}"; return 1; }
+    # #31743: the reload is MMRY's memory_load tool on Codex, not the sandboxed script.
+    [[ "$output" == *"offer to run the mmry_plugin memory_load tool to try again"* ]] || { echo "${output:0:1500}"; return 1; }
+    [[ "$output" != *"session-start.sh"* ]] || { echo "named the reload script: ${output:0:1500}"; return 1; }
     [[ "$output" != *"/mmry:load-memories"* && "$output" != *"/mmry:foundation-status"* ]] || { echo "named a slash command"; return 1; }
 }

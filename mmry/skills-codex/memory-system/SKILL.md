@@ -177,8 +177,8 @@ point.
 
 ## Coordination groups (formations)
 
-> **Use this plugin's `formation_join` and `formation_leave` tools (server `mmry_plugin`), not the
-> `mmry_formation_*` connector tools, for anything that JOINS or LEAVES a group.**
+> **Use this plugin's `formation_join` and `formation_leave` tools (server `mmry_plugin`),
+> not the `mmry_formation_*` connector tools, for anything that JOINS or LEAVES a group.**
 >
 > Both look like they work. They do not do the same thing. The connector tools reach MMRY directly
 > and enrol you under their own identity; this plugin's tools enrol the identity this
