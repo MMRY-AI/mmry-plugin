@@ -88,8 +88,8 @@ _claims() {
 
 @test "TC5: no sentence anywhere on the page claims every formation operation" {
     local page; page="$(tr -d '\r' < "$PAGE" | tr 'A-Z' 'a-z')"
-    [[ "$page" != *"formations work, all of them"* ]]
-    [[ "$page" != *"every formation operation"* ]]
+    [[ "$page" != *"formations work, all of them"* ]] || return 1
+    [[ "$page" != *"every formation operation"* ]] || return 1
     [[ "$page" != *"every operation is usable here"* ]]
 }
 
