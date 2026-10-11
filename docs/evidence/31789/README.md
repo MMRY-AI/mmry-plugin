@@ -170,9 +170,15 @@ showing the tool calls, the absence of an Internet access prompt, and the lead's
 
 ## Runs kept here
 
-- `live-windows-run2.txt`: plugin ed5d6d3, Windows 11, codex-cli 0.160.0, Integration. **24 of 24 PASS**,
+- `live-windows-run3.txt`: plugin 260e42c, Windows 11, codex-cli 0.160.0, Integration. **23 of 23 PASS**,
+  `fails=0`. Formation 8932. The throwaway account's password is now made per run and never shown.
+  Idle watch: `turn/started=0` for 60 s.
+- `live-windows-run2.txt`: plugin ed5d6d3, Windows 11, codex-cli 0.160.0, Integration. **23 of 23 PASS**,
   `fails=0`. Formation 8931. The idle watch: `turn/started=0 notifications=0` for 60 s after the
   member's Done report and message; the lead's next prompt then delivered both.
-- `live-windows-run1.txt`: plugin 71fd92e, the same flow. 23 of 24: every product check passed, and
+- `live-windows-run1.txt`: plugin 71fd92e, the same flow. 22 of 23: every product check passed, and
   the one FAIL was the harness matching compact JSON where the hook prints it indented (fixed in the
   harness, not the product). Formation 8930; the same idle result.
+
+(Commit ed5d6d3's and 4c16234's messages counted these runs as 24 and 23 of 24. The runs have 23
+checks; the counts above are the ones in the files.)
