@@ -24,9 +24,10 @@
 
 load '../helpers/test-helper'
 
-# The scripts of the eleven operations the tool server covers. A name here on a Codex surface is
-# an instruction to run the sandboxed script.
-TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|progress|roster|leave))\.sh'
+# The scripts of the fifteen operations the tool server covers. A name here on a Codex surface is
+# an instruction to run the sandboxed script. #31789 added the lead's four: start, assign, report
+# and debrief.
+TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|progress|roster|leave|start|assign|report|debrief))\.sh'
 
 # The same thing said in prose, which is how docs/codex.md said it before this round.
 TOOL_COVERED_PROSE_RE='(the save script|formation join script|run the save|the search script|the join script)'
@@ -64,7 +65,7 @@ _script_hits() {
     while IFS= read -r t; do
         grep -qF "\`$t\`" "$SKILL" || missing="${missing} $t"
     done < <(_server_tools)
-    [ "$(_server_tools | grep -c .)" -eq 11 ] || { echo "expected 11 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
+    [ "$(_server_tools | grep -c .)" -eq 15 ] || { echo "expected 15 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
     # Any memory_* or formation_* name in backticks must be one the server offers. The connector's
     # mmry_formation_* tools are a different, warned-about thing and are excluded by the prefix,
     # and an argument such as formation_id is not a tool.
@@ -141,15 +142,16 @@ ${f#$REPO_ROOT/}: ${hits}"
 }
 
 @test "the scanner is real: it finds every tool-covered script name in a line built to contain them" {
-    # A regex that matches nothing makes every test above green. Feed it the eleven names.
+    # A regex that matches nothing makes every test above green. Feed it the fifteen names.
     local f="$BATS_TEST_TMPDIR/probe.md" n
     printf '%s\n' save-memory.sh search-memories.sh reinforce-memory.sh link-memories.sh \
         deactivate-memory.sh session-start.sh formation-join.sh formation-say.sh \
-        formation-progress.sh formation-roster.sh formation-leave.sh > "$f"
+        formation-progress.sh formation-roster.sh formation-leave.sh \
+        formation-start.sh formation-assign.sh formation-report.sh formation-debrief.sh > "$f"
     n="$(_script_hits "$f" | grep -c .)"
-    [ "$n" -eq 11 ]
+    [ "$n" -eq 15 ]
     # And it leaves alone the scripts no tool covers.
-    printf '%s\n' list-groups.sh visibility.sh formation-list.sh formation-start.sh submit-feedback.sh mmry-setup.sh > "$f"
+    printf '%s\n' list-groups.sh visibility.sh formation-list.sh formation-claim.sh submit-feedback.sh mmry-setup.sh > "$f"
     [ -z "$(_script_hits "$f")" ]
 }
 
