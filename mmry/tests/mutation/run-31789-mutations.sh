@@ -114,6 +114,33 @@ add skill-start-script "the skill sends the model to the start script again" "mm
     'bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-list.sh"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-start.sh" "Ship the v2 checkout"'
 
+# Round 2 (#31789 QA round 1): the skill and both READMEs are held to the proven set too. The first
+# restores the exact passage QA failed.
+add skill-old-passage "the skill again tells the model every operation, list and claim included, is available" "mmry/skills-codex/memory-system/SKILL.md" "$S_DOCS" \
+    'The formation operations tested on Codex are: start, join, say (to the formation or to one member),
+assign, progress, roster, report, debrief and leave, all as tools. Do not tell a customer any of
+them is unavailable. Listing the formations and claiming an area have not been tested from Codex
+yet: never tell a customer they are proven here, and if you run one of their scripts, say it has
+not been tested on Codex. Do tell' \
+    'Every formation operation is available here: start, join, say, assign, progress, roster, report,
+debrief and leave as tools, and list and claim as scripts. Do not tell a customer any of them is
+unavailable. Do tell'
+add skill-claims-list "the skill's tested sentence adds listing" "mmry/skills-codex/memory-system/SKILL.md" "$S_DOCS" \
+    'debrief and leave, all as tools.' 'debrief, list and leave, all as tools.'
+add skill-drops-broadcast "the skill's tested sentence stops claiming a message to the formation" "mmry/skills-codex/memory-system/SKILL.md" "$S_DOCS" \
+    'say (to the formation or to one member),' 'say,'
+add skill-scripts-untold "the skill's script section stops saying listing and claiming are untested" "mmry/skills-codex/memory-system/SKILL.md" "$S_DOCS" \
+    'Listing the active formations and claiming an area have no tool, and neither has been tested
+from Codex yet. If a customer asks for one, run it and tell them it has not been tested on Codex:' \
+    'Listing the active formations and claiming an area have no tool:'
+add readme-every-op "the repository README claims every formation operation on Codex" "README.md" "$S_DOCS" \
+    '| Coordination-group messages delivered as you work | yes | yes |' \
+    '| Coordination-group messages delivered as you work | yes | yes |
+| Every formation operation, including listing and claiming | yes | yes |'
+add plugin-readme-claims "the plugin README claims listing and claiming formations on Codex" "mmry/README.md" "$S_DOCS" \
+    'the Foundation memories restated each prompt and coordination-group messages all work;' \
+    'the Foundation memories restated each prompt, coordination-group messages, and listing and claiming in a formation all work;'
+
 run_suite() { ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats "$3" ) > "$2" 2>&1; }
 
 copy() {

@@ -248,7 +248,8 @@ this session is in the formation; they are the same on every platform:
 Send the report with `formation_say`, with `to_member_id` set to the lead's id; the roster shows
 which member is the lead.
 
-Listing formations and claiming an area have no tool and are scripts; see the next section.
+Listing formations and claiming an area have no tool and are scripts, and neither has been
+tested from Codex yet; see the next section.
 
 ## Operations with no tool: MMRY's scripts
 
@@ -323,7 +324,8 @@ question, never wait, and never change visibility on your own.
 
 ### The formation operations with no tool
 
-Listing the active formations and claiming an area have no tool:
+Listing the active formations and claiming an area have no tool, and neither has been tested
+from Codex yet. If a customer asks for one, run it and tell them it has not been tested on Codex:
 
 ```bash
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-list.sh"
@@ -421,7 +423,10 @@ The four things that are genuinely unavailable on this platform are: typed slash
 prompt before context is trimmed, waking an idle session with a formation message, and the
 plan-accepted prompt. Never imply any of them works here.
 
-Every formation operation is available here: start, join, say, assign, progress, roster, report,
-debrief and leave as tools, and list and claim as scripts. Do not tell a customer any of them is
-unavailable. Do tell a customer who leads from Codex that a lead here hears its members only on its
-next action, and that we recommend a Claude Code session lead (see "Leading a formation on Codex").
+The formation operations tested on Codex are: start, join, say (to the formation or to one member),
+assign, progress, roster, report, debrief and leave, all as tools. Do not tell a customer any of
+them is unavailable. Listing the formations and claiming an area have not been tested from Codex
+yet: never tell a customer they are proven here, and if you run one of their scripts, say it has
+not been tested on Codex. Do tell a customer who leads from Codex that a lead here hears its
+members only on its next action, and that we recommend a Claude Code session lead (see "Leading a
+formation on Codex").

@@ -22,6 +22,7 @@ setup() {
     PAGE="$REPO_ROOT/docs/codex.md"
     SKILL="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
     README="$REPO_ROOT/README.md"
+    PLUGIN_README="$PLUGIN_ROOT/README.md"
     SERVER="$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"
 }
 
@@ -91,6 +92,68 @@ _claims() {
     [[ "$page" != *"formations work, all of them"* ]] || return 1
     [[ "$page" != *"every formation operation"* ]] || return 1
     [[ "$page" != *"every operation is usable here"* ]]
+}
+
+# The Codex skill names the same proven set, in its own words (tool operations, not page phrases).
+SKILL_PROVEN='start|TC1
+join|TC1
+say (to the formation or to one member)|TC3
+assign|TC2
+progress|TC3
+roster|TC3
+report|TC4
+debrief|TC4
+and leave|TC4'
+
+# The skill's sentence that states what is tested on Codex, joined into one line.
+_skill_claim() {
+    tr -d '\r' < "$SKILL" | tr '\n' ' ' | grep -o 'The formation operations tested on Codex are: [^.]*\.'
+}
+
+@test "TC5: the Codex skill claims exactly the proven operations, each mapped to a test case" {
+    local claim line op tc rest
+    claim="$(_skill_claim)"
+    [ -n "$claim" ] || { echo "the skill has no 'The formation operations tested on Codex are:' sentence"; return 1; }
+    rest="${claim#The formation operations tested on Codex are: }"
+    while IFS= read -r line; do
+        op="${line%%|*}"; tc="${line##*|}"
+        [[ "$tc" =~ ^TC[1-4]$ ]] || { echo "$op is not mapped to a test case 1 to 4: $tc"; return 1; }
+        [[ "$rest" == *"$op"* ]] || { echo "the skill does not claim the proven '$op' ($tc): $claim"; return 1; }
+        rest="${rest//"$op"/}"
+    done <<< "$SKILL_PROVEN"
+    rest="$(printf '%s' "$rest" | tr 'A-Z' 'a-z')"
+    for op in "list" "claim" "speak" "close-out" "script"; do
+        [[ "$rest" != *"$op"* ]] || { echo "the skill's tested sentence names '$op' outside the proven set: $claim"; return 1; }
+    done
+}
+
+@test "TC5: the Codex skill claims no unproven operation and states listing and claiming as not yet tested" {
+    local skill; skill="$(tr -d '\r' < "$SKILL" | tr '\n' ' ')"
+    local low; low="$(printf '%s' "$skill" | tr 'A-Z' 'a-z')"
+    [[ "$low" != *"every formation operation"* ]] || { echo "the skill claims every formation operation"; return 1; }
+    [[ "$low" != *"list and claim as scripts"* ]] || { echo "the skill offers list and claim as available"; return 1; }
+    [[ "$low" != *"formations work, all of them"* ]] || return 1
+    [[ "$skill" == *"Listing the formations and claiming an area have not been tested from Codex yet"* ]] \
+        || { echo "the skill does not state listing and claiming as not yet tested"; return 1; }
+    [[ "$skill" == *"never tell a customer they are proven here"* ]] || { echo "no instruction to the model"; return 1; }
+    # Where the skill shows the two scripts, it says the same thing.
+    [[ "$skill" == *"claiming an area have no tool, and neither has been tested from Codex yet"* ]] \
+        || { echo "the scripts section does not say they are untested"; return 1; }
+}
+
+@test "TC5: neither plugin README claims an unproven formation operation on Codex" {
+    local f low line
+    for f in "$README" "$PLUGIN_README"; do
+        low="$(tr -d '\r' < "$f" | tr 'A-Z' 'a-z')"
+        [[ "$low" != *"every formation operation"* ]] || { echo "$f claims every formation operation"; return 1; }
+        [[ "$low" != *"formations work, all of them"* ]] || { echo "$f claims all formations work"; return 1; }
+        # A line that names formations and listing or claiming must say they are untested.
+        while IFS= read -r line; do
+            [[ "$line" == *"formation"* ]] || continue
+            [[ "$line" == *"list"* || "$line" == *"claim"* ]] || continue
+            [[ "$line" == *"not been tested"* ]] || { echo "$f claims listing or claiming: $line"; return 1; }
+        done <<< "$low"
+    done
 }
 
 @test "R0: the page states the lead limit and recommends a Claude Code lead" {
