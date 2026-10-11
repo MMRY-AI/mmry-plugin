@@ -163,7 +163,19 @@ fi
 # (codex-rs/hooks/src/engine/discovery.rs line 267), not to the shell the model runs its own
 # commands in, so mmry_host_script_ref resolves an absolute path there instead. Getting this wrong
 # is silent: the model would run a command against an empty prefix and report a missing file.
-DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call \"$(mmry_host_script_ref save-memory.sh)\" with --context for each. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}${compaction_clause}"
+#
+# ON CODEX THE DIRECTIVE NAMES THE TOOL, NOT THE SCRIPT (#31743). MMRY's tool server saves with no
+# Internet access approval; the script, run by the model in Codex's sandbox, gets HTTP 000 until
+# the customer approves access for the conversation. The first live Mac CLI run showed the model
+# running whichever script it had been pointed at before it found the tool, so this prompt, which
+# arrives on every turn with unsaved work, points at the tool. The Claude Code string is built
+# exactly as before.
+if [[ "$(mmry_host)" == "codex" ]]; then
+    _mmry_save_how="call the mmry_plugin memory_save tool for each, with the memory as its content"
+else
+    _mmry_save_how="call \"$(mmry_host_script_ref save-memory.sh)\" with --context for each"
+fi
+DIRECTIVE="Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then ${_mmry_save_how}. If nothing new is worth keeping, skip and proceed.${last_save_clause}${escalation_clause}${compaction_clause}"
 
 # #30642: deliver the directive on stderr and keep exit 2. On exit 2 (which blocks the stop)
 # Claude Code discards stdout entirely and feeds the hook's STDERR to the model, so we emit

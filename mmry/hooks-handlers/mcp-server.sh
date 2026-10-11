@@ -353,7 +353,10 @@ _mcp_tools_call() {
     MMRY_ARGV=()
     eval "$setup"
     if [[ "$name" == formation_* || "$name" == memory_load ]] && [[ -z "$MMRY_SID" ]]; then
-        _mcp_tool_text "$id" "Nothing was done: Codex did not say which conversation this call came from, and a coordination group is joined by one conversation. Run the same operation with the memory-system skill's bash script instead." true
+        # #31743: no script is offered here. The script would run in the sandbox and need Internet
+        # access approval, which is the prompt this server exists to remove, and every Codex release
+        # this was built against sends the conversation id on each call.
+        _mcp_tool_text "$id" "Nothing was done: Codex did not say which conversation this call came from, and a coordination group is joined by one conversation. Tell the customer, and that updating Codex should fix it." true
         return 0
     fi
     _mcp_run_handler

@@ -590,9 +590,21 @@ mmry_host_script_ref() {
 # alongside the Codex output so that a handler which "fixes" this by naming no command at all
 # fails rather than passes.
 #
+# ON CODEX, AN OPERATION MMRY'S OWN TOOLS COVER IS NAMED AS THE TOOL, NEVER AS THE SCRIPT (#31743).
+# Codex starts the plugin's tool server (codex-mcp.json, server mmry_plugin) outside its sandbox, so
+# formation_join, formation_say, formation_roster, formation_leave and formation_progress reach MMRY
+# with no Internet access approval, while the script the model runs itself needs one in every
+# conversation. The first live Mac CLI run of #31743 (2026-10-10) showed the model running whatever
+# script the text in front of it named, getting HTTP 000 from the sandbox, and only then finding
+# the tool. So the derived remedy names the tool. Everything without a tool (list, start, assign,
+# claim, report, debrief, and the lead reporting progress FOR another member, which the tool does
+# not take) keeps the runnable script. See _mmry_host_formation_tool and mmry_host_tool_ref below.
+#
 # Usage: mmry_host_formation_ref <subcommand> [argument ...]
 #   mmry_host_formation_ref join 12     -> claude: /mmry:formation join 12
-#                                       -> codex:  bash <dir>/mmry/hooks-handlers/formation-join.sh 12
+#                                       -> codex:  the mmry_plugin formation_join tool with formation_id 12
+#   mmry_host_formation_ref list        -> claude: /mmry:formation list
+#                                       -> codex:  bash <dir>/mmry/hooks-handlers/formation-list.sh
 mmry_host_formation_ref() {
     local sub="$1"
     shift
@@ -600,10 +612,75 @@ mmry_host_formation_ref() {
     local rest=""
     (( $# > 0 )) && rest=" $*"
     if [[ "$_MMRY_HOST_V" == "codex" ]]; then
+        _mmry_host_formation_tool "$sub" "$@" && return 0
         printf 'bash %s/mmry/hooks-handlers/formation-%s.sh%s' "$_MMRY_HOST_DIR_V" "$sub" "$rest"
     else
         printf '/mmry:formation %s%s' "$sub" "$rest"
     fi
+}
+
+# HOW A CODEX MESSAGE NAMES ONE OF MMRY'S OWN TOOLS (#31743).
+#
+# One spelling, so every message reads the same and the tests can find it: "the mmry_plugin <tool>
+# tool". The server name is part of it on purpose. A Codex customer may also have the MMRY connector,
+# whose mmry_formation_* tools enrol a different identity (the skill's warning), so a bare
+# "formation_join" is not specific enough to send the model to the right one.
+#
+# Codex only; on any other host this prints nothing and returns 1, because Claude Code has no tool
+# server here and its messages keep naming slash commands and scripts, byte for byte.
+#
+# Usage: mmry_host_tool_ref <tool> [phrase appended after it]
+mmry_host_tool_ref() {
+    local tool="$1"
+    shift
+    _mmry_host_resolve
+    [[ "$_MMRY_HOST_V" == "codex" ]] || return 1
+    case "$tool" in
+        memory_save|memory_search|memory_reinforce|memory_link|memory_retire|memory_load) ;;
+        formation_join|formation_say|formation_progress|formation_roster|formation_leave) ;;
+        *) return 1 ;;
+    esac
+    printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
+}
+
+# The tool form of a formation subcommand on Codex, or return 1 when no tool covers it.
+# Arguments are the ones the caller would have put after the script, rewritten as the tool's own
+# argument names, because "formation_say \"...\" <id>" is not how a tool is called.
+_mmry_host_formation_tool() {
+    local sub="$1"
+    shift
+    case "$sub" in
+        join)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_join
+            elif [[ "$1" =~ ^[0-9]+$ ]]; then
+                mmry_host_tool_ref formation_join "with formation_id $1"
+            else
+                mmry_host_tool_ref formation_join "with the formation's id"
+            fi
+            ;;
+        leave)  mmry_host_tool_ref formation_leave ;;
+        roster) mmry_host_tool_ref formation_roster ;;
+        say)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_say
+            else
+                mmry_host_tool_ref formation_say "(message, plus to_member_id for one member)"
+            fi
+            ;;
+        progress)
+            # The tool reports for THIS conversation only. A first argument that is a member id is
+            # the lead reporting for somebody else, which only the script does.
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_progress
+            elif [[ "$1" =~ ^[0-9]+$ || "$1" == "<memberId>"* ]]; then
+                return 1
+            else
+                mmry_host_tool_ref formation_progress "with state Accepted, Done, Blocked or Abandoned, and an optional note"
+            fi
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 # EVERY OTHER COMMAND MMRY NAMES TO A CUSTOMER, DERIVED FROM ONE TABLE (#31245 QA round 6).
@@ -632,21 +709,36 @@ mmry_host_formation_ref() {
 #
 # THE CLAUDE STRING IS THE LITERAL IT ALWAYS WAS, byte for byte, which is requirement 4.
 #
+# ON CODEX, SAVE, SEARCH AND LOAD-MEMORIES ARE TOOLS, NOT SCRIPTS (#31743). MMRY's tool server
+# covers all three (memory_save, memory_search, memory_load) with no Internet access approval, and
+# a message naming the script is what sent the model to the sandboxed script first in the live Mac
+# CLI run. So they are answered by _mmry_host_command_tool and are deliberately absent from the
+# script table, where a later edit could otherwise hand the script back.
+#
 # Usage: mmry_host_command_ref <command> [argument ...]
 #   mmry_host_command_ref setup            -> claude: /mmry:setup
 #                                          -> codex:  bash <dir>/mmry/setup/mmry-setup.sh
 #   mmry_host_command_ref visibility group -> claude: /mmry:visibility group
 #                                          -> codex:  bash <dir>/mmry/hooks-handlers/visibility.sh group
+#   mmry_host_command_ref load-memories    -> claude: /mmry:load-memories
+#                                          -> codex:  the mmry_plugin memory_load tool
+_mmry_host_command_tool() {
+    # The Codex tool for a command, or nothing.
+    case "$1" in
+        save)           printf 'memory_save' ;;
+        search)         printf 'memory_search' ;;
+        load-memories)  printf 'memory_load' ;;
+        *)              printf '' ;;
+    esac
+}
+
 _mmry_host_command_script() {
     # The Codex script for a command, relative to <config-dir>/mmry/. Empty means there is none.
     case "$1" in
         setup)          printf 'setup/mmry-setup.sh' ;;
         uninstall)      printf 'setup/uninstall.sh' ;;
-        save)           printf 'hooks-handlers/save-memory.sh' ;;
-        search)         printf 'hooks-handlers/search-memories.sh' ;;
         visibility)     printf 'hooks-handlers/visibility.sh' ;;
         feedback)       printf 'hooks-handlers/submit-feedback.sh' ;;
-        load-memories)  printf 'hooks-handlers/session-start.sh' ;;
         # #31411's status command. session-init.sh copies every handler, so it is on disk on Codex.
         foundation-status) printf 'hooks-handlers/foundation-status.sh' ;;
         *)              printf '' ;;
@@ -671,7 +763,12 @@ mmry_host_command_ref() {
     local rest=""
     (( $# > 0 )) && rest=" $*"
     if [[ "$_MMRY_HOST_V" == "codex" ]]; then
-        local script
+        local script tool
+        tool="$(_mmry_host_command_tool "$cmd")"
+        if [[ -n "$tool" ]]; then
+            mmry_host_tool_ref "$tool"
+            return 0
+        fi
         script="$(_mmry_host_command_script "$cmd")"
         [[ -n "$script" ]] || return 1
         printf 'bash %s/mmry/%s%s' "$_MMRY_HOST_DIR_V" "$script" "$rest"
@@ -847,7 +944,19 @@ mmry_host_codex_access_hint() {
         extra=", \"${extra//\\/\\\\}\""
     fi
     echo "MMRY AI could not be reached from here. In Codex this usually means the sandbox has no"
-    echo "network access. Assistant: call request_permissions with"
+    # #31743: an operation MMRY's own tools cover should never have been run as a script, and the
+    # tool needs no access. Said FIRST, so the model reaches for the tool rather than the request.
+    # Not for setup ($1 given), which has no tool.
+    if [[ -z "${1:-}" ]]; then
+        echo "network access. If this was a save, search, reinforce, link, retire or reload, or a"
+        echo "formation join, say, progress report, roster or leave, do not ask for access: call the"
+        echo "matching mmry_plugin tool instead (memory_save, memory_search, memory_reinforce,"
+        echo "memory_link, memory_retire, memory_load, formation_join, formation_say,"
+        echo "formation_progress, formation_roster, formation_leave), which needs none. For anything"
+        echo "else, call request_permissions with"
+    else
+        echo "network access. Assistant: call request_permissions with"
+    fi
     echo "  {\"permissions\": {\"network\": {\"enabled\": true}, \"file_system\": {\"write\": [\"${dir}\"${extra}]}}}"
     echo "approved for this conversation, then run the same command again. If the customer declines,"
     echo "tell them, and that they can run it in a terminal instead."
