@@ -18,6 +18,13 @@
 # The MCP specification itself names a memory tool as the example of a closed world, which is why
 # no tool here says open-world: every one of them reaches only this customer's own MMRY account.
 #
+# THE LEAD'S TOOLS (#31789). formation_start, formation_assign, formation_report and
+# formation_debrief were scripts until #31789, so a Codex lead met the Internet access prompt on
+# the very first thing it did, starting the formation. They follow the same rules as the rest.
+# Closing a formation out ends it for every member and cannot be undone, so formation_debrief says
+# destructive, as memory_retire does, and Codex asks the customer once and offers to always allow
+# it. Reading the close-out record changes nothing, so formation_report is read-only.
+#
 # WHICH CONVERSATION A CALL BELONGS TO. One server may serve several conversations, and the delivery
 # hook keeps formation membership per conversation. Codex puts the conversation's identity on every
 # tools/call it sends: params._meta.sessionId, the same value its hooks receive as session_id and
@@ -231,6 +238,57 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Show the coordination group roster", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
   },
   {
+    "name": "formation_start",
+    "title": "Start a coordination group",
+    "description": "Start a formation (coordination group) for a job, with this conversation as its lead, and get its id to give the other sessions so they can join. The reply also says how a lead on Codex hears its members; tell the customer what it says.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "objective": {"type": "string", "description": "What the formation is for, in a sentence anyone joining will understand."},
+        "task_id": {"type": "integer", "description": "Optional id of the task this work belongs to."},
+        "working_dir": {"type": "string", "description": "Absolute path of the project directory."}
+      },
+      "required": ["objective"]
+    },
+    "annotations": {"title": "Start a coordination group", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
+  },
+  {
+    "name": "formation_assign",
+    "title": "Assign work in the coordination group",
+    "description": "As the lead, set what one member of this conversation'"'"'s formation is working on, its role, or both. Only that member is told. Member ids come from formation_roster.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "member_id": {"type": "integer", "description": "Roster entry id of the member."},
+        "assignment": {"type": "string", "description": "What they should work on."},
+        "role": {"type": "string", "enum": ["Lead", "Wingman"], "description": "Optional new role."}
+      },
+      "required": ["member_id"]
+    },
+    "annotations": {"title": "Assign work in the coordination group", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
+  },
+  {
+    "name": "formation_report",
+    "title": "Read the coordination group'"'"'s close-out record",
+    "description": "Read the close-out record of this conversation'"'"'s formation, or of the formation given by formation_id: every member, the work it was given, and the state it ended in. Readable before and after the debrief.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"formation_id": {"type": "integer", "description": "Optional. Leave unset for this conversation'"'"'s own formation."}}
+    },
+    "annotations": {"title": "Read the coordination group'"'"'s close-out record", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
+    "name": "formation_debrief",
+    "title": "Close out the coordination group",
+    "description": "As the lead, close out this conversation'"'"'s formation with a summary of what was accomplished, decided and learned. The summary and the close-out record are kept as lasting memories, and the formation stops carrying messages. This ends the formation for every member.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"summary": {"type": "string", "description": "What was accomplished, what was decided, and what went wrong. At least 20 characters."}},
+      "required": ["summary"]
+    },
+    "annotations": {"title": "Close out the coordination group", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false}
+  },
+  {
     "name": "formation_leave",
     "title": "Leave the coordination group",
     "description": "Release this conversation'"'"'s place in its formation, on the service and here, so it can join another.",
@@ -239,7 +297,7 @@ MMRY_MCP_TOOLS='[
   }
 ]'
 
-MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, reinforcing, linking, retiring and reloading memories, and joining, messaging, reporting progress in, reading the roster of and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
+MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, reinforcing, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out (debrief) and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
 
 # ---------------------------------------------------------------------------------------------
 # ONE TOOL CALL.
@@ -280,6 +338,16 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "formation_progress" then
       ["formation-progress.sh", (str("state") | need("state") | if IN("Accepted","Done","Blocked","Abandoned") then . else error("state must be Accepted, Done, Blocked or Abandoned") end)]
       + (if (str("note") // "") != "" then [str("note")] else [] end)
+   elif $n == "formation_start" then
+      ["formation-start.sh", (str("objective") | need("objective"))] + (if int("task_id") == null then [] else [int("task_id")] end)
+   elif $n == "formation_assign" then
+      (str("role") // "") as $role
+      | (str("assignment") // "") as $work
+      | if $role != "" and ($role | IN("Lead","Wingman") | not) then error("role must be Lead or Wingman")
+        elif $work == "" and $role == "" then error("assignment or role is required")
+        else ["formation-assign.sh", (int("member_id") | need("member_id")), $work] + (if $role != "" then [$role] else [] end) end
+   elif $n == "formation_report" then ["formation-report.sh"] + (if int("formation_id") == null then [] else [int("formation_id")] end)
+   elif $n == "formation_debrief" then ["formation-debrief.sh", (str("summary") | need("summary"))]
    elif $n == "formation_roster" then ["formation-roster.sh"]
    elif $n == "formation_leave" then ["formation-leave.sh"]
    else error("unknown tool: \($n)") end) as $argv

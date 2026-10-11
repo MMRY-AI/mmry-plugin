@@ -138,4 +138,8 @@ if [[ -n "$applied_assignment" ]]; then
 fi
 printf '.\n'
 printf 'They will see it after their next tool call, marked as directed at them. No other member was told.\n'
+# #31789: a Codex lead hears the member's report only on its next action. Nothing on Claude Code.
+if declare -F mmry_host_lead_notice >/dev/null 2>&1; then
+    mmry_host_lead_notice assign || true
+fi
 exit 0
