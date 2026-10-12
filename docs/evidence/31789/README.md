@@ -83,7 +83,7 @@ Claude Code output is unchanged, byte for byte (the same BATS files pin it).
 | Each lead tool's request and response, refusals, quoting, identity, annotations by Codex's rule | BATS | `mmry/tests/handlers/mcp-server.bats` |
 | TC5 / R4: the Codex page, the Codex skill and both READMEs claim only operations test cases 1 to 4 prove, and state listing and claiming as not yet tested | BATS | `mmry/tests/structural/codex-formation-lead-docs.bats` |
 | Nothing a Codex model reads names a script for an operation a tool covers, now including start, assign, report and debrief | BATS (#31743's pins, extended) and the live run | `codex-tools-first.bats`, `codex-tools-first-output.bats`, `tools-first` line |
-| Each guard bites: 27 mutations, 27 refused. Round 1 (20): 19 refused, and access-hint-lead SURVIVED, because nothing pinned the lead tools in the sandbox-access hint; a pin was added. Round 2: that one and a sharper one (the tool names dropped) both refused. Round 3: six against the skill and README pins, one restoring the skill passage QA round 1 failed, all refused | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh`; `mutations-round1.txt`, `mutations-round2.txt`, `mutations-round3.txt` |
+| Each guard bites: 31 mutations, 31 refused. Round 4 (QA round 2): four against the relay instruction in the skill, the customer label on the assign line and its position, all refused (`mutations-round4.txt`). Round 1 (20): 19 refused, and access-hint-lead SURVIVED, because nothing pinned the lead tools in the sandbox-access hint; a pin was added. Round 2: that one and a sharper one (the tool names dropped) both refused. Round 3: six against the skill and README pins, one restoring the skill passage QA round 1 failed, all refused | mutation runner | `mmry/tests/mutation/run-31789-mutations.sh`; `mutations-round1.txt`, `mutations-round2.txt`, `mutations-round3.txt` |
 
 What the app-server run does NOT prove: anything the MODEL does. A call through
 `mcpServer/tool/call` is not put through the approval policy and runs no hooks, so the harness runs
@@ -181,6 +181,11 @@ showing the tool calls, the absence of an Internet access prompt, and the lead's
 
 ## Runs kept here
 
+- `live-windows-run5.txt`: plugin 8063b09 (QA round 2), Windows 11, codex-cli 0.160.0, Integration
+  revision 1de4775. **25 of 25 PASS**, `fails=0`. Formation 8938. The assign reply is the
+  confirmation, then the line labelled "Tell the customer this in your reply", then the line about
+  the member. Idle watch: `turn/started=0` for 60 s. The model-driven TC2 (does the assistant say
+  it to the customer) is the Codex members' to re-run.
 - `live-windows-run4.txt`: plugin 2b3221a, Windows 11, codex-cli 0.160.0, Integration revision 1de4775.
   **25 of 25 PASS**, `fails=0`. Formation 8934. Adds the broadcast step to TC3: the member messages
   the whole formation, and the lead's next prompt shows it unmarked, beside the directed report.

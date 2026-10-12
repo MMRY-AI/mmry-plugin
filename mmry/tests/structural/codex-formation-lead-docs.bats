@@ -192,7 +192,7 @@ _skill_claim() {
         [[ "$section" == *"$phrase"* ]] || { echo "the lead section lacks: $phrase"; return 1; }
     done
     # The label the skill names is the label both tools actually print, start and assign.
-    [ "$(grep -c '"Tell the customer this in your reply' "$PLUGIN_ROOT/hooks-handlers/lib-host.sh")" -eq 2 ] \
+    [ "$(grep -c "printf '%s\\\\n' \"Tell the customer this in your reply" "$PLUGIN_ROOT/hooks-handlers/lib-host.sh")" -eq 2 ] \
         || { echo "start and assign must both carry the label the skill names"; return 1; }
 }
 
