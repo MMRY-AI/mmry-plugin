@@ -112,8 +112,18 @@ Claude Code is unchanged byte for byte: its skill, hooks and commands still name
 1. Update the clone to the branch head and reinstall, so Codex does not keep the old skill:
    `git -C <clone> pull`, then `codex plugin remove mmry@mmry-plugin` and
    `codex plugin add mmry@mmry-plugin`. Restart Codex and trust the hooks again if asked.
-2. Check the skill Codex will read is the new one. This must print nothing:
-   `grep -rl --include=SKILL.md 'save-memory.sh' "${CODEX_HOME:-$HOME/.codex}"`
+2. Check the skill Codex will read is the new one. This step assumes the clone from Setup step 1
+   (branch `31743/codex-tools-no-prompt`, installed with `codex plugin marketplace add <clone>`),
+   which Codex copies to `plugins/cache/mmry-plugin/mmry/local/` under its home. Codex loads only
+   the skills under `skills-codex/` (the `skills` entry of `mmry/.codex-plugin/plugin.json`). The
+   `skills/` folder beside it is the Claude Code skill, which names the scripts by design, so it is
+   deliberately not searched.
+   First confirm the path exists. This must print the one file:
+   `ls "${CODEX_HOME:-$HOME/.codex}/plugins/cache/mmry-plugin/mmry/local/skills-codex/memory-system/SKILL.md"`
+   Then this must print nothing:
+   `grep -rl 'save-memory.sh' "${CODEX_HOME:-$HOME/.codex}/plugins/cache/mmry-plugin/mmry/local/skills-codex"`
+   If the `ls` fails, the grep proves nothing: the plugin is not installed where this step expects,
+   so find the installed `skills-codex` folder and run the grep against it.
 3. Run the five TC1 prompts above, each in a **fresh conversation for prompt 1**, twice, as round 1
    did. Use a **fresh throwaway account** for at least one of the two runs: an empty account gets
    the first-session welcome, which was one of the texts naming `save-memory.sh`.
