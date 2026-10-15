@@ -134,6 +134,50 @@ _IDLE_LOCK_STALE=120
 # the idle mode). The old watch notices within one 3 s slice of its sleep, or once a request it is
 # already waiting on returns (25 s at the client's limit); 40 s covers both with margin.
 _IDLE_HANDOVER_WAIT=40
+#
+# ---- How long continuous listening lasts (#31850) ---------------------------------------------
+# Every renewal is a model turn, and a model turn carries the session's whole context: measured on
+# #32028, about 30,000 tokens in a session that had only just started and 570,000 to 880,000 in a
+# long one, for a two-word reply. A member left idle overnight renewed all night. So listening is
+# limited, and the customer chooses the limit:
+#
+#   formationListenMinutes in mmry-config.json, or MMRY_FORMATION_LISTEN_MINUTES in the environment
+#     a whole number   minutes of idle listening after the member's last turn; then the watch stops
+#                      quietly, and the member's next turn starts listening again
+#     off (or 0)       never renew: one watch after each turn, which wakes the session only for a
+#                      message and so costs no model turn of its own
+#     unlimited        renew for as long as the session is in the formation (plugin 2.10.2 to 2.11.0)
+#     anything else    the default below
+#
+# THE SHIPPED DEFAULT IS THIS ONE LINE. 120 minutes is four renewals, chosen for cost. The product
+# decision on it was still open when this was written; changing it is this line plus the sentence
+# in commands/formation.md and the help page that states it, which formation-listen-docs.bats checks.
+MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=120
+#
+# ---- The watch's own budget (#31850 requirement 3) -------------------------------------------
+# The window is measured from the moment this hook STARTED, not from the moment it took the lock:
+# the handover wait (up to _IDLE_HANDOVER_WAIT) and its preparation used to come on top of the 28
+# minutes, which is how a watch that waited out a handover could run to within seconds of the
+# registration's 1800 and be killed there without renewing. The worst case is now:
+#
+#     _IDLE_PREP_RESERVE   4 s   the registration's `sh -c` gate and bash starting, before SECONDS runs
+#   + window            1680 s   MMRY_IDLE_POLL_SECONDS, from hook start, handover wait included
+#   + last poll           25 s   the client's limit, for an ask begun at the very end of the window
+#   + renewal question    23 s   10 s, a 3 s pause, and 10 s again (_idle_confirmed_member)
+#   = 1732 s of the 1800 s registration, leaving 68 s, which is at least _IDLE_MARGIN.
+#
+# formation-listen-limit.bats runs that worst case on a simulated clock and refuses a tree where it
+# leaves less than _IDLE_MARGIN. _IDLE_BUDGET must equal the Stop registration in hooks/hooks.json.
+_IDLE_BUDGET=1800
+_IDLE_PREP_RESERVE=4
+_IDLE_MARGIN=60
+# A poll lock held by a LIVE pid is respected however long since its last touch (#31721), because a
+# sleeping laptop is not a dead watch. But no watch outlives its registration - Claude Code kills it
+# at _IDLE_BUDGET - so a lock TAKEN longer ago than that cannot belong to a watch. Its pid is alive
+# only because the system has handed the number to some other process, and before this backstop
+# such a lock silenced idle delivery for the rest of the session. Measured on the pid file, which is
+# written once when the lock is taken; the directory is touched on every interval.
+_IDLE_LOCK_BACKSTOP=$(( _IDLE_BUDGET + 60 ))
 
 # ---- 0. Resolve a jq BEFORE anything is parsed with it. ----
 # THIS MUST BE THE PROJECT'S OWN RESOLVER, NOT `command -v jq` (#31196 QA round 2).
@@ -436,6 +480,10 @@ _fc_limit_request() {
 mmry_formation_safe_sid "$session_id"
 _safe_sid="$MMRY_FS_SAFE"
 _mutex_dir="${MMRY_TMPDIR}/.mmry-formation-cs-${_safe_sid}"
+# Left by a renewal for the turn it wakes (#31850): stop-check.sh reads it on that turn's Stop and
+# stays silent, and the prompt check below recognises that turn's own prompt. NOT named
+# .mmry-formation-*, which the hooks.json gate would take for a membership record.
+_renew_turn="${MMRY_TMPDIR}/.mmry-renewal-turn-${_safe_sid}"
 _poller_dir="${MMRY_TMPDIR}/.mmry-formation-poll-${_safe_sid}"
 _held_mutex=""
 _held_poller=""
@@ -461,7 +509,8 @@ _lock_mtime() {
 # which is the failure this whole task is about.
 _lock_is_stale() {
     local dir="$1" max_age="$2" now mtime
-    [[ -d "$dir" ]] || return 1
+    # -e, not -d: the poll lock's backstop (#31850) asks this of the lock's pid FILE.
+    [[ -e "$dir" ]] || return 1
     now="$(date +%s 2>/dev/null || printf '0')"
     mtime="$(_lock_mtime "$dir")"
     [[ "$now" =~ ^[0-9]+$ ]] || return 1
@@ -526,7 +575,11 @@ _acquire_poller() {
         { IFS= read -r pid || true; } < "${dir}/pid" 2>/dev/null || true
     fi
     if [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]]; then
-        if kill -0 "$pid" 2>/dev/null; then return 1; fi
+        # Alive holds it, unless the lock was taken longer ago than any watch can live: then the
+        # number has been reused by some other process (#31850, see _IDLE_LOCK_BACKSTOP).
+        if kill -0 "$pid" 2>/dev/null; then
+            _lock_is_stale "${dir}/pid" "$_IDLE_LOCK_BACKSTOP" || return 1
+        fi
     else
         _lock_is_stale "$dir" "$max_age" || return 1
     fi
@@ -774,6 +827,34 @@ _idle_interval() {
     fi
 }
 
+# Sets _listen_secs from the customer's setting (#31850): -1 unlimited, 0 off, otherwise the seconds
+# of idle listening allowed after the member's last turn. See MMRY_FORMATION_LISTEN_DEFAULT_MINUTES.
+# A case statement rather than a lower-casing process, so the spellings are listed out; at most six
+# digits, so no setting can overflow the arithmetic.
+_fc_listen_setting() {
+    local v="${MMRY_FORMATION_LISTEN_MINUTES:-}"
+    v="${v//[[:space:]]/}"
+    case "$v" in
+        [Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]) _listen_secs=0; return 0 ;;
+        [Uu][Nn][Ll][Ii][Mm][Ii][Tt][Ee][Dd]) _listen_secs=-1; return 0 ;;
+    esac
+    if [[ "$v" =~ ^[0-9]{1,6}$ ]]; then
+        _listen_secs=$(( 10#$v * 60 ))
+    else
+        _listen_secs=$(( MMRY_FORMATION_LISTEN_DEFAULT_MINUTES * 60 ))
+    fi
+}
+
+# True while this process still holds the poll lock (#31850). A lock can be reclaimed from under a
+# watch that has been suspended past the backstop age; when that watch resumes it must stand down,
+# and must not remove the lock on its way out, because the lock is no longer its own. A read builtin,
+# no process.
+_fc_holds_poller() {
+    local pid=""
+    { IFS= read -r pid || true; } < "${_poller_dir}/pid" 2>/dev/null || return 1
+    [[ "$pid" == "$$" ]]
+}
+
 # Sleeps the given seconds in slices of at most 3, and returns 1 at once when a turn that has just
 # ended has asked this watch to stand down (the HANDOVER in the idle mode). 3 s bounds how long the
 # new watch waits; it costs one short-lived process per slice and nothing on the network.
@@ -883,11 +964,22 @@ case "$mode" in
         else
             _event_name="UserPromptSubmit"
             _preamble="These formation messages were sent while this session was idle and had not yet been shown. They may be stale; check before acting."
+            # THE RENEWAL'S OWN PROMPT IS NOT A PERSON TYPING (#31850). Measured on Claude Code
+            # 2.1.292: the wake a renewal makes fires UserPromptSubmit, with the renewal notice inside
+            # the prompt. Treated as typing, it asked the service for messages (a request the watch
+            # starting at this turn's Stop makes anyway, seconds later) and removed the renewal
+            # markers, so the next watch started at the fast end and the save prompt fired. So when
+            # the renewal-turn marker is here AND the prompt carries the notice, this check does
+            # nothing at all. Pattern matches, no process.
+            if [[ -f "$_renew_turn" && "${payload:-}" == *"MMRY FORMATION WATCH RENEWED (formation ${formation_id})"* ]]; then
+                exit 0
+            fi
             # A person typed, so the next watch follows real work and must start at the fast end of
-            # its schedule, not at the slow end a renewal earns (#31721). One test, no process,
-            # unless a renewal marker is actually there.
-            [[ -d "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" ]] \
-                && { rmdir "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
+            # its schedule, not at the slow end a renewal earns (#31721), and its listening limit
+            # starts again from now (#31850). One test each, no process unless a marker is there.
+            [[ -e "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" ]] \
+                && { rm -rf -- "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
+            [[ -e "$_renew_turn" ]] && { rm -f -- "$_renew_turn" 2>/dev/null || true; }
         fi
         _poll_once || exit 0
         # A here-string, not `printf | jq`, which was one more process before the person's prompt
@@ -936,6 +1028,12 @@ case "$mode" in
             _mark_shown
             exit 2
         fi
+        # THE CLOCK STARTS WITH THE HOOK (#31850 requirement 3). SECONDS has counted since this shell
+        # started, so the epoch it started at is now minus SECONDS: one `date`, here, before the
+        # handover wait and everything after it, all of which must come out of the same 1800 s.
+        _idle_entry="$(date +%s 2>/dev/null || printf '0')"
+        [[ "$_idle_entry" =~ ^[0-9]+$ ]] || exit 0
+        _hook_start=$(( _idle_entry - SECONDS ))
         # HANDOVER (#31721 requirement 3). A watch lives for up to 28 minutes, so a member that ends a
         # later turn usually finds the previous watch still running - and by then that watch may be
         # asking only once a minute, which would make a reply to the turn that just ended slower than
@@ -979,23 +1077,52 @@ case "$mode" in
         # marker is only trusted while fresh, and any typed prompt removes it (see the prompt mode).
         _renew_marker="${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}"
         _offset=0
+        # THE LISTENING LIMIT COUNTS FROM THE MEMBER'S LAST TURN (#31850). A watch that follows a
+        # renewal inherits the time its chain began, which the renewal wrote into the marker; any
+        # other watch follows real work - a typed prompt, a delivered message - and begins a chain.
+        _chain_since=$_hook_start
         if [[ -d "$_renew_marker" ]]; then
             _lock_is_stale "$_renew_marker" 120 || _offset=$_IDLE_LATE_UNTIL
-            rmdir "$_renew_marker" 2>/dev/null || true
+            _since=""
+            { IFS= read -r _since || true; } < "${_renew_marker}/since" 2>/dev/null || true
+            if [[ "$_since" =~ ^[0-9]{1,12}$ ]] && (( _since <= _hook_start )); then
+                _chain_since=$_since
+            fi
+            rm -rf -- "$_renew_marker" 2>/dev/null || true
         fi
 
-        _start="$(date +%s 2>/dev/null || printf '0')"
-        [[ "$_start" =~ ^[0-9]+$ ]] || exit 0
-        _deadline=$(( _start + MMRY_IDLE_POLL_SECONDS ))
+        # The window ends 28 minutes after the hook started, or where the listening limit runs out if
+        # that is sooner. Only a window that ends with listening still left to do may renew.
+        _fc_listen_setting
+        _deadline=$(( _hook_start + MMRY_IDLE_POLL_SECONDS ))
+        _renew=1
+        if (( _listen_secs == 0 )); then
+            _renew=0
+        elif (( _listen_secs > 0 )); then
+            _listen_end=$(( _chain_since + _listen_secs ))
+            # The chain is already spent: nothing to listen for until the member's next turn.
+            (( _listen_end > _idle_entry )) || exit 0
+            if (( _listen_end <= _deadline )); then
+                _deadline=$_listen_end
+                _renew=0
+            fi
+        fi
+
+        _start=$_hook_start
         while :; do
             # LEAVING STOPS THE WATCH (#31721). One file read, no process: the record is gone after
             # /mmry:formation leave, and names another formation after a join elsewhere.
             mmry_formation_state_read "$session_id" || exit 0
             [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || exit 0
+            # A watch whose lock was reclaimed is no longer the watcher (#31850). It leaves without
+            # touching the lock, which belongs to the watch that took it.
+            _fc_holds_poller || { _held_poller=""; exit 0; }
 
             if _poll_once; then
                 printf '%s\n' "$FORMATION_BLOCK" >&2 || exit 0
                 _mark_shown
+                # The turn this wakes is real work, not a renewal (#31850).
+                [[ -e "$_renew_turn" ]] && { rm -f -- "$_renew_turn" 2>/dev/null || true; }
                 exit 2
             fi
             _now="$(date +%s 2>/dev/null || printf '0')"
@@ -1021,8 +1148,17 @@ case "$mode" in
         # formation and the service CONFIRMS it; otherwise stop quietly, as the watch always did. A
         # turn that ended meanwhile has a watch waiting to take over, and needs no wake from this one.
         [[ ! -d "$_handover_dir" ]] || exit 0
+        # The listening limit is reached, or listening is off (#31850): stop quietly, without asking
+        # the service anything. The member's next turn starts listening again.
+        (( _renew == 1 )) || exit 0
+        _fc_holds_poller || { _held_poller=""; exit 0; }
         _idle_confirmed_member || exit 0
         mkdir "$_renew_marker" 2>/dev/null || true
+        # The next watch carries this chain's start forward, so the limit counts from the last turn.
+        printf '%s\n' "$_chain_since" > "${_renew_marker}/since" 2>/dev/null || true
+        # And the turn this wakes is marked as a renewal, for the save prompt and the prompt check.
+        # The clock as last read in the loop, no process; stop-check.sh only needs it to the minute.
+        printf '%s\n' "${_now:-$_idle_entry}" > "$_renew_turn" 2>/dev/null || true
         # TWO WORDS, NOT SILENCE. Asked to end its turn without replying, a model produced no output,
         # and Claude Code 2.1.285 answered that with a prompt of its own ("Your previous response had
         # no visible output...") - a second turn for every renewal, seen in the live run on #31721. A
