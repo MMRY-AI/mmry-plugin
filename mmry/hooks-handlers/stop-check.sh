@@ -93,7 +93,7 @@ _mmry_sc_renewal_turn() {
     [[ -n "$sid" ]] || return 1
     f="${TMPDIR}/.mmry-renewal-turn-${sid//[^A-Za-z0-9._-]/_}"
     [[ -f "$f" ]] || return 1
-    { IFS= read -r at || true; } < "$f" 2>/dev/null || true
+    { IFS= read -r at || true; } 2>/dev/null < "$f" || true
     rm -f -- "$f" 2>/dev/null || true
     [[ "$at" =~ ^[0-9]+$ ]] || return 1
     (( $(date +%s) - at <= 900 ))

@@ -253,6 +253,34 @@ _chain() {
     [ "$CHAIN_RENEWALS" -eq 4 ] || { echo "'forever' gave ${CHAIN_RENEWALS} renewals, not the default 4"; return 1; }
 }
 
+@test "cost: the requests two hours of default listening makes, on the shipped schedule" {
+    # Every check is a request to MMRY AI, and every request uses one credit (CreditMiddleware exempts
+    # no formation route). The docs state this count; this measures it, on the shipped schedule with
+    # no interval override, over the whole default chain.
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local t0 i first=0 total
+    t0="$(_now)"
+    CHAIN_RENEWALS=0
+    for (( i = 1; i <= 10; i++ )); do
+        _watch "$HANDLERS"
+        (( i == 1 )) && first="$(grep -c . "$URLS")"
+        [[ "$WATCH_RC" -eq 2 ]] || break
+        CHAIN_RENEWALS=$(( CHAIN_RENEWALS + 1 ))
+        _fake_sleep 5
+        # The marker's mtime is real time, and the simulated clock is hours ahead of it, so the next
+        # watch would judge it stale and start at the fast end. In a session it is seconds old: give
+        # it the simulated time it was made at.
+        touch -d "@$(( $(_now) - 5 ))" "${TMPDIR}/.mmry-formation-renewed-$(_sid)" 2>/dev/null \
+            || touch -t "$(command date -r "$(( $(_now) - 5 ))" +%Y%m%d%H%M.%S)" "${TMPDIR}/.mmry-formation-renewed-$(_sid)"
+    done
+    total="$(grep -c . "$URLS")"
+    echo "default listening: ${CHAIN_RENEWALS} renewals, $(( $(_now) - t0 )) s; requests: ${first} in the first window, ${total} in all ($(_count_polls) checks + $(_count_sent) membership questions)" >&3
+    [ "$CHAIN_RENEWALS" -eq 4 ]
+    # What formation.md and the help page say: about 70 in the first half hour, about 170 in all.
+    (( first >= 65 && first <= 75 )) || { echo "first window made ${first}"; return 1; }
+    (( total >= 160 && total <= 180 )) || { echo "two hours made ${total}"; return 1; }
+}
+
 @test "restart: after the limit, the member's next turn starts listening again" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     _chain "$HANDLERS" 10 MMRY_FORMATION_LISTEN_MINUTES=30

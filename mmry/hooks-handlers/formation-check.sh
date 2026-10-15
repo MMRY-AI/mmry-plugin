@@ -851,7 +851,7 @@ _fc_listen_setting() {
 # no process.
 _fc_holds_poller() {
     local pid=""
-    { IFS= read -r pid || true; } < "${_poller_dir}/pid" 2>/dev/null || return 1
+    { IFS= read -r pid || true; } 2>/dev/null < "${_poller_dir}/pid" || return 1
     [[ "$pid" == "$$" ]]
 }
 
@@ -1084,7 +1084,7 @@ case "$mode" in
         if [[ -d "$_renew_marker" ]]; then
             _lock_is_stale "$_renew_marker" 120 || _offset=$_IDLE_LATE_UNTIL
             _since=""
-            { IFS= read -r _since || true; } < "${_renew_marker}/since" 2>/dev/null || true
+            { IFS= read -r _since || true; } 2>/dev/null < "${_renew_marker}/since" || true
             if [[ "$_since" =~ ^[0-9]{1,12}$ ]] && (( _since <= _hook_start )); then
                 _chain_since=$_since
             fi
