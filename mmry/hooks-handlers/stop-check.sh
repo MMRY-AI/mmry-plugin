@@ -68,6 +68,40 @@ STOP_COUNT_FILE="${TMPDIR}/.mmry-stop-count"
 DEBOUNCE_SECONDS=900           # 15 minutes between visible firings
 ESCALATION_THRESHOLD=3         # consecutive firings without a save before nagging
 
+# A FORMATION RENEWAL TURN IS NOT A SEGMENT OF WORK (#31850). formation-check.sh renews its idle watch
+# by waking the session with a notice; the model replies "Still listening." and this Stop follows.
+# The 15-minute debounce is shorter than the 28-minute window, so this prompt used to fire on every
+# renewal, and its exit 2 made a second model turn asking for memories from a turn that did nothing.
+# The renewal leaves .mmry-renewal-turn-<session> for exactly that turn; finding this session's, this
+# hook spends it and says nothing, leaving its debounce and count as they were.
+#
+# The payload is read only when some renewal marker exists, so every other Stop costs one glob and
+# nothing more. A marker older than 15 minutes is discarded rather than obeyed.
+_mmry_sc_renewal_turn() {
+    local f any="" payload="" sid="" re='"session_id"[[:space:]]*:[[:space:]]*"([^"]+)"' at=""
+    for f in "${TMPDIR}"/.mmry-renewal-turn-*; do
+        [[ -f "$f" ]] && { any=1; break; }
+    done
+    [[ -n "$any" ]] || return 1
+    if [[ ! -t 0 ]]; then
+        IFS= read -r -d '' -t 2 payload || true
+    fi
+    [[ "$payload" =~ $re ]] && sid="${BASH_REMATCH[1]}"
+    if [[ -z "$sid" ]] && declare -F mmry_session_id >/dev/null 2>&1; then
+        sid="$(mmry_session_id 2>/dev/null || true)"
+    fi
+    [[ -n "$sid" ]] || return 1
+    f="${TMPDIR}/.mmry-renewal-turn-${sid//[^A-Za-z0-9._-]/_}"
+    [[ -f "$f" ]] || return 1
+    { IFS= read -r at || true; } 2>/dev/null < "$f" || true
+    rm -f -- "$f" 2>/dev/null || true
+    [[ "$at" =~ ^[0-9]+$ ]] || return 1
+    (( $(date +%s) - at <= 900 ))
+}
+if _mmry_sc_renewal_turn; then
+    exit 0
+fi
+
 # Cross-platform mtime helper
 _mmry_mtime() {
     if stat --version &>/dev/null 2>&1; then

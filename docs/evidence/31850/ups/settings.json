@@ -1,0 +1,5 @@
+{"hooks":{
+ "UserPromptSubmit":[{"hooks":[{"type":"command","command":"bash \"<probe dir>/logger.sh\" UPS","timeout":10}]}],
+ "Stop":[{"hooks":[{"type":"command","command":"bash \"<probe dir>/logger.sh\" STOP-SYNC","timeout":10}]},
+         {"hooks":[{"type":"command","command":"bash \"<probe dir>/rewake.sh\"","asyncRewake":true,"timeout":60}]}]
+}}
