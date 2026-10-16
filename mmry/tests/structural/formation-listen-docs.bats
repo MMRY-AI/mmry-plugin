@@ -39,6 +39,7 @@ _has() { grep -qF -- "$2" "$1" || { echo "$(basename "$1") does not say: $2"; re
     _has "$FORMATION" "uses"
     _has "$FORMATION" "one credit"
     _has "$FORMATION" "about 70 times in the half hour after a turn"
+    _has "$FORMATION" "about 64 times an hour after that"
     _has "$FORMATION" "at the default 24 hours uses about 1,580"
 }
 

@@ -69,7 +69,7 @@ holds it to fewer.
 
 **What listening costs in MMRY credits.** Every check for messages is a request to MMRY AI and uses
 one credit, like any other request. A watch checks about 70 times in the half hour after a turn and
-about 60 times an hour after that, so a full day of quiet at the default 24 hours uses about 1,580
+about 64 times an hour after that, so a full day of quiet at the default 24 hours uses about 1,580
 credits. With `"off"` it is the first half hour only, about 70; a stopped watch uses none.
 
 **A renewal turn asks for nothing else.** It does not set off the save prompt, and it makes no

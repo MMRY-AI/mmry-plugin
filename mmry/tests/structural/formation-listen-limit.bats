@@ -319,9 +319,10 @@ _chain() {
     day=$(( per[0] + 50 * per[1] + per[4] ))
     echo "a day at the default: ${per[0]} + 50 x ${per[1]} + ${per[4]} = ${day} requests" >&3
     # What formation.md, /mmry:help and the help page say: about 70 in the half hour after a turn,
-    # about 60 an hour after that, about 1,580 over a full day at the default.
+    # about 64 an hour after that, about 1,580 over a full day at the default.
     (( per[0] >= 65 && per[0] <= 75 )) || { echo "first window made ${per[0]}"; return 1; }
-    (( per[1] * 60 / 28 >= 55 && per[1] * 60 / 28 <= 65 )) || { echo "a full window made ${per[1]}, not about 60 an hour"; return 1; }
+    # A full 28-minute window, scaled to an hour and rounded: 30 x 60 / 28 = 64.3, so 64.
+    (( (per[1] * 60 + 14) / 28 == 64 )) || { echo "a full window made ${per[1]}, $(( (per[1] * 60 + 14) / 28 )) an hour, not about 64"; return 1; }
     (( day >= 1560 && day <= 1600 )) || { echo "a day of default listening makes ${day}, not about 1,580"; return 1; }
 }
 
