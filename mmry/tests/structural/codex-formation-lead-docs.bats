@@ -150,7 +150,8 @@ _skill_claim() {
         # A line that names formations and listing or claiming must say they are untested.
         while IFS= read -r line; do
             [[ "$line" == *"formation"* ]] || continue
-            [[ "$line" == *"list"* || "$line" == *"claim"* ]] || continue
+            # Whole words only: "listening" must not match "list".
+            [[ "$line" =~ (^|[^a-z])(list|lists|listed|listing|claim|claims|claimed|claiming)([^a-z]|$) ]] || continue
             [[ "$line" == *"not been tested"* ]] || { echo "$f claims listing or claiming: $line"; return 1; }
         done <<< "$low"
     done
