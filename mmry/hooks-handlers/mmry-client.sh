@@ -46,6 +46,10 @@ MMRY_FOUNDATION_TOKEN_CAP="${MMRY_FOUNDATION_TOKEN_CAP:-}"
 # foundationRefreshSeconds: re-fetch the Foundation cache mid-session at most this often so
 # admin-added Foundation memories propagate without a Claude restart. 0 = session-start only.
 MMRY_FOUNDATION_REFRESH_SECONDS="${MMRY_FOUNDATION_REFRESH_SECONDS:-}"
+# formationListenMinutes (#31850): how long a formation member keeps listening while idle - whole
+# minutes, "off" or "unlimited". Read here, interpreted in formation-check.sh, whose
+# MMRY_FORMATION_LISTEN_DEFAULT_MINUTES is the one default: nothing is defaulted here.
+MMRY_FORMATION_LISTEN_MINUTES="${MMRY_FORMATION_LISTEN_MINUTES:-}"
 
 # Temp directory — cross-platform
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
@@ -191,7 +195,7 @@ mmry_load_config() {
         # reads below must not be reordered without reordering the jq array to match.
         if [[ -n "${MMRY_JQ:-}" ]]; then
             local _cfg_url="" _cfg_auth="" _cfg_key=""
-            local _cfg_reinject="" _cfg_cap="" _cfg_refresh=""
+            local _cfg_reinject="" _cfg_cap="" _cfg_refresh="" _cfg_listen=""
             # `{ read; ... } < <(...)` rather than mapfile: macOS ships bash 3.2, which has
             # no mapfile but does have `read -d`.
             # Each read is `|| true` twice over: `read -d ''` returns non-zero at EOF even
@@ -205,9 +209,11 @@ mmry_load_config() {
                 IFS= read -r -d '' _cfg_reinject || true
                 IFS= read -r -d '' _cfg_cap || true
                 IFS= read -r -d '' _cfg_refresh || true
+                IFS= read -r -d '' _cfg_listen || true
             } < <("$MMRY_JQ" -j '
                     [ .apiUrl, .authMethod, .apiKey,
-                      .foundationReinject, .foundationReinjectTokenCap, .foundationRefreshSeconds ]
+                      .foundationReinject, .foundationReinjectTokenCap, .foundationRefreshSeconds,
+                      .formationListenMinutes ]
                     | map(if . == null then "" else tostring end)
                     | map(. + "\u0000")
                     | .[]
@@ -219,6 +225,7 @@ mmry_load_config() {
             [[ -z "${MMRY_FOUNDATION_REINJECT:-}" && -n "$_cfg_reinject" ]] && MMRY_FOUNDATION_REINJECT="$_cfg_reinject" || true
             [[ -z "${MMRY_FOUNDATION_TOKEN_CAP:-}" && -n "$_cfg_cap" ]] && MMRY_FOUNDATION_TOKEN_CAP="$_cfg_cap" || true
             [[ -z "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" && -n "$_cfg_refresh" ]] && MMRY_FOUNDATION_REFRESH_SECONDS="$_cfg_refresh" || true
+            [[ -z "${MMRY_FORMATION_LISTEN_MINUTES:-}" && -n "$_cfg_listen" ]] && MMRY_FORMATION_LISTEN_MINUTES="$_cfg_listen" || true
         fi
     fi
 

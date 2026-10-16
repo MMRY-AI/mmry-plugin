@@ -19,8 +19,8 @@ are four moments a member receives:
 
 1. **After any tool call.** A member that is working picks messages up between its own steps.
 2. **While it is sitting idle.** When a member's turn ends, MMRY keeps watching on its behalf in
-   the background, for as long as this session is in the formation, and wakes it if something
-   arrives. This is the case that matters most, because a member is usually idle at exactly the
+   the background, by default for 24 hours of quiet (see "How Long It Listens, And What That Costs"
+   below), and wakes it if something arrives. This is the case that matters most, because a member is usually idle at exactly the
    moment the lead has something to tell it. The watch checks every few seconds for the first
    minute after a turn ends, when a reply is most likely, and less often the longer the member sits
    idle, down to once a minute. Every time a turn ends it starts again at its fastest, so a quick
@@ -34,12 +34,55 @@ are four moments a member receives:
 a limited time, so after about half an hour of silence the watch hands over to a fresh one. To do
 that it wakes the session briefly with a note that MMRY is still listening; the session replies
 "Still listening." and a new watch starts. That short turn in the window is expected and needs
-nothing from anybody. The watch stops renewing when this session leaves the formation, joins a
-different one, or the service says it is no longer a member, for example because the formation was
-closed out.
+nothing from anybody. The watch stops renewing when the listening limit below is reached, when this
+session leaves the formation, joins a different one, or the service says it is no longer a member,
+for example because the formation was closed out.
 
-**A session that cannot run may not receive.** The watch keeps listening for as long as the session
-is open and in the formation, but it cannot run at all if the session has been closed, or is on a
+## How Long It Listens, And What That Costs
+
+**By default a session listens for 24 hours of quiet after its last turn,** which is the first
+watch and up to 51 renewals, about two an hour. A typed prompt, or a message the session receives,
+starts the 24 hours again, so a session doing continuous work in a formation keeps listening for as
+long as the work goes on. After a full day of quiet the watch stops. Nothing is lost while it is
+stopped: a message waits on the server and arrives on the session's next tool call, prompt or start.
+The session's next turn starts listening again, for another 24 hours.
+
+**The limit is the customer's to set.** Put `formationListenMinutes` in `~/.claude/mmry-config.json`
+(or set `MMRY_FORMATION_LISTEN_MINUTES` in the environment Claude Code runs in):
+
+- a whole number of minutes, for example `"formationListenMinutes": 480` to listen for 8 hours;
+- `"off"` for no renewals at all. The session still listens for about half an hour after each turn,
+  and is woken only if a message arrives;
+- `"unlimited"` for no limit: renew for as long as this session is in the formation, as plugins
+  2.10.2 to 2.11.0 did.
+
+Anything else is read as the default. The setting is read each time a watch starts, so a change
+applies from the end of the session's next turn, with no restart.
+
+**What a renewal costs in Claude usage.** A renewal is one model turn, and a turn sends the whole
+conversation to the model, however short the reply. Measured on real renewals (#32028): about
+30,000 tokens in a session that had only just started, and 570,000 to 880,000 in a long working
+session, each for a two-word reply. About 99 percent of each was read from Claude's prompt cache
+rather than being new work, and it counts toward your Claude Code usage like any other turn. The
+default limit holds that to at most 51 such turns in a day of quiet; a lower limit, or `"off"`,
+holds it to fewer.
+
+**What listening costs in MMRY credits.** Every check for messages is a request to MMRY AI and uses
+one credit, like any other request. A watch checks about 70 times in the half hour after a turn and
+about 64 times an hour after that, so a full day of quiet at the default 24 hours uses about 1,580
+credits. With `"off"` it is the first half hour only, about 70; a stopped watch uses none.
+
+**A renewal turn asks for nothing else.** It does not set off the save prompt, and it makes no
+request to MMRY AI of its own. The only request it leads to is the next watch's.
+
+**Continuous listening needs Claude Code 2.1.285 or newer.** It depends on Claude Code letting the
+background watch run for its full 1800 seconds, which was measured on 2.1.285, held in the live
+test on 2.1.286, and measured again on 2.1.292. Versions from 2.1.64 to 2.1.284 deliver to an idle
+session (see below) but were never measured for renewal, so if a session stops listening after
+about half an hour, update Claude Code.
+
+**A session that cannot run may not receive.** The watch keeps listening, within that limit, while
+the session is open and in the formation, but it cannot run at all if the session has been closed, or is on a
 machine that has gone to sleep. It also stops, rather than waking the session on a guess, if MMRY
 cannot confirm with the service at the moment of renewal that this session is still a member. After
 that, every remaining path needs somebody to touch that session: a tool call, a typed prompt, or a
