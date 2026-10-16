@@ -149,10 +149,12 @@ _IDLE_HANDOVER_WAIT=40
 #     unlimited        renew for as long as the session is in the formation (plugin 2.10.2 to 2.11.0)
 #     anything else    the default below
 #
-# THE SHIPPED DEFAULT IS THIS ONE LINE. 120 minutes is four renewals, chosen for cost. The product
-# decision on it was still open when this was written; changing it is this line plus the sentence
-# in commands/formation.md and the help page that states it, which formation-listen-docs.bats checks.
-MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=120
+# THE SHIPPED DEFAULT IS THIS ONE LINE. 1440 minutes, 24 hours from the member's last turn, so a
+# member doing continuous work keeps listening through a full day and a member who walks away stops
+# costing anything a day later (product decision, 2026-10-15). Changing it is this line plus the
+# sentences and figures in commands/formation.md, commands/help.md, the README and the help page that
+# state it, which formation-listen-docs.bats and the website's formation-listening-cost test check.
+MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=1440
 #
 # ---- The watch's own budget (#31850 requirement 3) -------------------------------------------
 # The window is measured from the moment this hook STARTED, not from the moment it took the lock:

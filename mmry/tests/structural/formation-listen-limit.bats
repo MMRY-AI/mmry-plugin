@@ -165,18 +165,35 @@ _chain() {
 # TEST CASE 1: the limit, off, and the default
 # =============================================================================================
 
-@test "default: the shipped default is ONE constant, 120 minutes of idle listening" {
-    run grep -c '^MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=120$' "${HANDLERS}/formation-check.sh"
-    [ "$output" -eq 1 ] || { echo "the default is not the single constant 120: ${output}"; return 1; }
+@test "default: the shipped default is ONE constant, 1440 minutes (24 hours) of idle listening" {
+    run grep -c '^MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=1440$' "${HANDLERS}/formation-check.sh"
+    [ "$output" -eq 1 ] || { echo "the default is not the single constant 1440: ${output}"; return 1; }
     # Nothing else in the handlers spells a listening default of its own.
     run grep -l 'MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=' "${HANDLERS}"/*.sh
     [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ] || { echo "defined in more than one place: ${output}"; return 1; }
 }
 
-@test "default: with no setting, listening renews 4 times and stops quietly at 2 hours" {
+# Renewals in a limit of L seconds: watch k starts at (k-1) x 1685 s (a 1680 s window and a 5 s
+# renewal turn), and a watch renews only when its whole window fits inside the limit. 86400 s:
+# 51 x 1685 = 85935, so the 52nd watch has 465 s left and stops; 51 renewals. 7200 s: watches start
+# at 0, 1685, 3370, 5055 and 6740; the fifth has 460 s left; 4 renewals.
+@test "default: with no setting, listening renews 51 times and stops quietly at 24 hours" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    _chain "$HANDLERS" 10
+    _chain "$HANDLERS" 60
     echo "default: ${CHAIN_RENEWALS} renewals, stopped=${CHAIN_STOPPED}, ${CHAIN_ELAPSED} s listened" >&3
+    [ "$CHAIN_RENEWALS" -eq 51 ] || { echo "expected 51 renewals in 24 hours, got ${CHAIN_RENEWALS}"; return 1; }
+    [ "$CHAIN_STOPPED" -eq 1 ] || { echo "the last watch did not stop quietly: rc ${WATCH_RC} ${WATCH_OUT}"; return 1; }
+    # Listened the whole 24 hours and not past it (the 5 s renewal turns are inside the chain).
+    (( CHAIN_ELAPSED >= 86400 - 5 && CHAIN_ELAPSED <= 86400 + 10 )) || { echo "listened ${CHAIN_ELAPSED} s"; return 1; }
+    # The service is asked about membership only for a renewal it will actually make.
+    [ "$(_count_sent)" -eq 51 ] || { echo "membership asked $(_count_sent) times for 51 renewals"; return 1; }
+    [ ! -d "${TMPDIR}/.mmry-formation-renewed-$(_sid)" ] || { echo "a stopped chain left a renewal marker"; return 1; }
+}
+
+@test "limit: with 120 minutes set, listening renews 4 times and stops quietly at 2 hours" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    _chain "$HANDLERS" 10 MMRY_FORMATION_LISTEN_MINUTES=120
+    echo "120 min: ${CHAIN_RENEWALS} renewals, stopped=${CHAIN_STOPPED}, ${CHAIN_ELAPSED} s listened" >&3
     [ "$CHAIN_RENEWALS" -eq 4 ] || { echo "expected 4 renewals in 2 hours, got ${CHAIN_RENEWALS}"; return 1; }
     [ "$CHAIN_STOPPED" -eq 1 ] || { echo "the last watch did not stop quietly: rc ${WATCH_RC} ${WATCH_OUT}"; return 1; }
     # Listened the whole 2 hours and not past it (4 renewal turns of 5 s are inside the chain).
@@ -249,36 +266,52 @@ _chain() {
 
 @test "default: a setting that is not a number, off or unlimited falls back to the default" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    _chain "$HANDLERS" 10 MMRY_FORMATION_LISTEN_MINUTES=forever
-    [ "$CHAIN_RENEWALS" -eq 4 ] || { echo "'forever' gave ${CHAIN_RENEWALS} renewals, not the default 4"; return 1; }
+    _chain "$HANDLERS" 60 MMRY_FORMATION_LISTEN_MINUTES=forever
+    [ "$CHAIN_RENEWALS" -eq 51 ] || { echo "'forever' gave ${CHAIN_RENEWALS} renewals, not the default 51"; return 1; }
 }
 
-@test "cost: the requests two hours of default listening makes, on the shipped schedule" {
+@test "cost: the requests a day of default listening makes, on the shipped schedule" {
     # Every check is a request to MMRY AI, and every request uses one credit (CreditMiddleware exempts
-    # no formation route). The docs state this count; this measures it, on the shipped schedule with
-    # no interval override, over the whole default chain.
+    # no formation route). The docs state this count; this measures it on the shipped schedule, with
+    # no interval override.
+    #
+    # A full simulated day of the default chain (52 watches on the shipped schedule) takes about 11
+    # minutes here, so this measures every KIND of window over a 120-minute limit - the first window
+    # after a turn, a full window after a renewal, and the last window cut short by the limit - and
+    # builds the day from those measured counts and the 51 renewals the "default:" test measures:
+    #   first + 50 x (full window after a renewal) + last window
+    # The last window of the day is 465 s and of the 120-minute chain 460 s; on the 60 s slow end both
+    # are 9 checks (0, 60 ... 420 s, then the final ask at the limit). Measured in full once, on the
+    # handlers of this commit, with this loop run to 60 watches and no limit set: 51 renewals,
+    # 86400 s, 71 requests in the first window, 1580 in all (1529 checks + 51 membership questions).
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    local t0 i first=0 total
-    t0="$(_now)"
+    local i n prev=0 total day
+    local -a per=()
     CHAIN_RENEWALS=0
     for (( i = 1; i <= 10; i++ )); do
-        _watch "$HANDLERS"
-        (( i == 1 )) && first="$(grep -c . "$URLS")"
+        _watch "$HANDLERS" MMRY_FORMATION_LISTEN_MINUTES=120
+        n="$(grep -c . "$URLS")"
+        per+=( $(( n - prev )) ); prev=$n
         [[ "$WATCH_RC" -eq 2 ]] || break
         CHAIN_RENEWALS=$(( CHAIN_RENEWALS + 1 ))
         _fake_sleep 5
         # The marker's mtime is real time, and the simulated clock is hours ahead of it, so the next
         # watch would judge it stale and start at the fast end. In a session it is seconds old: give
         # it the simulated time it was made at.
-        touch -d "@$(( $(_now) - 5 ))" "${TMPDIR}/.mmry-formation-renewed-$(_sid)" 2>/dev/null \
-            || touch -t "$(command date -r "$(( $(_now) - 5 ))" +%Y%m%d%H%M.%S)" "${TMPDIR}/.mmry-formation-renewed-$(_sid)"
+        touch -d "@$(( $(_now) - 5 ))" "${TMPDIR}/.mmry-formation-renewed-$(_sid)" 2>/dev/null             || touch -t "$(command date -r "$(( $(_now) - 5 ))" +%Y%m%d%H%M.%S)" "${TMPDIR}/.mmry-formation-renewed-$(_sid)"
     done
     total="$(grep -c . "$URLS")"
-    echo "default listening: ${CHAIN_RENEWALS} renewals, $(( $(_now) - t0 )) s; requests: ${first} in the first window, ${total} in all ($(_count_polls) checks + $(_count_sent) membership questions)" >&3
-    [ "$CHAIN_RENEWALS" -eq 4 ]
-    # What formation.md and the help page say: about 70 in the first half hour, about 170 in all.
-    (( first >= 65 && first <= 75 )) || { echo "first window made ${first}"; return 1; }
-    (( total >= 160 && total <= 180 )) || { echo "two hours made ${total}"; return 1; }
+    echo "120 minutes: ${CHAIN_RENEWALS} renewals; requests per watch: ${per[*]}; ${total} in all ($(_count_polls) checks + $(_count_sent) membership questions)" >&3
+    [ "$CHAIN_RENEWALS" -eq 4 ] || { echo "expected 4 renewals over 120 minutes, got ${CHAIN_RENEWALS}"; return 1; }
+    # Every full window after a renewal costs the same: 29 checks and one membership question.
+    [ "${per[1]}" -eq "${per[2]}" ] && [ "${per[2]}" -eq "${per[3]}" ] || { echo "full windows differ: ${per[*]}"; return 1; }
+    day=$(( per[0] + 50 * per[1] + per[4] ))
+    echo "a day at the default: ${per[0]} + 50 x ${per[1]} + ${per[4]} = ${day} requests" >&3
+    # What formation.md, /mmry:help and the help page say: about 70 in the half hour after a turn,
+    # about 60 an hour after that, about 1,580 over a full day at the default.
+    (( per[0] >= 65 && per[0] <= 75 )) || { echo "first window made ${per[0]}"; return 1; }
+    (( per[1] * 60 / 28 >= 55 && per[1] * 60 / 28 <= 65 )) || { echo "a full window made ${per[1]}, not about 60 an hour"; return 1; }
+    (( day >= 1560 && day <= 1600 )) || { echo "a day of default listening makes ${day}, not about 1,580"; return 1; }
 }
 
 @test "restart: after the limit, the member's next turn starts listening again" {

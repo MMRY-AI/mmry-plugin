@@ -114,7 +114,7 @@ A Claude Code session in a formation keeps listening for messages while it sits 
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `formationListenMinutes` | `120` | Minutes of idle listening after the session's last turn, then the watch stops until the next turn. `"off"`: no renewals (it still listens for about half an hour after each turn). `"unlimited"`: renew for as long as the session is in the formation. Renewal needs Claude Code 2.1.285 or newer. |
+| `formationListenMinutes` | `1440` | Minutes of idle listening after the session's last turn (24 hours by default; a typed prompt or a received message starts it again), then the watch stops until the next turn. `"off"`: no renewals (it still listens for about half an hour after each turn). `"unlimited"`: no limit, renew for as long as the session is in the formation. Renewal needs Claude Code 2.1.285 or newer. |
 
 Env override: `MMRY_FORMATION_LISTEN_MINUTES`.
 

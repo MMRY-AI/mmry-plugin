@@ -4,7 +4,8 @@
 #
 # The figures are the measured ones: tokens per renewal from #32028 (about 30,000 in a session that
 # had only just started, 570,000 to 880,000 in a long one), credits from the shipped schedule
-# (formation-listen-limit.bats "cost:", about 70 in the first half hour and 170 over the default),
+# (formation-listen-limit.bats "cost:", about 70 in the first half hour and 1,580 over a full day at
+# the default of 24 hours, with 51 renewals),
 # and the version floor from the ceiling measured on 2.1.285 (docs/evidence/31721) and again on
 # 2.1.292 (docs/evidence/31850). The website help page is checked in MMRY-AI/mmry by
 # testing/backend/tests/formation-listening-cost.test.ts.
@@ -17,7 +18,7 @@ setup() {
     DEFAULT_MIN="$(sed -n 's/^MMRY_FORMATION_LISTEN_DEFAULT_MINUTES=\([0-9]*\)$/\1/p' "${ROOT}/hooks-handlers/formation-check.sh")"
 }
 
-# "2 hours" for 120, "90 minutes" for 90: how the pages spell the shipped default.
+# "24 hours" for 1440, "90 minutes" for 90: how the pages spell the shipped default.
 _default_words() {
     if (( DEFAULT_MIN % 60 == 0 )); then
         if (( DEFAULT_MIN == 60 )); then printf '1 hour'; else printf '%s hours' "$(( DEFAULT_MIN / 60 ))"; fi
@@ -38,7 +39,7 @@ _has() { grep -qF -- "$2" "$1" || { echo "$(basename "$1") does not say: $2"; re
     _has "$FORMATION" "uses"
     _has "$FORMATION" "one credit"
     _has "$FORMATION" "about 70 times in the half hour after a turn"
-    _has "$FORMATION" "about 170 credits"
+    _has "$FORMATION" "at the default 24 hours uses about 1,580"
 }
 
 @test "docs: the formation page states the minimum Claude Code version for continuous listening" {
@@ -55,6 +56,10 @@ _has() { grep -qF -- "$2" "$1" || { echo "$(basename "$1") does not say: $2"; re
     _has "$FORMATION" '"off"'
     _has "$FORMATION" '"unlimited"'
     _has "$FORMATION" "By default a session listens for $(_default_words) of quiet"
+    # The renewals that default allows, from formation-listen-limit.bats "default:" (51 in 24 hours).
+    _has "$FORMATION" "up to 51 renewals"
+    # The count restarts with the member's own work, which is what makes the default fit continuous use.
+    _has "$FORMATION" "A typed prompt, or a message the session receives,"
 }
 
 @test "docs: /mmry:help states the cost, the setting and the minimum version" {
@@ -63,6 +68,7 @@ _has() { grep -qF -- "$2" "$1" || { echo "$(basename "$1") does not say: $2"; re
     _has "$HELP" "formationListenMinutes"
     _has "$HELP" "Claude Code 2.1.285 or newer"
     _has "$HELP" "by default for $(_default_words) of quiet"
+    _has "$HELP" "about 1,580 over a full day at the default $(_default_words)"
 }
 
 @test "docs: the README's settings table carries the key with the constant's default" {
