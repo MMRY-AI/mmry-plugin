@@ -1,0 +1,1 @@
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bash \"<probe dir>/hb.sh\"","asyncRewake":true,"timeout":1800}]}]}}

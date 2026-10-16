@@ -108,6 +108,16 @@ Foundation memories are restated to Claude on every prompt so they consistently 
 
 Env overrides: `MMRY_FOUNDATION_REINJECT`, `MMRY_FOUNDATION_REFRESH_SECONDS`. `MMRY_FOUNDATION_TOKEN_CAP` is still read, for the same compatibility reason as the config key, and has no effect.
 
+### Formation listening (optional)
+
+A Claude Code session in a formation keeps listening for messages while it sits idle, renewing its background watch about every half hour. Each renewal is a model turn that counts toward your Claude Code usage, and each check for messages uses one MMRY credit; `/mmry:formation` states both costs as measured.
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `formationListenMinutes` | `1440` | Minutes of idle listening after the session's last turn (24 hours by default; a typed prompt or a received message starts it again), then the watch stops until the next turn. `"off"`: no renewals (it still listens for about half an hour after each turn). `"unlimited"`: no limit, renew for as long as the session is in the formation. Renewal needs Claude Code 2.1.285 or newer. |
+
+Env override: `MMRY_FORMATION_LISTEN_MINUTES`.
+
 **Your Foundation set is never trimmed or cut.** Before MMRY 2.9.2 the set was cut at roughly 6,000 characters, as a raw substring, so the cut landed wherever that character fell: mid-sentence, mid-directive. Anything after it never reached the assistant and you were never told. Now, in Claude Code, a set of up to about 57,000 characters is delivered in full with every prompt, in up to six labelled parts, because Claude Code shows a plugin at most 10,000 characters at a time. A larger set is more than six parts hold, so instead your assistant is pointed to a copy of it, made for that turn, and asked to read it before answering; you are told when that happens, and the assistant may need your permission to read the file. The tokens are spent in your own session, so the cost of a large set is yours to weigh.
 
 **Your local copy is verified before it is used.** Your directives are stored in one file whose first line records their exact byte count and checksum, and the whole file is replaced in a single step, so a prompt that arrives while your directives are being refreshed sees either the old set or the new one, never half of each. On every prompt the hook reads that file once and checks the directives against the record on its first line, and if the two do not agree (damaged, truncated, or replaced without its record) the copy is refused rather than sent to the assistant as your guidance. This is a consistency check, not a signature: it proves the copy is the one its record describes, and it cannot tell MMRY's writing from another program on your machine that deliberately rewrites the whole file. You are told on that turn, in your own terminal, with the remedy: run `/mmry:load-memories` to rebuild it. A valid copy is silent. An account with genuinely no Foundation memories is told so once a session, when the session starts or on its first prompt, rather than warned on every prompt.

@@ -1,0 +1,32 @@
+2026-10-15T23:07:56.615Z spawned pid=36292
+2026-10-15T23:07:57.093Z OUT system/hook_started {"type":"system","subtype":"hook_started","hook_id":"98bc5720-3e85-42f1-8ebf-cbaa1f7209fa","hook_name":"SessionStart:startup","hook_event":"SessionStart","uuid":"d64cecae-e564-4554-aa9a-93a0bac386e3","session_id":"f1465679-d4a0-4878-8329-0f51337a530d"}
+2026-10-15T23:07:57.094Z OUT system/hook_started {"type":"system","subtype":"hook_started","hook_id":"4f843731-e02b-431c-bc4c-9dcfbda8dbf6","hook_name":"SessionStart:startup","hook_event":"SessionStart","uuid":"5bef276d-0e5c-48a5-bd3d-e18d6dff5a30","session_id":"f1465679-d4a0-4878-8329-0f51337a530d"}
+2026-10-15T23:07:57.095Z OUT system/hook_started {"type":"system","subtype":"hook_started","hook_id":"2fc5ba09-8296-491b-a1a3-97c8143f8702","hook_name":"SessionStart:startup","hook_event":"SessionStart","uuid":"714ef20a-219a-4efe-babc-3f7fcd278d4d","session_id":"f1465679-d4a0-4878-8329-0f51337a530d"}
+2026-10-15T23:07:57.209Z OUT system/hook_response {"type":"system","subtype":"hook_response","hook_id":"2fc5ba09-8296-491b-a1a3-97c8143f8702","hook_name":"SessionStart:startup","hook_event":"SessionStart","output":"","stdout":"","stderr":"","exit_code":0,"outcome":"success","uuid":"9a58e48b-3d4c-45a6-b4df-26303d637f64","session_id":"f1465679-d4a0-4878-8329-0f51337a530d"}
+2026-10-15T23:07:57.266Z OUT system/hook_response {"type":"system","subtype":"hook_response","hook_id":"98bc5720-3e85-42f1-8ebf-cbaa1f7209fa","hook_name":"SessionStart:startup","hook_event":"SessionStart","output":"","stdout":"","stderr":"","exit_code":0,"outcome":"success","uuid":"27d34ea7-79ac-4bf5-8485-963c42f53018","session_id":"f1465679-d4a0-4878-8329-0f51337a530d"}
+2026-10-15T23:07:59.497Z OUT system/hook_response {"type":"system","subtype":"hook_response","hook_id":"4f843731-e02b-431c-bc4c-9dcfbda8dbf6","hook_name":"SessionStart:startup","hook_event":"SessionStart","output":"{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Welcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate sco
+2026-10-15T23:08:00.248Z OUT system/init
+2026-10-15T23:08:03.244Z OUT assistant TEXT="thinking"
+2026-10-15T23:08:03.246Z OUT assistant TEXT="READY"
+2026-10-15T23:08:03.266Z OUT rate_limit_event
+2026-10-15T23:08:03.514Z OUT result/success result="READY"
+2026-10-15T23:08:33.706Z OUT system/init
+2026-10-15T23:08:34.997Z OUT assistant TEXT="thinking"
+2026-10-15T23:08:35.018Z OUT assistant TEXT="Still listening."
+2026-10-15T23:08:35.033Z OUT rate_limit_event
+2026-10-15T23:08:35.238Z OUT result/success result="Still listening."
+2026-10-15T23:09:06.506Z OUT system/init
+2026-10-15T23:09:07.357Z OUT assistant TEXT="thinking"
+2026-10-15T23:09:07.377Z OUT assistant TEXT="Still listening."
+2026-10-15T23:09:07.613Z OUT result/success result="Still listening."
+2026-10-15T23:09:38.051Z OUT system/init
+2026-10-15T23:09:38.825Z OUT assistant TEXT="thinking"
+2026-10-15T23:09:38.842Z OUT assistant TEXT="Still listening."
+2026-10-15T23:09:39.069Z OUT result/success result="Still listening."
+2026-10-15T23:10:09.537Z OUT system/init
+2026-10-15T23:10:10.258Z OUT assistant TEXT="thinking"
+2026-10-15T23:10:10.300Z OUT assistant TEXT="Still listening."
+2026-10-15T23:10:10.311Z OUT rate_limit_event
+2026-10-15T23:10:10.546Z OUT result/success result="Still listening."
+2026-10-15T23:10:16.622Z closing stdin
+2026-10-15T23:10:42.293Z exit 0

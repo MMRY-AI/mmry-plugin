@@ -1,0 +1,17 @@
+2026-10-15T22:28:54.660Z spawned pid=660
+2026-10-15T22:28:55.518Z OUT system/init
+2026-10-15T22:28:56.792Z OUT system/thinking_tokens {"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"session_id":"69eb1ade-9b75-4759-b875-37b1483be032","uuid":"99ce7efc-dc8b-4433-9328-8d8b8b45f105"}
+2026-10-15T22:28:58.163Z OUT system/thinking_tokens {"type":"system","subtype":"thinking_tokens","estimated_tokens":150,"estimated_tokens_delta":100,"session_id":"69eb1ade-9b75-4759-b875-37b1483be032","uuid":"5458de58-c183-4372-a410-7ebfef001dd9"}
+2026-10-15T22:28:59.146Z OUT system/thinking_tokens {"type":"system","subtype":"thinking_tokens","estimated_tokens":274,"estimated_tokens_delta":124,"session_id":"69eb1ade-9b75-4759-b875-37b1483be032","uuid":"69cac23d-cae7-47be-90ff-852e3f0a9831"}
+2026-10-15T22:28:59.148Z OUT assistant TEXT="thinking"
+2026-10-15T22:28:59.163Z OUT assistant TEXT="READY"
+2026-10-15T22:28:59.183Z OUT rate_limit_event
+2026-10-15T22:28:59.330Z OUT result/success result="READY"
+2026-10-15T22:29:07.548Z OUT system/init
+2026-10-15T22:29:08.626Z OUT system/thinking_tokens {"type":"system","subtype":"thinking_tokens","estimated_tokens":50,"estimated_tokens_delta":50,"session_id":"69eb1ade-9b75-4759-b875-37b1483be032","uuid":"e959ec55-366b-4f6c-9bad-b21a099d85c7"}
+2026-10-15T22:29:09.179Z OUT system/thinking_tokens {"type":"system","subtype":"thinking_tokens","estimated_tokens":195,"estimated_tokens_delta":145,"session_id":"69eb1ade-9b75-4759-b875-37b1483be032","uuid":"349479b1-a2cd-429f-ba39-237c3d347bd5"}
+2026-10-15T22:29:09.179Z OUT assistant TEXT="thinking"
+2026-10-15T22:29:09.195Z OUT assistant TEXT="Still listening."
+2026-10-15T22:29:09.381Z OUT result/success result="Still listening."
+2026-10-15T22:29:39.665Z closing stdin
+2026-10-15T22:29:40.039Z exit 0
