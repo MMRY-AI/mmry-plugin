@@ -265,9 +265,20 @@ _chain() {
 }
 
 @test "default: a setting that is not a number, off or unlimited falls back to the default" {
+    # One watch at the end of a 24-hour chain rather than the whole chain again (the "default:" test
+    # above runs that, and it takes minutes): the renewal marker says the chain began 86400 - 600 s
+    # ago, so a limit of exactly the default leaves 600 s, and the watch listens 600 s and stops
+    # without asking to renew. Any other limit ends somewhere else.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    _chain "$HANDLERS" 60 MMRY_FORMATION_LISTEN_MINUTES=forever
-    [ "$CHAIN_RENEWALS" -eq 51 ] || { echo "'forever' gave ${CHAIN_RENEWALS} renewals, not the default 51"; return 1; }
+    local t0 marker="${TMPDIR}/.mmry-formation-renewed-$(_sid)"
+    t0="$(_now)"
+    mkdir -p "$marker"
+    printf '%s\n' "$(( t0 - 86400 + 600 ))" > "${marker}/since"
+    _watch "$HANDLERS" MMRY_IDLE_POLL_INTERVAL=600 MMRY_FORMATION_LISTEN_MINUTES=forever
+    [ "$WATCH_RC" -eq 0 ] && [ -z "$WATCH_OUT" ] || { echo "'forever' did not stop quietly: rc ${WATCH_RC} ${WATCH_OUT}"; return 1; }
+    local listened=$(( $(_now) - t0 ))
+    (( listened >= 595 && listened <= 610 )) || { echo "'forever' listened ${listened} s, not the 600 s a 24-hour default leaves"; return 1; }
+    [ "$(_count_sent)" -eq 0 ] || { echo "'forever' asked the service about renewing at the limit"; return 1; }
 }
 
 @test "cost: the requests a day of default listening makes, on the shipped schedule" {
