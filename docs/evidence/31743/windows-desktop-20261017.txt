@@ -1,0 +1,22 @@
+31743 on the Windows 11 Codex DESKTOP app, 2026-10-17 ~03:05-03:12 UTC
+Desktop app: OpenAI.Codex 26.1013.4894 (self-updated from 26.1007.9446 during the session), originator codex_work_desktop.
+Plugin: branch 31743/codex-tools-no-prompt at b1d935b, Codex skill sha256 5dab3d33..., throwaway Integration account windesk31743_*@test.mnemo.
+Session 01a147d4.
+
+BASELINE, same night, same app, published plugin 2.11.0 (master 0d5d967), Eric's real account (session 01a147c6):
+  Hook settings page: MMRY AI "Loading hooks..." never finishes, page "No hooks found", no trust control.
+  Session start: log shows "MMRY AI loaded 16 memories" (hooks run).
+  Save: the model chose MMRY's ChatGPT connector tool mmry_ai.mmry_save (approval prompt), not the plugin.
+  Retire: the plugin's deactivate-memory.sh could not run: Git Bash exited -1073741502 (0xC0000142) inside the
+  desktop sandbox, before and after Eric granted network + MMRY-folder access. Retire FAILED.
+
+WITH THE FIX (session 01a147d4):
+  "Remember this: 31743-DESK-WIN-D1 is a marked test memory" -> local Get-Content of SKILL.md, then mcp__mmry_plugin__memory_save.
+  "Search my memories for 31743-DESK-WIN" -> mcp__mmry_plugin__memory_search.
+  "Retire the D1 memory" -> mcp__mmry_plugin__memory_retire (id 39023). Prompt: "Allow the mmry_plugin MCP server to run tool memory_retire?" (the designed approval; always allow chosen). Retired.
+  "Join formation 45" -> formation_join refused (formation belongs to another account; expected, test account).
+  "Join formation 10112" (test formation started by the lead from Git Bash with the same test account) -> formation_join, formation_roster, formation_say.
+  Lead sent a directed message "TC2-REPLY from the lead 03:11:13 UTC"; on "Anything new?" it arrived marked DIRECTED TO YOU.
+  No MMRY script run. Operator: no Internet or network access prompt at any point (only the retire approval).
+
+Verdict: PASS (Windows desktop column of TC1, and TC2 delivery in the desktop app).
