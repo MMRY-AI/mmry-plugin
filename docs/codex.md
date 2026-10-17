@@ -109,14 +109,15 @@ If that prints an error rather than a version, install Git for Windows from
 
 **Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
 search, reinforce, link, retire and reload memories, and start, join, message, assign work in,
-report progress in, see the roster of, read the close-out record of, close out and leave a
-coordination group. Codex starts them itself, outside the sandbox that keeps your assistant's own
-commands off the internet, so they reach mmryai.com without asking you for Internet access, in
-every conversation.
+report progress in, see the roster of, read the close-out record of, close out, remove a member from
+and leave a coordination group. Codex starts them itself, outside the sandbox that keeps your
+assistant's own commands off the internet, so they reach mmryai.com without asking you for Internet
+access, in every conversation.
 
-Two of them ask once: **retiring a memory**, because it takes a memory out of recall, and **closing
-a coordination group out**, because it ends the group for everyone in it. Codex offers to always
-allow each one; choose that and you are not asked again.
+Three of them ask once: **retiring a memory**, because it takes a memory out of recall, **closing a
+coordination group out**, because it ends the group for everyone in it, and **removing a member**
+from one, because that member stops receiving anything. Codex offers to always allow each one;
+choose that and you are not asked again.
 
 **Everything else is a script.** Changing who can see a memory, structured records, the other
 formation operations, setup and feedback still run as one of MMRY's scripts. Those reach mmryai.com
