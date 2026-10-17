@@ -4,25 +4,33 @@
 #
 # HISTORY. v2.10.0's setup told customers to trust MMRY's hooks in the Codex desktop app. UAT on
 # 2026-10-06 found the app's hook settings page stalls on "Loading hooks...", so v2.10.1 said that
-# trusting the hooks in the desktop app "could not be confirmed in this release".
+# trusting the hooks in the desktop app "could not be confirmed in this release". #31790 round 1
+# then said the Mac works and "the Codex desktop app on Windows is not yet confirmed".
 #
-# WHAT IS NOW PROVEN (#31790). On a Mac (app 26.1007.30912, runtime 0.163.0-alpha.10.2, plugin
-# 2.10.2 and 2.11.0) MMRY's hooks run in the desktop app: memories load at the start of a
-# conversation, Foundation memories are re-stated, and save, search, retire and a directed
-# formation message worked. The app's hook settings page still hangs on "Loading hooks..." while
-# they run. The hooks were trusted in the Codex CLI review; both read the trust in config.toml in
-# the Codex home. The Windows desktop app is not confirmed: MMRY's commands could not reach
-# mmryai.com from its sandbox in testing.
+# WHAT IS NOW PROVEN (#31790 round 2, shipping with #31743 in plugin 2.12.0).
+#  Mac (app 26.1007.30912, plugin 2.10.2 and 2.11.0, 2026-10-16/17): MMRY's hooks run in the desktop
+#  app: memories load at the start of a conversation, the Foundation block is present on every later
+#  turn checked (seven, 02:04-02:12 UTC), and save, search, retire and a directed formation message
+#  worked (through scripts, with network approvals).
+#  Windows (apps 26.1007.9446 and 26.1013.4894, 2026-10-17): the hooks run ("MMRY AI loaded 16
+#  memories"); MMRY's scripts cannot start in the app's sandbox (Git Bash exits 0xC0000142 even
+#  with access granted); with #31743's mmry_plugin tools, save, search, retire, formation join and
+#  a directed message all worked. Later-turn Foundation was not separately logged on Windows, so the
+#  docs claim it for the Mac only.
+#  Both: the app's hook settings page hangs on "Loading hooks..." while the hooks run. The hooks
+#  were trusted in the Codex CLI review; both read the trust in config.toml in the Codex home.
 #
 # THE RULES.
 #  1. Any customer-facing text that mentions the desktop app and trust in the same place must send
 #     the customer to the Codex CLI review, never to the desktop app's own hook settings page. "The
 #     same place" is a line and the lines either side of it, because setup's echo pairs and wrapped
 #     Markdown split one sentence across lines.
-#  2. That same text must not carry the superseded "could not be confirmed" claim.
+#  2. No customer-facing text near "desktop app" may carry a superseded claim: "could not be
+#     confirmed" (v2.10.1) or "not yet confirmed" (#31790 round 1).
 #  3. Every customer surface (docs/codex.md, both READMEs, the Codex skill and the setup message)
-#     states the proven claim: on a Mac it works, the settings page can hang without stopping MMRY,
-#     and Windows is not yet confirmed.
+#     states the proven claim: tested on a Mac and on Windows, trust in the Codex CLI review, and the
+#     settings page can hang without stopping MMRY. The written surfaces also say what works, that
+#     the Mac re-states Foundation on each later turn, and that Windows works through MMRY's tools.
 # Shell comment lines are skipped: they are read by maintainers, not printed to customers.
 
 load '../helpers/test-helper'
@@ -45,14 +53,14 @@ desktop_trust_offenders() {
             }
             END {
                 for (i = 1; i <= n; i++) {
-                    if (low[i] !~ /trust/) continue
+                    if (low[i] !~ /trust|confirmed/) continue
                     w = low[i]
                     if (i > 1) w = low[i-1] " " w
                     if (i < n) w = w " " low[i+1]
                     if (w !~ /desktop app/) continue
-                    if (w ~ /could not be confirmed/)
+                    if (w ~ /(could not be|not yet) confirmed/)
                         printf "%s:%d: superseded claim: %s\n", file, num[i], text[i]
-                    else if (w !~ /command-line tool|codex cli/)
+                    else if (low[i] ~ /trust/ && w !~ /command-line tool|codex cli/)
                         printf "%s:%d: trust without the CLI review: %s\n", file, num[i], text[i]
                 }
             }
@@ -64,9 +72,12 @@ desktop_trust_offenders() {
 missing_claim_parts() {
     local f="$1" flat part
     flat="$(tr '\r\n' '  ' < "$f" | tr -s ' ' | tr '[:upper:]' '[:lower:]')"
-    for part in "on a mac" "loading hooks" "does not stop mmry working" \
-                "desktop app on windows is not yet confirmed"; do
+    for part in "on a mac and on windows" "codex cli review" "the same trust" \
+                "loading hooks" "does not stop mmry working"; do
         [[ "$flat" == *"$part"* ]] || echo "$f: missing \"$part\""
+    done
+    for part in "desktop app on windows is not yet confirmed" "could not be confirmed in this release"; do
+        [[ "$flat" != *"$part"* ]] || echo "$f: superseded \"$part\""
     done
 }
 
@@ -114,14 +125,22 @@ claim_surfaces() {
     fi
 }
 
-@test "desktop trust: the written surfaces name what works on a Mac" {
-    local f
+@test "desktop trust: the written surfaces name what works, Foundation on a Mac, and tools on Windows" {
+    local f flat out=""
     for f in "$REPO_ROOT/docs/codex.md" "$REPO_ROOT/README.md" "$PLUGIN_ROOT/README.md" \
              "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"; do
-        tr '\r\n' '  ' < "$f" | tr -s ' ' \
-            | grep -qi "saving, searching and retiring memories and formation messages work" \
-            || { echo "$f does not list what works in the desktop app on a Mac" >&2; return 1; }
+        flat="$(tr '\r\n' '  ' < "$f" | tr -s ' ' | tr '[:upper:]' '[:lower:]')"
+        grep -q "saving, searching and retiring memories and formation messages work" <<< "$flat" \
+            || out+="$f: does not list what works in the desktop app"$'\n'
+        grep -q "on a mac, \(your \)\?foundation memories are also re-stated on each later turn" <<< "$flat" \
+            || out+="$f: does not say Foundation is re-stated on each later turn on a Mac"$'\n'
+        grep -q "through \(its\|mmry's\) own tools" <<< "$flat" \
+            || out+="$f: does not say the Windows desktop app works through MMRY's tools"$'\n'
     done
+    if [[ -n "$out" ]]; then
+        echo "$out" >&2
+        return 1
+    fi
 }
 
 @test "desktop trust: the sweep is reading the files that matter, not an empty set" {
@@ -164,12 +183,26 @@ claim_surfaces() {
     [[ "$output" == *"superseded claim"* ]]
 }
 
+@test "desktop trust: the detector refuses the round-1 'not yet confirmed' wording, on one line or wrapped" {
+    local tmp="$BATS_TEST_TMPDIR/r1-setup.sh"
+    printf '%s\n' '    echo "The Codex desktop app on Windows is not yet confirmed."' > "$tmp"
+    run desktop_trust_offenders "$tmp"
+    [[ "$output" == *"superseded claim"* ]] || return 1
+
+    local md="$BATS_TEST_TMPDIR/r1.md"
+    printf '%s\n' \
+        'hooks..." or show "No hooks found"; that does not stop MMRY working. The Codex desktop app on' \
+        'Windows is not yet confirmed.' > "$md"
+    run desktop_trust_offenders "$md"
+    [[ "$output" == *"superseded claim"* ]]
+}
+
 @test "desktop trust: the detector accepts the current wording and ignores shell comments" {
     local tmp="$BATS_TEST_TMPDIR/new-setup.sh"
     printf '%s\n' \
         '    # the desktop app showed no review; trust could not be confirmed there in v2.10.1' \
         '    echo "  - Codex desktop app: trust them in the Codex CLI review; the app uses the same trust."' \
-        '    echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac."' > "$tmp"
+        '    echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows."' > "$tmp"
     run desktop_trust_offenders "$tmp"
     [[ -z "$output" ]]
 }
@@ -177,7 +210,7 @@ claim_surfaces() {
 @test "desktop trust: setup prints the proven-scope statement to Codex customers" {
     local f="$PLUGIN_ROOT/setup/mmry-setup.sh"
     grep -qF 'echo "  - Codex desktop app: trust them in the Codex CLI review; the app uses the same trust."' "$f"
-    grep -qF 'echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac."' "$f"
+    grep -qF 'echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows."' "$f"
     grep -qF 'stay on \"Loading hooks...\"; that does not stop MMRY working."' "$f"
-    grep -qF 'echo "The Codex desktop app on Windows is not yet confirmed."' "$f"
+    ! grep -qF 'not yet confirmed' "$f"
 }
