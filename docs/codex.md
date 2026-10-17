@@ -115,7 +115,7 @@ If that prints an error rather than a version, install Git for Windows from
 ### What MMRY's commands need from Codex
 
 **Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
-search, reinforce, link, retire and reload memories, and start, join, message, assign work in,
+search, link, retire and reload memories, and start, join, message, assign work in,
 report progress in, see the roster of, read the close-out record of, close out, remove a member from
 and leave a coordination group. Codex starts them itself, outside the sandbox that keeps your
 assistant's own commands off the internet, so they reach mmryai.com without asking you for Internet
@@ -162,7 +162,7 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save what is new** | When you send your next message and something is still unsaved, Codex is reminded to record it. If you have just saved, it stays quiet. |
-| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and the formation operations listed under [What is the same](#what-is-the-same). |
+| **The memory operations** | Save, search, link, retire, change who can see a memory, and the formation operations listed under [What is the same](#what-is-the-same). |
 | **Reloading your memories mid-session** | Ask your assistant to reload and it calls MMRY's `memory_load` tool, which repeats the session-start load and also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
@@ -259,8 +259,7 @@ memory.
   [3. A message will not wake an idle session](#3-a-message-will-not-wake-an-idle-session)).
   Listing the formations on your account and claiming an area of the work have not been tested
   from Codex yet, so this page does not list them.
-- **Tiers and reinforcement are the same.** Nothing about how memories age or survive differs by
-  platform.
+- **Memory types are the same.** Nothing about how your memories are kept differs by platform.
 
 ---
 

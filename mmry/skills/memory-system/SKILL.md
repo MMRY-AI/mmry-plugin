@@ -27,7 +27,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | Script | Operation |
 |--------|-----------|
 | `save-memory.sh` | Store a new memory |
-| `reinforce-memory.sh` | Reinforce (reset expiration) |
+| `reinforce-memory.sh` | Mark a memory as used, after it guided your work |
 | `deactivate-memory.sh` | Deactivate a memory |
 | `link-memories.sh` | Link two memories |
 | `search-memories.sh` | Search memories by keyword |
@@ -41,7 +41,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
-**Run in background** when you don't need the result immediately — memory saves, reinforcements, deactivations, and links rarely need to block the conversation. Use `run_in_background: true` on the Bash tool call so the script executes without blocking.
+**Run in background** when you don't need the result immediately: memory saves, marking a memory as used, deactivations, and links rarely need to block the conversation. Use `run_in_background: true` on the Bash tool call so the script executes without blocking.
 
 ### Custom Queries (source the client library)
 
@@ -67,36 +67,6 @@ Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startu
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
-## API Endpoints
-
-All operations go through the MMRY AI REST API:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/memories` | Store a memory (409 on duplicate topic+scope) |
-| GET | `/api/memories` | Retrieve memories (auto-reinforces) |
-| GET | `/api/memories/search?q=` | Keyword search |
-| GET | `/api/memories/startup` | Get startup memories (Foundation + dir-matched) |
-| GET | `/api/memories/{id}` | Get single memory by ID |
-| DELETE | `/api/memories/{id}` | Deactivate a memory |
-| POST | `/api/memories/{id}/reinforce` | Reinforce (reset expiration) |
-| POST | `/api/memories/{id}/links` | Create memory link |
-| DELETE | `/api/memories/{id}/links/{targetId}` | Delete memory link |
-| GET | `/api/memories/{id}/related` | Get related memories |
-| POST | `/api/sessions` | Register/update session |
-| GET | `/api/sessions/active` | List your active sessions |
-| GET | `/api/groups/mine` | List your permission groups |
-| POST | `/api/data-formats` | Define a structured record type |
-| GET | `/api/data-formats` | List the user's record types |
-| GET | `/api/data-formats/{id}` | One record type in full |
-| PUT | `/api/data-formats/{id}` | Rename it, or change the words that help choose it |
-| POST | `/api/data-formats/{id}/versions` | Publish a new shape for it |
-| POST | `/api/data-formats/{id}/retire` | Stop offering it (nothing is deleted) |
-| POST | `/api/data-formats/{id}/reinstate` | Offer it again |
-| POST | `/api/data-formats/{id}/entries` | Record something against it |
-| GET | `/api/data-formats/{id}/entries` | Read its records, filtered on their fields |
-| GET | `/api/data-formats/{id}/entries/{entryId}/history` | What a record used to hold |
-
 ## Structured Records
 
 ### What they are, and when they are the right answer
@@ -108,11 +78,8 @@ type** stores the same words with **named fields** alongside them. "How many of 
 becomes an answer rather than a guess.
 
 A record is an ordinary memory that additionally carries fields. Everything else about it is
-unchanged: it appears in recall, in search and in the user's export, `DELETE` deactivates it like
-any other, and **the user's own words are always kept verbatim**. The one difference is
-retention: a record is **durable against the tier clock**, so a log the user is actively keeping
-does not stop appearing three months after they last read it. Removing one is a deactivation,
-not an expiry.
+unchanged: it appears in recall, in search and in the user's export, it is deactivated like any
+other, and **the user's own words are always kept verbatim**. Removing one is a deactivation.
 
 **Do not create a type for a single fact, a one-off note, or anything you would not expect a
 second example of.** Left unchecked a model creates one type per conversation and leaves the
@@ -338,17 +305,6 @@ mmry_get_memories "$PWD" "" "" "" ""
 echo "$MMRY_RESPONSE"
 ```
 
-### Tier Expiration
-
-The API automatically filters out stale memories based on tier:
-- **Foundation** — always loaded (core facts, never expire)
-- **Strategic** — loaded if less than 1 year old (priorities, direction)
-- **Operational** — loaded if less than 3 months old (working knowledge)
-- **Tactical** — loaded if less than 7 days old (current task context)
-- **Momentary** — loaded if less than 8 hours old (immediate/in-progress items)
-
-For Operational, Tactical, and Momentary tiers, the expiration clock resets each time a memory is reinforced (see Reinforcement below). A memory accessed yesterday has a fresh clock, regardless of when it was originally created.
-
 ## How to Store Memories
 
 Use the pre-built `save-memory.sh` script:
@@ -398,20 +354,6 @@ REASON: Sync failures with distributor catalog when using SKU.
 ```
 We had a long discussion about identifiers and after considering several options we decided UPC was the best choice for various reasons.
 ```
-
-## Reinforcement
-
-Memories in Operational, Tactical, and Momentary tiers are automatically reinforced when retrieved via the GET memories endpoint. Reinforcement increments the access count and resets the expiration clock — a reinforced memory persists as if it were just created.
-
-**Automatic:** Every call to GET /api/memories reinforces the Operational, Tactical, and Momentary memories it returns. No manual action needed — memories that keep being loaded stay alive. Memories that stop being loaded (wrong directory, out of scope) naturally expire.
-
-**Manual:** You can still reinforce a specific memory explicitly if needed:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/reinforce-memory.sh" 42
-```
-
-Foundation and Strategic memories are excluded from reinforcement. Foundation never expires. Strategic should be consciously re-evaluated at year end, not silently extended.
 
 ## Associative Linking
 
@@ -499,7 +441,7 @@ the correction is recalled from then on.
 
 ## Search
 
-Search finds memories by keyword across Topic and Content fields, regardless of age. This is intentional — search is how you recover memories that have expired from normal loading.
+Search finds memories by keyword across their topic and content, including memories that were not loaded at session start.
 
 Users can also trigger a search directly with the `/mmry:search <keywords> [scope]` command, which wraps the same `search-memories.sh` hook shown below. Reach for the command when the user explicitly asks to search; use the hook calls here when you are searching as part of your own reasoning.
 
@@ -516,19 +458,17 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" "refund" "backend
 - When encountering an unexpected topic that feels familiar
 - When doing cross-scope work and you suspect related knowledge exists
 - When a keyword keeps coming up and you want to check if there's institutional knowledge about it
-- When you need older context that may have aged out of normal loading
+- When you need context that was not loaded at session start
 
-### Search + Reinforce Pattern
+### When a Search Result Guides Your Work
 
-Search recovers expired memories. Reinforcement revives them. Together they mirror how the brain recalls from long-term storage through associative pathways:
+When a memory you found by searching shapes what you do, run `reinforce-memory.sh` with its id,
+in the background. It records that the memory was useful. Search with `--ids` to see the id, and
+run it only for a memory that actually guided the work, not for every match:
 
 ```bash
-# Search finds an expired Operational memory (ID 42, last accessed 4 months ago)
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" "UPC"
-
-# You use the memory's content to guide your work → reinforce it
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" --ids "UPC"
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/reinforce-memory.sh" 42
-# Memory is now alive again in normal loading results (clock reset)
 ```
 
 ## Memory Tier Hierarchy
@@ -546,13 +486,13 @@ Memory tiers follow four considerations, in order of importance:
 
 ### All Tiers
 
-| Tier | Use For | Expiration | Reinforceable |
-|------|---------|------------|---------------|
-| Foundation | Core values and Initialization (identity & orientation) | Never | No |
-| Strategic | Organization & communication standards | 1 year from creation | No |
-| Operational | Active working knowledge | 3 months from last access | Yes |
-| Tactical | This week's work | 7 days from last access | Yes |
-| Momentary | Right now | 8 hours from last access | Yes |
+| Tier | Use For |
+|------|---------|
+| Foundation | Core values and Initialization (identity & orientation) |
+| Strategic | Organization & communication standards |
+| Operational | Active working knowledge |
+| Tactical | This week's work |
+| Momentary | Right now |
 
 ### Balance Principle
 
@@ -664,7 +604,7 @@ Memories default to **Global** visibility (all users in the subscriber see them)
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-groups.sh"
 ```
 
-This calls `GET /api/groups/mine` and shows group IDs and names.
+It shows the IDs and names of the groups you belong to.
 
 ### Saving a Group-Scoped Memory
 
@@ -694,10 +634,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh" group "Sales"  # defau
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/visibility.sh" global         # back to the default
 ```
 
-This reads and writes `GET`/`PUT /api/users/me/default-visibility`. An explicit scope on a
-single save still wins over the default. Groups are created and their membership managed by
-an account administrator in the portal; this only selects among groups the user already
-belongs to, so when a user has no groups, tell them to ask an administrator rather than
+An explicit scope on a single save still wins over the default. Groups are created and their
+membership managed by an account administrator in the portal; this only selects among groups
+the user already belongs to, so when a user has no groups, tell them to ask an administrator rather than
 trying to create one.
 
 ### Restricting a Memory After Saving
@@ -708,9 +647,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/make-private.sh" 1234     # a specifi
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/make-private.sh" 1234 group 7
 ```
 
-Calls `PUT /api/memories/{id}/visibility`, which is creator-only: only the person who saved
-a memory can change its scope, and the server returns 403 otherwise (an administrator
-cannot re-scope someone else's memory either). Content is preserved.
+Changing a memory's scope is creator-only: only the person who saved a memory can change it,
+and the server returns 403 otherwise (an administrator cannot re-scope someone else's memory
+either). Content is preserved.
 
 ### Sensitive-Content Nudge
 

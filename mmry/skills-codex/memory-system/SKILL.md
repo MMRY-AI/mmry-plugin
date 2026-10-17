@@ -1,6 +1,6 @@
 ---
 name: memory-system
-description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, reinforcing, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out, removing a member from and leaving a formation, are calls to the mmry_plugin tools, never scripts.
+description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out, removing a member from and leaving a formation, are calls to the mmry_plugin tools, never scripts.
 ---
 
 # MMRY AI memory system (Codex)
@@ -20,7 +20,7 @@ approves Internet access for the conversation, which is the prompt these tools e
 |---|---|---|
 | Save a memory, or correct a wrong one | `memory_save` | `content`; optional `supersedes`, `visibility`, `permission_group_id`, `working_dir` |
 | Search memories (prints each match's id) | `memory_search` | `query`; optional `scope` |
-| Reset a memory's expiry | `memory_reinforce` | `id` |
+| Record that a memory you found by searching was useful | `memory_reinforce` | `id` |
 | Link two memories | `memory_link` | `source_id`, `target_id`, `link_type` |
 | Retire (deactivate) a memory | `memory_retire` | `id` |
 | Reload memories now | `memory_load` | optional `working_dir` |
@@ -111,9 +111,9 @@ Bad: `We had a long discussion about identifiers and decided UPC was best for va
 Call `memory_search` with keywords as `query`, and optionally a `scope` such as `backend`. Each
 match is printed with its id, tier, scope and topic, then its content.
 
-Search ignores age, which is the point: it is how a memory that has aged out of normal loading is
-recovered. When a search result genuinely guides the work, reinforce it with `memory_reinforce` and
-its id, so it comes back on its own next time.
+Search finds memories that were not loaded at session start. When a memory you found by searching
+genuinely guides the work, call `memory_reinforce` with its id; it records that the memory was
+useful. Call it only for a memory that guided the work.
 
 ## Reloading memories mid-session
 
@@ -130,13 +130,13 @@ session-start hook does; calling it by hand is not a workaround.
 
 ## Tiers
 
-| Tier | For | Expires | Reinforceable |
-|---|---|---|---|
-| Foundation | Core values, identity and orientation | Never | No |
-| Strategic | Organisation and communication standards | 1 year from creation | No |
-| Operational | Active working knowledge | 3 months from last access | Yes |
-| Tactical | This week's work | 7 days from last access | Yes |
-| Momentary | Right now | 8 hours from last access | Yes |
+| Tier | For |
+|---|---|
+| Foundation | Core values, identity and orientation |
+| Strategic | Organisation and communication standards |
+| Operational | Active working knowledge |
+| Tactical | This week's work |
+| Momentary | Right now |
 
 Foundation is sacred: only core values and `Initialization` category memories belong there.
 

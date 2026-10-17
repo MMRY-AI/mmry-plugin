@@ -47,6 +47,14 @@ jobs:
           echo "timeout        = $(command -v timeout || echo ABSENT)"
           echo "gtimeout       = $(command -v gtimeout || echo ABSENT)"
 
+      # #32272 (DD-140 in the mmry repository): customer-readable text must not name an internal
+      # memory mechanic. Its own step, ahead of the suite, so a refusal is named in the job summary
+      # rather than buried among the BATS results. The suite runs it again in
+      # structural/public-text-check.bats.
+      - name: Check customer-readable text for internal memory mechanics
+        shell: /bin/bash -e {0}
+        run: bash scripts/check-public-text.sh
+
       - name: Run offline tests (structural + unit + handlers)
         # /bin/bash explicitly, so the step's own shell is the stock one on macOS too.
         shell: /bin/bash -e {0}
