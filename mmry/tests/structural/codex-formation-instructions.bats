@@ -78,26 +78,56 @@ _run_claude() {
         run bash "$@"
 }
 
-# The literal a Codex customer can paste. Built here from the same two facts the handler has —
-# the resolved home and the operation — so that a test cannot agree with the handler by sharing
-# its mistake.
+# What a Codex customer's assistant is told to use. Built here from the same facts the handler
+# has - the resolved home and the operation - so that a test cannot agree with the handler by
+# sharing its mistake.
+#
+# #31743: join, say, roster, leave and progress (for this conversation) are tools of MMRY's own
+# tool server on Codex, which needs no Internet access approval, so the message names the TOOL.
+# The rest have no tool and are still the runnable script.
 _codex_ref() {
-    printf 'bash %s/mmry/hooks-handlers/formation-%s.sh' "$CODEX_DIR" "$1"
+    case "$1" in
+        join|say|roster|leave|progress) printf 'the mmry_plugin formation_%s tool' "$1" ;;
+        *) printf 'bash %s/mmry/hooks-handlers/formation-%s.sh' "$CODEX_DIR" "$1" ;;
+    esac
 }
 
-# A remedy naming a script that is not there is not a remedy. Resolve every formation-*.sh the
-# message mentions back to a real file.
+# The tools the server really offers, read from its tools/list table.
+_server_tools() {
+    grep -o '"name": "[a-z_]*"' "${HANDLERS}/mcp-server.sh" | sed 's/"name": "//; s/"$//' | sort -u
+}
+
+# A remedy naming a script or a tool that is not there is not a remedy. Resolve every
+# formation-*.sh the message mentions back to a real file, and every mmry_plugin tool to one the
+# server offers. At least one of the two must be named.
 _assert_targets_exist() {
-    local named
+    local named tools
     named="$(printf '%s' "$output" | grep -o 'formation-[a-z]*\.sh' | sort -u)"
-    [ -n "$named" ]
+    tools="$(printf '%s' "$output" | grep -o 'mmry_plugin [a-z_]* tool' | sed 's/^mmry_plugin //; s/ tool$//' | sort -u)"
+    [ -n "${named}${tools}" ]
     local f
     while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
         [ -f "${HANDLERS}/${f}" ] || {
             echo "message names ${f}, which is not a handler that exists" >&2
             return 1
         }
     done <<< "$named"
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        _server_tools | grep -qx "$f" || {
+            echo "message names the tool ${f}, which the mmry_plugin server does not offer" >&2
+            return 1
+        }
+    done <<< "$tools"
+}
+
+# #31743: on Codex no message may send the model to the script of an operation a tool covers.
+_assert_no_tool_covered_script() {
+    [[ "$output" != *"formation-join.sh"* && "$output" != *"formation-say.sh"*         && "$output" != *"formation-roster.sh"* && "$output" != *"formation-leave.sh"* ]] || {
+        echo "a Codex message names the script of an operation a tool covers: $output" >&2
+        return 1
+    }
 }
 
 # No message may name a slash command on Codex. Kept as one helper so a new assertion cannot
@@ -114,6 +144,7 @@ _assert_no_slash_command() {
     [[ "$output" == *"$(_codex_ref join)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "join: the same message on Claude Code still names the slash command, unchanged" {
@@ -135,6 +166,7 @@ _assert_no_slash_command() {
     [[ "$output" == *'"what the formation is for"'* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "start: on Claude Code the usage line is the slash command it always was" {
@@ -151,6 +183,7 @@ _assert_no_slash_command() {
     [[ "$output" == *"$(_codex_ref leave)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "start: and on Claude Code that same remedy is still /mmry:formation leave" {
@@ -166,9 +199,11 @@ _assert_no_slash_command() {
     _run_codex "${HANDLERS}/formation-say.sh"
     [ "$status" -eq 1 ]
     [[ "$output" == *"$(_codex_ref say)"* ]] || return 1
-    [[ "$output" == *'"what you want the others to know" [recipientMemberId]'* ]] || return 1
+    # The arguments survive, spelled the way the tool takes them.
+    [[ "$output" == *"to_member_id"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "say: on Claude Code the usage line is unchanged" {
@@ -186,6 +221,7 @@ _assert_no_slash_command() {
     [[ "$output" == *"$(_codex_ref roster)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "say: and on Claude Code the bad recipient still names /mmry:formation roster" {
@@ -202,6 +238,7 @@ _assert_no_slash_command() {
     [[ "$output" == *"$(_codex_ref join)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "say: and on Claude Code that pair is still the two slash commands" {
@@ -219,6 +256,7 @@ _assert_no_slash_command() {
     [[ "$output" == *"$(_codex_ref join)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 @test "roster: on Claude Code that message is unchanged" {
@@ -234,6 +272,7 @@ _assert_no_slash_command() {
     [[ "$output" == *"$(_codex_ref list)"* ]] || return 1
     _assert_no_slash_command
     _assert_targets_exist
+    _assert_no_tool_covered_script
 }
 
 # The footer below is the one a customer reads on the SUCCESS path — the busiest cluster of the
@@ -347,7 +386,8 @@ FOOTER
 
         n_claude="$(printf '%s' "$claude_out"  | grep -o -F '/mmry:' | grep -c . || true)"
         n_slash="$(printf '%s'  "$codex_out"   | grep -o -F '/mmry:' | grep -c . || true)"
-        n_runnable="$(printf '%s' "$codex_out" | grep -o -F "bash ${CODEX_DIR}/mmry/hooks-handlers/formation-" | grep -c . || true)"
+        # A runnable script for an operation with no tool, or the tool for one that has it (#31743).
+        n_runnable="$(printf '%s' "$codex_out" | grep -o -E "bash ${CODEX_DIR}/mmry/hooks-handlers/formation-|the mmry_plugin formation_[a-z]+ tool" | grep -c . || true)"
 
         # The control on the control: if the Claude run named nothing, this handler's comparison
         # is vacuous and the sweep is decoration. All four of these DO name commands.
@@ -379,7 +419,7 @@ FOOTER
         bash "${tmp}/formation-join.sh" 2>&1 || true)"
 
     n_claude="$(printf '%s' "$claude_out"  | grep -o -F '/mmry:' | grep -c . || true)"
-    n_runnable="$(printf '%s' "$codex_out" | grep -o -F "bash ${CODEX_DIR}/mmry/hooks-handlers/formation-" | grep -c . || true)"
+    n_runnable="$(printf '%s' "$codex_out" | grep -o -E "bash ${CODEX_DIR}/mmry/hooks-handlers/formation-|the mmry_plugin formation_[a-z]+ tool" | grep -c . || true)"
 
     # The silent handler names nothing; the Claude control names something. That inequality is
     # exactly what the sweep above reports as a failure, and it is what the old sweep could not

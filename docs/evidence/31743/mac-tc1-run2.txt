@@ -1,0 +1,63 @@
+31743: Codex: Give Codex customers MMRY tools that work without an Internet access prompt
+Mac CLI TC1 rerun C/D, 2026-10-16
+Verdict: PASS for this Mac CLI run. Desktop and Windows not tested here.
+Plugin bundle head: 20667652078323e1550afaad280b7b55df5dc7dd
+Launch instructed: MMRY_NO_SELF_UPDATE=1 codex
+Operator status: Workspace (Ask for approval).
+Operator reported retire D approval; directed to always allow. After tool result, second fresh session retired C with no prompt (operator explicitly confirmed).
+No Internet prompt reported or visible in supplied transcripts. No tool-covered bash scripts in either session. Initial cat SKILL.md is documented below.
+Session metadata reports0.160.0; separate shell codex --version reports0.163.0. Do not conflate.
+
+SOURCE /Users/ericbarone/.codex/sessions/2026/10/16/rollout-2026-10-16T13-45-20-01a14676-4b88-7ca3-8408-a424c2907ff1.jsonl
+2026-10-16T20:46:30.099Z version=0.160.0
+2026-10-16T20:46:30.288Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:46:34.126Z const r = await tools.exec_command({cmd:"cat /Users/ericbarone/.codex/plugins/cache/mmry-plugin/mmry/local/skills-codex/memory-system/SKILL.md",max_output_tokens:6000});text(r.output);
+text(ALL_TOOLS.filter(x=> /memory_save/.test(x.name)));
+
+2026-10-16T20:46:36.491Z text(await tools.mcp__mmry_plugin__memory_save({content:"31743-LIVE-20261016-C is a marked test memory.",working_dir:"/Users/ericbarone"}));
+
+2026-10-16T20:46:40.429Z [{'type': 'input_text', 'text': 'Script completed\nWall time 3.9 seconds\nOutput:\n'}, {'type': 'input_text', 'text': '{"content":[{"type":"text","text":"Stored 1 memory under Tactical tier."}],"isError":false}'}]
+2026-10-16T20:47:10.760Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:47:13.205Z text(await tools.mcp__mmry_plugin__memory_save({content:"31743-LIVE-20261016-D is a second marked test memory.",working_dir:"/Users/ericbarone"}));
+
+2026-10-16T20:47:15.655Z [{'type': 'input_text', 'text': 'Script completed\nWall time 2.4 seconds\nOutput:\n'}, {'type': 'input_text', 'text': '{"content":[{"type":"text","text":"Stored 1 memory under Tactical tier."}],"isError":false}'}]
+2026-10-16T20:48:23.519Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:48:25.740Z text(ALL_TOOLS.filter(x=> /mmry_plugin.*memory_search/.test(x.name)));
+
+2026-10-16T20:48:27.631Z text(await tools.mcp__mmry_plugin__memory_search({query:"31743-LIVE-20261016"}));
+
+2026-10-16T20:49:00.689Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:49:02.400Z text(ALL_TOOLS.filter(x=> /mmry_plugin.*memory_reinforce/.test(x.name)));
+
+2026-10-16T20:49:03.949Z text(await tools.mcp__mmry_plugin__memory_reinforce({id:39015}));
+
+2026-10-16T20:49:04.428Z [{'type': 'input_text', 'text': 'Script completed\nWall time 0.5 seconds\nOutput:\n'}, {'type': 'input_text', 'text': '{"content":[{"type":"text","text":"Memory reinforced."}],"isError":false}'}]
+2026-10-16T20:50:31.297Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:50:33.070Z text(ALL_TOOLS.filter(x=> /mmry_plugin.*memory_link/.test(x.name)));
+
+2026-10-16T20:50:35.007Z text(await tools.mcp__mmry_plugin__memory_link({link_type:"related",source_id:39015,target_id:39016}));
+
+2026-10-16T20:50:35.462Z [{'type': 'input_text', 'text': 'Script completed\nWall time 0.4 seconds\nOutput:\n'}, {'type': 'input_text', 'text': '{"content":[{"type":"text","text":"Memories linked."}],"isError":false}'}]
+2026-10-16T20:50:56.924Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:51:00.641Z text(ALL_TOOLS.filter(x=> /mmry_plugin.*memory_retire/.test(x.name)));
+
+2026-10-16T20:51:02.522Z text(await tools.mcp__mmry_plugin__memory_retire({id:39016}));
+
+2026-10-16T20:51:14.859Z [{'type': 'input_text', 'text': 'Script completed\nWall time 12.3 seconds\nOutput:\n'}, {'type': 'input_text', 'text': '{"content":[{"type":"text","text":"Memory deactivated."}],"isError":false}'}]
+
+SOURCE /Users/ericbarone/.codex/sessions/2026/10/16/rollout-2026-10-16T13-52-30-01a1467c-dddc-7fa2-bb46-1c78085e2f90.jsonl
+2026-10-16T20:52:30.905Z version=0.160.0
+2026-10-16T20:52:32.514Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:52:49.349Z approval=on-request sandbox={'type': 'workspace-write', 'network_access': False, 'exclude_tmpdir_env_var': False, 'exclude_slash_tmp': False}
+2026-10-16T20:52:52.044Z const r = await tools.exec_command({cmd:"cat /Users/ericbarone/.codex/plugins/cache/mmry-plugin/mmry/local/skills-codex/memory-system/SKILL.md",max_output_tokens:12000});text(r.output);
+text(ALL_TOOLS.filter(x=>/memory_(search|retire)/.test(x.name)));
+
+2026-10-16T20:52:53.832Z text(await tools.mcp__mmry_plugin__memory_search({query:"31743-LIVE-20261016-C"}));
+
+2026-10-16T20:52:55.878Z text(await tools.mcp__mmry_plugin__memory_retire({id:39015}));
+
+2026-10-16T20:52:56.335Z [{'type': 'input_text', 'text': 'Script completed\nWall time 0.5 seconds\nOutput:\n'}, {'type': 'input_text', 'text': '{"content":[{"type":"text","text":"Memory deactivated."}],"isError":false}'}]
+
+Post-run cached skill SHA256 5dab3d3301798623a6ef7fd79ef87a3dc7c34201f1589b1c3424b1390e6195c7
+Both test markers C and D retired. No commits/pushes. Prior failed A/B run preserved separately in old clone.
+This is one valid C/D run plus its second-conversation retire; any further repeat required by QA is PM decision.

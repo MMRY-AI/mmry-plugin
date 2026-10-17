@@ -91,13 +91,13 @@ _request_json() { printf '%s\n' "$1" | grep -m1 '^ *{"permissions"' | sed 's/^ *
 
 @test "skill: the request in the Codex skill is valid JSON in Codex's shape" {
     local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" block
-    block="$(tr -d '\r' < "$skill" | awk '/^## If an MMRY command cannot reach MMRY AI/{s=1} s && /^```json$/{j=1; next} j && /^```$/{exit} j{print}')"
+    block="$(tr -d '\r' < "$skill" | awk '/^##+ If .* cannot reach MMRY AI/{s=1} s && /^```json$/{j=1; next} j && /^```$/{exit} j{print}')"
     [[ -n "$block" ]] || { echo "no json block in the section"; return 1; }
     printf '%s' "$block" | jq -e '.permissions.network.enabled == true' >/dev/null || { echo "$block"; return 1; }
     printf '%s' "$block" | jq -e '(.permissions.file_system.write | type) == "array"' >/dev/null || return 1
     printf '%s' "$block" | jq -e '(keys - ["permissions","reason"]) == []' >/dev/null || { echo "$block"; return 1; }
     # And the section says when to ask, how long it lasts, and what to do if declined.
-    local section; section="$(tr -d '\r' < "$skill" | awk '/^## If an MMRY command cannot reach MMRY AI/{s=1; print; next} s && /^## /{exit} s{print}')"
+    local section; section="$(tr -d '\r' < "$skill" | awk '/^##+ If .* cannot reach MMRY AI/{s=1; print; next} s && /^## /{exit} s{print}')"
     [[ "$section" == *"for this conversation"* ]] || return 1
     [[ "$section" == *"run the same MMRY command again"* ]] || return 1
     [[ "$section" == *"declines"* ]] || return 1

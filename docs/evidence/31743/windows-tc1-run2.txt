@@ -1,0 +1,17 @@
+31743 TC1, model-driven, Windows 11 Codex CLI, 2026-10-17 (UTC)
+Plugin: MMRY-AI/mmry-plugin branch 31743/codex-tools-no-prompt at 476f77b, installed as git marketplace ref.
+Installed Codex skill skills-codex/memory-system/SKILL.md sha256 5dab3d3301798623a6ef7fd79ef87a3dc7c34201f1589b1c3424b1390e6195c7 (checked before and after the run).
+Launch: PowerShell, $env:MMRY_NO_SELF_UPDATE='1'; codex   (codex-cli 0.160.0; offered 0.163.0 update skipped)
+Session meta: cli_version 0.160.0, approval_policy on-request, sandbox workspace-write (default permissions).
+Account: throwaway Integration subscriber (win31743_*@test.mnemo), https://integration.mmryai.com.
+
+Conversation 1 (session 01a147b7): prompts typed in order W3 save, W4 save, search, reinforce W3, link W3/W4, retire W4.
+  Non-tool action: one local Get-Content of the installed SKILL.md (no network, no MMRY script).
+  Tool calls: mcp__mmry_plugin memory_save x2, memory_search, memory_reinforce (id 39020), memory_link, memory_retire.
+  No MMRY .sh script named or run anywhere in the session log.
+  Prompts seen (operator report): the retire approval for W4 only ("always allow" chosen).
+Conversation 2 (session 01a147b8, fresh): "Retire the W3 memory"
+  Local Get-Content of SKILL.md, then memory_search -> id 39020, then memory_retire -> "Memory deactivated." No prompt (operator paste).
+
+Verdict: PASS (Windows CLI column of TC1). Desktop app columns are covered under 31790 evidence.
+Note: an earlier attempt the same night was typed into a Codex session started before the install; it reported the tools missing and is not counted.
