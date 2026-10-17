@@ -17,7 +17,8 @@
 load '../helpers/test-helper'
 
 # The scripts of the operations the tool server covers.
-TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|roster|leave))\.sh'
+# #31789 added the lead's four: start, assign, report and debrief.
+TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|roster|leave|start|assign|report|debrief))\.sh'
 # formation-progress.sh is tool-covered only for this conversation's own report; the lead reporting
 # for ANOTHER member (a member id first) has no tool and keeps the script.
 PROGRESS_OWN_RE='formation-progress\.sh( <Accepted|$|[^ 0-9<]| [^0-9<])'
@@ -169,20 +170,25 @@ _ref() {
         for a in "join" "join 12" "leave" "roster" "say" "progress"; do set -- $a; mmry_host_formation_ref "$@"; echo; done
         mmry_host_formation_ref say "\"...\" <id>"; echo
         mmry_host_formation_ref progress "<Accepted|Done|Blocked|Abandoned>"; echo
-        for c in save search load-memories; do mmry_host_command_ref "$c"; echo; done')"
-    [ "$(printf '%s\n' "$out" | grep -c '^the mmry_plugin ')" -eq 11 ] || { echo "$out"; return 1; }
+        for c in save search load-memories; do mmry_host_command_ref "$c"; echo; done
+        for s in start assign report debrief; do mmry_host_formation_ref "$s"; echo; done
+        mmry_host_formation_ref start "\"what the formation is for\""; echo
+        mmry_host_formation_ref report 42; echo')"
+    [ "$(printf '%s\n' "$out" | grep -c '^the mmry_plugin ')" -eq 17 ] || { echo "$out"; return 1; }
     _assert_no_tool_covered_script "$out"
     _assert_names_real_tools "$out"
     [[ "$out" == *"the mmry_plugin formation_join tool with formation_id 12"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *'the mmry_plugin formation_start tool with objective "what the formation is for"'* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"the mmry_plugin formation_report tool with formation_id 42"* ]] || { echo "$out"; return 1; }
 }
 
 @test "references: on Codex the operations with no tool keep their runnable script" {
     local out
     out="$(_ref codex '
-        for s in list start assign claim report debrief; do mmry_host_formation_ref "$s"; echo; done
+        for s in list claim; do mmry_host_formation_ref "$s"; echo; done
         mmry_host_formation_ref progress 7 Done; echo
         for c in setup visibility feedback foundation-status; do mmry_host_command_ref "$c"; echo; done')"
-    [ "$(printf '%s\n' "$out" | grep -c "^bash ${CODEX_DIR}/mmry/")" -eq 11 ] || { echo "$out"; return 1; }
+    [ "$(printf '%s\n' "$out" | grep -c "^bash ${CODEX_DIR}/mmry/")" -eq 7 ] || { echo "$out"; return 1; }
     [[ "$out" != *"mmry_plugin"* ]]
 }
 
@@ -190,10 +196,12 @@ _ref() {
     local out expected
     out="$(_ref "" '
         for a in "join" "join 12" "leave" "roster" "say" "progress"; do set -- $a; mmry_host_formation_ref "$@"; echo; done
-        for c in save search load-memories; do mmry_host_command_ref "$c"; echo; done')"
+        for c in save search load-memories; do mmry_host_command_ref "$c"; echo; done
+        for s in start assign report debrief; do mmry_host_formation_ref "$s"; echo; done')"
     expected="$(printf '%s\n' '/mmry:formation join' '/mmry:formation join 12' '/mmry:formation leave' \
         '/mmry:formation roster' '/mmry:formation say' '/mmry:formation progress' \
-        '/mmry:save' '/mmry:search' '/mmry:load-memories')"
+        '/mmry:save' '/mmry:search' '/mmry:load-memories' \
+        '/mmry:formation start' '/mmry:formation assign' '/mmry:formation report' '/mmry:formation debrief')"
     [ "$out" = "$expected" ] || { echo "--- expected"; echo "$expected"; echo "--- actual"; echo "$out"; return 1; }
 }
 
@@ -259,4 +267,24 @@ _codex_handler() {
     req_at="$(printf '%s\n' "$out" | grep -n 'request_permissions' | head -1 | cut -d: -f1)"
     [ -n "$tools_at" ] && [ "$tools_at" -lt "$req_at" ] || { echo "$out"; return 1; }
     _assert_no_tool_covered_script "$out"
+}
+
+@test "access hint: it names every tool the server offers, the lead's included, and the lead's operations in words (#31789)" {
+    # Derived from the server, so a tool added there and missing here fails. Found by
+    # run-31789-mutations.sh: the hint could stop naming start, assign, report and debrief and no
+    # test noticed.
+    printf '%s' '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"k"}' > "$CODEX_DIR/mmry-config.json"
+    local out t missing=""
+    out="$(env -u MMRY_API_KEY -u MMRY_API_URL -u MMRY_AUTH_METHOD MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash -c '
+        source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1 || exit 9
+        MMRY_HTTP_CODE=000 MMRY_RESPONSE="curl failed"
+        _mmry_format_error save' _ "$PLUGIN_ROOT" 2>&1)"
+    [[ "$out" == *"do not ask for access: call the"* ]] || { echo "$out"; return 1; }
+    while IFS= read -r t; do
+        [[ "$out" == *"$t"* ]] || missing="${missing} ${t}"
+    done < <(_server_tools)
+    [ -z "$missing" ] || { echo "the access hint does not name:${missing}"; echo "$out"; return 1; }
+    local flat; flat="$(printf '%s' "$out" | tr '\n' ' ')"
+    [[ "$flat" == *"formation start, join, say, assign,"* ]] || { echo "$out"; return 1; }
+    [[ "$flat" == *"report, debrief or leave"* ]] || { echo "$out"; return 1; }
 }

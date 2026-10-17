@@ -108,13 +108,15 @@ If that prints an error rather than a version, install Git for Windows from
 ### What MMRY's commands need from Codex
 
 **Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
-search, reinforce, link, retire and reload memories, and join, message, report progress in, see the
-roster of and leave a coordination group. Codex starts them itself, outside the sandbox that keeps
-your assistant's own commands off the internet, so they reach mmryai.com without asking you for
-Internet access, in every conversation.
+search, reinforce, link, retire and reload memories, and start, join, message, assign work in,
+report progress in, see the roster of, read the close-out record of, close out and leave a
+coordination group. Codex starts them itself, outside the sandbox that keeps your assistant's own
+commands off the internet, so they reach mmryai.com without asking you for Internet access, in
+every conversation.
 
-One of them asks once: **retiring a memory**, because it takes a memory out of recall. Codex offers
-to always allow it; choose that and you are not asked again.
+Two of them ask once: **retiring a memory**, because it takes a memory out of recall, and **closing
+a coordination group out**, because it ends the group for everyone in it. Codex offers to always
+allow each one; choose that and you are not asked again.
 
 **Everything else is a script.** Changing who can see a memory, structured records, the other
 formation operations, setup and feedback still run as one of MMRY's scripts. Those reach mmryai.com
@@ -152,7 +154,7 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save what is new** | When you send your next message and something is still unsaved, Codex is reminded to record it. If you have just saved, it stays quiet. |
-| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and every formation operation. |
+| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and the formation operations listed under [What is the same](#what-is-the-same). |
 | **Reloading your memories mid-session** | Ask your assistant to reload and it calls MMRY's `memory_load` tool, which repeats the session-start load and also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
@@ -214,6 +216,16 @@ assistant runs, the next thing you type, or the next time you open a session. No
 arrives later. If you are coordinating something time-sensitive, the person waiting should expect
 delivery on activity rather than instantly.
 
+**This is why we recommend you lead a formation from Claude Code.** A lead has to hear its members
+while nobody is typing, or someone has to keep prompting it. A Codex lead hears its members only on
+its next action. So Codex is a good place to join a formation and not a good place to lead one:
+start the formation from a Claude Code session, give the other sessions its id, and join from
+Codex. Your assistant tells you this when you start a formation in Codex.
+
+If you do lead from Codex, every lead operation listed under [What is the same](#what-is-the-same)
+works there. Check in while the work runs: ask for the roster, which shows where each member is
+and delivers anything waiting, or send any message to the lead conversation.
+
 ### 4. There is no plan-accepted prompt
 
 Claude Code tells MMRY when you accept a plan, which is a good moment to record the decision.
@@ -230,14 +242,14 @@ memory.
   there in Claude Code and in any connected assistant, and vice versa.
 - **Privacy controls are the same.** Global, Private and Group visibility all work, and re-scoping
   is still restricted to whoever saved the memory.
-- **Formations work, all of them.** List, start, join, speak to the formation or to one member,
-  see the roster, assign work, report progress, claim an area, read the report, debrief and leave.
-  Messages reach you as you work.
-
-  Earlier builds of this page said six of those operations had no Codex surface. They do now. The
-  reason they were held back was that the instructions they printed when something went wrong
-  named typed slash commands, which is worse than nothing on a platform that has none; those
-  messages are derived from the platform you are on, so every operation is usable here.
+- **Formations work, for the operations tested on Codex.** Start a formation and share its id,
+  join one by its id, message the formation or one member, see the roster, assign work to a member,
+  report progress, read the close-out record, close the formation out with a debrief, and leave.
+  Messages reach you as you work, on the next thing that happens in the session, which is why we
+  recommend a Claude Code session lead (see
+  [3. A message will not wake an idle session](#3-a-message-will-not-wake-an-idle-session)).
+  Listing the formations on your account and claiming an area of the work have not been tested
+  from Codex yet, so this page does not list them.
 - **Tiers and reinforcement are the same.** Nothing about how memories age or survive differs by
   platform.
 
@@ -287,6 +299,7 @@ separate credentials and separate directories on purpose.
 | "Your Foundation directives were NOT applied to this turn - " followed by a reason about the stored copy | The local copy of your Foundation memories failed its check, so it was not used rather than trusted. Ask your assistant to reload your memories, then to check Foundation status; the notice names MMRY's `memory_load` tool for the first and the Foundation status script for the second. |
 | "Your Foundation set is larger than Codex lets a plugin show on each prompt" | Your set is too large to show in full on every prompt, so each turn your assistant is pointed at the complete copy and asked to read it first. That works, but relies on the assistant opening the file. Keeping the set smaller has it applied directly. |
 | "Your Foundation directives were NOT applied to this turn, the loader exited with code N" | That one is a failure, not a slow load, and the notice says so: re-sending will not help. The usual cause is an incomplete install, so reinstall the plugin. |
+| You lead a group from Codex and members' reports seem late | They are waiting for the lead conversation's next action: a Codex conversation is not woken while it sits idle. Ask the lead for the roster, or send it any message, and they arrive. For a job where the lead must hear members while nobody is typing, start the group from Claude Code and join it from Codex. |
 | You joined a group but no message ever arrives | You almost certainly joined with the `mmry_formation_*` connector tools. They enrol you under a different identity from the one your hooks poll with, so you appear on the roster and receive nothing, with no error. Leave and rejoin by asking your assistant to use MMRY's own `formation_leave` and `formation_join` tools. |
 
 To report a problem, ask the assistant to submit feedback (it has a script for it) or write to us

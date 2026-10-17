@@ -1,0 +1,28 @@
+baseline: the untouched copy, every suite a mutation uses
+baseline handlers/codex-formation-lead.bats: 8 passed
+baseline handlers/codex-tools-first-output.bats: 12 passed
+baseline handlers/mcp-server.bats: 50 passed
+baseline structural/codex-formation-lead-docs.bats: 9 passed
+baseline structural/codex-tools-first.bats: 11 passed
+REFUSED   sid-guard-lead: the lead's tools run with no conversation id -- handlers/mcp-server.bats: identity: each lead tool that names no conversation is refused, never guessed, and sends nothing
+REFUSED   no-sh-quote: arguments reach the handler unquoted -- handlers/mcp-server.bats: tool: memory_save sends the content for processing and says MMRY received it|tool: an argument is never interpreted by a shell|tool: formation_say sends to the formation, or to one member
+REFUSED   debrief-not-destructive: closing out is annotated as harmless, so Codex never asks -- handlers/mcp-server.bats: annotations: retiring a memory and closing a formation out are the destructive tools, so Codex asks once and offers always
+REFUSED   report-not-readonly: reading the record is annotated as a change -- handlers/mcp-server.bats: annotations: search, roster and the close-out record are read-only; nothing that changes anything claims to be
+REFUSED   assign-args-swapped: assign hands the handler its arguments in the wrong order -- handlers/mcp-server.bats: tool: formation_assign sets one member's assignment, and the lead is told it hears back on its next action|tool: formation_assign with a role only leaves the assignment alone|identity: a lead's tools act for the conversation that called them, not another lead's
+REFUSED   assign-role-unchecked: assign accepts any role -- handlers/mcp-server.bats: tool: formation_assign refuses a bad role, a missing member, a bad id and nothing to change, and sends nothing
+REFUSED   start-task-dropped: start drops the task id -- handlers/mcp-server.bats: tool: formation_start passes task_id, and refuses with no objective and sends nothing
+REFUSED   tool-ref-allowlist: the lead's tools are not recognised as tools, so messages name scripts -- handlers/codex-tools-first-output.bats: references: on Codex each tool-covered operation is the tool, and the tool exists|formation handlers: no Codex remedy names a tool-covered script, with no argument, a bad one, or out of a formation|roster footer: on Codex it hands the model the say and progress tools
+REFUSED   start-ref-script: start is referred to as its script on Codex -- handlers/codex-tools-first-output.bats: references: on Codex each tool-covered operation is the tool, and the tool exists|formation handlers: no Codex remedy names a tool-covered script, with no argument, a bad one, or out of a formation
+SURVIVED  access-hint-lead: the sandbox-access hint stops naming the lead's tools
+REFUSED   no-start-notice: the Codex start confirmation says nothing about the lead limit -- handlers/codex-formation-lead.bats: R0/R3 start: on Codex the confirmation states the limit, says what to do, and recommends a Claude Code lead|R0 start: the notice comes after the id, so the id the customer must share is read first|server: formation_start through the tool server carries the whole notice
+REFUSED   notice-ungated: the lead notice is printed on Claude Code too -- handlers/codex-formation-lead.bats: req: on Claude Code the start confirmation is unchanged, byte for byte|req: on Claude Code the assign confirmation is unchanged, byte for byte|lib: mmry_host_lead_notice prints nothing and returns 1 on Claude Code, for every kind
+REFUSED   no-recommendation: the start notice stops recommending a Claude Code lead -- handlers/codex-formation-lead.bats: R0/R3 start: on Codex the confirmation states the limit, says what to do, and recommends a Claude Code lead|server: formation_start through the tool server carries the whole notice
+REFUSED   no-assign-notice: the Codex assign confirmation says nothing about the next action -- handlers/codex-formation-lead.bats: R3 assign: on Codex the lead is told the member's report reaches it on its next action, and how to check in
+REFUSED   docs-claim-list: the Codex page claims listing formations -- structural/codex-formation-lead-docs.bats: TC5: every proven operation is claimed, and each names its test case|TC5: the claim names nothing beyond the proven set
+REFUSED   docs-drop-debrief: the Codex page stops claiming the debrief -- structural/codex-formation-lead-docs.bats: TC5: every proven operation is claimed, and each names its test case
+REFUSED   docs-all-of-them: the Codex page claims every formation operation again -- structural/codex-formation-lead-docs.bats: TC5: the page has a formation claim, and it is the one this test reads|TC5: no sentence anywhere on the page claims every formation operation
+REFUSED   docs-no-recommend: the Codex page stops recommending a Claude Code lead -- structural/codex-formation-lead-docs.bats: R0: the page states the lead limit and recommends a Claude Code lead
+REFUSED   skill-no-lead-section: the skill loses its lead section -- structural/codex-formation-lead-docs.bats: R0: the skill tells the model the limit and to recommend a Claude Code lead
+REFUSED   skill-start-script: the skill sends the model to the start script again -- structural/codex-tools-first.bats: skill: names no script for an operation one of MMRY's tools covers
+RESULT: 19 refused, 1 survived
+exit=1

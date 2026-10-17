@@ -15,8 +15,18 @@
 //     {"list": 0}, {"sleep": 3000} ] }
 //   "${name}" as a whole argument value is replaced by a value captured earlier.
 // The environment (CODEX_HOME, HOME, TMPDIR, the credential) is the caller's; make it isolated.
+//
+// #31789 added two steps, and nothing about the ones above changed:
+//   {"watch": 60000, "t": 0}   wait that long and report every notification the app-server sent
+//                              about thread t meanwhile, and how many turns started on it. An idle
+//                              thread that something woke would show turn/started here.
+//   {"exec": ["script", "arg", "${t1}"], "label": "x"}
+//                              run a bash script (BASH_BIN, else bash) mid-plan and log its output
+//                              under the label; ${t0}, ${t1}... are the thread ids and ${name} a
+//                              captured value. Used to run the plugin's own delivery hook for one
+//                              conversation at the moment the plan needs it.
 'use strict';
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 
 const plan = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -26,6 +36,7 @@ let buf = '';
 let nextId = 1;
 const pending = new Map();
 const vars = {};
+const notes = [];
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 
@@ -45,6 +56,10 @@ child.stdout.on('data', (d) => {
       resolve(msg);
     } else if (msg.method === 'mcpServer/startupStatus/updated') {
       log('startup', JSON.stringify(msg.params));
+    } else if (msg.id === undefined && msg.method) {
+      // #31789: every other notification is kept, with the thread it names, for "watch".
+      const p = msg.params || {};
+      notes.push({ at: Date.now(), method: msg.method, threadId: p.threadId || (p.thread && p.thread.id) || (p.turn && p.turn.threadId) || null });
     } else if (msg.id !== undefined && msg.method) {
       log('SERVER REQUEST (approval or elicitation):', JSON.stringify(msg).slice(0, 400));
     }
@@ -95,6 +110,25 @@ function substitute(args) {
         log(`list t${step.list}: server ${s.name} runtimeStatus=${JSON.stringify(s.runtimeStatus)} plugin=${s.pluginId} tools=${tools.length}${s.toolsError ? ' toolsError=' + s.toolsError : ''}`);
         for (const t of tools) log(`    ${t.name} ${JSON.stringify(t.annotations || {})}`);
       }
+      continue;
+    }
+    if (step.watch) {
+      // #31789: what did the app-server do about thread t while nobody spoke to it?
+      const tid = threads[step.t || 0];
+      const from = Date.now();
+      await sleep(step.watch);
+      const seen = notes.filter((n) => n.at >= from && n.threadId === tid);
+      const turns = seen.filter((n) => n.method === 'turn/started').length;
+      const methods = [...new Set(seen.map((n) => n.method))].join(',') || 'none';
+      log(`watch t${step.t || 0} ${step.watch}ms: turn/started=${turns} notifications=${seen.length} methods=${methods}`);
+      continue;
+    }
+    if (step.exec) {
+      // #31789: run a script mid-plan, with thread ids and captured values substituted.
+      const sub = (a) => a.replace(/\$\{(\w+)\}/g, (m, k) => (/^t\d+$/.test(k) ? threads[Number(k.slice(1))] : (k in vars ? vars[k] : m)));
+      const argv = step.exec.map(sub);
+      const r = spawnSync(process.env.BASH_BIN || 'bash', argv, { encoding: 'utf8', timeout: 120000 });
+      log(`exec ${step.label || argv[0]} exit=${r.status}\n${(r.stdout || '') + (r.stderr || '')}\nend exec ${step.label || argv[0]}`);
       continue;
     }
     const args = substitute(step.args);

@@ -50,6 +50,10 @@ case "$method $url" in
     "POST "*/api/formations/*/transmissions) code=201; resp='{"transmissionId":7,"stored":1}' ;;
     "GET "*/api/formations/*/transmissions/sent*) resp='{"member":true,"messages":[]}' ;;
     "PUT "*/api/formations/*/members/*/progress) resp='{"progress":"Accepted"}' ;;
+    "POST "*/api/formations) code=201; resp='{"id":77,"objective":"Ship it"}' ;;
+    "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
+    "GET "*/api/formations/*/close-out) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
+    "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
     "GET "*/api/formations/[0-9]*) resp='{"formation":{"id":77,"objective":"Ship it"},"members":[{"id":5,"sessionId":"conv-A","role":"Lead","email":"a@test.mnemo"},{"id":6,"sessionId":"conv-B","role":"Wingman","email":"b@test.mnemo"}]}' ;;
     *) code=404; resp='{"error":"no fake route"}' ;;
 esac
@@ -124,10 +128,12 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 9 | jq -c '.result')" = "{}" ]
 }
 
-@test "protocol: tools/list names the eleven tools, each with an object input schema" {
+@test "protocol: tools/list names the fifteen tools, each with an object input schema" {
+    # #31789 added the lead's four: formation_start, formation_assign, formation_report and
+    # formation_debrief.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     [ "$(answer 2 | jq -r '.result.tools | map(.name) | sort | join(",")')" = \
-      "formation_join,formation_leave,formation_progress,formation_roster,formation_say,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
+      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_report,formation_roster,formation_say,formation_start,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
     [ "$(answer 2 | jq -r '[.result.tools[] | .inputSchema.type] | unique | join(",")')" = "object" ]
 }
 
@@ -155,22 +161,26 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ "$(answer 2 | jq '[.result.tools[] | .annotations.openWorldHint] | any')" = "false" ]
 }
 
-@test "annotations: search and roster are read-only; nothing that changes anything claims to be" {
+@test "annotations: search, roster and the close-out record are read-only; nothing that changes anything claims to be" {
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_roster,memory_search" ]
+    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_report,formation_roster,memory_search" ]
 }
 
-@test "annotations: retiring a memory is the one destructive tool, so Codex asks once and offers always" {
+@test "annotations: retiring a memory and closing a formation out are the destructive tools, so Codex asks once and offers always" {
+    # #31789: a debrief ends the formation for every member and cannot be undone, so it says so,
+    # exactly as retiring a memory does.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .name] | join(",")')" = "memory_retire" ]
+    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .name] | sort | join(",")')" = "formation_debrief,memory_retire" ]
     [ "$(_codex_would_prompt memory_retire)" = "prompt" ]
+    [ "$(_codex_would_prompt formation_debrief)" = "prompt" ]
 }
 
 @test "annotations: by Codex's own rule, every other tool runs with no prompt at all" {
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     local t
     for t in memory_save memory_search memory_reinforce memory_link memory_load \
-             formation_join formation_say formation_progress formation_roster formation_leave; do
+             formation_join formation_say formation_progress formation_roster formation_leave \
+             formation_start formation_assign formation_report; do
         [ "$(_codex_would_prompt "$t")" = "no-prompt" ] || { echo "$t would prompt"; return 1; }
     done
 }
@@ -306,6 +316,135 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ "$(is_error 110)" = "false" ]
     grep -q '^POST http://fake.invalid/api/formations/leave .*"sessionId":"conv-A"' "$REQLOG"
     [ ! -e "$TMPDIR/.mmry-formation-conv-A" ]
+}
+
+# ---------------------------------------------------------------------------------------------
+# #31789: the lead's tools. Each one's request and response, its refusals, and its identity.
+# ---------------------------------------------------------------------------------------------
+
+@test "tool: formation_start creates the formation for THIS conversation, records it, and returns its id" {
+    mcp "$(call 400 formation_start '{"objective":"Ship the v2 checkout","working_dir":"'"$TEST_TMPDIR/proj"'"}' '{"sessionId":"conv-L"}')"
+    [ "$(is_error 400)" = "false" ]
+    [[ "$(text_of 400)" == *"Started formation 77: Ship the v2 checkout"* ]] || return 1
+    [[ "$(text_of 400)" == *"the mmry_plugin formation_join tool with formation_id 77"* ]] || return 1
+    grep '^POST http://fake.invalid/api/formations ' "$REQLOG" | grep -q 'Ship the v2 checkout'
+    grep '^POST http://fake.invalid/api/formations ' "$REQLOG" | grep -q '"sessionId":"conv-L"'
+    [ "$(head -1 "$TMPDIR/.mmry-formation-conv-L")" = "77" ]
+}
+
+@test "tool: formation_start tells a Codex lead it hears members on its next action, and recommends Claude Code to lead" {
+    mcp "$(call 401 formation_start '{"objective":"Ship the v2 checkout"}' '{"sessionId":"conv-L"}')"
+    local t; t="$(text_of 401)"
+    [[ "$t" == *"Codex cannot wake an idle conversation"* ]] || { echo "$t"; return 1; }
+    [[ "$t" == *"on its next action"* ]] || { echo "$t"; return 1; }
+    [[ "$t" == *"never while it sits idle"* ]] || { echo "$t"; return 1; }
+    [[ "$t" == *"start the formation from a Claude Code session"* ]] || { echo "$t"; return 1; }
+    [[ "$t" == *"the mmry_plugin formation_roster tool"* ]] || { echo "$t"; return 1; }
+}
+
+@test "tool: formation_start passes task_id, and refuses with no objective and sends nothing" {
+    mcp "$(call 402 formation_start '{"objective":"Ship the v2 checkout","task_id":31789}' '{"sessionId":"conv-L"}')"
+    grep '^POST http://fake.invalid/api/formations ' "$REQLOG" | grep -q '31789'
+    : > "$REQLOG"
+    mcp "$(call 403 formation_start '{}' '{"sessionId":"conv-M"}')"
+    [ "$(is_error 403)" = "true" ]
+    [[ "$(text_of 403)" == *"objective is required"* ]] || return 1
+    [ ! -s "$REQLOG" ]
+}
+
+@test "tool: formation_start's objective is never interpreted by a shell" {
+    mcp "$(call 404 formation_start '{"objective":"$(touch PWNED) `id` ${HOME} '"'"'q'"'"' ship it"}' '{"sessionId":"conv-L"}')"
+    [ "$(is_error 404)" = "false" ]
+    [ ! -e "$PLUGIN_ROOT/PWNED" ] || return 1
+    [ ! -e PWNED ] || return 1
+    grep -qF '$(touch PWNED) `id` ${HOME}' "$REQLOG"
+}
+
+@test "tool: formation_assign sets one member's assignment, and the lead is told it hears back on its next action" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 410 formation_assign '{"member_id":6,"assignment":"write the tests"}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 410)" = "false" ]
+    [[ "$(text_of 410)" == *"Member 6 in formation 77 is now Wingman, working on: write the tests."* ]] || return 1
+    [[ "$(text_of 410)" == *"Tell the customer this in your reply, every time you assign work"* ]] || return 1
+    [[ "$(text_of 410)" == *"reaches me only when you next send a message here, not while this conversation sits idle"* ]] || return 1
+    grep -q '^PUT http://fake.invalid/api/formations/77/members/6 .*write the tests' "$REQLOG"
+}
+
+@test "tool: formation_assign with a role only leaves the assignment alone" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 411 formation_assign '{"member_id":6,"role":"Lead"}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 411)" = "false" ]
+    grep -q '^PUT http://fake.invalid/api/formations/77/members/6 .*"role":"Lead"' "$REQLOG"
+    ! grep -q '"assignment"' "$REQLOG" || return 1
+}
+
+@test "tool: formation_assign refuses a bad role, a missing member, a bad id and nothing to change, and sends nothing" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 412 formation_assign '{"member_id":6,"assignment":"x","role":"Boss"}' '{"sessionId":"conv-A"}')" \
+        "$(call 413 formation_assign '{"assignment":"write the tests"}' '{"sessionId":"conv-A"}')" \
+        "$(call 414 formation_assign '{"member_id":6}' '{"sessionId":"conv-A"}')" \
+        "$(call 415 formation_assign '{"member_id":"6; rm -rf /","assignment":"x"}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 412)" = "true" ]; [[ "$(text_of 412)" == *"role must be Lead or Wingman"* ]] || return 1
+    [ "$(is_error 413)" = "true" ]; [[ "$(text_of 413)" == *"member_id is required"* ]] || return 1
+    [ "$(is_error 414)" = "true" ]; [[ "$(text_of 414)" == *"assignment or role is required"* ]] || return 1
+    [ "$(is_error 415)" = "true" ]; [[ "$(text_of 415)" == *"member_id must be a positive whole number"* ]] || return 1
+    [ ! -s "$REQLOG" ]
+}
+
+@test "tool: formation_report reads this conversation's close-out record, or a named formation's" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 420 formation_report '{}' '{"sessionId":"conv-A"}')" \
+        "$(call 421 formation_report '{"formation_id":88}' '{"sessionId":"conv-Z"}')"
+    [ "$(is_error 420)" = "false" ]
+    [[ "$(text_of 420)" == *"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"* ]] || return 1
+    grep -q '^GET http://fake.invalid/api/formations/77/close-out' "$REQLOG"
+    [ "$(is_error 421)" = "false" ]
+    grep -q '^GET http://fake.invalid/api/formations/88/close-out' "$REQLOG"
+}
+
+@test "tool: formation_debrief closes this conversation's formation out, prints the record, and clears it here" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 430 formation_debrief '{"summary":"Shipped the checkout; decided UPC is the key; nothing went wrong."}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 430)" = "false" ]
+    [[ "$(text_of 430)" == *"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"* ]] || return 1
+    [[ "$(text_of 430)" == *"Formation 77 closed out."* ]] || return 1
+    grep -q '^POST http://fake.invalid/api/formations/77/debrief .*decided UPC is the key' "$REQLOG"
+    [ ! -e "$TMPDIR/.mmry-formation-conv-A" ]
+}
+
+@test "tool: formation_debrief refuses with no summary and sends nothing" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 431 formation_debrief '{}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 431)" = "true" ]
+    [[ "$(text_of 431)" == *"summary is required"* ]] || return 1
+    [ ! -s "$REQLOG" ]
+    [ -e "$TMPDIR/.mmry-formation-conv-A" ]
+}
+
+@test "identity: each lead tool that names no conversation is refused, never guessed, and sends nothing" {
+    export CODEX_SESSION_ID="inherited-from-somewhere"
+    printf '77\n' > "$TMPDIR/.mmry-formation-inherited-from-somewhere"
+    mcp "$(call 440 formation_start '{"objective":"Ship the v2 checkout"}')" \
+        "$(call 441 formation_assign '{"member_id":6,"assignment":"x"}')" \
+        "$(call 442 formation_report '{"formation_id":77}')" \
+        "$(call 443 formation_debrief '{"summary":"Shipped the checkout and nothing went wrong."}')"
+    local i
+    for i in 440 441 442 443; do
+        [ "$(is_error $i)" = "true" ] || { echo "call $i was not refused"; return 1; }
+        [[ "$(text_of $i)" == *"did not say which conversation"* ]] || { echo "call $i: $(text_of $i)"; return 1; }
+    done
+    [ ! -s "$REQLOG" ]
+    [ -e "$TMPDIR/.mmry-formation-inherited-from-somewhere" ]
+}
+
+@test "identity: a lead's tools act for the conversation that called them, not another lead's" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    printf '88\n' > "$TMPDIR/.mmry-formation-conv-B"
+    mcp "$(call 450 formation_assign '{"member_id":6,"assignment":"from A"}' '{"sessionId":"conv-A"}')" \
+        "$(call 451 formation_assign '{"member_id":6,"assignment":"from B"}' '{"sessionId":"conv-B"}')"
+    grep -q '/api/formations/77/members/6 .*from A' "$REQLOG"
+    grep -q '/api/formations/88/members/6 .*from B' "$REQLOG"
+    ! grep -q '/api/formations/77/members/6 .*from B' "$REQLOG" || return 1
 }
 
 @test "tool: an unknown tool is a JSON-RPC error, not a silent success" {

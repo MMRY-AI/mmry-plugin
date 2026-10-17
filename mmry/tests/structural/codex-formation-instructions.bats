@@ -85,9 +85,10 @@ _run_claude() {
 # #31743: join, say, roster, leave and progress (for this conversation) are tools of MMRY's own
 # tool server on Codex, which needs no Internet access approval, so the message names the TOOL.
 # The rest have no tool and are still the runnable script.
+# #31789: so are the lead's start, assign, report and debrief.
 _codex_ref() {
     case "$1" in
-        join|say|roster|leave|progress) printf 'the mmry_plugin formation_%s tool' "$1" ;;
+        join|say|roster|leave|progress|start|assign|report|debrief) printf 'the mmry_plugin formation_%s tool' "$1" ;;
         *) printf 'bash %s/mmry/hooks-handlers/formation-%s.sh' "$CODEX_DIR" "$1" ;;
     esac
 }
@@ -124,7 +125,9 @@ _assert_targets_exist() {
 
 # #31743: on Codex no message may send the model to the script of an operation a tool covers.
 _assert_no_tool_covered_script() {
-    [[ "$output" != *"formation-join.sh"* && "$output" != *"formation-say.sh"*         && "$output" != *"formation-roster.sh"* && "$output" != *"formation-leave.sh"* ]] || {
+    [[ "$output" != *"formation-join.sh"* && "$output" != *"formation-say.sh"*         && "$output" != *"formation-roster.sh"* && "$output" != *"formation-leave.sh"* \
+       && "$output" != *"formation-start.sh"* && "$output" != *"formation-assign.sh"* \
+       && "$output" != *"formation-report.sh"* && "$output" != *"formation-debrief.sh"* ]] || {
         echo "a Codex message names the script of an operation a tool covers: $output" >&2
         return 1
     }

@@ -1,6 +1,6 @@
 ---
 name: memory-system
-description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, reinforcing, linking, retiring and reloading memories, and joining, messaging, reporting progress in, reading the roster of and leaving a formation, are calls to the mmry_plugin tools, never scripts.
+description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, reinforcing, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out and leaving a formation, are calls to the mmry_plugin tools, never scripts.
 ---
 
 # MMRY AI memory system (Codex)
@@ -28,14 +28,19 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Message the formation, or one member | `formation_say` | `message`; optional `to_member_id` |
 | Report Accepted, Done, Blocked or Abandoned | `formation_progress` | `state`; optional `note` |
 | See the members, their ids, and the lead | `formation_roster` | nothing |
+| Start a formation, with this conversation as lead | `formation_start` | `objective`; optional `task_id`, `working_dir` |
+| As the lead, give one member work or a role | `formation_assign` | `member_id`; `assignment`, `role`, or both |
+| Read the close-out record | `formation_report` | optional `formation_id` |
+| As the lead, close the formation out | `formation_debrief` | `summary` |
 | Leave the formation | `formation_leave` | nothing |
 
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,
 and its messages arrive here on their own.
 
-`memory_retire` is the one tool Codex asks about, because it takes a memory out of recall. Tell the
-customer they can choose to always allow it, and they will not be asked again.
+`memory_retire` and `formation_debrief` are the two tools Codex asks about: retiring takes a memory
+out of recall, and a debrief ends the formation for every member. Tell the customer they can choose
+to always allow each one, and they will not be asked again.
 
 **If the mmry_plugin tools are not offered at all,** MMRY's tool server did not start. Tell the
 customer, and ask them to restart Codex; if the tools are still missing, report a problem (see the
@@ -64,7 +69,8 @@ This platform does not give plugins typed slash commands. On Claude Code a custo
    record what has happened since the last save, because it may be.
 3. **Idle delivery does not happen here.** Coordination messages reach you when a tool runs, when a
    prompt is submitted, and at session start. A Codex session that is sitting doing nothing is not
-   woken by a message; it sees it on the next thing that happens.
+   woken by a message; it sees it on the next thing that happens. For a lead that matters most:
+   see "Leading a formation on Codex" below.
 4. **There is no plan-accepted prompt.** Claude Code tells MMRY when a plan is accepted; Codex has
    no equivalent, so nothing saves an agreed plan automatically. When the customer accepts a plan,
    or says "remember this plan", save it as a Decision memory yourself.
@@ -205,6 +211,38 @@ with `formation_leave`.
 
 Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
 
+Start a formation with `formation_start` and an `objective` that says what the job is; this
+conversation becomes its lead, and the reply gives the id to share with the other sessions. As the
+lead, give a member work with `formation_assign` (`member_id` from the roster, and an
+`assignment`); only that member is told. `formation_report` prints the close-out record: every
+member, the work it was given and the state it ended in. Close the formation out with
+`formation_debrief` and a `summary` of what was accomplished, decided and learned; the summary and
+the record become lasting memories, and the formation stops carrying messages.
+
+### Leading a formation on Codex
+
+Codex cannot wake an idle conversation. A lead on Codex therefore hears its members only on its
+next action: their messages and reports arrive with this conversation's next tool call or the
+customer's next message, never while it sits idle. A lead has to be listening all the time, or the
+customer has to keep prompting it.
+
+So when a customer asks to start a formation here, start it, give them the id, and tell them
+plainly what `formation_start` says: Codex is fine for joining a formation, but we recommend it does
+not lead one; a Claude Code session hears its members while idle, so start the formation from Claude
+Code and join it from Codex. If they lead from here anyway, check in while the work runs: call
+`formation_roster`, which shows each member's state and delivers anything waiting, and tell the
+customer to send a message to this conversation whenever they want an update. Never tell a customer
+a member's message will reach an idle Codex lead on its own.
+
+**Relay the next-action line to the customer, in your own reply, after every `formation_start` and
+every `formation_assign`.** Both results include a line that begins "Tell the customer this in
+your reply". It is for the customer, not for you: never leave it out, even when the rest of your
+reply is a one-line confirmation. After `formation_assign`, tell the customer that the member's
+report arrives when they next send a message here, not on its own, and to check in then. For
+example: "Member 7 has the checkout tests. Their report reaches me only when you next send a
+message here, so check in with me once they have had time to work." After `formation_start`, give
+the id, say the same of every member, and give the recommendation above.
+
 Messages from the formation arrive on their own, marked `MMRY AI Formation Transmission`. A line marked
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.
@@ -219,7 +257,8 @@ this session is in the formation; they are the same on every platform:
 Send the report with `formation_say`, with `to_member_id` set to the lead's id; the roster shows
 which member is the lead.
 
-The other formation operations have no tool and are scripts; see the next section.
+Listing formations and claiming an area have no tool and are scripts, and neither has been
+tested from Codex yet; see the next section.
 
 ## Operations with no tool: MMRY's scripts
 
@@ -294,17 +333,13 @@ question, never wait, and never change visibility on your own.
 
 ### The formation operations with no tool
 
-Listing, starting, assigning, claiming an area, reading the report and closing out with a debrief
-have no tool:
+Listing the active formations and claiming an area have no tool, and neither has been tested
+from Codex yet. If a customer asks for one, run it and tell them it has not been tested on Codex:
 
 ```bash
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-list.sh"
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-start.sh" "Ship the v2 checkout"
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-assign.sh" <memberId> "what they should work on"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" "src/Billing"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" --list
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-report.sh"
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-debrief.sh" "what was accomplished, what was decided, what went wrong"
 ```
 
 They were left undocumented here until #31245 QA round 6 because the instructions they printed
@@ -397,6 +432,10 @@ The four things that are genuinely unavailable on this platform are: typed slash
 prompt before context is trimmed, waking an idle session with a formation message, and the
 plan-accepted prompt. Never imply any of them works here.
 
-Every formation operation is available here (#31245 QA round 6): join, say, progress, roster and
-leave as tools, and list, start, assign, claim, report and debrief as scripts. Do not tell a
-customer any of them is unavailable.
+The formation operations tested on Codex are: start, join, say (to the formation or to one member),
+assign, progress, roster, report, debrief and leave, all as tools. Do not tell a customer any of
+them is unavailable. Listing the formations and claiming an area have not been tested from Codex
+yet: never tell a customer they are proven here, and if you run one of their scripts, say it has
+not been tested on Codex. Do tell a customer who leads from Codex that a lead here hears its
+members only on its next action, and that we recommend a Claude Code session lead (see "Leading a
+formation on Codex").

@@ -596,9 +596,10 @@ mmry_host_script_ref() {
 # with no Internet access approval, while the script the model runs itself needs one in every
 # conversation. The first live Mac CLI run of #31743 (2026-10-10) showed the model running whatever
 # script the text in front of it named, getting HTTP 000 from the sandbox, and only then finding
-# the tool. So the derived remedy names the tool. Everything without a tool (list, start, assign,
-# claim, report, debrief, and the lead reporting progress FOR another member, which the tool does
-# not take) keeps the runnable script. See _mmry_host_formation_tool and mmry_host_tool_ref below.
+# the tool. So the derived remedy names the tool. Everything without a tool (list, claim, and the
+# lead reporting progress FOR another member, which the tool does not take) keeps the runnable
+# script. See _mmry_host_formation_tool and mmry_host_tool_ref below. #31789 added the lead's
+# operations, start, assign, report and debrief, to the tools.
 #
 # Usage: mmry_host_formation_ref <subcommand> [argument ...]
 #   mmry_host_formation_ref join 12     -> claude: /mmry:formation join 12
@@ -638,6 +639,8 @@ mmry_host_tool_ref() {
     case "$tool" in
         memory_save|memory_search|memory_reinforce|memory_link|memory_retire|memory_load) ;;
         formation_join|formation_say|formation_progress|formation_roster|formation_leave) ;;
+        # #31789: the lead's operations.
+        formation_start|formation_assign|formation_report|formation_debrief) ;;
         *) return 1 ;;
     esac
     printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
@@ -661,6 +664,38 @@ _mmry_host_formation_tool() {
             ;;
         leave)  mmry_host_tool_ref formation_leave ;;
         roster) mmry_host_tool_ref formation_roster ;;
+        # #31789: the lead's operations are tools too. The example a usage line carries survives,
+        # named by the tool's own argument, so the model is told what to pass as well as what to call.
+        start)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_start
+            else
+                mmry_host_tool_ref formation_start "with objective $*"
+            fi
+            ;;
+        assign)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_assign
+            else
+                mmry_host_tool_ref formation_assign "with member_id (from the roster) and assignment"
+            fi
+            ;;
+        report)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_report
+            elif [[ "$1" =~ ^[0-9]+$ ]]; then
+                mmry_host_tool_ref formation_report "with formation_id $1"
+            else
+                mmry_host_tool_ref formation_report "with formation_id set to the formation's id"
+            fi
+            ;;
+        debrief)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_debrief
+            else
+                mmry_host_tool_ref formation_debrief "with summary $*"
+            fi
+            ;;
         say)
             if (( $# == 0 )); then
                 mmry_host_tool_ref formation_say
@@ -678,6 +713,48 @@ _mmry_host_formation_tool() {
             else
                 mmry_host_tool_ref formation_progress "with state Accepted, Done, Blocked or Abandoned, and an optional note"
             fi
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+# WHAT A CODEX LEAD IS TOLD ABOUT HEARING ITS MEMBERS (#31789).
+#
+# Codex cannot wake an idle conversation. Established from openai/codex at rust-v0.160.0, not
+# assumed: a hook's output reaches the model only at a turn boundary (async hook results are
+# drained before a user prompt or after a sampling step, core/src/hook_runtime.rs
+# drain_async_hook_results, called from core/src/session/turn.rs); a notification from an MCP
+# server is only logged (rmcp-client/src/logging_client_handler.rs); MCP event streams are for
+# Codex's hosted apps only and go to the client, not to a turn
+# (app-server/src/request_processors/mcp_event_stream.rs); and the paths that do start a turn on
+# an idle thread, mail between Codex's own agents and its durable sleep, are internal to the Codex
+# process (core/src/session/handlers.rs inter_agent_communication, core/src/tasks/mod.rs). So a
+# lead on Codex hears its members only when it next acts, and a lead has to be listening all the
+# time or it needs constant attention (Eric Barone, 2026-10-07). The confirmation of starting a
+# formation, and of assigning work in one, says so plainly, says what to do instead, and
+# recommends that a Claude Code session lead. docs/evidence/31789/README.md has the evidence.
+#
+# BOTH LINES OPEN "Tell the customer this in your reply" (#31789 QA round 2). Unlabelled, the
+# assign line read as a note to the model: on Mac and on Windows the lead's reply to the customer
+# kept the confirmation and dropped the next-action line. The assign line now carries a sentence
+# the model can say as it stands. The skill says the same from the other side.
+#
+# Codex only. On any other host this prints nothing and returns 1, because a Claude Code lead is
+# woken by its members' messages and its confirmations are unchanged, byte for byte.
+#
+# Usage: mmry_host_lead_notice start|assign
+mmry_host_lead_notice() {
+    _mmry_host_resolve
+    [[ "$_MMRY_HOST_V" == "codex" ]] || return 1
+    case "$1" in
+        start)
+            # The recommendation names the other product on purpose: it is the remedy (R0).
+            local rec
+            rec="Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here."
+            printf '%s\n' "Tell the customer this in your reply when you give them the id. Codex cannot wake an idle conversation, so a lead on Codex hears its members only on its next action: their messages and reports arrive with this conversation's next tool call or the customer's next message, never while it sits idle. ${rec} If this conversation does lead, check in while the work runs: call $(mmry_host_tool_ref formation_roster), which shows each member's state and delivers anything waiting, or ask the customer to send a message here."
+            ;;
+        assign)
+            printf '%s\n' "Tell the customer this in your reply, every time you assign work, in words like these: \"Their report reaches me only when you next send a message here, not while this conversation sits idle, so check in with me once they have had time to work.\" Members' replies and reports reach you only on your next action; to check in yourself, call $(mmry_host_tool_ref formation_roster)."
             ;;
         *) return 1 ;;
     esac
@@ -949,11 +1026,12 @@ mmry_host_codex_access_hint() {
     # Not for setup ($1 given), which has no tool.
     if [[ -z "${1:-}" ]]; then
         echo "network access. If this was a save, search, reinforce, link, retire or reload, or a"
-        echo "formation join, say, progress report, roster or leave, do not ask for access: call the"
-        echo "matching mmry_plugin tool instead (memory_save, memory_search, memory_reinforce,"
-        echo "memory_link, memory_retire, memory_load, formation_join, formation_say,"
-        echo "formation_progress, formation_roster, formation_leave), which needs none. For anything"
-        echo "else, call request_permissions with"
+        echo "formation start, join, say, assign, progress report, roster, report, debrief or leave,"
+        echo "do not ask for access: call the matching mmry_plugin tool instead (memory_save,"
+        echo "memory_search, memory_reinforce, memory_link, memory_retire, memory_load,"
+        echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
+        echo "formation_roster, formation_report, formation_debrief, formation_leave), which needs"
+        echo "none. For anything else, call request_permissions with"
     else
         echo "network access. Assistant: call request_permissions with"
     fi

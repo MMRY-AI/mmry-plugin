@@ -1,0 +1,11 @@
+baseline: the untouched copy, every suite a mutation uses
+baseline handlers/codex-formation-lead.bats: 9 passed
+baseline handlers/codex-tools-first-output.bats: 13 passed
+baseline handlers/mcp-server.bats: 50 passed
+baseline structural/codex-formation-lead-docs.bats: 13 passed
+baseline structural/codex-tools-first.bats: 11 passed
+REFUSED   skill-no-relay: the skill stops telling the model to relay the next-action line after start and assign -- structural/codex-formation-lead-docs.bats: R3 (QA round 2): the skill tells the model to relay the next-action line after every assign and every start
+REFUSED   skill-relay-start-only: the skill's relay instruction covers start but not assign -- structural/codex-formation-lead-docs.bats: R3 (QA round 2): the skill tells the model to relay the next-action line after every assign and every start
+REFUSED   assign-unlabelled: the assign line is no longer labelled for the customer -- handlers/codex-formation-lead.bats: R3 assign: on Codex the lead is told the member's report reaches it on its next action, and how to check in|R3 assign (QA round 2): the line to tell the customer comes straight after the confirmation, not last
+REFUSED   assign-notice-last: the assign line goes back to being the last line -- handlers/codex-formation-lead.bats: R3 assign (QA round 2): the line to tell the customer comes straight after the confirmation, not last
+RESULT: 4 refused, 0 survived
