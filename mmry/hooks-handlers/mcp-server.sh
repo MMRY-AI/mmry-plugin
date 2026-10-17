@@ -130,7 +130,7 @@ MMRY_MCP_TOOLS='[
   {
     "name": "memory_search",
     "title": "Search memories",
-    "description": "Search MMRY AI memories by keyword, regardless of age. Each match is printed with its id, tier, scope and topic, then its content. Use the id to reinforce, link, retire or correct a memory; do not show ids to the customer unless they ask.",
+    "description": "Search MMRY AI memories by keyword. Search finds memories that were not loaded at session start. Each match is printed with its id, tier, scope and topic, then its content. Use the id with memory_reinforce, memory_link, memory_retire, or memory_save and supersedes; do not show ids to the customer unless they ask.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -143,14 +143,14 @@ MMRY_MCP_TOOLS='[
   },
   {
     "name": "memory_reinforce",
-    "title": "Reinforce a memory",
-    "description": "Reset a memory'"'"'s expiry because it genuinely guided the work, so it keeps coming back on its own. Operational, Tactical and Momentary memories only.",
+    "title": "Mark a memory useful",
+    "description": "Record that a memory you found with memory_search was useful. Call it only when that memory genuinely guided the work.",
     "inputSchema": {
       "type": "object",
       "properties": {"id": {"type": "integer", "description": "The memory id, from memory_search."}},
       "required": ["id"]
     },
-    "annotations": {"title": "Reinforce a memory", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+    "annotations": {"title": "Mark a memory useful", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
   },
   {
     "name": "memory_link",
@@ -297,7 +297,7 @@ MMRY_MCP_TOOLS='[
   }
 ]'
 
-MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, reinforcing, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out (debrief) and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
+MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out (debrief) and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
 
 # ---------------------------------------------------------------------------------------------
 # ONE TOOL CALL.

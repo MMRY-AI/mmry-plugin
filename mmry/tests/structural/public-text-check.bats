@@ -15,8 +15,11 @@
 #      that file and the planted line.
 #   3. The same copy passes again once the planted line is gone, so a refusal is caused by the
 #      planted term and nothing else.
-#   4. Code identifiers that happen to contain a banned word (the handler file name) pass.
-#   5. CI runs the check.
+#   4. Code identifiers that happen to contain a banned word (the handler file name, the
+#      client function and the Codex MCP tool name memory_reinforce) pass.
+#   5. The Codex MCP server's tool titles, tool descriptions and server instructions are read,
+#      and the rest of that file (code) is not.
+#   6. CI runs the check.
 
 load '../helpers/test-helper'
 
@@ -30,7 +33,7 @@ setup() {
     COPY="$TEST_TMPDIR/repo-copy"
     # A copy of every surface the check reads, so planting a term never touches the real files.
     mkdir -p "$COPY/mmry" "$COPY/docs" "$COPY/.claude-plugin" \
-             "$COPY/mmry/.claude-plugin" "$COPY/mmry/.codex-plugin"
+             "$COPY/mmry/.claude-plugin" "$COPY/mmry/.codex-plugin" "$COPY/mmry/hooks-handlers"
     cp -R "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/skills-codex" \
           "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/commands-codex" "$COPY/mmry/"
     cp "$PLUGIN_ROOT/README.md" "$COPY/mmry/README.md"
@@ -39,6 +42,15 @@ setup() {
     cp "$REPO_ROOT/.claude-plugin/marketplace.json" "$COPY/.claude-plugin/"
     cp "$PLUGIN_ROOT/.claude-plugin/plugin.json" "$COPY/mmry/.claude-plugin/"
     cp "$PLUGIN_ROOT/.codex-plugin/plugin.json" "$COPY/mmry/.codex-plugin/"
+    cp "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh" "$COPY/mmry/hooks-handlers/"
+}
+
+# Inserts one line into the copied MCP server straight after the line that opens the tool list,
+# so it sits inside the list, and echoes its line number. Portable: awk, no sed -i.
+_plant_in_tools() {
+    local f="$COPY/mmry/hooks-handlers/mcp-server.sh"
+    awk -v ins="$1" '{ print } /^MMRY_MCP_TOOLS=/ { print ins }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    awk '/^MMRY_MCP_TOOLS=/ { print NR + 1; exit }' "$f"
 }
 
 # Appends one line to the copied Claude Code skill and echoes the line number it landed on.
@@ -155,6 +167,53 @@ _refuses_then_passes() {
     [[ "$status" -ne 0 && "$output" == *".claude-plugin/marketplace.json:"* ]] || { echo "$output"; return 1; }
 }
 
+@test "refuses 'regardless of age'" {
+    _refuses_then_passes "Search memories by keyword, regardless of age."
+}
+
+@test "refuses a banned term in a Codex MCP tool title" {
+    local line
+    line="$(_plant_in_tools '    "title": "Reinforce a memory",')"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -ne 0 && "$output" == *"mmry/hooks-handlers/mcp-server.sh:${line}:"* ]]         || { echo "title on line ${line} not refused"; echo "$output"; return 1; }
+}
+
+@test "refuses a banned term in a Codex MCP tool description" {
+    local line
+    line="$(_plant_in_tools '    "description": "Reset a memory expiry. Operational, Tactical and Momentary memories only.",')"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -ne 0 && "$output" == *"mmry/hooks-handlers/mcp-server.sh:${line}:"* ]]         || { echo "description on line ${line} not refused"; echo "$output"; return 1; }
+}
+
+@test "refuses an age mechanic in a Codex MCP tool description" {
+    local line
+    line="$(_plant_in_tools '    "description": "Search memories by keyword, regardless of age.",')"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -ne 0 && "$output" == *"mmry/hooks-handlers/mcp-server.sh:${line}:"* ]]         || { echo "description on line ${line} not refused"; echo "$output"; return 1; }
+}
+
+@test "refuses a banned term in the Codex MCP server instructions" {
+    local f="$COPY/mmry/hooks-handlers/mcp-server.sh"
+    printf '%s
+' 'MMRY_MCP_INSTRUCTIONS="Use these tools for saving, searching and reinforcing memories."' >> "$f"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -ne 0 && "$output" == *"mmry/hooks-handlers/mcp-server.sh:"* ]] || { echo "$output"; return 1; }
+}
+
+@test "code in the Codex MCP server outside the tool text is not read" {
+    local f="$COPY/mmry/hooks-handlers/mcp-server.sh"
+    printf '%s
+' '# memory_reinforce posts to /api/memories/{id}/reinforce'         'elif $n == "memory_reinforce" then ["reinforce-memory.sh"]' >> "$f"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "the Codex MCP tool name memory_reinforce is code and passes" {
+    _plant_in_tools '    "description": "Use the id with memory_reinforce or memory_link.",' >/dev/null
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
 @test "handler and function names are code and pass" {
     local line
     line="$(_plant 'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/reinforce-memory.sh" 42 and `mmry_reinforce_memory`')"
@@ -174,8 +233,9 @@ _refuses_then_passes() {
     [[ "$status" -ne 0 ]]
 }
 
-# Every handler, client function and flag the two skills named at develop c61f565, before the
-# text was cleaned. Removing an explanation must not remove a step the assistant performs, and the
+# Every handler, client function and flag the Claude Code skill named at develop c61f565, before
+# the text was cleaned, and every handler and MMRY tool the Codex skill names at develop 79d2211
+# (#88 moved the Codex skill's everyday operations from scripts to MMRY's MCP tools). Removing an explanation must not remove a step the assistant performs, and the
 # one step that was explained by the mechanic (marking a used search result) is the one most at
 # risk of being dropped with it.
 CLAUDE_STEPS="save-memory.sh search-memories.sh reinforce-memory.sh deactivate-memory.sh
@@ -183,11 +243,10 @@ link-memories.sh list-groups.sh visibility.sh make-private.sh list-formats.sh cr
 revise-format.sh save-record.sh query-records.sh record-history.sh mmry-client.sh
 mmry_get_memories mmry_get_related mmry_delete_link mmry_reinforce_memory --ids --supersedes
 --record-type --record-fields --visibility --permission-group-id"
-CODEX_STEPS="save-memory.sh search-memories.sh reinforce-memory.sh deactivate-memory.sh
-link-memories.sh list-groups.sh visibility.sh make-private.sh session-start.sh formation-list.sh
-formation-start.sh formation-join.sh formation-say.sh formation-roster.sh formation-leave.sh
-formation-assign.sh formation-progress.sh formation-claim.sh formation-report.sh
-formation-debrief.sh submit-feedback.sh mmry-setup.sh --ids --supersedes"
+CODEX_STEPS="list-groups.sh visibility.sh make-private.sh formation-list.sh formation-claim.sh
+submit-feedback.sh mmry-setup.sh memory_save memory_search memory_reinforce memory_link
+memory_retire memory_load formation_join formation_say formation_progress formation_roster
+formation_start formation_assign formation_report formation_debrief formation_leave supersedes"
 
 @test "the Claude Code skill still names every step it named before #32272" {
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md" s missing=""
@@ -204,11 +263,18 @@ formation-debrief.sh submit-feedback.sh mmry-setup.sh --ids --supersedes"
 @test "both skills still tell the assistant to mark a search result that guided the work" {
     # DD-140: search does not record use on the server, so this step stays with the assistant
     # until a server change makes it unnecessary. Removing it would shorten memory lifetimes.
-    local f
-    for f in "$PLUGIN_ROOT/skills/memory-system/SKILL.md" "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"; do
-        grep -q 'search-memories.sh" --ids' "$f" || { echo "$f: no --ids search before marking"; return 1; }
-        grep -q 'reinforce-memory.sh" 42' "$f" || { echo "$f: no step marking the used memory"; return 1; }
-    done
+    local f="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    grep -q 'search-memories.sh" --ids' "$f" || { echo "$f: no --ids search before marking"; return 1; }
+    grep -q 'reinforce-memory.sh" 42' "$f" || { echo "$f: no step marking the used memory"; return 1; }
+    # Codex does it with MMRY's tools (#88): memory_search prints the id, memory_reinforce marks it.
+    f="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
+    grep -q 'call `memory_reinforce` with its id' "$f" || { echo "$f: no step marking the used memory"; return 1; }
+    grep -q '| `memory_reinforce` | `id` |' "$f" || { echo "$f: memory_reinforce missing from the tool table"; return 1; }
+}
+
+@test "the Codex MCP server still offers memory_reinforce under its own name" {
+    # Renaming a tool is a behaviour change; #32272 only rewords what the assistant reads.
+    grep -q '"name": "memory_reinforce"' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"
 }
 
 @test "CI runs the check" {

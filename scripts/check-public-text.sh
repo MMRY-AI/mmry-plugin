@@ -11,16 +11,19 @@
 #
 # WHAT IS CUSTOMER-READABLE. Everything a customer can read in the published plugin or in the
 # documentation it links to: the Claude Code and Codex skills, the commands, the READMEs, the
-# top-level docs pages and the description lines of the three manifests. docs/evidence/ is
-# engineering evidence kept for QA (raw request logs and traces), not documentation, and is
-# not read.
+# top-level docs pages and the description lines of the three manifests. Also the text the
+# Codex MCP server hands the assistant in mmry/hooks-handlers/mcp-server.sh: every title and
+# description line in its tool list, and its server instructions line. Only those lines of
+# that file are read; the rest is code. docs/evidence/ is engineering evidence kept for QA
+# (raw request logs and traces), not documentation, and is not read.
 #
 # WHAT IS AN INTERNAL MECHANIC. How long each kind of memory lasts, how memories are kept alive,
 # and the server's route list. Connected assistants already keep these out of every tool
 # description (DD-48); this holds the plugin to the same rule.
 #
-# CODE IS NOT PROSE. The handler file name reinforce-memory.sh and the client function
-# mmry_reinforce_memory are code in a public repository and cannot be hidden, so those two
+# CODE IS NOT PROSE. The handler file name reinforce-memory.sh, the client function
+# mmry_reinforce_memory and the Codex MCP tool name memory_reinforce are code in a public
+# repository and cannot be hidden (renaming the tool would change behaviour), so those three
 # identifiers are removed from a line before it is checked. Nothing else is allow-listed.
 #
 # Portable to the bash 3.2 and BSD awk macOS ships: no mapfile, no GNU-only flags.
@@ -48,7 +51,8 @@ _surfaces() {
     [ -d "$ROOT/docs" ] && find "$ROOT/docs" -maxdepth 1 -type f -name '*.md' -print
     local f
     for f in README.md mmry/README.md .claude-plugin/marketplace.json \
-             mmry/.claude-plugin/plugin.json mmry/.codex-plugin/plugin.json; do
+             mmry/.claude-plugin/plugin.json mmry/.codex-plugin/plugin.json \
+             mmry/hooks-handlers/mcp-server.sh; do
         [ -f "$ROOT/$f" ] && printf '%s\n' "$ROOT/$f"
     done
 }
@@ -61,20 +65,33 @@ while IFS= read -r path; do
     [ -n "$path" ] || continue
     files=$((files + 1))
     rel="${path#$ROOT/}"
-    out="$(awk -v rel="$rel" '
+    mcp=0
+    [ "$rel" = "mmry/hooks-handlers/mcp-server.sh" ] && mcp=1
+    out="$(awk -v rel="$rel" -v mcp="$mcp" '
         {
             raw = $0
             sub(/\r$/, "", raw)
+            if (mcp == 1) {
+                # Only the text the assistant is shown: title and description lines inside the
+                # tool list, and the server instructions line. The rest of the file is code.
+                if (raw ~ /^MMRY_MCP_TOOLS=/) intools = 1
+                keep = 0
+                if (intools && raw ~ /"(title|description)"[ \t]*:/) keep = 1
+                if (raw ~ /^MMRY_MCP_INSTRUCTIONS=/) keep = 1
+                if (intools && raw ~ /^\]/) intools = 0
+                if (!keep) next
+            }
             line = tolower(raw)
             gsub(/reinforce-memory\.sh/, "", line)
             gsub(/mmry_reinforce_memory/, "", line)
+            gsub(/memory_reinforce/, "", line)
 
             what = ""
             if (line ~ /reinforc/)                                   what = "reinforce or reinforcement"
             else if (line ~ /expiration clock|expiry clock|tier clock/) what = "expiry clock"
             else if (line ~ /access[ _-]?count/)                     what = "access count"
             else if (line ~ /\/api\//)                               what = "server route"
-            else if (line ~ /(aged?|ages) out|(stay|stays|kept|keep|keeps) alive|fades? naturally/) what = "how memories are kept alive"
+            else if (line ~ /(aged?|ages) out|(stay|stays|kept|keep|keeps) alive|fades? naturally|regardless of (its |their )?age|ignores age/) what = "how memories are kept alive"
             else if (line ~ /foundation|strategic|operational|tactical|momentary/ &&
                      (line ~ /[0-9]+[ -]*(hour|day|week|month|year)s?/ ||
                       line ~ /(one|two|three|four|five|six|seven|eight|nine|ten|twelve)[ -]+(hour|day|week|month|year)s?/ ||
