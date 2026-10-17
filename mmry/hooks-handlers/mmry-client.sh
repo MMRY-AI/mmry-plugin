@@ -1476,6 +1476,20 @@ mmry_update_formation_member() {
     _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}" "$body"
 }
 
+mmry_remove_formation_member() {
+    # Usage: mmry_remove_formation_member FORMATION_ID MEMBER_ID
+    #
+    # Take ONE roster entry off the formation (#32270), for a member whose session has dropped and
+    # so can no longer leave by itself. Named by ROSTER ENTRY, the id `say --to` and `assign` use,
+    # so another window of the same person stays on.
+    #
+    # No body, and nothing that says who is asking. The lead, the person who started the formation
+    # and an account administrator may do this; the server decides which the caller is from its own
+    # tables, and a request that could state its own authority would not be an authorisation check.
+    local formation_id="$1" member_id="$2"
+    _mmry_request DELETE "/api/formations/${formation_id}/members/${member_id}"
+}
+
 mmry_update_formation_member_progress() {
     # Usage: mmry_update_formation_member_progress FORMATION_ID MEMBER_ID SESSION_ID PROGRESS [NOTE]
     #

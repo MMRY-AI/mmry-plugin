@@ -88,4 +88,9 @@ bash "${HANDLER_DIR}/formation-state.sh" set "$formation_id" "$session_id"
 
 echo "Started formation ${formation_id}: ${objective}"
 echo "You are the lead. Tell the others to run $(mmry_host_formation_ref join "${formation_id}"), then use $(mmry_host_formation_ref say) to keep them posted."
+# #31789: on Codex the lead is told it hears its members only on its next action, what to do
+# instead, and that a Claude Code session should lead. Prints nothing on Claude Code.
+if declare -F mmry_host_lead_notice >/dev/null 2>&1; then
+    mmry_host_lead_notice start || true
+fi
 exit 0

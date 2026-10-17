@@ -422,7 +422,16 @@ _codex_tree() {
         # other handlers read and write, and check is the delivery hook. Neither is an operation
         # a customer performs, on either host - commands/formation.md names neither.
         case "$op" in state|check) continue ;; esac
-        grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}"
+        # #31743: an operation MMRY's tool server covers is documented as the TOOL, and its
+        # script must not be there to be reached for first. The rest are documented as scripts.
+        # #32270 added remove (formation_remove) to the tool server.
+        case "$op" in
+            join|say|progress|roster|leave|start|assign|report|debrief|remove)
+                grep -q "\`formation_${op}\`" "$skill" || missing="${missing} ${op}(tool)"
+                ! grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}(script-named)" ;;
+            *)
+                grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}" ;;
+        esac
     done
     [ -z "$missing" ] || {
         echo "these formation operations run on Codex but are not documented in the skill:${missing}" >&2

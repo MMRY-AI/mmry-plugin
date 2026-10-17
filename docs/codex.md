@@ -114,14 +114,27 @@ If that prints an error rather than a version, install Git for Windows from
 
 ### What MMRY's commands need from Codex
 
-When your assistant saves, searches or joins a coordination group, it runs one of MMRY's scripts.
-Those scripts reach mmryai.com over the network and write in the `mmry` folder of your Codex home,
-which is outside your project. Codex's default sandbox allows neither (seen in the desktop app on
-macOS, 2026-10-04). MMRY's hooks are not affected, because Codex runs those itself.
+**Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
+search, reinforce, link, retire and reload memories, and start, join, message, assign work in,
+report progress in, see the roster of, read the close-out record of, close out, remove a member from
+and leave a coordination group. Codex starts them itself, outside the sandbox that keeps your
+assistant's own commands off the internet, so they reach mmryai.com without asking you for Internet
+access, in every conversation.
 
-**What happens:** the first time an MMRY command is blocked in a conversation, your assistant asks
+Three of them ask once: **retiring a memory**, because it takes a memory out of recall, **closing a
+coordination group out**, because it ends the group for everyone in it, and **removing a member**
+from one, because that member stops receiving anything. Codex offers to always allow each one;
+choose that and you are not asked again.
+
+**Everything else is a script.** Changing who can see a memory, structured records, the other
+formation operations, setup and feedback still run as one of MMRY's scripts. Those reach mmryai.com
+over the network and write in the `mmry` folder of your Codex home, which is outside your project,
+and Codex's default sandbox allows neither (seen in the desktop app on macOS, 2026-10-04). MMRY's
+hooks are not affected, because Codex runs those itself.
+
+**What happens then:** the first time a script is blocked in a conversation, your assistant asks
 Codex for network access and write access to that folder, and Codex asks you to approve it. Approve
-it for the conversation, and every MMRY command after it works. A new conversation asks again.
+it for the conversation, and every MMRY script after it works. A new conversation asks again.
 
 **If you would rather not be asked,** you can allow it permanently in `config.toml` in your Codex
 home. This widens the sandbox for everything the assistant runs, not only MMRY:
@@ -149,8 +162,8 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save what is new** | When you send your next message and something is still unsaved, Codex is reminded to record it. If you have just saved, it stays quiet. |
-| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and every formation operation. |
-| **Reloading your memories mid-session** | Ask your assistant to reload and it re-runs the session-start load, which also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
+| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and the formation operations listed under [What is the same](#what-is-the-same). |
+| **Reloading your memories mid-session** | Ask your assistant to reload and it calls MMRY's `memory_load` tool, which repeats the session-start load and also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
 
@@ -212,6 +225,16 @@ assistant runs, the next thing you type, or the next time you open a session. No
 arrives later. If you are coordinating something time-sensitive, the person waiting should expect
 delivery on activity rather than instantly.
 
+**This is why we recommend you lead a formation from Claude Code.** A lead has to hear its members
+while nobody is typing, or someone has to keep prompting it. A Codex lead hears its members only on
+its next action. So Codex is a good place to join a formation and not a good place to lead one:
+start the formation from a Claude Code session, give the other sessions its id, and join from
+Codex. Your assistant tells you this when you start a formation in Codex.
+
+If you do lead from Codex, every lead operation listed under [What is the same](#what-is-the-same)
+works there. Check in while the work runs: ask for the roster, which shows where each member is
+and delivers anything waiting, or send any message to the lead conversation.
+
 ### 4. There is no plan-accepted prompt
 
 Claude Code tells MMRY when you accept a plan, which is a good moment to record the decision.
@@ -228,14 +251,14 @@ memory.
   there in Claude Code and in any connected assistant, and vice versa.
 - **Privacy controls are the same.** Global, Private and Group visibility all work, and re-scoping
   is still restricted to whoever saved the memory.
-- **Formations work, all of them.** List, start, join, speak to the formation or to one member,
-  see the roster, assign work, report progress, claim an area, read the report, debrief and leave.
-  Messages reach you as you work.
-
-  Earlier builds of this page said six of those operations had no Codex surface. They do now. The
-  reason they were held back was that the instructions they printed when something went wrong
-  named typed slash commands, which is worse than nothing on a platform that has none; those
-  messages are derived from the platform you are on, so every operation is usable here.
+- **Formations work, for the operations tested on Codex.** Start a formation and share its id,
+  join one by its id, message the formation or one member, see the roster, assign work to a member,
+  report progress, read the close-out record, close the formation out with a debrief, and leave.
+  Messages reach you as you work, on the next thing that happens in the session, which is why we
+  recommend a Claude Code session lead (see
+  [3. A message will not wake an idle session](#3-a-message-will-not-wake-an-idle-session)).
+  Listing the formations on your account and claiming an area of the work have not been tested
+  from Codex yet, so this page does not list them.
 - **Tiers and reinforcement are the same.** Nothing about how memories age or survive differs by
   platform.
 
@@ -278,16 +301,17 @@ separate credentials and separate directories on purpose.
 | Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |
-| Saving, searching or joining a group fails with "HTTP 000" or a permission error | Codex's sandbox is blocking network access or writes to the MMRY folder. Approve your assistant's request for access for the conversation, or see [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex) to allow it permanently. |
+| Saving, searching or joining a group fails with "HTTP 000" or a permission error | Your assistant ran one of MMRY's scripts instead of MMRY's own tools, and Codex's sandbox blocked it. Ask it to use MMRY's tools. If it says they are not available, start a new session; if they are still missing, see [What MMRY's commands need from Codex](#what-mmrys-commands-need-from-codex). |
 | Setup says "Failed to translate" or `execvpe(/bin/bash) failed` | You ran it in PowerShell and it picked the Linux subsystem's bash. Use the Git Bash window, or the explicit PowerShell form above. |
-| Memories load but nothing saves | Ask the assistant to run the save script directly and show you the output. |
+| Memories load but nothing saves | Ask the assistant to save with MMRY's `memory_save` tool and show you what it returns. If it says the tool is not available, start a new session. |
 | Your session is not in your session list | Codex sessions are listed as `codex`. Your list shows your own sessions only. |
-| A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It re-runs the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |
+| A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It calls MMRY's `memory_load` tool, which repeats the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |
 | Your assistant says your Foundation directives were not applied to a turn because loading was cut short | The machine was too busy to load them in the time a prompt allows, so that turn ran without them. MMRY no longer shows you a notice for this; your assistant is told, and the next prompt applies them again. If it keeps happening, ask your assistant to check Foundation status. |
-| "Your Foundation directives were NOT applied to this turn - " followed by a reason about the stored copy | The local copy of your Foundation memories failed its check, so it was not used rather than trusted. Ask your assistant to reload your memories, then to check Foundation status; the notice names both scripts for your install. |
+| "Your Foundation directives were NOT applied to this turn - " followed by a reason about the stored copy | The local copy of your Foundation memories failed its check, so it was not used rather than trusted. Ask your assistant to reload your memories, then to check Foundation status; the notice names MMRY's `memory_load` tool for the first and the Foundation status script for the second. |
 | "Your Foundation set is larger than Codex lets a plugin show on each prompt" | Your set is too large to show in full on every prompt, so each turn your assistant is pointed at the complete copy and asked to read it first. That works, but relies on the assistant opening the file. Keeping the set smaller has it applied directly. |
 | "Your Foundation directives were NOT applied to this turn, the loader exited with code N" | That one is a failure, not a slow load, and the notice says so: re-sending will not help. The usual cause is an incomplete install, so reinstall the plugin. |
-| You joined a group but no message ever arrives | You almost certainly joined with the `mmry_formation_*` connector tools. They enrol you under a different identity from the one your hooks poll with, so you appear on the roster and receive nothing, with no error. Leave and rejoin by asking your assistant to run the formation join script. |
+| You lead a group from Codex and members' reports seem late | They are waiting for the lead conversation's next action: a Codex conversation is not woken while it sits idle. Ask the lead for the roster, or send it any message, and they arrive. For a job where the lead must hear members while nobody is typing, start the group from Claude Code and join it from Codex. |
+| You joined a group but no message ever arrives | You almost certainly joined with the `mmry_formation_*` connector tools. They enrol you under a different identity from the one your hooks poll with, so you appear on the roster and receive nothing, with no error. Leave and rejoin by asking your assistant to use MMRY's own `formation_leave` and `formation_join` tools. |
 
 To report a problem, ask the assistant to submit feedback (it has a script for it) or write to us
 through [mmryai.com](https://mmryai.com).
