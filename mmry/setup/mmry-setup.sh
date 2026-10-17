@@ -592,7 +592,7 @@ if [[ "$(mmry_host)" == "codex" ]]; then
     # tests/structural/codex-desktop-trust-claim.bats pins this wording.
     echo "One more step the first time: Codex runs MMRY's hooks only once you trust them."
     echo "  - Codex CLI: it asks when it starts. Choose \"Trust all and continue\"."
-    echo "  - Codex desktop app: trust them in the Codex CLI review; the app uses the same trust."
+    echo "  - Codex desktop app: trust them in the Codex CLI review. In our testing, hooks trusted there also ran in the desktop app."
     echo "Until they are trusted, MMRY appears installed and does nothing."
     echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows."
     echo "The desktop app's hook settings page can stay on \"Loading hooks...\"; that does not stop MMRY working."

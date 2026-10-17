@@ -356,7 +356,7 @@ If a customer asks whether MMRY works in the Codex desktop app, this is what has
   Windows MMRY works through its own tools. For anything that still runs as a script, such as
   changing who can see a memory, tell the customer to use the Codex CLI.
 - Trust MMRY's hooks in the Codex CLI review (choose "Trust all and continue" when the Codex CLI
-  starts). The desktop app uses the same Codex home and the same trust.
+  starts). In our testing, hooks trusted in the Codex CLI review also ran in the desktop app.
 - The desktop app's hook settings page for MMRY AI can stay on "Loading hooks..." or show "No hooks
   found". That does not stop MMRY working. If memories loaded at the start of this conversation,
   MMRY's hooks are running.

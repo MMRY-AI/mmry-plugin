@@ -7,8 +7,8 @@ supported surface, and uninstall all differ from the Claude Code instructions be
 tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows, where
 MMRY's hooks run: memories load, and saving, searching and retiring memories and formation messages
 work. On a Mac, Foundation memories are also re-stated on each later turn. On Windows the desktop
-app works through MMRY's own tools. Trust MMRY's hooks in the Codex CLI review; the desktop app uses
-the same trust. The desktop app's hook settings page can stay on "Loading hooks..."; that does not
+app works through MMRY's own tools. Trust MMRY's hooks in the Codex CLI review; in our testing, hooks
+trusted in the Codex CLI review also ran in the desktop app. The desktop app's hook settings page can stay on "Loading hooks..."; that does not
 stop MMRY working.
 
 | What happens | Claude Code | OpenAI Codex |

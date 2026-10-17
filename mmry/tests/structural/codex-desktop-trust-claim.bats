@@ -72,9 +72,12 @@ desktop_trust_offenders() {
 missing_claim_parts() {
     local f="$1" flat part
     flat="$(tr '\r\n' '  ' < "$f" | tr -s ' ' | tr '[:upper:]' '[:lower:]')"
-    for part in "on a mac and on windows" "codex cli review" "the same trust" \
+    for part in "on a mac and on windows" "codex cli review" "in our testing, hooks trusted" "also ran in the desktop app" \
                 "loading hooks" "does not stop mmry working"; do
         [[ "$flat" == *"$part"* ]] || echo "$f: missing \"$part\""
+    done
+    for part in "uses the same trust" "same codex home" "app uses the same"; do
+        [[ "$flat" != *"$part"* ]] || echo "$f: unproven mechanism stated as fact \"$part\""
     done
     for part in "desktop app on windows is not yet confirmed" "could not be confirmed in this release"; do
         [[ "$flat" != *"$part"* ]] || echo "$f: superseded \"$part\""
@@ -201,7 +204,7 @@ claim_surfaces() {
     local tmp="$BATS_TEST_TMPDIR/new-setup.sh"
     printf '%s\n' \
         '    # the desktop app showed no review; trust could not be confirmed there in v2.10.1' \
-        '    echo "  - Codex desktop app: trust them in the Codex CLI review; the app uses the same trust."' \
+        '    echo "  - Codex desktop app: trust them in the Codex CLI review. In our testing, hooks trusted there also ran in the desktop app."' \
         '    echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows."' > "$tmp"
     run desktop_trust_offenders "$tmp"
     [[ -z "$output" ]]
@@ -209,7 +212,7 @@ claim_surfaces() {
 
 @test "desktop trust: setup prints the proven-scope statement to Codex customers" {
     local f="$PLUGIN_ROOT/setup/mmry-setup.sh"
-    grep -qF 'echo "  - Codex desktop app: trust them in the Codex CLI review; the app uses the same trust."' "$f"
+    grep -qF 'echo "  - Codex desktop app: trust them in the Codex CLI review. In our testing, hooks trusted there also ran in the desktop app."' "$f"
     grep -qF 'echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows."' "$f"
     grep -qF 'stay on \"Loading hooks...\"; that does not stop MMRY working."' "$f"
     ! grep -qF 'not yet confirmed' "$f"
