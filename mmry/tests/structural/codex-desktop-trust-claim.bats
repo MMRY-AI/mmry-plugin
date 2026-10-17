@@ -102,10 +102,11 @@ claim_surfaces() {
 }
 
 @test "desktop trust: every customer surface states what the desktop app has proven" {
-    local f out=""
+    local f out="" missing
     while IFS= read -r f; do
         [[ -f "$f" ]] || { out+="$f: not found"$'\n'; continue; }
-        out+="$(missing_claim_parts "$f")"
+        missing="$(missing_claim_parts "$f")"
+        [[ -z "$missing" ]] || out+="$missing"$'\n'
     done < <(claim_surfaces)
     if [[ -n "$out" ]]; then
         echo "$out" >&2
