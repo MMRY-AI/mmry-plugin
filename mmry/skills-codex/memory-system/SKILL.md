@@ -409,6 +409,22 @@ the tool is not offered, say so plainly and give them the two alternatives: run 
 themselves in a terminal, or allow it permanently in their Codex settings (see docs/codex.md,
 "What MMRY's commands need from Codex").
 
+### In the Codex desktop app
+
+If a customer asks whether MMRY works in the Codex desktop app, this is what has been tested:
+
+- On a Mac and on Windows, MMRY's hooks run in the desktop app: memories load when a conversation
+  starts, and saving, searching and retiring memories and formation messages work. On a Mac,
+  Foundation memories are also re-stated on each later turn.
+- On Windows, MMRY's scripts do not start inside the desktop app's sandbox, so in the desktop app on
+  Windows MMRY works through its own tools. For anything that still runs as a script, such as
+  changing who can see a memory, tell the customer to use the Codex CLI.
+- Trust MMRY's hooks in the Codex CLI review (choose "Trust all and continue" when the Codex CLI
+  starts). In our testing, hooks trusted in the Codex CLI review also ran in the desktop app.
+- The desktop app's hook settings page for MMRY AI can stay on "Loading hooks..." or show "No hooks
+  found". That does not stop MMRY working. If memories loaded at the start of this conversation,
+  MMRY's hooks are running.
+
 ## Removing MMRY from Codex
 
 If the customer asks how to uninstall, do NOT point them at uninstall.sh or uninstall.bat. Both of
