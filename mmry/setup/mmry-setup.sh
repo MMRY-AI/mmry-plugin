@@ -583,14 +583,18 @@ if [[ "$(mmry_host)" == "codex" ]]; then
     echo "There are no slash commands to type on Codex. Just ask in plain words:"
     echo "  \"remember this\", \"what do you know about X\", \"make that private\"."
     echo ""
-    # The CLI shows a hook review on start (#31245). The desktop app is not covered: UAT on
-    # 2026-10-06 found its hook settings stall, so no desktop trust step is offered here.
-    # tests/structural/codex-desktop-trust-claim.bats refuses any text that offers one.
+    # Trust is given in the CLI's hook review (#31245). The desktop app's hook settings page can
+    # hang on "Loading hooks..." (Mac, 2026-10-16, app 26.1007.30912), yet the hooks run there once
+    # trusted in the CLI, because both read config.toml in the Codex home (#31790). So the desktop
+    # app is pointed at the CLI review, never at its own settings page.
+    # tests/structural/codex-desktop-trust-claim.bats pins this wording.
     echo "One more step the first time: Codex runs MMRY's hooks only once you trust them."
     echo "  - Codex CLI: it asks when it starts. Choose \"Trust all and continue\"."
-    echo "MMRY has been tested in the Codex command-line tool."
-    echo "Trusting MMRY's hooks in the Codex desktop app could not be confirmed in this release."
+    echo "  - Codex desktop app: trust them in the Codex CLI review; the app uses the same trust."
     echo "Until they are trusted, MMRY appears installed and does nothing."
+    echo "MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac."
+    echo "The desktop app's hook settings page can stay on \"Loading hooks...\"; that does not stop MMRY working."
+    echo "The Codex desktop app on Windows is not yet confirmed."
     echo ""
     # A URL that exists TODAY. mmryai.com has no /docs/codex page yet, and printing one would be
     # the v1.18 failure again: an announcement promising something a customer cannot reach.

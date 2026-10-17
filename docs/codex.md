@@ -28,8 +28,13 @@ codex plugin add mmry@mmry-plugin
 Codex runs a plugin's hooks only once you have trusted them, and MMRY does nothing without its
 hooks: no memories load and nothing is saved.
 
-MMRY has been tested in the Codex command-line tool. Trusting MMRY's hooks in the Codex desktop app
-could not be confirmed in this release.
+MMRY has been tested in the Codex command-line tool, and in the Codex desktop app on a Mac. In the
+desktop app on a Mac, MMRY's hooks run: your memories load when a conversation starts, your
+Foundation memories are re-stated, and saving, searching and retiring memories and formation
+messages work. Trust MMRY's hooks in the Codex CLI review below; the desktop app uses the same
+Codex home and the same trust. The desktop app's own hook settings page can stay on "Loading
+hooks..." or show "No hooks found"; that does not stop MMRY working. The Codex desktop app on
+Windows is not yet confirmed.
 
 The first time the Codex CLI starts after installing, it shows a hook review listing MMRY's
 handlers. Choose **Trust all and continue**. If you chose "Continue without trusting" by accident,
@@ -149,13 +154,14 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 
 ## Where this works
 
-MMRY is a Codex plugin. MMRY has been tested in the Codex command-line tool. Trusting MMRY's hooks in
-the Codex desktop app could not be confirmed in this release.
+MMRY is a Codex plugin. MMRY has been tested in the Codex command-line tool, and in the Codex desktop
+app on a Mac. The Codex desktop app on Windows is not yet confirmed.
 
 | Surface | MMRY |
 |---|---|
-| Codex CLI | yes, this is where MMRY has been tested, and what the instructions above install |
-| Codex in the ChatGPT desktop app | not confirmed. OpenAI's plugin documentation says plugins run there, but trusting MMRY's hooks in the Codex desktop app could not be confirmed in this release, and MMRY does nothing until its hooks are trusted |
+| Codex CLI | yes, tested on Windows and Mac, and what the instructions above install |
+| Codex in the ChatGPT desktop app, on a Mac | yes. MMRY's hooks run: memories load when a conversation starts, Foundation memories are re-stated, and saving, searching and retiring memories and formation messages work. Trust MMRY's hooks in the Codex CLI review; the desktop app uses the same trust. The app's hook settings page can stay on "Loading hooks..." or show "No hooks found"; that does not stop MMRY working |
+| Codex in the ChatGPT desktop app, on Windows | not yet confirmed. In our testing there, MMRY's commands could not reach mmryai.com from the app's sandbox |
 | The Codex IDE extension | no. OpenAI's plugin documentation states plainly that "the IDE extension doesn't support plugins", so no plugin reaches it, not only ours. Use the Codex CLI in a terminal beside your editor instead |
 | Codex cloud tasks | not established. OpenAI's plugin documentation does not name it either way, and we have not run a cloud task to find out. Treat it as unsupported until we say otherwise |
 
@@ -264,7 +270,8 @@ separate credentials and separate directories on purpose.
 
 | Symptom | First thing to check |
 |---|---|
-| No memories at session start | MMRY's hooks are probably not trusted, or changed in an update and need trusting again. Check `config.toml` as described in step 2, then trust them in the review the Codex CLI shows on start. Trusting MMRY's hooks in the Codex desktop app could not be confirmed in this release. |
+| No memories at session start | MMRY's hooks are probably not trusted, or changed in an update and need trusting again. Check `config.toml` as described in step 2, then trust them in the review the Codex CLI shows on start. The desktop app uses the same trust as the Codex CLI. |
+| The desktop app's hook settings for MMRY AI stay on "Loading hooks..." or show "No hooks found" | That page can do this while MMRY's hooks are running; it does not stop MMRY working. Start a new conversation: if your memories load, the hooks are trusted and running. If they do not, trust MMRY's hooks in the review the Codex CLI shows on start. |
 | Setup says "could not reach MMRY AI" | Run it yourself in a terminal, not through the assistant: an assistant's sandbox may have no network access. If it fails in a terminal too, check that this machine can open mmryai.com. |
 | "MMRY AI is installed but needs to be set up" | Run `bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"`. |
 | Your assistant says "MMRY needs Git for Windows", or nothing at all happens on Windows | Git for Windows is not installed, or not where MMRY looks for it. Install it from [gitforwindows.org](https://gitforwindows.org) with its default options and start a new session. To check, run `git --version` in PowerShell; an error there means the same thing. |

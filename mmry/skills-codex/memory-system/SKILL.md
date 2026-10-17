@@ -345,6 +345,20 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 It opens a browser for the customer to sign in at mmryai.com and writes the credential. After it
 finishes, the customer restarts Codex.
 
+### In the Codex desktop app
+
+If a customer asks whether MMRY works in the Codex desktop app, this is what has been tested:
+
+- On a Mac, MMRY's hooks run in the desktop app: memories load when a conversation starts,
+  Foundation memories are re-stated, and saving, searching and retiring memories and formation
+  messages work.
+- Trust MMRY's hooks in the Codex CLI review (choose "Trust all and continue" when the Codex CLI
+  starts). The desktop app uses the same Codex home and the same trust.
+- The desktop app's hook settings page for MMRY AI can stay on "Loading hooks..." or show "No hooks
+  found". That does not stop MMRY working. If memories loaded at the start of this conversation,
+  MMRY's hooks are running.
+- The Codex desktop app on Windows is not yet confirmed. Say so plainly if asked.
+
 ## Removing MMRY from Codex
 
 If the customer asks how to uninstall, do NOT point them at uninstall.sh or uninstall.bat. Both of
