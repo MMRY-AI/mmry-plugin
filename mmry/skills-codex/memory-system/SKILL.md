@@ -159,11 +159,12 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" "UPC"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" "refund" "backend"
 ```
 
-Search ignores age, which is the point: it is how a memory that has aged out of normal loading is
-recovered. When a search result genuinely guides the work, reinforce it so it comes back on its own
-next time:
+Search finds memories that were not loaded at session start. When a memory you found by searching
+genuinely guides the work, run `reinforce-memory.sh` with its id; it records that the memory was
+useful. Search with `--ids` to see the id, and run it only for a memory that guided the work:
 
 ```bash
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/search-memories.sh" --ids "UPC"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/reinforce-memory.sh" 42
 ```
 
@@ -184,13 +185,13 @@ session-start hook runs; running it by hand is not a workaround.
 
 ## Tiers
 
-| Tier | For | Expires | Reinforceable |
-|---|---|---|---|
-| Foundation | Core values, identity and orientation | Never | No |
-| Strategic | Organisation and communication standards | 1 year from creation | No |
-| Operational | Active working knowledge | 3 months from last access | Yes |
-| Tactical | This week's work | 7 days from last access | Yes |
-| Momentary | Right now | 8 hours from last access | Yes |
+| Tier | For |
+|---|---|
+| Foundation | Core values, identity and orientation |
+| Strategic | Organisation and communication standards |
+| Operational | Active working knowledge |
+| Tactical | This week's work |
+| Momentary | Right now |
 
 Foundation is sacred: only core values and `Initialization` category memories belong there.
 

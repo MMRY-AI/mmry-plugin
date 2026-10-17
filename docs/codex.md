@@ -142,7 +142,7 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 | **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
 | **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save what is new** | When you send your next message and something is still unsaved, Codex is reminded to record it. If you have just saved, it stays quiet. |
-| **The memory operations** | Save, search, reinforce, link, retire, change who can see a memory, and every formation operation. |
+| **The memory operations** | Save, search, link, retire, change who can see a memory, and every formation operation. |
 | **Reloading your memories mid-session** | Ask your assistant to reload and it re-runs the session-start load, which also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
@@ -228,8 +228,7 @@ memory.
   reason they were held back was that the instructions they printed when something went wrong
   named typed slash commands, which is worse than nothing on a platform that has none; those
   messages are derived from the platform you are on, so every operation is usable here.
-- **Tiers and reinforcement are the same.** Nothing about how memories age or survive differs by
-  platform.
+- **Memory types are the same.** Nothing about how your memories are kept differs by platform.
 
 ---
 

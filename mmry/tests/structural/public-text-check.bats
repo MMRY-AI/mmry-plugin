@@ -174,6 +174,43 @@ _refuses_then_passes() {
     [[ "$status" -ne 0 ]]
 }
 
+# Every handler, client function and flag the two skills named at develop c61f565, before the
+# text was cleaned. Removing an explanation must not remove a step the assistant performs, and the
+# one step that was explained by the mechanic (marking a used search result) is the one most at
+# risk of being dropped with it.
+CLAUDE_STEPS="save-memory.sh search-memories.sh reinforce-memory.sh deactivate-memory.sh
+link-memories.sh list-groups.sh visibility.sh make-private.sh list-formats.sh create-format.sh
+revise-format.sh save-record.sh query-records.sh record-history.sh mmry-client.sh
+mmry_get_memories mmry_get_related mmry_delete_link mmry_reinforce_memory --ids --supersedes
+--record-type --record-fields --visibility --permission-group-id"
+CODEX_STEPS="save-memory.sh search-memories.sh reinforce-memory.sh deactivate-memory.sh
+link-memories.sh list-groups.sh visibility.sh make-private.sh session-start.sh formation-list.sh
+formation-start.sh formation-join.sh formation-say.sh formation-roster.sh formation-leave.sh
+formation-assign.sh formation-progress.sh formation-claim.sh formation-report.sh
+formation-debrief.sh submit-feedback.sh mmry-setup.sh --ids --supersedes"
+
+@test "the Claude Code skill still names every step it named before #32272" {
+    local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md" s missing=""
+    for s in $CLAUDE_STEPS; do grep -q -- "$s" "$skill" || missing="$missing $s"; done
+    [[ -z "$missing" ]] || { echo "no longer named:$missing"; return 1; }
+}
+
+@test "the Codex skill still names every step it named before #32272" {
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" s missing=""
+    for s in $CODEX_STEPS; do grep -q -- "$s" "$skill" || missing="$missing $s"; done
+    [[ -z "$missing" ]] || { echo "no longer named:$missing"; return 1; }
+}
+
+@test "both skills still tell the assistant to mark a search result that guided the work" {
+    # DD-140: search does not record use on the server, so this step stays with the assistant
+    # until a server change makes it unnecessary. Removing it would shorten memory lifetimes.
+    local f
+    for f in "$PLUGIN_ROOT/skills/memory-system/SKILL.md" "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"; do
+        grep -q 'search-memories.sh" --ids' "$f" || { echo "$f: no --ids search before marking"; return 1; }
+        grep -q 'reinforce-memory.sh" 42' "$f" || { echo "$f: no step marking the used memory"; return 1; }
+    done
+}
+
 @test "CI runs the check" {
     grep -q 'scripts/check-public-text.sh' "$REPO_ROOT/.github/workflows/test.yml"
 }

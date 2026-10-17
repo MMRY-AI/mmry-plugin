@@ -120,9 +120,13 @@ RECORD_HANDLERS=(
     grep -q 'RecordedAs' "$skill" || fail "SKILL.md never tells the assistant to read RecordedAs"
 }
 
-@test "SKILL.md lists the data-format endpoints" {
-    grep -q '/api/data-formats' "$PLUGIN_ROOT/skills/memory-system/SKILL.md" \
-        || fail "SKILL.md's endpoint table omits /api/data-formats"
+@test "SKILL.md reaches records through the handlers, with no server route table (#32272)" {
+    # The route table this test used to require was removed by #32272 (DD-140 in the mmry
+    # repository): the server's route list is an internal mechanic, and the assistant reaches
+    # every record operation through the handlers the test above already requires.
+    local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    ! grep -q '/api/' "$skill" || fail "SKILL.md names a server route"
+    grep -q 'list-formats.sh' "$skill" || fail "SKILL.md never names list-formats.sh"
 }
 
 @test "client library reaches the record history route (#31827)" {
