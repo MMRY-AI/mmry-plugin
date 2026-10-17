@@ -208,7 +208,8 @@ _skill_claim() {
     n="$(printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
         | env MMRY_HOST=codex CODEX_HOME="$BATS_TEST_TMPDIR" MMRY_API_KEY=k MMRY_API_URL=http://fake.invalid MMRY_AUTH_METHOD=apikey bash "$SERVER" 2>/dev/null \
         | jq '[.result.tools[] | select(.annotations.destructiveHint)] | length')"
-    case "$n" in 1) words="One of them asks once" ;; 2) words="Two of them ask once" ;; *) words="(unexpected: $n)" ;; esac
+    # 3 since #32270: formation_remove is destructive too.
+    case "$n" in 1) words="One of them asks once" ;; 2) words="Two of them ask once" ;; 3) words="Three of them ask once" ;; *) words="(unexpected: $n)" ;; esac
     grep -q "$words" "$PAGE" || { echo "the server has $n destructive tools; the page does not say '$words'"; return 1; }
     grep -q 'closing' "$PAGE"
 }

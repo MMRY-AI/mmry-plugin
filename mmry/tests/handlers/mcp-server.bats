@@ -51,6 +51,7 @@ case "$method $url" in
     "GET "*/api/formations/*/transmissions/sent*) resp='{"member":true,"messages":[]}' ;;
     "PUT "*/api/formations/*/members/*/progress) resp='{"progress":"Accepted"}' ;;
     "POST "*/api/formations) code=201; resp='{"id":77,"objective":"Ship it"}' ;;
+    "DELETE "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","leftDate":"2026-10-16T02:14:33.1234567","removedByEmail":"a@test.mnemo"}' ;;
     "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
     "GET "*/api/formations/*/close-out) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
     "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
@@ -128,12 +129,13 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 9 | jq -c '.result')" = "{}" ]
 }
 
-@test "protocol: tools/list names the fifteen tools, each with an object input schema" {
+@test "protocol: tools/list names the sixteen tools, each with an object input schema" {
     # #31789 added the lead's four: formation_start, formation_assign, formation_report and
-    # formation_debrief.
+    # formation_debrief. #32270 added formation_remove, so a lead or an administrator on Codex can
+    # take off a member whose session has dropped without the Internet access prompt.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     [ "$(answer 2 | jq -r '.result.tools | map(.name) | sort | join(",")')" = \
-      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_report,formation_roster,formation_say,formation_start,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
+      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_remove,formation_report,formation_roster,formation_say,formation_start,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
     [ "$(answer 2 | jq -r '[.result.tools[] | .inputSchema.type] | unique | join(",")')" = "object" ]
 }
 
@@ -166,13 +168,15 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_report,formation_roster,memory_search" ]
 }
 
-@test "annotations: retiring a memory and closing a formation out are the destructive tools, so Codex asks once and offers always" {
+@test "annotations: retiring a memory, closing a formation out and removing a member are the destructive tools, so Codex asks once and offers always" {
     # #31789: a debrief ends the formation for every member and cannot be undone, so it says so,
-    # exactly as retiring a memory does.
+    # exactly as retiring a memory does. #32270: removing a member takes another session's place
+    # away, and that session cannot put itself back, so it says so too.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .name] | sort | join(",")')" = "formation_debrief,memory_retire" ]
+    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .name] | sort | join(",")')" = "formation_debrief,formation_remove,memory_retire" ]
     [ "$(_codex_would_prompt memory_retire)" = "prompt" ]
     [ "$(_codex_would_prompt formation_debrief)" = "prompt" ]
+    [ "$(_codex_would_prompt formation_remove)" = "prompt" ]
 }
 
 @test "annotations: by Codex's own rule, every other tool runs with no prompt at all" {
@@ -421,15 +425,65 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ -e "$TMPDIR/.mmry-formation-conv-A" ]
 }
 
+@test "tool: formation_remove takes one member off this conversation's formation and says who removed it and when (#32270)" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 460 formation_remove '{"member_id":6}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 460)" = "false" ]
+    [[ "$(text_of 460)" == *"Member 6 was removed from formation 77 at 2026-10-16 02:14 UTC by a@test.mnemo."* ]] || { text_of 460; return 1; }
+    # The route formation-remove.sh uses, with no body: the server decides who may.
+    grep -qx 'DELETE http://fake.invalid/api/formations/77/members/6 ' "$REQLOG"
+    [ "$(grep -c . "$REQLOG")" -eq 1 ]
+    # Removing somebody else leaves this conversation in its formation.
+    [ -e "$TMPDIR/.mmry-formation-conv-A" ]
+}
+
+@test "tool: formation_remove names a formation this conversation is not in, as an administrator would (#32270)" {
+    mcp "$(call 461 formation_remove '{"member_id":6,"formation_id":88}' '{"sessionId":"conv-Z"}')"
+    [ "$(is_error 461)" = "false" ]
+    grep -qx 'DELETE http://fake.invalid/api/formations/88/members/6 ' "$REQLOG"
+}
+
+@test "tool: formation_remove refuses a missing member, a bad member id and a bad formation id, and sends nothing (#32270)" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 462 formation_remove '{}' '{"sessionId":"conv-A"}')" \
+        "$(call 463 formation_remove '{"member_id":"6; rm -rf /"}' '{"sessionId":"conv-A"}')" \
+        "$(call 464 formation_remove '{"member_id":0}' '{"sessionId":"conv-A"}')" \
+        "$(call 465 formation_remove '{"member_id":6,"formation_id":"x"}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 462)" = "true" ]; [[ "$(text_of 462)" == *"Nothing was done: member_id is required"* ]] || return 1
+    [ "$(is_error 463)" = "true" ]; [[ "$(text_of 463)" == *"Nothing was done: member_id must be a positive whole number"* ]] || return 1
+    [ "$(is_error 464)" = "true" ]; [[ "$(text_of 464)" == *"Nothing was done: member_id must be a positive whole number"* ]] || return 1
+    [ "$(is_error 465)" = "true" ]; [[ "$(text_of 465)" == *"Nothing was done: formation_id must be a positive whole number"* ]] || return 1
+    [ ! -s "$REQLOG" ]
+}
+
+@test "tool: formation_remove with no formation, here or named, is refused by the handler and sends nothing (#32270)" {
+    mcp "$(call 466 formation_remove '{"member_id":6}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 466)" = "true" ]
+    [[ "$(text_of 466)" == *"This session is not in a formation"* ]] || { text_of 466; return 1; }
+    # The remedy names the tool, with formation_id, not the sandboxed script.
+    [[ "$(text_of 466)" == *"the mmry_plugin formation_remove tool"* ]] || { text_of 466; return 1; }
+    [[ "$(text_of 466)" != *"formation-remove.sh"* ]] || { text_of 466; return 1; }
+    [ ! -s "$REQLOG" ]
+}
+
+@test "tool: formation_remove reports a failure from MMRY AI as an error and does not claim the removal (#32270)" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    export FAKE_FAIL_ALL=1
+    mcp "$(call 467 formation_remove '{"member_id":6}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 467)" = "true" ]
+    [[ "$(text_of 467)" == *"Could not remove member 6 from formation 77 (HTTP 500)"* ]] || { text_of 467; return 1; }
+}
+
 @test "identity: each lead tool that names no conversation is refused, never guessed, and sends nothing" {
     export CODEX_SESSION_ID="inherited-from-somewhere"
     printf '77\n' > "$TMPDIR/.mmry-formation-inherited-from-somewhere"
     mcp "$(call 440 formation_start '{"objective":"Ship the v2 checkout"}')" \
         "$(call 441 formation_assign '{"member_id":6,"assignment":"x"}')" \
         "$(call 442 formation_report '{"formation_id":77}')" \
-        "$(call 443 formation_debrief '{"summary":"Shipped the checkout and nothing went wrong."}')"
+        "$(call 443 formation_debrief '{"summary":"Shipped the checkout and nothing went wrong."}')" \
+        "$(call 444 formation_remove '{"member_id":6}')"
     local i
-    for i in 440 441 442 443; do
+    for i in 440 441 442 443 444; do
         [ "$(is_error $i)" = "true" ] || { echo "call $i was not refused"; return 1; }
         [[ "$(text_of $i)" == *"did not say which conversation"* ]] || { echo "call $i: $(text_of $i)"; return 1; }
     done

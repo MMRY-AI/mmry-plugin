@@ -79,6 +79,9 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 
 # The id first, because it is the thing the sender is here to get. Members who have left are listed
 # last and marked, so "left" reads as a fact about the formation rather than as a missing row.
+# #32270: a member somebody else took off is marked REMOVED, with who did it, because "has left"
+# would say the member chose to go. A server too old to send removedByEmail shows "has left", which
+# is still true.
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
     (.members // [])
     | sort_by(.leftDate != null, .id)
@@ -88,7 +91,10 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
       + "  " + (.email // "?")
       + (if .assignment then "  - " + .assignment else "" end)
       + (if .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]" else "" end)
-      + (if .leftDate != null then "   (has left; cannot be addressed)" else "" end)
+      + (if .leftDate == null then ""
+         elif .removedByEmail then "   (removed by " + .removedByEmail + "; cannot be addressed)"
+         elif .removedByUserId then "   (removed; cannot be addressed)"
+         else "   (has left; cannot be addressed)" end)
 ' 2>/dev/null || { echo "$MMRY_RESPONSE"; exit 0; }
 
 # WHETHER WHAT THIS SESSION SENT HAS BEEN READ (#31721). A sender used to have no way to tell "I sent
