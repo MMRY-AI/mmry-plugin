@@ -778,10 +778,13 @@ _broken_bash_dir() {
     [[ "$output" != *'~/.claude/mmry-config.json'* ]] || return 1
     # AND THE REMEDY, ASSERTED AS PRESENT. Absence alone is satisfied by a notice that stopped
     # offering any remedy at all, which is worse for the customer, not better.
-    [[ "$output" == *"bash ${codex}/mmry/hooks-handlers/session-start.sh"* ]] || return 1
+    # #31743: the reload is MMRY's memory_load tool on Codex, not the script, which needs Internet
+    # access approval in the sandbox.
+    [[ "$output" == *"the mmry_plugin memory_load tool"* ]] || return 1
+    [[ "$output" != *"session-start.sh"* ]] || return 1
     [[ "$output" == *"${codex}/mmry-config.json"* ]] || return 1
-    # The script it names is really there.
-    [ -f "$PLUGIN_ROOT/hooks-handlers/session-start.sh" ]
+    # The tool it names is really offered by the server.
+    grep -q '"name": "memory_load"' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"
 }
 
 @test "userpromptsubmit-foundation: an absurd deadline value falls back to the default rather than disabling the guard" {

@@ -1,0 +1,116 @@
+#31743 live run  2026-10-10T21:49:23Z
+API      https://mnemo-integration-d8h6bzh2bxgrc3e4.westus3-01.azurewebsites.net
+health   {"status":"healthy","timestamp":"2026-10-10T21:49:24.2065978Z","revision":"c42350da855c3b3d37bbde1134c9bd6ddce1f43e"}
+plugin   90ac8e4d07e11da93e75d60ae661096a32ce7944
+codex    codex-cli 0.160.0
+os       MINGW64_NT-10.0-26300 x86_64
+
+installed: mmry_plugin ./mcp/mmry-mcp
+subscriber Mcp31743_1791668959 registered; API key issued (in the environment only, not shown)
+formations F1=6597 (lead e6680f78-0273-4791-b7a3-d01ad120d77b) F2=6598 (lead 48d1b2f5-0c94-4f95-9111-062da3aa345d)
+
+[0.6s] initialize ok
+[0.6s] thread 0 = 01a127cb-3664-7ab2-9a2f-81cc5550248d
+[0.6s] startup {"threadId":"01a127cb-3664-7ab2-9a2f-81cc5550248d","name":"mmry_plugin","status":"starting","error":null,"failureReason":null}
+[0.6s] thread 1 = 01a127cb-3677-78c0-bf52-902d673c7555
+[0.6s] startup {"threadId":"01a127cb-3677-78c0-bf52-902d673c7555","name":"mmry_plugin","status":"starting","error":null,"failureReason":null}
+[7.5s] startup {"threadId":"01a127cb-3664-7ab2-9a2f-81cc5550248d","name":"mmry_plugin","status":"ready","error":null,"failureReason":null}
+[8.0s] startup {"threadId":"01a127cb-3677-78c0-bf52-902d673c7555","name":"mmry_plugin","status":"ready","error":null,"failureReason":null}
+[14.4s] list t0: server mmry_plugin runtimeStatus="connected" plugin=mmry@mmry-plugin tools=11
+[14.4s]     memory_link {"title":"Link two memories","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+[14.4s]     formation_say {"title":"Message the coordination group","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}
+[14.4s]     memory_load {"title":"Reload memories","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+[14.4s]     memory_retire {"title":"Retire a memory","readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
+[14.4s]     memory_reinforce {"title":"Reinforce a memory","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+[14.4s]     formation_leave {"title":"Leave the coordination group","readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+[14.4s]     memory_search {"title":"Search memories","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+[14.4s]     formation_progress {"title":"Report progress","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}
+[14.4s]     memory_save {"title":"Save a memory","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}
+[14.4s]     formation_join {"title":"Join a coordination group","readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}
+[14.4s]     formation_roster {"title":"Show the coordination group roster","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
+[25.5s] call t0 memory_save {"content":"DECISION: MARK31743_1791668959_A is the first marked test memory for the Codex MCP live run.","working_dir":"C:\\Users\\ERICBA~1\\AppData\\Local\\Temp\\tmp.I9h2FhVnWK\\proj"} isError=false
+Stored 1 memory under Tactical tier.
+[33.5s] call t0 memory_save {"content":"DECISION: MARK31743_1791668959_B is the second marked test memory for the Codex MCP live run."} isError=false
+Stored 1 memory under Tactical tier.
+[37.1s] call t0 memory_search {"query":"MARK31743_1791668959_A"} isError=false
+Found 1 memories:
+
+id 33378 | Tactical | testing/codex-mcp | First marked test memory for Codex MCP live run
+  DECISION: MARK31743_1791668959_A is the first marked test memory for the Codex MCP live run.
+---
+[37.1s] captured idA=33378
+[44.3s] call t0 memory_search {"query":"MARK31743_1791668959_B"} isError=false
+Found 1 memories:
+
+id 33388 | Tactical | codex-mcp/testing | Second marked test memory for live run
+  DECISION: MARK31743_1791668959_B is the second marked test memory for the Codex MCP live run.
+---
+[44.3s] captured idB=33388
+[50.3s] call t0 memory_reinforce {"id":33378} isError=false
+Memory reinforced.
+[54.9s] call t0 memory_link {"source_id":33378,"target_id":33388,"link_type":"related"} isError=false
+Memories linked.
+[58.9s] call t0 memory_retire {"id":33388} isError=false
+Memory deactivated.
+[64.5s] call t0 memory_search {"query":"MARK31743_1791668959_B"} isError=false
+Found 0 memories:
+[73.6s] call t0 formation_join {"formation_id":6597} isError=false
+Joined formation 6597: 31743 live F1 1791668959. Messages from the other members will now be surfaced automatically.
+Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running.
+When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
+[83.9s] call t1 formation_join {"formation_id":6598} isError=false
+Joined formation 6598: 31743 live F2 1791668959. Messages from the other members will now be surfaced automatically.
+Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running.
+When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
+[92.8s] call t0 formation_roster {} isError=false
+Formation 6597: 31743 live F1 1791668959
+
+  12425  Lead  mcp31743_1791668959@test.mnemo
+  12453  Wingman  mcp31743_1791668959@test.mnemo
+
+Direct a message at one of them with bash C:\Users\ERICBA~1\AppData\Local\Temp\tmp.I9h2FhVnWK\codex/mmry/hooks-handlers/formation-say.sh "..." <id>. Leave the id off
+and the message goes to the whole formation.
+The state in brackets is the last thing that member reported. Report your own with
+bash C:\Users\ERICBA~1\AppData\Local\Temp\tmp.I9h2FhVnWK\codex/mmry/hooks-handlers/formation-progress.sh <Accepted|Done|Blocked|Abandoned>, and read the whole account
+with bash C:\Users\ERICBA~1\AppData\Local\Temp\tmp.I9h2FhVnWK\codex/mmry/hooks-handlers/formation-report.sh.
+[100.8s] call t1 formation_roster {} isError=false
+Formation 6598: 31743 live F2 1791668959
+
+  12426  Lead  mcp31743_1791668959@test.mnemo
+  12462  Wingman  mcp31743_1791668959@test.mnemo
+
+Direct a message at one of them with bash C:\Users\ERICBA~1\AppData\Local\Temp\tmp.I9h2FhVnWK\codex/mmry/hooks-handlers/formation-say.sh "..." <id>. Leave the id off
+and the message goes to the whole formation.
+The state in brackets is the last thing that member reported. Report your own with
+bash C:\Users\ERICBA~1\AppData\Local\Temp\tmp.I9h2FhVnWK\codex/mmry/hooks-handlers/formation-progress.sh <Accepted|Done|Blocked|Abandoned>, and read the whole account
+with bash C:\Users\ERICBA~1\AppData\Local\Temp\tmp.I9h2FhVnWK\codex/mmry/hooks-handlers/formation-report.sh.
+[103.5s] call t0 formation_say {"message":"FROM-T0-1791668959 hello from conversation 0"} isError=false
+Sent to formation 6597. The other members will see it after their next tool call.
+[111.7s] call t1 formation_say {"message":"FROM-T1-1791668959 hello from conversation 1"} isError=false
+Sent to formation 6598. The other members will see it after their next tool call.
+[120.4s] call t0 formation_progress {"state":"Accepted","note":"PROGRESS-T0-1791668959"} isError=false
+Member 12453 in formation 6597 is now recorded as Accepted.
+It is in the close-out record from here on. The lead sees this after its next tool call; no other member was told.
+[140.2s] call t0 memory_load {"working_dir":"C:\\Users\\ERICBA~1\\AppData\\Local\\Temp\\tmp.I9h2FhVnWK\\proj"} isError=false
+Welcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know they can always say remember this to save something new, or ask what MMRY can do here.
+
+PASS  R1 Codex started the plugin's MCP server and listed its tools
+PASS  R1 save x2 reached MMRY AI from Codex
+PASS  R1 search found both marked memories by id
+PASS  R1 reinforce
+PASS  R1 link
+PASS  R1 retire
+PASS  R1 the retired memory is no longer found
+PASS  R2 conversation 0 joined F1 through the tool
+PASS  R2 say
+PASS  R2 progress
+PASS  reload (memory_load)
+PASS  R3 conversation 0's membership is recorded under its own id, in F1
+PASS  R3 conversation 1's membership is recorded under its own id, in F2
+delivery to conversation 0: {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"MMRY AI Formation Transmission (1 new, formation 6597)\n\n  [Lead ?] FOR-F1-1791668959 lead one to formation one\n\nThese are other assistants working the same job right now. Act on anything that\naffects what you are doing, especially a Blocked or a Heads up naming something you\nare about to touch. A report to the lead is always worth sending: tell the lead when\nyou finish, are blocked, are waiting, or stop with work still running. Beyond that,\nreply to the formation only when you have something worth transmitting."}
+delivery to conversation 1: {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"MMRY AI Formation Transmission (1 new, formation 6598)\n\n  [Lead ?] FOR-F2-1791668959 lead two to formation two\n\nThese are other assistants working the same job right now. Act on anything that\naffects what you are doing, especially a Blocked or a Heads up naming something you\nare about to touch. A report to the lead is always worth sending: tell the lead when\nyou finish, are blocked, are waiting, or stop with work still running. Beyond that,\nreply to the formation only when you have something worth transmitting."}
+PASS  R3 conversation 0 received F1's message and not F2's
+PASS  R3 conversation 1 received F2's message and not F1's
+PASS  R2/R3 F1's lead received conversation 0's message and not conversation 1's
+
+fails=0  (work folder /tmp/tmp.I9h2FhVnWK)

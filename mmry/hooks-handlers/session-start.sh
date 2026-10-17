@@ -379,12 +379,17 @@ MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
 # would be read after the model has already decided what to do with the turn (#31385).
 if [[ "$count" == "0" ]]; then
     # #31245: the closing hint differs by host. There is no slash command to type on Codex.
+    # #31743: and so does the way to save. A fresh Codex account is exactly the one a first "remember
+    # this" lands on, and naming the script here sent the model to the sandboxed script, which fails
+    # with HTTP 000, before it found MMRY's own tool, which needs no Internet access approval.
     if [[ "$(mmry_host)" == "codex" ]]; then
         _mmry_onboard_hint="they can always say remember this to save something new, or ask what MMRY can do here"
+        _mmry_onboard_save="Use the mmry_plugin memory_save tool for each one, with working_dir set to the project directory."
     else
         _mmry_onboard_hint="they can always say remember this to save something new, or /mmry:help for a quick reference"
+        _mmry_onboard_save="Use save-memory.sh with --working-dir and --session-id for each one."
     fi
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. Use save-memory.sh with --working-dir and --session-id for each one. When done, let them know %s."}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_hint" "$EMPTY_SYSMSG"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. %s When done, let them know %s."}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_save" "$_mmry_onboard_hint" "$EMPTY_SYSMSG"
 else
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path" "$EMPTY_SYSMSG"
 fi

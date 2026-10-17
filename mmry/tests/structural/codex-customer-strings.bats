@@ -160,6 +160,10 @@ _allowed_reason() {
         "mmry-client.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME:-}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "lib-foundation-switch.sh|cfg=\"\${HOME}/.claude/mmry-config.json\"") printf 'N'; return 0 ;;
+        # (L) #31789: the Codex lead notice recommends Claude Code BY NAME, because a Claude Code
+        #     session leading is the remedy for a Codex lead that cannot hear its members while
+        #     idle. mmry_host_lead_notice returns before this line on any host but Codex.
+        "lib-host.sh|rec=\"Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here.\"") printf 'L'; return 0 ;;
     esac
     return 1
 }
@@ -310,7 +314,8 @@ _compare_hosts() {
     local n_claude n_codex_slash n_codex_runnable
     n_claude="$(_count "$claude_out" '/mmry:')"
     n_codex_slash="$(_count "$codex_out" '/mmry:')"
-    n_codex_runnable="$(_count "$codex_out" "bash ${CODEX_DIR}/mmry/")"
+    # A runnable script, or (#31743) the mmry_plugin tool for an operation a tool covers.
+    n_codex_runnable="$(( $(_count "$codex_out" "bash ${CODEX_DIR}/mmry/") + $(_count "$codex_out" "the mmry_plugin ") ))"
 
     # Nothing to compare if the Claude path names no command; such a message has no defect to have.
     if [[ "$n_claude" -eq 0 ]]; then
@@ -335,6 +340,14 @@ _compare_hosts() {
         echo "  codex:  ${codex_out}" >&2
         return 1
     }
+
+    # #31743: and no script for an operation a tool covers.
+    case "$codex_out" in
+        *formation-join.sh*|*formation-say.sh*|*formation-roster.sh*|*formation-leave.sh*|*save-memory.sh*|*search-memories.sh*|*hooks-handlers/session-start.sh*)
+            echo "$(basename "$script"): Codex names the script of an operation a tool covers:" >&2
+            printf '%s\n' "$codex_out" >&2
+            return 1 ;;
+    esac
 
     # And every script the Codex message names is really there. A remedy pointing at
     # formation-rooster.sh reads perfectly plausibly in a diff and helps nobody.
@@ -454,12 +467,13 @@ _compare_hosts() {
 }
 
 @test "refuse: load-memories is answered, because it now HAS a Codex surface" {
-    # QA round 6 item 2: either give it a surface or list it as a gap. It has one — the same
-    # session-start.sh that commands/load-memories.md tells a Claude Code customer to run.
+    # QA round 6 item 2: either give it a surface or list it as a gap. It has one. Since #31743 it
+    # is MMRY's memory_load tool, which runs the same session-start.sh with no Internet access
+    # approval; the script itself, run by the model, needs one.
     run env MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" MMRY_ALLOW_NO_CREDENTIAL=1 \
         bash -c 'source "'"${HANDLERS}"'/lib-host.sh"; mmry_host_command_ref load-memories'
-    [ "$output" = "bash ${CODEX_DIR}/mmry/hooks-handlers/session-start.sh" ]
-    [ -f "${HANDLERS}/session-start.sh" ]
+    [ "$output" = "the mmry_plugin memory_load tool" ]
+    grep -q '"name": "memory_load"' "${HANDLERS}/mcp-server.sh"
 
     run bash -c 'source "'"${HANDLERS}"'/lib-host.sh"; mmry_host_command_ref load-memories'
     [ "$output" = "/mmry:load-memories" ]
@@ -467,10 +481,11 @@ _compare_hosts() {
 
 @test "surface: load-memories is documented where a Codex customer and their assistant will find it" {
     # Item 2 again, on the customer-facing side: the substitute has to be findable, not merely to
-    # exist. Both Codex surfaces name the script, and the customer page says what it is for.
+    # exist. Both Codex surfaces name the tool (#31743), and the customer page says what it is for.
     local skill="${PLUGIN_ROOT}/skills-codex/memory-system/SKILL.md"
     local page="${PLUGIN_ROOT}/../docs/codex.md"
-    grep -q 'hooks-handlers/session-start.sh' "$skill"
+    grep -q '`memory_load`' "$skill"
+    ! grep -q 'hooks-handlers/session-start.sh' "$skill" || return 1
     grep -qi 'reloading memories mid-session' "$skill"
     grep -qi 'reload' "$page"
 }
