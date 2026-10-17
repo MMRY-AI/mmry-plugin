@@ -41,7 +41,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
-**Run in background** when you don't need the result immediately — memory saves, marking a memory as used, deactivations, and links rarely need to block the conversation. Use `run_in_background: true` on the Bash tool call so the script executes without blocking.
+**Run in background** when you don't need the result immediately: memory saves, marking a memory as used, deactivations, and links rarely need to block the conversation. Use `run_in_background: true` on the Bash tool call so the script executes without blocking.
 
 ### Custom Queries (source the client library)
 
