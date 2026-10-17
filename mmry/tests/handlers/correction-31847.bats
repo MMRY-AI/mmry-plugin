@@ -129,18 +129,26 @@ ONE_HIT='[{"id":42,"memoryTier":"Operational","scope":"global","topic":"Office",
     ! grep -q 'save a follow-up memory with the correction' "$f"
 }
 
-@test "31847 req2: the Codex skill tells the assistant to correct with --supersedes and read the exit" {
+@test "31847 req2: the Codex skill tells the assistant to correct with supersedes and read the result" {
+    # #31743: on Codex the correction is MMRY's memory_save tool with supersedes, and the id comes
+    # from the memory_search tool. The script forms are gone from the Codex skill on purpose: the
+    # script runs in the sandbox and needs Internet access approval, the tool does not.
     local f="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
     grep -q '^## Correcting a memory' "$f"
-    grep -q -- '--supersedes 42' "$f"
-    grep -q '| 3 | Saved, but memory 42 may still be active' "$f"
+    grep -q 'call `memory_save`' "$f"
+    grep -q 'supersedes 42' "$f"
+    grep -q 'Saved, but memory 42 may still be active' "$f"
     grep -q 'Where the id comes from' "$f"
-    grep -q 'mmry/hooks-handlers/search-memories.sh" --ids' "$f"
+    grep -q 'Call `memory_search` for the memory being corrected' "$f"
     grep -q 'visibility and group' "$f"
 }
 
-@test "31847 req2: the Codex correction example runs from the relocatable Codex path" {
+@test "31847 req2: and that rule matches the tool server's own 'may still be active' note" {
+    # The skill tells the assistant what exit 3 looks like through the tool. That wording is the
+    # server's, so the two cannot drift apart unnoticed.
     local f="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
-    awk '/^## Correcting a memory/{on=1} on && /save-memory.sh/{print; exit}' "$f" \
-        | grep -qF '"${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-memory.sh"'
+    grep -qF 'Saved, but the memory it was meant to replace may still be active' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"
+    grep -qF 'Saved, but the memory it was meant to replace may still be active' "$f"
+    awk '/^## Correcting a memory/{on=1; next} on && /^## /{exit} on' "$f" > "$BATS_TEST_TMPDIR/sec"
+    ! grep -q 'save-memory.sh' "$BATS_TEST_TMPDIR/sec"
 }

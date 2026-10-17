@@ -1,0 +1,18 @@
+31789 TC2, model-driven, Windows 11 Codex CLI, 2026-10-17 (UTC ~02:42)
+Plugin: MMRY-AI/mmry-plugin branch 31789/codex-formation-lead at 3218b50 (plugin 2.11.0), git marketplace ref.
+Installed Codex skill sha256 fcad61d67ea743b4480800a491fb28fdeb3f8a21616fc130320ae628970bbf0d; mcp-server exposes formation_start/assign/report/debrief.
+Launch: PowerShell, $env:MMRY_NO_SELF_UPDATE='1'; codex   (codex-cli 0.160.0). Default permissions: approval_policy on-request, sandbox workspace-write.
+Account: throwaway Integration subscriber (win31743_*@test.mnemo).
+
+LEAD (session 01a147bd-45bc):
+  "Start a formation for the checkout tests." -> local Get-Content of SKILL.md, then mcp__mmry_plugin__formation_start.
+    Reply: "Started formation 10111 ... Members' reports reach me on my next tool call or your next message, so check in here for updates. MMRY recommends Claude Code as lead because it receives messages while idle."
+  "Show me the roster." -> formation_roster. Lead 19603, Wingman 19604.
+  "Assign member M to write the checkout tests" -> first action mcp__mmry_plugin__formation_assign (member 19604).
+    Reply verbatim: "Assigned M (19604) to write the checkout tests and run the appropriate checks. Their report reaches me on my next action or your next message, so check in once they've had time to work."
+MEMBER (session 01a147bd-475f):
+  "Join formation 10111" -> Get-Content of SKILL.md, formation_join, formation_say to the lead.
+  "Anything for me?" -> the assignment arrived marked "[MMRY] DIRECTED TO YOU: ASSIGNMENT"; member acknowledged via formation_roster/report/say and asked for a repository path (the assignment is illustrative). No files changed.
+No MMRY .sh script run in either session. Operator: no Internet or network access prompt in either window (only the Codex version-update offer, skipped).
+
+Verdict: PASS (Windows CLI).

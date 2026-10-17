@@ -137,5 +137,11 @@ if [[ -n "$applied_assignment" ]]; then
     printf ', working on: %s' "$applied_assignment"
 fi
 printf '.\n'
+# #31789: a Codex lead hears the member's report only on its next action. Nothing on Claude Code.
+# QA round 2: it comes straight after the confirmation, ahead of the line about the member, so the
+# line the customer must be told is not the trailing one a reply drops.
+if declare -F mmry_host_lead_notice >/dev/null 2>&1; then
+    mmry_host_lead_notice assign || true
+fi
 printf 'They will see it after their next tool call, marked as directed at them. No other member was told.\n'
 exit 0
