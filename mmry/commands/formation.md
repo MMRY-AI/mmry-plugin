@@ -1,6 +1,6 @@
-Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, or leave: a group of assistants coordinating on one job at the same time.
+Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status`
 
 ## What This Does
 
@@ -472,6 +472,39 @@ This releases the session on the service as well as stopping delivery here (#311
 Never tell the user the session left when the script did not say it did. Somebody who believes they left, and then cannot join anything, has nothing on screen to explain it.
 
 A session that has lost track of which formation it was in can still run this: the service resolves the membership from the session itself, so no formation id is needed.
+
+### remove
+
+The lead takes another member off the formation, for example `/mmry:formation remove 156` when that member's session has dropped.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-remove.sh" <memberId> [formationId]
+```
+
+A member can leave only from its own session. When a session is closed, crashes or loses its
+connection it can never do that, and until #32270 it stayed on the roster for good: it could still
+be addressed and a message sent to it was accepted and never read. This is how the lead clears it.
+Marking its work Abandoned with `progress` records what happened to the work; `remove` takes the
+member off.
+
+**Get the member id from `/mmry:formation roster`, and do not guess one.** It is the same id
+`say --to` and `assign` use.
+
+**Only the flight lead, the person who started the formation, or an account administrator may do
+this.** Anybody else is refused by the server. An administrator who is not in the formation names it:
+`/mmry:formation remove 156 45`.
+
+**It removes that one member and nobody else.** If the same person has another window in the
+formation, that window stays on. The removed member receives nothing further, a message directed at
+it is refused, and its claims stop counting. The roster shows it as removed, and the report records
+who removed it and when. Removal is not a ban: that person can join again from a new session.
+
+**To take this session out, use `leave`, not `remove`.** If the member id turns out to be this
+session's own place, the script says so and stops listening here, as `leave` would.
+
+**Report what the script reports.** On success it prints when and by whom the member was removed,
+read back from the server. On a refusal it prints the server's own reason: a member who has already
+left, one that is not in this formation, and a formation already closed out each read differently.
 
 ### status
 

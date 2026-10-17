@@ -17,8 +17,8 @@
 load '../helpers/test-helper'
 
 # The scripts of the operations the tool server covers.
-# #31789 added the lead's four: start, assign, report and debrief.
-TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|roster|leave|start|assign|report|debrief))\.sh'
+# #31789 added the lead's four: start, assign, report and debrief. #32270 added remove.
+TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|roster|leave|start|assign|report|debrief|remove))\.sh'
 # formation-progress.sh is tool-covered only for this conversation's own report; the lead reporting
 # for ANOTHER member (a member id first) has no tool and keeps the script.
 PROGRESS_OWN_RE='formation-progress\.sh( <Accepted|$|[^ 0-9<]| [^0-9<])'
@@ -173,13 +173,19 @@ _ref() {
         for c in save search load-memories; do mmry_host_command_ref "$c"; echo; done
         for s in start assign report debrief; do mmry_host_formation_ref "$s"; echo; done
         mmry_host_formation_ref start "\"what the formation is for\""; echo
-        mmry_host_formation_ref report 42; echo')"
-    [ "$(printf '%s\n' "$out" | grep -c '^the mmry_plugin ')" -eq 17 ] || { echo "$out"; return 1; }
+        mmry_host_formation_ref report 42; echo
+        mmry_host_formation_ref remove; echo
+        mmry_host_formation_ref remove "<memberId>"; echo
+        mmry_host_formation_ref remove "<memberId> <formationId>"; echo')"
+    # 20: #32270 added the three forms formation-remove.sh prints.
+    [ "$(printf '%s\n' "$out" | grep -c '^the mmry_plugin ')" -eq 20 ] || { echo "$out"; return 1; }
     _assert_no_tool_covered_script "$out"
     _assert_names_real_tools "$out"
     [[ "$out" == *"the mmry_plugin formation_join tool with formation_id 12"* ]] || { echo "$out"; return 1; }
     [[ "$out" == *'the mmry_plugin formation_start tool with objective "what the formation is for"'* ]] || { echo "$out"; return 1; }
     [[ "$out" == *"the mmry_plugin formation_report tool with formation_id 42"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"the mmry_plugin formation_remove tool with member_id (from the roster)"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"the mmry_plugin formation_remove tool with member_id (from the roster) and formation_id"* ]] || { echo "$out"; return 1; }
 }
 
 @test "references: on Codex the operations with no tool keep their runnable script" {
@@ -197,11 +203,12 @@ _ref() {
     out="$(_ref "" '
         for a in "join" "join 12" "leave" "roster" "say" "progress"; do set -- $a; mmry_host_formation_ref "$@"; echo; done
         for c in save search load-memories; do mmry_host_command_ref "$c"; echo; done
-        for s in start assign report debrief; do mmry_host_formation_ref "$s"; echo; done')"
+        for s in start assign report debrief remove; do mmry_host_formation_ref "$s"; echo; done')"
     expected="$(printf '%s\n' '/mmry:formation join' '/mmry:formation join 12' '/mmry:formation leave' \
         '/mmry:formation roster' '/mmry:formation say' '/mmry:formation progress' \
         '/mmry:save' '/mmry:search' '/mmry:load-memories' \
-        '/mmry:formation start' '/mmry:formation assign' '/mmry:formation report' '/mmry:formation debrief')"
+        '/mmry:formation start' '/mmry:formation assign' '/mmry:formation report' '/mmry:formation debrief' \
+        '/mmry:formation remove')"
     [ "$out" = "$expected" ] || { echo "--- expected"; echo "$expected"; echo "--- actual"; echo "$out"; return 1; }
 }
 
@@ -286,5 +293,5 @@ _codex_handler() {
     [ -z "$missing" ] || { echo "the access hint does not name:${missing}"; echo "$out"; return 1; }
     local flat; flat="$(printf '%s' "$out" | tr '\n' ' ')"
     [[ "$flat" == *"formation start, join, say, assign,"* ]] || { echo "$out"; return 1; }
-    [[ "$flat" == *"report, debrief or leave"* ]] || { echo "$out"; return 1; }
+    [[ "$flat" == *"report, debrief, remove a member or leave"* ]] || { echo "$out"; return 1; }
 }

@@ -641,6 +641,8 @@ mmry_host_tool_ref() {
         formation_join|formation_say|formation_progress|formation_roster|formation_leave) ;;
         # #31789: the lead's operations.
         formation_start|formation_assign|formation_report|formation_debrief) ;;
+        # #32270: removing a member whose session has dropped.
+        formation_remove) ;;
         *) return 1 ;;
     esac
     printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
@@ -694,6 +696,17 @@ _mmry_host_formation_tool() {
                 mmry_host_tool_ref formation_debrief
             else
                 mmry_host_tool_ref formation_debrief "with summary $*"
+            fi
+            ;;
+        # #32270. formation-remove.sh passes its usage as one string, "<memberId> <formationId>"
+        # when it means both, so the words are counted rather than the arguments.
+        remove)
+            if (( $# == 0 )); then
+                mmry_host_tool_ref formation_remove
+            elif [[ "$*" == *" "* ]]; then
+                mmry_host_tool_ref formation_remove "with member_id (from the roster) and formation_id"
+            else
+                mmry_host_tool_ref formation_remove "with member_id (from the roster)"
             fi
             ;;
         say)
@@ -1026,11 +1039,11 @@ mmry_host_codex_access_hint() {
     # Not for setup ($1 given), which has no tool.
     if [[ -z "${1:-}" ]]; then
         echo "network access. If this was a save, search, reinforce, link, retire or reload, or a"
-        echo "formation start, join, say, assign, progress report, roster, report, debrief or leave,"
-        echo "do not ask for access: call the matching mmry_plugin tool instead (memory_save,"
+        echo "formation start, join, say, assign, progress report, roster, report, debrief, remove a member"
+        echo "or leave, do not ask for access: call the matching mmry_plugin tool instead (memory_save,"
         echo "memory_search, memory_reinforce, memory_link, memory_retire, memory_load,"
         echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
-        echo "formation_roster, formation_report, formation_debrief, formation_leave), which needs"
+        echo "formation_roster, formation_report, formation_debrief, formation_remove, formation_leave), which needs"
         echo "none. For anything else, call request_permissions with"
     else
         echo "network access. Assistant: call request_permissions with"

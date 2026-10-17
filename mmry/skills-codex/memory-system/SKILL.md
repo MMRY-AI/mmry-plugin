@@ -1,6 +1,6 @@
 ---
 name: memory-system
-description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out and leaving a formation, are calls to the mmry_plugin tools, never scripts.
+description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out, removing a member from and leaving a formation, are calls to the mmry_plugin tools, never scripts.
 ---
 
 # MMRY AI memory system (Codex)
@@ -32,15 +32,17 @@ approves Internet access for the conversation, which is the prompt these tools e
 | As the lead, give one member work or a role | `formation_assign` | `member_id`; `assignment`, `role`, or both |
 | Read the close-out record | `formation_report` | optional `formation_id` |
 | As the lead, close the formation out | `formation_debrief` | `summary` |
+| As the lead or an administrator, remove a member whose session has dropped | `formation_remove` | `member_id`; optional `formation_id` |
 | Leave the formation | `formation_leave` | nothing |
 
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,
 and its messages arrive here on their own.
 
-`memory_retire` and `formation_debrief` are the two tools Codex asks about: retiring takes a memory
-out of recall, and a debrief ends the formation for every member. Tell the customer they can choose
-to always allow each one, and they will not be asked again.
+`memory_retire`, `formation_debrief` and `formation_remove` are the three tools Codex asks about:
+retiring takes a memory out of recall, a debrief ends the formation for every member, and removing a
+member takes that member out of the formation. Tell the customer they can choose to always allow
+each one, and they will not be asked again.
 
 **If the mmry_plugin tools are not offered at all,** MMRY's tool server did not start. Tell the
 customer, and ask them to restart Codex; if the tools are still missing, report a problem (see the
@@ -218,6 +220,13 @@ lead, give a member work with `formation_assign` (`member_id` from the roster, a
 member, the work it was given and the state it ended in. Close the formation out with
 `formation_debrief` and a `summary` of what was accomplished, decided and learned; the summary and
 the record become lasting memories, and the formation stops carrying messages.
+
+A member can leave only from its own session. When that session has dropped, the lead, the person
+who started the formation, or an account administrator can take it off with `formation_remove` and
+its `member_id` from the roster; add `formation_id` to act on a formation this conversation is not
+in. MMRY AI decides who may, and says so when it refuses. The member receives nothing further and a
+message directed at it is refused, so remove a member only when its session has really gone. The
+same person's other windows in the formation stay on.
 
 ### Leading a formation on Codex
 
@@ -400,6 +409,22 @@ the tool is not offered, say so plainly and give them the two alternatives: run 
 themselves in a terminal, or allow it permanently in their Codex settings (see docs/codex.md,
 "What MMRY's commands need from Codex").
 
+### In the Codex desktop app
+
+If a customer asks whether MMRY works in the Codex desktop app, this is what has been tested:
+
+- On a Mac and on Windows, MMRY's hooks run in the desktop app: memories load when a conversation
+  starts, and saving, searching and retiring memories and formation messages work. On a Mac,
+  Foundation memories are also re-stated on each later turn.
+- On Windows, MMRY's scripts do not start inside the desktop app's sandbox, so in the desktop app on
+  Windows MMRY works through its own tools. For anything that still runs as a script, such as
+  changing who can see a memory, tell the customer to use the Codex CLI.
+- Trust MMRY's hooks in the Codex CLI review (choose "Trust all and continue" when the Codex CLI
+  starts). In our testing, hooks trusted in the Codex CLI review also ran in the desktop app.
+- The desktop app's hook settings page for MMRY AI can stay on "Loading hooks..." or show "No hooks
+  found". That does not stop MMRY working. If memories loaded at the start of this conversation,
+  MMRY's hooks are running.
+
 ## Removing MMRY from Codex
 
 If the customer asks how to uninstall, do NOT point them at uninstall.sh or uninstall.bat. Both of
@@ -434,8 +459,9 @@ plan-accepted prompt. Never imply any of them works here.
 
 The formation operations tested on Codex are: start, join, say (to the formation or to one member),
 assign, progress, roster, report, debrief and leave, all as tools. Do not tell a customer any of
-them is unavailable. Listing the formations and claiming an area have not been tested from Codex
-yet: never tell a customer they are proven here, and if you run one of their scripts, say it has
-not been tested on Codex. Do tell a customer who leads from Codex that a lead here hears its
-members only on its next action, and that we recommend a Claude Code session lead (see "Leading a
-formation on Codex").
+them is unavailable. Removing a member (`formation_remove`) is a tool here too, but it has not been
+tested live from Codex yet: never tell a customer it is proven here. Listing the formations and
+claiming an area have not been tested from Codex yet: never tell a customer they are proven here,
+and if you run one of their scripts, say it has not been tested on Codex. Do tell a customer who
+leads from Codex that a lead here hears its members only on its next action, and that we recommend a
+Claude Code session lead (see "Leading a formation on Codex").

@@ -25,6 +25,12 @@
 # destructive, as memory_retire does, and Codex asks the customer once and offers to always allow
 # it. Reading the close-out record changes nothing, so formation_report is read-only.
 #
+# REMOVING A MEMBER (#32270). formation_remove takes one member whose session has dropped off the
+# formation, for the lead, the person who started it or an account administrator; the server
+# decides which the caller is. It runs formation-remove.sh, the same DELETE
+# /api/formations/{id}/members/{memberId} the Claude Code command uses. It says destructive, as a
+# debrief does: the member it names stops receiving anything and cannot put itself back.
+#
 # WHICH CONVERSATION A CALL BELONGS TO. One server may serve several conversations, and the delivery
 # hook keeps formation membership per conversation. Codex puts the conversation's identity on every
 # tools/call it sends: params._meta.sessionId, the same value its hooks receive as session_id and
@@ -289,6 +295,20 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Close out the coordination group", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false}
   },
   {
+    "name": "formation_remove",
+    "title": "Remove a member from the coordination group",
+    "description": "As the lead or an account administrator, take one member whose session has dropped off this conversation'"'"'s formation, or off the formation given by formation_id. It receives nothing further, and a message directed at it is refused. Member ids come from formation_roster. MMRY AI decides who may, and says so if it refuses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "member_id": {"type": "integer", "description": "Roster entry id of the member to remove."},
+        "formation_id": {"type": "integer", "description": "Optional. Leave unset for this conversation'"'"'s own formation."}
+      },
+      "required": ["member_id"]
+    },
+    "annotations": {"title": "Remove a member from the coordination group", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
     "name": "formation_leave",
     "title": "Leave the coordination group",
     "description": "Release this conversation'"'"'s place in its formation, on the service and here, so it can join another.",
@@ -297,7 +317,7 @@ MMRY_MCP_TOOLS='[
   }
 ]'
 
-MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out (debrief) and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
+MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out (debrief), removing a member from and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
 
 # ---------------------------------------------------------------------------------------------
 # ONE TOOL CALL.
@@ -348,6 +368,8 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
         else ["formation-assign.sh", (int("member_id") | need("member_id")), $work] + (if $role != "" then [$role] else [] end) end
    elif $n == "formation_report" then ["formation-report.sh"] + (if int("formation_id") == null then [] else [int("formation_id")] end)
    elif $n == "formation_debrief" then ["formation-debrief.sh", (str("summary") | need("summary"))]
+   elif $n == "formation_remove" then
+      ["formation-remove.sh", (int("member_id") | need("member_id"))] + (if int("formation_id") == null then [] else [int("formation_id")] end)
    elif $n == "formation_roster" then ["formation-roster.sh"]
    elif $n == "formation_leave" then ["formation-leave.sh"]
    else error("unknown tool: \($n)") end) as $argv

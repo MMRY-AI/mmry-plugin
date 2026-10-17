@@ -4,8 +4,12 @@ Persistent memory system that gives your assistant long-term recall across sessi
 
 Using **OpenAI Codex**? Start at **[docs/codex.md](docs/codex.md)** - installation, setup, the
 supported surface, and uninstall all differ from the Claude Code instructions below. MMRY has been
-tested in the Codex command-line tool. Trusting MMRY's hooks in the Codex desktop app could not be
-confirmed in this release.
+tested in the Codex command-line tool, and in the Codex desktop app on a Mac and on Windows, where
+MMRY's hooks run: memories load, and saving, searching and retiring memories and formation messages
+work. On a Mac, Foundation memories are also re-stated on each later turn. On Windows the desktop
+app works through MMRY's own tools. Trust MMRY's hooks in the Codex CLI review; in our testing, hooks
+trusted in the Codex CLI review also ran in the desktop app. The desktop app's hook settings page can stay on "Loading hooks..."; that does not
+stop MMRY working.
 
 | What happens | Claude Code | OpenAI Codex |
 |---|---|---|
