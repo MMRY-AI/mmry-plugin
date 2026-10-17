@@ -85,11 +85,13 @@ missing_claim_parts() {
 }
 
 customer_files() {
+    # docs/evidence/ holds historical test-procedure records, not customer surfaces, so it is pruned.
     find "$PLUGIN_ROOT/hooks-handlers" "$PLUGIN_ROOT/setup" \
          "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/skills-codex" \
          "$PLUGIN_ROOT/commands" "$PLUGIN_ROOT/commands-codex" \
          "$REPO_ROOT/docs" \
-         -type f \( -name '*.sh' -o -name '*.cmd' -o -name '*.bat' -o -name '*.ps1' -o -name '*.md' \) \
+         -path "$REPO_ROOT/docs/evidence" -prune -o \
+         -type f \( -name '*.sh' -o -name '*.cmd' -o -name '*.bat' -o -name '*.ps1' -o -name '*.md' \) -print \
          2>/dev/null
     echo "$PLUGIN_ROOT/README.md"
     echo "$REPO_ROOT/README.md"
