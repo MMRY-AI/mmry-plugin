@@ -316,6 +316,7 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" "src/B
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" --list
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-report.sh"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-debrief.sh" "what was accomplished, what was decided, what went wrong"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-remove.sh" <memberId>
 ```
 
 Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
