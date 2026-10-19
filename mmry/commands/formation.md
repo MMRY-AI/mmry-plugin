@@ -355,9 +355,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" 12 --name "Check
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" --name "Checkout tests"
 ```
 
-The first renames member 12; only the lead, the person who started the formation or an
-administrator may rename somebody else. The second, with no member id, renames **this session**,
-which any member may do. A rename tells nobody and changes nothing else; the new name appears beside
+The first renames member 12; only the lead may rename somebody else, and only from the lead's own
+session (another window of the same account is a different member and cannot). The second, with no
+member id, renames **this session**, which any member may do. A rename tells nobody and changes nothing else; the new name appears beside
 the member id from then on. The server refuses a name with line breaks or invisible characters, or
 over 100 characters.
 

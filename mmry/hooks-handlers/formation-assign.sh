@@ -23,9 +23,11 @@
 #        formation-assign.sh <memberId> --name "<name>"    # rename a member (#31410)
 #        formation-assign.sh --name "<name>"               # rename THIS session's own member
 #
-# RENAMING (#31410). The lead, the person who started the formation and an administrator may rename
-# anybody; any member may rename ITSELF. The server decides which from the roster and this session,
-# so this script sends the session along with the name and states no authority of its own.
+# RENAMING (#31410). Only the lead, from the lead's own session, may rename somebody else; any
+# member may rename ITSELF. Being the person who started the formation or an administrator does not
+# grant a rename of anybody else (DD-143, changed after QA round 1). The server decides from the
+# roster and this session, so this script sends the session along with the name and states no
+# authority of its own.
 #
 # An OMITTED field is left alone rather than cleared. There is deliberately no way to blank an
 # assignment back to empty: the same non-clobbering rule the formation update has always had.
