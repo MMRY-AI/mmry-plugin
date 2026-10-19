@@ -208,6 +208,12 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    line saying which member this session is and the name the others see. If it says the session
    has no name, say so; the others then see it by role and member id until it is given one.
 
+   If the line says "You are back as member N", this session left this formation earlier and the
+   service has given it the same seat back (#32385): the same member id the others know it by, with
+   its name, role, assignment and progress as they were. Say so. The first messages to arrive may be
+   marked SENT WHILE YOU WERE AWAY; they were said while this session was out, so check whether
+   what they asked for has already been done before acting on them.
+
    A refusal is usually one of two things, and both are worth saying plainly:
    - You share no access group with whoever created the formation. An administrator adds you.
      This does NOT apply to your own formations: since #31122 a person needs no access group with
@@ -517,6 +523,8 @@ Never tell the user the session left when the script did not say it did. Somebod
 
 A session that has lost track of which formation it was in can still run this: the service resolves the membership from the session itself, so no formation id is needed.
 
+Leaving is not forgetting (#32385). If this same session joins the same formation again, it gets its old seat back on the service (same member id, name, role, assignment and progress), and the script keeps where delivery had got to, so the rejoin shows what was said in between, marked as sent while it was away, and nothing it had already seen. A seat the lead or an administrator removed is not given back; a rejoin after a removal is a new member.
+
 ### remove
 
 The lead takes another member off the formation, for example `/mmry:formation remove 156` when that member's session has dropped.
@@ -541,7 +549,9 @@ this.** Anybody else is refused by the server. An administrator who is not in th
 **It removes that one member and nobody else.** If the same person has another window in the
 formation, that window stays on. The removed member receives nothing further, a message directed at
 it is refused, and its claims stop counting. The roster shows it as removed, and the report records
-who removed it and when. Removal is not a ban: that person can join again from a new session.
+who removed it and when. Removal is not a ban: that person can join again, from the same session or
+a new one, but as a new member; a removed seat is never given back (#32385), unlike one the member
+left by itself.
 
 **To take this session out, use `leave`, not `remove`.** If the member id turns out to be this
 session's own place, the script says so and stops listening here, as `leave` would.

@@ -695,16 +695,25 @@ _poll_once() {
     # The fifth field (#31721) is the ids of the DIRECTED lines in this batch, comma-separated. Once
     # the batch has been printed they are owed to the service as read, and the next poll reports
     # them; see _mark_shown.
-    local count="" directed_count="" system_count="" newest="" directed_ids="" lines=""
+    # #32385: A LINE SAID WHILE THIS SESSION WAS OUT OF THE FORMATION IS MARKED. A session that left
+    # and joined again gets its seat and its delivery position back, so the first batch after a
+    # return holds what was said in between. The service marks each such message (sentWhileAway),
+    # and the marker here tells the model it is catching up on that line rather than being spoken
+    # to now: what it asked for may already be done. An older service sends no such field and
+    # nothing is marked, exactly as before. The sixth field is the count of marked lines, for the
+    # guidance below, counted rather than inferred from the rendered text.
+    local count="" directed_count="" system_count="" away_count="" newest="" directed_ids="" lines=""
     {
         IFS= read -r -d '' count || true
         IFS= read -r -d '' directed_count || true
         IFS= read -r -d '' system_count || true
+        IFS= read -r -d '' away_count || true
         IFS= read -r -d '' newest || true
         IFS= read -r -d '' directed_ids || true
         IFS= read -r -d '' lines || true
     } < <("$MMRY_JQ" -j "${MMRY_JQ_NAME_DEFS:-}"'
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
+        def away: (.sentWhileAway // false) == true;
         def sender:
             if (.senderMemberID // null) != null then
                 (if ((.senderName // "") | mmry_name_clean) != ""
@@ -715,6 +724,7 @@ _poll_once() {
             [ (length | tostring),
               ([.[] | select((.recipientMemberID // null) != null)] | length | tostring),
               ([.[] | select(system)] | length | tostring),
+              ([.[] | select(away)] | length | tostring),
               (([.[].sentDate // empty] | max) // "" | tostring),
               ([.[] | select((.recipientMemberID // null) != null) | (.transmissionID // empty)
                     | select(type == "number") | tostring] | join(",")),
@@ -722,6 +732,7 @@ _poll_once() {
                         then "  [MMRY] "
                         else "  [" + sender + "] "
                         end)
+                       + (if away then "SENT WHILE YOU WERE AWAY: " else "" end)
                        + (if (.recipientMemberID // null) != null then "DIRECTED TO YOU: " else "" end)
                        + ((.content // .topic // "") | tostring)
                ] | join("\n"))
@@ -747,6 +758,9 @@ _poll_once() {
     # quoting the marker.
     [[ "$system_count" =~ ^[0-9]+$ ]] || system_count=0
 
+    # Whether any line was said while this session was out of the formation (#32385).
+    [[ "$away_count" =~ ^[0-9]+$ ]] || away_count=0
+
     # Past the deadline, say nothing and mark nothing (#31746). The response arrived, but writing it
     # out now risks Claude Code killing the check after it has been written and before it is read,
     # and then the person's copy is thrown away. Leaving the batch pending costs one check's delay
@@ -767,6 +781,11 @@ _poll_once() {
         FORMATION_BLOCK+="${nl}A line marked DIRECTED TO YOU was addressed to this session specifically and was${nl}"
         FORMATION_BLOCK+="sent to nobody else in the formation. Treat it as an instruction meant for you and${nl}"
         FORMATION_BLOCK+="act on it. The unmarked lines went to everybody and are for your awareness.${nl}"
+    fi
+    if [[ "$away_count" -gt 0 ]]; then
+        FORMATION_BLOCK+="${nl}A line marked SENT WHILE YOU WERE AWAY was said while this session was out of the formation${nl}"
+        FORMATION_BLOCK+="and is being shown now that it is back. You are catching up on it, not being spoken to${nl}"
+        FORMATION_BLOCK+="now: what it asked for may already be done, so check before acting on it.${nl}"
     fi
     FORMATION_BLOCK+="${nl}These are other assistants working the same job right now. Act on anything that${nl}"
     FORMATION_BLOCK+="affects what you are doing, especially a Blocked or a Heads up naming something you${nl}"

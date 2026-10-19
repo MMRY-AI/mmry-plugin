@@ -378,6 +378,51 @@ mmry_formation_sweep() {
     return 0
 }
 
+# ---------------------------------------------------------------------------------------------
+# A POSITION KEPT ACROSS LEAVE AND REJOIN (#32385).
+#
+# The service gives a session that leaves a formation and joins it again its own roster entry
+# back (DD-146 in the API repository). The delivery position, though, is this file's line 2, and
+# leaving removes the file, so a rejoin used to poll from the start and show the formation's whole
+# history again. So `keep`, run by leave BEFORE the record is cleared, copies the formation id and
+# the last-seen position to a second file, and `resume`, run by join AFTER the record is written,
+# puts the position back when the join is of the SAME formation. The second file is removed by the
+# first join after it whatever formation that is: a position belongs to one formation and is of no
+# use to another, and one that is never used again is one small file named by this session.
+#
+# The second file is NOT named .mmry-formation-*. That prefix is a membership record to the hooks'
+# gates (hooks.json, codex-hooks.json, codex-hook.cmd) and to the sweep above, and a session that
+# has left is not a member.
+# ---------------------------------------------------------------------------------------------
+mmry_formation_away_path() {
+    mmry_formation_state_path "${1:-}"
+    MMRY_FS_AWAY_PATH="${MMRY_TMPDIR}/.mmry-away-${MMRY_FS_SAFE}"
+}
+
+# Keep this session's position for the formation it is leaving. Nothing is kept when there is no
+# record or no position: a session that was shown nothing has nothing to resume from.
+mmry_formation_state_keep() {
+    mmry_formation_state_read "${1:-}" || return 0
+    [[ -n "$MMRY_FS_LAST_SEEN" ]] || return 0
+    mmry_formation_away_path "${1:-}"
+    { printf '%s\n' "$MMRY_FS_FORMATION"; printf '%s\n' "$MMRY_FS_LAST_SEEN"; } > "$MMRY_FS_AWAY_PATH" 2>/dev/null || true
+    return 0
+}
+
+# Restore the kept position if it is for formation $1; drop the kept file either way.
+mmry_formation_state_resume() {
+    local fid="${1:-}" kept_fid="" kept_seen=""
+    mmry_formation_away_path "${2:-}"
+    [[ -f "$MMRY_FS_AWAY_PATH" ]] || return 0
+    { IFS= read -r kept_fid || true; IFS= read -r kept_seen || true; } < "$MMRY_FS_AWAY_PATH" 2>/dev/null || true
+    rm -f "$MMRY_FS_AWAY_PATH" 2>/dev/null || true
+    kept_fid="${kept_fid%$'\r'}"
+    kept_seen="${kept_seen%$'\r'}"
+    [[ -n "$fid" && "$kept_fid" == "$fid" && -n "$kept_seen" ]] || return 0
+    mmry_formation_state_seen "$kept_seen" "${2:-}" || true
+    return 0
+}
+
 # Sourced as a library: the functions above are all the caller wants. Run as a command: carry on.
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     return 0
@@ -420,8 +465,16 @@ case "$cmd" in
         mmry_formation_sweep "${2:-}" || true
         exit 0
         ;;
+    keep)
+        mmry_formation_state_keep "${2:-}" || true
+        exit 0
+        ;;
+    resume)
+        mmry_formation_state_resume "${2:-}" "${3:-}" || true
+        exit 0
+        ;;
     *)
-        echo "usage: formation-state.sh {set|get|seen|clear|sweep} ..." >&2
+        echo "usage: formation-state.sh {set|get|seen|clear|sweep|keep|resume} ..." >&2
         exit 1
         ;;
 esac
