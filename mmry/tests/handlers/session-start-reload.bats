@@ -60,7 +60,7 @@ _registered_session_id() {
     _reload
     [ "$status" -eq 0 ]
     [[ "$output" == *"WARNING FROM MMRY AI"* ]] || { echo "no warning: ${output}"; return 1; }
-    [[ "$output" == *"could not be read from stdin"* ]]
+    [[ "$output" == *"could not be read from stdin"* ]] || return 1
     [[ "$output" == *"loaded"* ]]
 }
 
