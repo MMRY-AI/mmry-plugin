@@ -116,7 +116,7 @@ If that prints an error rather than a version, install Git for Windows from
 
 **Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
 search, link, retire and reload memories, and start, join, message, assign work in,
-report progress in, see the roster of, read the close-out record of, close out, remove a member from
+report progress in, see the roster and the status of, read the close-out record of, close out, remove a member from
 and leave a coordination group. Codex starts them itself, outside the sandbox that keeps your
 assistant's own commands off the internet, so they reach mmryai.com without asking you for Internet
 access, in every conversation.
