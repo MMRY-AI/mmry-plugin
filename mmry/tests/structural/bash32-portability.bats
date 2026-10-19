@@ -213,7 +213,7 @@ _INERT_PINNED=(
     "integration/session-registration.bats 1"
     "structural/cross-platform.bats 3"
     "structural/file-integrity.bats 2"
-    "structural/formation-assign.bats 24"
+    "structural/formation-assign.bats 23"
     "structural/formation-claim.bats 28"
     "structural/formation-delivery.bats 1"
     "structural/formation-directed.bats 23"

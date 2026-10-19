@@ -424,9 +424,10 @@ _codex_tree() {
         case "$op" in state|check) continue ;; esac
         # #31743: an operation MMRY's tool server covers is documented as the TOOL, and its
         # script must not be there to be reached for first. The rest are documented as scripts.
-        # #32270 added remove (formation_remove) to the tool server.
+        # #32270 added remove (formation_remove) to the tool server, and #31410 status
+        # (formation_status).
         case "$op" in
-            join|say|progress|roster|leave|start|assign|report|debrief|remove)
+            join|say|progress|roster|leave|start|assign|report|debrief|remove|status)
                 grep -q "\`formation_${op}\`" "$skill" || missing="${missing} ${op}(tool)"
                 ! grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}(script-named)" ;;
             *)

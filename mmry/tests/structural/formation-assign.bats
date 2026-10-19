@@ -338,8 +338,8 @@ _ok_body() {
     [ "$status" -eq 2 ]
     # #31410: a member is labelled by role (and, from a service that sends them, member id and
     # name), and NEVER by a session string, even one an older service still put in the body.
-    [[ "$output" == *"[Wingman] the build is broken"* ]]
-    [[ "$output" != *"other-session"* ]]
+    [[ "$output" == *"[Wingman] the build is broken"* ]] || return 1
+    [[ "$output" != *"other-session"* ]] || return 1
     [[ "$output" != *"[MMRY]"* ]]
     # And the system guidance is not printed when there is nothing from the system, so it does not
     # become wallpaper the model skims past.

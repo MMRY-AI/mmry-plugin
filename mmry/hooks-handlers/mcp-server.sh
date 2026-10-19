@@ -202,7 +202,7 @@ MMRY_MCP_TOOLS='[
       "type": "object",
       "properties": {
         "formation_id": {"type": "integer"},
-        "name": {"type": "string", "description": "Optional. The name the other members see beside this conversation's member id. Leave unset to use this thread's own name."},
+        "name": {"type": "string", "description": "Optional. The name the other members see beside the member id of this conversation. Leave unset to use the name of this Codex thread."},
         "working_dir": {"type": "string", "description": "Absolute path of the project directory."}
       },
       "required": ["formation_id"]
@@ -253,7 +253,7 @@ MMRY_MCP_TOOLS='[
       "properties": {
         "objective": {"type": "string", "description": "What the formation is for, in a sentence anyone joining will understand."},
         "task_id": {"type": "integer", "description": "Optional id of the task this work belongs to."},
-        "name": {"type": "string", "description": "Optional. The name the other members see beside the lead's member id. Leave unset to use this thread's own name."},
+        "name": {"type": "string", "description": "Optional. The name the other members see beside the member id of the lead. Leave unset to use the name of this Codex thread."},
         "working_dir": {"type": "string", "description": "Absolute path of the project directory."}
       },
       "required": ["objective"]

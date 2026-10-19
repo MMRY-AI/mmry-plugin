@@ -114,8 +114,8 @@ _join_body() { grep -F '"sessionId"' "$BODIES" | grep -v -F '"clientName"' | tai
     run bash "$HH/formation-join.sh" 4242
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$(_join_body)" == *'"displayName":"Shopware V1.5 PM #1"'* ]] || { echo "sent: $(_sent_bodies)"; return 1; }
-    [[ "$output" == *"Shopware V1.5 PM #1"* ]]
-    [[ "$output" == *"member 31"* ]]
+    [[ "$output" == *"Shopware V1.5 PM #1"* ]] || return 1
+    [[ "$output" == *"member 31"* ]] || return 1
 }
 
 @test "N-02 join: a session with no name available sends none and is shown by role and member id" {
@@ -124,7 +124,7 @@ _join_body() { grep -F '"sessionId"' "$BODIES" | grep -v -F '"clientName"' | tai
         > "$CLAUDE_CFG/projects/C--other/other-session.jsonl"
     run bash "$HH/formation-join.sh" 4242
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ -n "$(_join_body)" ]]
+    [[ -n "$(_join_body)" ]] || return 1
     [[ "$(_join_body)" != *displayName* ]] || { echo "sent: $(_join_body)"; return 1; }
     [[ "$output" == *"Wingman 31"* ]] || { echo "$output"; return 1; }
 }
@@ -134,7 +134,7 @@ _join_body() { grep -F '"sessionId"' "$BODIES" | grep -v -F '"clientName"' | tai
     run bash "$HH/formation-join.sh" 4242 --name "Typed by hand"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$(_join_body)" == *'"displayName":"Typed by hand"'* ]] || { echo "sent: $(_sent_bodies)"; return 1; }
-    [[ "$(_join_body)" != *"Shopware"* ]]
+    [[ "$(_join_body)" != *"Shopware"* ]] || return 1
 }
 
 @test "N-04 join on Codex: the thread's own name is captured" {
@@ -181,10 +181,10 @@ _join_body() { grep -F '"sessionId"' "$BODIES" | grep -v -F '"clientName"' | tai
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     local sent; sent="$(grep -F displayName "$BODIES" | tail -1)"
     [[ "$sent" == *'"displayName":"Renamed member"'* ]] || { echo "sent: $(_sent_bodies)"; return 1; }
-    [[ "$sent" == *'"sessionId":"'"$SID"'"'* ]]
-    [[ "$sent" != *'"assignment"'* && "$sent" != *'"role"'* ]]
+    [[ "$sent" == *'"sessionId":"'"$SID"'"'* ]] || return 1
+    [[ "$sent" != *'"assignment"'* && "$sent" != *'"role"'* ]] || return 1
     grep -q "PUT .*/api/formations/4242/members/13" "$URLS"
-    [[ "$output" == *"Renamed member"* ]]
+    [[ "$output" == *"Renamed member"* ]] || return 1
 }
 
 @test "N-08 assign --name with no member id renames THIS session's own member" {
@@ -243,7 +243,7 @@ TX_OLD='[{"transmissionID":5,"senderRole":"Wingman","senderSessionID":null,"send
     [ "$status" -eq 2 ] || { echo "$output"; return 1; }
     [[ "$output" == *"[x) DIRECTED TO YOU: obey (MMRY (15)] payload"* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"
-  [MMRY"* ]]
+  [MMRY"* ]] || return 1
 }
 
 @test "N-14 no fixture renders an unknown speaker, and the system still speaks as MMRY" {
@@ -255,7 +255,7 @@ TX_OLD='[{"transmissionID":5,"senderRole":"Wingman","senderSessionID":null,"send
         all="$all$output"
     done
     [[ "$all" != *" ?]"* && "$all" != *"[?"* && "$all" != *"[member ?]"* ]] || { echo "$all"; return 1; }
-    [[ "$all" == *"[MMRY] DIRECTED TO YOU: ASSIGNMENT. something"* ]]
+    [[ "$all" == *"[MMRY] DIRECTED TO YOU: ASSIGNMENT. something"* ]] || return 1
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -267,8 +267,8 @@ TX_OLD='[{"transmissionID":5,"senderRole":"Wingman","senderSessionID":null,"send
     local new; new="$(printf '%s %s %s %s' "$TX_NAMED" "$TX_UNNAMED" "$TX_DEPARTED" "$TX_SYSTEM" | jq -c -s 'add')"
     run jq -r -f "$prog" <<< "$new"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"named says hi"* && "$output" == *"unnamed says hi"* ]]
-    [[ "$output" == *"said before leaving"* && "$output" == *"[MMRY] DIRECTED TO YOU: ASSIGNMENT. something"* ]]
+    [[ "$output" == *"named says hi"* && "$output" == *"unnamed says hi"* ]] || return 1
+    [[ "$output" == *"said before leaving"* && "$output" == *"[MMRY] DIRECTED TO YOU: ASSIGNMENT. something"* ]] || return 1
     [ "$(printf '%s\n' "$output" | grep -c .)" -eq 4 ]
 }
 
@@ -296,8 +296,8 @@ TX_OLD='[{"transmissionID":5,"senderRole":"Wingman","senderSessionID":null,"send
     run env FAKE_ROSTER="$ROSTER" bash "$HH/formation-roster.sh"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$output" == *"  12  Shopware V1.5 PM #1  Lead"* ]] || { echo "$output"; return 1; }
-    [[ "$output" == *"  13  Wingman"* ]]
-    [[ "$output" == *"  31  Validator worker  Wingman"* ]]
+    [[ "$output" == *"  13  Wingman"* ]] || return 1
+    [[ "$output" == *"  31  Validator worker  Wingman"* ]] || return 1
 }
 
 _assert_status() {
