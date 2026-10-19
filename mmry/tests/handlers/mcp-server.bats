@@ -391,7 +391,8 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
         "$(call 415 formation_assign '{"member_id":"6; rm -rf /","assignment":"x"}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 412)" = "true" ]; [[ "$(text_of 412)" == *"role must be Lead or Wingman"* ]] || return 1
     [ "$(is_error 413)" = "true" ]; [[ "$(text_of 413)" == *"member_id is required"* ]] || return 1
-    [ "$(is_error 414)" = "true" ]; [[ "$(text_of 414)" == *"assignment or role is required"* ]] || return 1
+    # #31410: a name alone is now a change too (a rename), so the refusal names all three.
+    [ "$(is_error 414)" = "true" ]; [[ "$(text_of 414)" == *"assignment, role or name is required"* ]] || return 1
     [ "$(is_error 415)" = "true" ]; [[ "$(text_of 415)" == *"member_id must be a positive whole number"* ]] || return 1
     [ ! -s "$REQLOG" ]
 }
