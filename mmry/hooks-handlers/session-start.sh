@@ -137,7 +137,17 @@ fi
 # plugin that always has a channel to the model, so it is where the fault gets stated. Anything
 # formation-check.sh recorded while it was obliged to stay silent is picked up here too.
 MMRY_HOOK_FAULT_NOTE=""
-if [[ "$HOOK_READ_STATUS" == "empty" || "$HOOK_READ_STATUS" == "timeout" ]]; then
+# A MANUAL RELOAD IS NOT A FAULT (#32346). /mmry:load-memories runs this script in the Bash tool with
+# no hook payload, but the Bash tool sets CLAUDE_CODE_SESSION_ID, so the session's own id is known
+# and registration below uses it. An empty read WITH an id from the environment is therefore that
+# reload, and warning that the session "could not learn its own session id" was false. A read that
+# timed out is still a fault, a start with no id from any source still warns, and Codex is excluded
+# so its start behaviour is exactly what it was.
+_mmry_manual_reload=0
+if [[ "$HOOK_READ_STATUS" == "empty" && -n "${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"       && "$(mmry_host)" != "codex" ]]; then
+    _mmry_manual_reload=1
+fi
+if [[ "$_mmry_manual_reload" -eq 0 && ( "$HOOK_READ_STATUS" == "empty" || "$HOOK_READ_STATUS" == "timeout" ) ]]; then
     mmry_note_hook_read_fault "session-start" "$HOOK_READ_STATUS" || true
     # The host is named rather than assumed. Telling a Codex customer that "the Claude Code hook
     # payload" failed sends them looking for a product they are not running (#31245). The report
