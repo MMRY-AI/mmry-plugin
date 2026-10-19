@@ -1,6 +1,10 @@
+Output the text below the line verbatim, exactly as written, and nothing else. Do not summarize it, shorten it, add to it or comment on it.
+
+---
+
 # MMRY AI Help
 
-MMRY AI is your memory. It remembers your decisions, conventions, preferences, and context across every session — so you never have to repeat yourself.
+MMRY AI is your memory. It remembers your decisions, conventions, preferences, and context across every session, so you never have to repeat yourself.
 
 ## How It Works
 
@@ -12,30 +16,44 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
 - **When context gets compressed**, Claude saves a continuity note so nothing is lost.
 - **When a plan is accepted**, Claude saves it as a decision record.
 
+## Commands
+
+- `/mmry:help` shows this page.
+- `/mmry:save [what to remember]` saves a memory, either what you describe or the most important takeaway from the conversation.
+- `/mmry:search <keywords> [scope]` searches your memories and lists the matches.
+- `/mmry:load-memories` reloads your memories into this session.
+- `/mmry:foundation-status` reports whether your Foundation directives are reaching this assistant right now.
+- `/mmry:visibility [global | private | group ["NAME"]]` sets who can see the memories you save: your organization, only you, or one of your groups.
+- `/mmry:feedback` sends a bug report or feature request to the MMRY AI team.
+- `/mmry:setup` sets up MMRY AI, or reconfigures it for a different account.
+- `/mmry:uninstall` removes MMRY AI from this computer.
+- `/mmry:formation <subcommand>` coordinates several assistants on one job, as a Formation. The subcommands:
+  - `/mmry:formation start "objective"` begins a Formation with this session as its lead.
+  - `/mmry:formation join <id>` puts this session in a Formation.
+  - `/mmry:formation roster` lists the members and the ids to address them by.
+  - `/mmry:formation say "message" [--to <memberId>]` sends a message to the other members, or to one member.
+  - `/mmry:formation assign <memberId> "work"` gives one member its work (the lead).
+  - `/mmry:formation progress <state> "note"` tells the lead how your assigned work is going.
+  - `/mmry:formation report` shows what each member was asked to do and how it ended.
+  - `/mmry:formation claim "<path>"` declares the area this session is about to work, so nobody collides with it.
+  - `/mmry:formation debrief "summary"` closes the job out with a record that lasts (the lead).
+  - `/mmry:formation leave` takes this session out of the Formation.
+  - `/mmry:formation remove <memberId>` takes a member whose session has dropped off the Formation (the lead or an administrator).
+  - `/mmry:formation status` shows which Formation this session is in.
+
 ## Things You Can Say
 
 You can talk to Claude naturally about your memories:
 
-- **"Remember this: we always use kebab-case for file names."** — Claude saves it as a memory.
+- **"Remember this: we always use kebab-case for file names."** Claude saves it as a memory.
 - **"Save a Foundation memory about our tech stack."**: Foundation memories are your standing guidance. Use them for things that define who you are.
-- **"What do you remember about our deployment process?"** — Claude searches your memories.
+- **"What do you remember about our deployment process?"** Claude searches your memories.
 - **`/mmry:search <keywords> [scope]`** runs a search on demand and lists the matches, optionally narrowed to one area of your work.
 - **`/mmry:formation start "objective"`** begins a formation with this session as its lead. **`join <id>`** puts this session in a formation, a group of assistants coordinating on one job, so their messages are surfaced here automatically. **`say "message"`** sends one to the others, and **`say "message" --to <memberId>`** sends it to that one member and nobody else, which is what an instruction meant for one person wants. **`roster`** lists the members and the ids to address them by. **`debrief "summary"`** closes the job out with a record that lasts. **`remove <memberId>`** lets the lead or an administrator take off a member whose session has dropped; that member's other windows stay on. Also `leave` and `status`. Every member is told when it joins, and again with every assignment, to report to the lead at each stopping point (finished, blocked, waiting, or stopping with work still running) and to acknowledge an assignment, a brief or a question with what it understood, anything it cannot do and when to expect the result; `/mmry:formation` has the exact wording. Members receive a message on their next tool call, or within a minute while idle, by default for 24 hours of quiet after their last turn, or when that session next starts. Idle listening renews about every half hour, and each renewal is a model turn that re-reads the whole conversation (measured at about 30,000 tokens in a new session and 570,000 to 880,000 in a long one) and counts toward Claude Code usage, while each check for messages uses one MMRY credit (about 1,580 over a full day at the default 24 hours). Set `formationListenMinutes` in `~/.claude/mmry-config.json` to a number of minutes, `"off"` or `"unlimited"` (no limit) to change it; renewal needs Claude Code 2.1.285 or newer. A session that is closed or asleep may not receive until then, so if something has to be acted on now, ask that session to run `/mmry:formation status`. `roster` also shows whether each message you sent with `--to` has been read. Delivery while a session is idle needs Claude Code 2.1.64 or newer, and MMRY plugin 2.9.1 or newer. On an older client, or on a Mac running MMRY 2.9.0 or earlier, nothing breaks and nothing is lost, but a message waits for that member's next tool call, next prompt or next session start instead of arriving while they sit idle. On a Mac the plugin version is the more likely of the two, so check both before concluding a message was not sent.
 - **`/mmry:foundation-status`** reports whether your Foundation directives are actually reaching this assistant right now: whether re-injection is on, whether the locally stored copy still matches the record MMRY wrote when it last fetched your directives, how many directives and bytes it holds, whether the most recent prompt received them in full, in part or by reference, and how long ago they were last sent. It is a local check and makes no network call. Read-only.
-- **"Forget the memory about the old API endpoint."** — Claude deactivates it.
-- **"Load my memories."** — Reloads your memories mid-session (same as `/mmry:load-memories`).
-
-## Memory Types
-
-Not all memories are equal. Use the right type for the right purpose:
-
-| Type | Good For |
-|------|----------|
-| **Foundation** | Who you are, your values, your stack, your conventions |
-| **Strategic** | Architecture decisions, communication patterns, long-term plans |
-| **Operational** | Active project knowledge, current workflows |
-| **Tactical** | This week's tasks, current sprint context |
-| **Momentary** | Right now: what you're working on this session |
+- **"Forget the memory about the old API endpoint."** Claude deactivates it.
+- **"Load my memories."** Reloads your memories mid-session (same as `/mmry:load-memories`).
+- **"Define a record type for our bug reports, then save one."** Claude creates a structured record type, saves records of it, and can query them or show a record's history.
 
 ## Tips
 
