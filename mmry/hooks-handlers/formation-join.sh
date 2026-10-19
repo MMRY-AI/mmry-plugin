@@ -102,6 +102,11 @@ fi
 # formation the server had refused, and the hook would poll it after every tool call forever.
 bash "${HANDLER_DIR}/formation-state.sh" set "$formation_id" "$session_id"
 
+# A return picks up where it left off (#32385). If this session left THIS formation, leave kept its
+# delivery position, and it goes back on the record now, so the next poll asks for what was said
+# since rather than for everything. A position kept for another formation is dropped.
+bash "${HANDLER_DIR}/formation-state.sh" resume "$formation_id" "$session_id"
+
 objective=""
 if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
     objective="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.formation.objective // empty' 2>/dev/null || true)"
@@ -115,11 +120,23 @@ fi
 
 # WHO THE OTHERS SEE (#31410): this session's own roster entry, read back from the server's answer
 # (the roster carries a session id only on the caller's own rows), never the name that was asked for.
+#
+# A RETURN IS SAID TO BE ONE (#32385). When the own row carries returnedDate the service gave this
+# session its earlier seat back: the same member id the others already know it by, with its name,
+# role, assignment and progress as it left them. The line says so, because a member that reports
+# "member 31" to a lead who assigned work to member 31 an hour ago should not leave the lead
+# wondering whether that is the same assistant.
 own_line=""
 if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
     own_line="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg sid "$session_id" "${MMRY_JQ_NAME_DEFS}"'
         [(.members // [])[] | select(.sessionId == $sid and .leftDate == null)] | last
         | if . == null then empty
+          elif (.returnedDate // null) != null then
+              "You are back as member \(.id), the id you had before you left, shown to the others as "
+              + (if ((.displayName // "") | mmry_name_clean) != ""
+                 then "\"\(.displayName | mmry_name_label)\"."
+                 else "\(.role // "Member") \(.id), because this session has no name." end)
+              + " Your name, role, assignment and progress are as you left them. Anything said while you were out arrives marked SENT WHILE YOU WERE AWAY."
           elif ((.displayName // "") | mmry_name_clean) != "" then
               "You are member \(.id), shown to the others as \"\(.displayName | mmry_name_label)\"."
           else

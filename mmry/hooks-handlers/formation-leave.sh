@@ -37,6 +37,11 @@ mmry_load_config || true
 leave_rc=0
 mmry_leave_formation "$session_id" || leave_rc=$?
 
+# Keep where delivery had got to, BEFORE the record goes (#32385). If this session joins the same
+# formation again it gets its seat back on the service, and with this it carries on from the last
+# message it was shown rather than being shown the formation's history over again.
+bash "${HANDLER_DIR}/formation-state.sh" keep "$session_id"
+
 # Stop delivery here regardless of what the service said. Leaving the state behind would keep the
 # hook polling a formation the person has finished with, on top of whatever else went wrong.
 bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id"
