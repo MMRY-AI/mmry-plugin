@@ -205,9 +205,13 @@ point.
 A formation carries messages between assistant sessions that cannot otherwise see each other, so
 two people's assistants can work the same job without colliding.
 
-Join with `formation_join` and the formation's id. Message the whole formation with
+Join with `formation_join` and the formation's id. The other members see this conversation under
+its thread name, or under `name` if you give one. Message the whole formation with
 `formation_say`, or one member by adding `to_member_id`. `formation_roster` lists the members, the
-id to address each by, and which one is the lead. Report how your assigned work is going with
+id to address each by, each member's name beside its id, and which one is the lead.
+`formation_status` shows the same members, plus which member this conversation is. Rename a member
+with `formation_assign` and `name`; with no `member_id` it renames this conversation's own member,
+which any member may do. Report how your assigned work is going with
 `formation_progress` (`Accepted`, `Done`, `Blocked` or `Abandoned`, and an optional `note`). Leave
 with `formation_leave`.
 
@@ -252,7 +256,9 @@ example: "Member 7 has the checkout tests. Their report reaches me only when you
 message here, so check in with me once they have had time to work." After `formation_start`, give
 the id, say the same of every member, and give the recommendation above.
 
-Messages from the formation arrive on their own, marked `MMRY AI Formation Transmission`. A line marked
+Messages from the formation arrive on their own, marked `MMRY AI Formation Transmission`. Each
+line names its sender by name and member id, for example `[Checkout tests (12)]`, or by role and
+member id, `[Wingman 14]`, when the sender has no name. A line marked
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.
 

@@ -1303,10 +1303,11 @@ mmry_get_formation() {
 }
 
 mmry_join_formation() {
-    # Usage: mmry_join_formation FORMATION_ID SESSION_ID
-    local formation_id="$1" session_id="$2"
+    # Usage: mmry_join_formation FORMATION_ID SESSION_ID [DISPLAY_NAME]
+    # #31410: the member's readable name, omitted entirely when empty so the service stores none.
+    local formation_id="$1" session_id="$2" display_name="${3:-}"
     local body
-    body="$(_mmry_build_json "sessionId" "$session_id")"
+    body="$(_mmry_build_json "sessionId" "$session_id" "displayName" "$display_name")"
     _mmry_request POST "/api/formations/${formation_id}/join" "$body"
 }
 
@@ -1335,13 +1336,15 @@ mmry_leave_formation() {
 # have could create one. Requirement 2 of #31104 asks for a message to reach another session with no
 # manual step, and calling the API by hand to start the formation is a manual step.
 mmry_create_formation() {
-    # Usage: mmry_create_formation "objective" SESSION_ID [TASK_ID]
-    local objective="$1" session_id="$2" task_id="${3:-}"
+    # Usage: mmry_create_formation "objective" SESSION_ID [TASK_ID] [DISPLAY_NAME]
+    # #31410: the lead's readable name, omitted entirely when empty.
+    local objective="$1" session_id="$2" task_id="${3:-}" display_name="${4:-}"
     local body
     body="$(_mmry_build_json \
-        "objective" "$objective" \
-        "sessionId" "$session_id" \
-        "taskId"    "$task_id")"
+        "objective"   "$objective" \
+        "sessionId"   "$session_id" \
+        "taskId"      "$task_id" \
+        "displayName" "$display_name")"
     _mmry_request POST "/api/formations" "$body"
 }
 
@@ -1454,7 +1457,7 @@ mmry_get_formation_sent() {
 # ---- Leader-assigned targets and collision deconfliction (#31044) ----
 
 mmry_update_formation_member() {
-    # Usage: mmry_update_formation_member FORMATION_ID MEMBER_ID [ROLE] [ASSIGNMENT]
+    # Usage: mmry_update_formation_member FORMATION_ID MEMBER_ID [ROLE] [ASSIGNMENT] [DISPLAY_NAME] [SESSION_ID]
     #
     # Set what ONE member of the formation is working on. The member is named by its ROSTER ENTRY
     # id from /mmry:formation roster, never by a session string: a session id is secret-adjacent
@@ -1467,11 +1470,19 @@ mmry_update_formation_member() {
     # There is nothing here that says who is asking, deliberately. The caller's standing is
     # decided by the server from the roster, the formation and the account's roles, and a request
     # that could state its own authority would not be an authorisation check.
+    #
+    # #31410: DISPLAY_NAME renames the member, and SESSION_ID is THIS session's own id, sent only
+    # with a name. It grants nothing by itself: the service lets a member with no other standing
+    # rename only its own roster entry, matched on the caller's user AND this session.
     local formation_id="$1" member_id="$2" role="${3:-}" assignment="${4:-}"
+    local display_name="${5:-}" session_id="${6:-}"
+    [[ -n "$display_name" ]] || session_id=""
     local body
     body="$(_mmry_build_json \
-        "role"       "$role" \
-        "assignment" "$assignment")"
+        "role"        "$role" \
+        "assignment"  "$assignment" \
+        "displayName" "$display_name" \
+        "sessionId"   "$session_id")"
 
     _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}" "$body"
 }
@@ -1784,6 +1795,94 @@ mmry_record_session_agent() {
     # exactly this value whatever characters the name contains.
     local q="'\\''"
     printf "export MMRY_SESSION_AGENT_NAME='%s'\n" "${agent//\'/$q}" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+}
+
+# ============================================================================
+# FORMATION MEMBER NAME (#31410, DD-143 in the API repository)
+# ============================================================================
+#
+# A formation member carries a readable name, shown beside its member id on every message it sends,
+# on the roster, in the status view and in the close-out record. The name is captured AUTOMATICALLY
+# from the name the session already has, so nobody has to type it:
+#
+#   Claude Code  the session's title. Claude Code records it in the session transcript as a
+#                custom-title entry, and appends another on every rename, so the LAST one is the
+#                name. The transcript is <config>/projects/<project>/<session id>.jsonl, where
+#                <config> is CLAUDE_CONFIG_DIR when set and the host config directory otherwise.
+#   Codex        the thread's name, which Codex records in <CODEX_HOME>/session_index.jsonl, one
+#                line per rename, so again the last line for this thread is the name.
+#
+# A name given explicitly (--name) always wins. No name available means none is sent, and the
+# member is then shown by role and member id. Only THIS session's own record is ever read: the file
+# is found by this session's id, and every line is matched on it again before it is believed.
+#
+# WHAT A NAME MAY CONTAIN is decided by the service (MemberNameRules there): no control character,
+# no line or paragraph separator, no invisible formatting character that reorders or hides text,
+# at most 100 UTF-16 units, not blank. A CAPTURED name is cleaned to that rule here, rather than
+# sent and refused, because the customer never typed it and a join must not fail over a title. The
+# cleaning is done by code point, with no regular expression: a backslash in a jq program passed on
+# the command line is not reliable on Windows, where MSYS rewrites it before jq.exe sees it.
+
+MMRY_MEMBER_NAME_MAX=100
+
+# The jq definitions every formation script shares, so the rule is written once:
+#   mmry_name_clean   refused characters become spaces, runs of spaces collapse, ends are trimmed
+#   mmry_u16cut(n)    at most n UTF-16 units, never splitting a character
+#   mmry_name_label   a name made safe to sit INSIDE a [label]: cleaned, brackets turned to parens
+#   mmry_member_line  one roster line: "  <id>  <name>  <role>", or "  <id>  <role>" with no name
+MMRY_JQ_NAME_DEFS='
+def mmry_name_clean: tostring | explode
+    | map(if . < 32 or (. >= 127 and . < 160) or . == 1564 or . == 8203 or . == 8206 or . == 8207
+             or . == 8232 or . == 8233 or (. >= 8234 and . <= 8238) or . == 8288
+             or (. >= 8294 and . <= 8297) or . == 65279 then 32 else . end)
+    | implode | split(" ") | map(select(length > 0)) | join(" ");
+def mmry_u16cut($n): reduce explode[] as $c ({n: 0, o: [], stop: false};
+    (if $c > 65535 then 2 else 1 end) as $w
+    | if .stop or (.n + $w > $n) then .stop = true else .o += [$c] | .n += $w end) | .o | implode;
+def mmry_name_label: mmry_name_clean | explode | map(if . == 91 then 40 elif . == 93 then 41 else . end) | implode | mmry_u16cut(100);
+def mmry_member_line: "  " + (.id | tostring) + "  "
+    + (if ((.displayName // "") | mmry_name_clean) != "" then (.displayName | mmry_name_label) + "  " else "" end)
+    + (.role // "Member");
+'
+
+# Cleans a name to the service's rule and prints it, or nothing when nothing printable is left.
+# Usage: mmry_member_name_clean "<name>"
+mmry_member_name_clean() {
+    local raw="${1:-}" out=""
+    [[ -n "$raw" && -n "${MMRY_JQ:-}" ]] || return 0
+    out="$(printf '%s' "$raw" | "$MMRY_JQ" -R -r -s "${MMRY_JQ_NAME_DEFS} mmry_name_clean | mmry_u16cut(${MMRY_MEMBER_NAME_MAX})" 2>/dev/null || true)"
+    out="${out%$'\r'}"
+    printf '%s' "$out"
+}
+
+# Prints THIS session's own name as the host records it, cleaned, or nothing.
+# Usage: mmry_session_display_name [SESSION_ID]
+mmry_session_display_name() {
+    local sid="${1:-}"
+    [[ -n "$sid" ]] || sid="$(mmry_session_id 2>/dev/null || true)"
+    [[ -n "$sid" && -n "${MMRY_JQ:-}" ]] || return 0
+    # The id is part of a file name below, so anything that could walk a path is refused outright.
+    case "$sid" in *[!A-Za-z0-9._-]*|.*) return 0 ;; esac
+
+    local raw=""
+    if [[ "$(mmry_host 2>/dev/null || echo claude)" == "codex" ]]; then
+        local index; index="$(mmry_host_config_dir)/session_index.jsonl"
+        [[ -f "$index" ]] || return 0
+        raw="$(grep -F "\"${sid}\"" "$index" 2>/dev/null \
+            | "$MMRY_JQ" -r --arg sid "$sid" 'select(type == "object" and .id == $sid) | .thread_name // empty' 2>/dev/null \
+            | tail -n 1 || true)"
+    else
+        local cfg="${CLAUDE_CONFIG_DIR:-$(mmry_host_config_dir)}" f transcript=""
+        for f in "$cfg"/projects/*/"${sid}.jsonl"; do
+            [[ -f "$f" ]] && { transcript="$f"; break; }
+        done
+        [[ -n "$transcript" ]] || return 0
+        raw="$(grep -F '"custom-title"' "$transcript" 2>/dev/null \
+            | "$MMRY_JQ" -r --arg sid "$sid" 'select(type == "object" and .type == "custom-title" and ((.sessionId // $sid) == $sid)) | .customTitle // empty' 2>/dev/null \
+            | tail -n 1 || true)"
+    fi
+    raw="${raw%$'\r'}"
+    mmry_member_name_clean "$raw"
 }
 
 mmry_health() {

@@ -20,6 +20,14 @@
 #
 # Usage: formation-assign.sh <memberId> "<assignment>" [role]
 #        formation-assign.sh <memberId> "" <role>          # role only, assignment left alone
+#        formation-assign.sh <memberId> --name "<name>"    # rename a member (#31410)
+#        formation-assign.sh --name "<name>"               # rename THIS session's own member
+#
+# RENAMING (#31410). Only the lead, from the lead's own session, may rename somebody else; any
+# member may rename ITSELF. Being the person who started the formation or an administrator does not
+# grant a rename of anybody else (DD-143, changed after QA round 1). The server decides from the
+# roster and this session, so this script sends the session along with the name and states no
+# authority of its own.
 #
 # An OMITTED field is left alone rather than cleared. There is deliberately no way to blank an
 # assignment back to empty: the same non-clobbering rule the formation update has always had.
@@ -29,11 +37,23 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
 
-member_id="${1:-}"
-assignment="${2:-}"
-role="${3:-}"
+member_id=""
+assignment=""
+role=""
+new_name=""
+_positional=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name) new_name="${2:-}"; shift; [[ $# -gt 0 ]] && shift
+                [[ -n "$new_name" ]] || { echo "A name cannot be blank. Nothing was changed."; exit 1; } ;;
+        *) _positional+=("$1"); shift ;;
+    esac
+done
+member_id="${_positional[0]:-}"
+assignment="${_positional[1]:-}"
+role="${_positional[2]:-}"
 
-if [[ -z "$member_id" ]]; then
+if [[ -z "$member_id" && -z "$new_name" ]]; then
     echo "Which member? Usage: $(mmry_host_formation_ref assign '<memberId> "what they should work on"'). Run $(mmry_host_formation_ref roster) to see the ids."
     exit 1
 fi
@@ -41,13 +61,13 @@ fi
 # Validated here as well as on the server, because this is the thing the server cannot judge for
 # us: whether the caller meant to name anybody at all. A non-numeric value is a mistake at the
 # keyboard, and refusing it here means the mistake is named rather than turned into a round trip.
-if ! [[ "$member_id" =~ ^[1-9][0-9]*$ ]]; then
+if [[ -n "$member_id" ]] && ! [[ "$member_id" =~ ^[1-9][0-9]*$ ]]; then
     echo "A member id is a positive whole number from $(mmry_host_formation_ref roster). Nothing was changed."
     exit 1
 fi
 
-if [[ -z "$assignment" && -z "$role" ]]; then
-    echo "Nothing to change. Give an assignment, a role, or both. Nothing was sent."
+if [[ -z "$assignment" && -z "$role" && -z "$new_name" ]]; then
+    echo "Nothing to change. Give an assignment, a role, a --name, or a combination. Nothing was sent."
     exit 1
 fi
 
@@ -81,7 +101,23 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! mmry_update_formation_member "$formation_id" "$member_id" "$role" "$assignment"; then
+# --name with no member id renames THIS session's own member (#31410). Its id is found on the
+# roster, which carries a session id only on the caller's own rows, so this can only ever find us.
+if [[ -z "$member_id" ]]; then
+    if ! mmry_get_formation "$formation_id" || [[ -z "${MMRY_JQ:-}" ]]; then
+        echo "Could not read the roster to find this session's own member id (HTTP ${MMRY_HTTP_CODE:-0}). Give the id: $(mmry_host_formation_ref assign '<memberId> --name "<name>"')."
+        exit 1
+    fi
+    member_id="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r --arg sid "$session_id" \
+        '[(.members // [])[] | select(.sessionId == $sid and .leftDate == null) | .id] | last // empty' 2>/dev/null || true)"
+    member_id="${member_id//$'\r'/}"
+    if ! [[ "$member_id" =~ ^[1-9][0-9]*$ ]]; then
+        echo "This session has no current place on formation ${formation_id}'s roster, so there is nobody to rename. Nothing was changed."
+        exit 1
+    fi
+fi
+
+if ! mmry_update_formation_member "$formation_id" "$member_id" "$role" "$assignment" "$new_name" "$session_id"; then
     code="${MMRY_HTTP_CODE:-0}"
     # #31195: EVERY BRANCH MAY ONLY SAY WHAT ITS STATUS ACTUALLY MEANS. A status code is evidence
     # about the server's answer, not about the state of the world behind it, and where the two are
@@ -120,9 +156,23 @@ fi
 # was asked for as though it had been read back.
 applied_assignment=""
 applied_role=""
+applied_name=""
 if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
     applied_assignment="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.assignment // empty' 2>/dev/null || true)"
     applied_role="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.role // empty' 2>/dev/null || true)"
+    applied_name="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"' (.displayName // "") | mmry_name_label' 2>/dev/null || true)"
+    applied_name="${applied_name//$'\r'/}"
+fi
+
+# A rename and nothing else is not an instruction, and the server tells nobody about it, so the
+# reply says what the member is now called and stops (#31410).
+if [[ -n "$new_name" && -z "$assignment" && -z "$role" && -n "$applied_role" ]]; then
+    if [[ -n "$applied_name" ]]; then
+        printf 'Member %s in formation %s is now shown as "%s".\n' "$member_id" "$formation_id" "$applied_name"
+    else
+        printf 'The server accepted the change for member %s in formation %s but returned no name. Run %s to see what it now holds.\n' "$member_id" "$formation_id" "$(mmry_host_formation_ref roster)"
+    fi
+    exit 0
 fi
 
 if [[ -z "$applied_role" ]]; then
@@ -133,6 +183,9 @@ if [[ -z "$applied_role" ]]; then
 fi
 
 printf 'Member %s in formation %s is now %s' "$member_id" "$formation_id" "$applied_role"
+if [[ -n "$applied_name" ]]; then
+    printf ', shown as "%s"' "$applied_name"
+fi
 if [[ -n "$applied_assignment" ]]; then
     printf ', working on: %s' "$applied_assignment"
 fi

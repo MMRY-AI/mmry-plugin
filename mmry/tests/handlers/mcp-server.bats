@@ -129,13 +129,14 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 9 | jq -c '.result')" = "{}" ]
 }
 
-@test "protocol: tools/list names the sixteen tools, each with an object input schema" {
+@test "protocol: tools/list names the seventeen tools, each with an object input schema" {
     # #31789 added the lead's four: formation_start, formation_assign, formation_report and
     # formation_debrief. #32270 added formation_remove, so a lead or an administrator on Codex can
-    # take off a member whose session has dropped without the Internet access prompt.
+    # take off a member whose session has dropped without the Internet access prompt. #31410 added
+    # formation_status, the status view with each member's name beside its member id.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     [ "$(answer 2 | jq -r '.result.tools | map(.name) | sort | join(",")')" = \
-      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_remove,formation_report,formation_roster,formation_say,formation_start,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
+      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
     [ "$(answer 2 | jq -r '[.result.tools[] | .inputSchema.type] | unique | join(",")')" = "object" ]
 }
 
@@ -163,9 +164,9 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ "$(answer 2 | jq '[.result.tools[] | .annotations.openWorldHint] | any')" = "false" ]
 }
 
-@test "annotations: search, roster and the close-out record are read-only; nothing that changes anything claims to be" {
+@test "annotations: search, roster, status and the close-out record are read-only; nothing that changes anything claims to be" {
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_report,formation_roster,memory_search" ]
+    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_report,formation_roster,formation_status,memory_search" ]
 }
 
 @test "annotations: retiring a memory, closing a formation out and removing a member are the destructive tools, so Codex asks once and offers always" {
@@ -184,7 +185,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     local t
     for t in memory_save memory_search memory_reinforce memory_link memory_load \
              formation_join formation_say formation_progress formation_roster formation_leave \
-             formation_start formation_assign formation_report; do
+             formation_start formation_assign formation_report formation_status; do
         [ "$(_codex_would_prompt "$t")" = "no-prompt" ] || { echo "$t would prompt"; return 1; }
     done
 }
@@ -390,7 +391,8 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
         "$(call 415 formation_assign '{"member_id":"6; rm -rf /","assignment":"x"}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 412)" = "true" ]; [[ "$(text_of 412)" == *"role must be Lead or Wingman"* ]] || return 1
     [ "$(is_error 413)" = "true" ]; [[ "$(text_of 413)" == *"member_id is required"* ]] || return 1
-    [ "$(is_error 414)" = "true" ]; [[ "$(text_of 414)" == *"assignment or role is required"* ]] || return 1
+    # #31410: a name alone is now a change too (a rename), so the refusal names all three.
+    [ "$(is_error 414)" = "true" ]; [[ "$(text_of 414)" == *"assignment, role or name is required"* ]] || return 1
     [ "$(is_error 415)" = "true" ]; [[ "$(text_of 415)" == *"member_id must be a positive whole number"* ]] || return 1
     [ ! -s "$REQLOG" ]
 }

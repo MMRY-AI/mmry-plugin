@@ -677,6 +677,14 @@ _poll_once() {
     # that cannot tell the system from a member cannot judge how much weight to give a line, and the
     # assignment notice is the one line in the channel it is meant to act on.
     #
+    # #31410: A MEMBER IS LABELLED BY NAME AND MEMBER ID, never as an unknown speaker. The service
+    # stopped returning the sender's session in #31413, rightly, and nothing replaced it, so every
+    # member line read [Wingman ?]. It now returns the member id the message was sent under and that
+    # member's name: "[Shopware V1.5 PM #1 (12)]", or "[Wingman 12]" for a member with no name, or
+    # "[Member 12]" for one that has since left. A service that predates it returns neither, and the
+    # line reads "[Wingman]". The name is cleaned and its brackets turned to parentheses by
+    # mmry_name_label (mmry-client.sh), so it cannot close the label early or start a new line.
+    #
     # ONE jq PASS, NOT FIVE (#31746). The count, the two guidance counts, the newest timestamp and the
     # rendered lines used to come from five separate jq processes over the same response. They are
     # the same expressions in one program now, each field terminated by a NUL - the scheme
@@ -695,8 +703,14 @@ _poll_once() {
         IFS= read -r -d '' newest || true
         IFS= read -r -d '' directed_ids || true
         IFS= read -r -d '' lines || true
-    } < <("$MMRY_JQ" -j '
+    } < <("$MMRY_JQ" -j "${MMRY_JQ_NAME_DEFS:-}"'
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
+        def sender:
+            if (.senderMemberID // null) != null then
+                (if ((.senderName // "") | mmry_name_clean) != ""
+                 then (.senderName | mmry_name_label) + " (" + (.senderMemberID | tostring) + ")"
+                 else (.senderRole // "Member") + " " + (.senderMemberID | tostring) end)
+            else (.senderRole // "Member") end;
         if type == "array" and length > 0 then
             [ (length | tostring),
               ([.[] | select((.recipientMemberID // null) != null)] | length | tostring),
@@ -706,7 +720,7 @@ _poll_once() {
                     | select(type == "number") | tostring] | join(",")),
               ([ .[] | (if system
                         then "  [MMRY] "
-                        else "  [" + ((.senderRole // "member")) + " " + ((.senderSessionID // "?") | tostring) + "] "
+                        else "  [" + sender + "] "
                         end)
                        + (if (.recipientMemberID // null) != null then "DIRECTED TO YOU: " else "" end)
                        + ((.content // .topic // "") | tostring)
