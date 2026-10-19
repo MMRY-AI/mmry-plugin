@@ -19,7 +19,17 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${HANDLER_DIR}/mmry-client.sh"
 
 objective="${1:-}"
-task_id="${2:-}"
+task_id=""
+explicit_name=""
+[[ $# -gt 0 ]] && shift
+# The task id is the second positional argument; --name "<name>" may come anywhere after the
+# objective (#31410). Without it the session's own name is used, as on join.
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name) explicit_name="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
+        *) [[ -z "$task_id" ]] && task_id="$1"; shift ;;
+    esac
+done
 
 if [[ -z "$objective" ]]; then
     echo "What is the job? Usage: $(mmry_host_formation_ref start '"what the formation is for"')"
@@ -62,7 +72,22 @@ else
 fi
 mmry_register_session "$session_id" "$_mmry_client_name" "$PWD" 2>/dev/null || true
 
-if ! mmry_create_formation "$objective" "$session_id" "$task_id"; then
+# The lead's name (#31410): the one given, else the session's own, else none.
+display_name="$explicit_name"
+name_was_captured=""
+if [[ -z "$display_name" ]]; then
+    display_name="$(mmry_session_display_name "$session_id" 2>/dev/null || true)"
+    [[ -n "$display_name" ]] && name_was_captured=1
+fi
+started=""
+if mmry_create_formation "$objective" "$session_id" "$task_id" "$display_name"; then
+    started=1
+elif [[ "${MMRY_HTTP_CODE:-0}" == "400" && -n "$name_was_captured" ]]; then
+    # A captured name must never cost the formation; a refusal writes nothing, so try once without.
+    display_name=""
+    mmry_create_formation "$objective" "$session_id" "$task_id" "" && started=1
+fi
+if [[ -z "$started" ]]; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
         400) echo "The server refused the objective. ${MMRY_RESPONSE:-}" ;;
@@ -87,6 +112,9 @@ fi
 bash "${HANDLER_DIR}/formation-state.sh" set "$formation_id" "$session_id"
 
 echo "Started formation ${formation_id}: ${objective}"
+if [[ -n "$display_name" ]]; then
+    echo "The others see you as \"${display_name}\"."
+fi
 echo "You are the lead. Tell the others to run $(mmry_host_formation_ref join "${formation_id}"), then use $(mmry_host_formation_ref say) to keep them posted."
 # #31789: on Codex the lead is told it hears its members only on its next action, what to do
 # instead, and that a Claude Code session should lead. Prints nothing on Claude Code.

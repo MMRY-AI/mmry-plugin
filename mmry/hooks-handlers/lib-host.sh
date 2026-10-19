@@ -639,6 +639,8 @@ mmry_host_tool_ref() {
     case "$tool" in
         memory_save|memory_search|memory_reinforce|memory_link|memory_retire|memory_load) ;;
         formation_join|formation_say|formation_progress|formation_roster|formation_leave) ;;
+        # #31410: the status view, with each member's name beside its member id.
+        formation_status) ;;
         # #31789: the lead's operations.
         formation_start|formation_assign|formation_report|formation_debrief) ;;
         # #32270: removing a member whose session has dropped.
@@ -666,6 +668,7 @@ _mmry_host_formation_tool() {
             ;;
         leave)  mmry_host_tool_ref formation_leave ;;
         roster) mmry_host_tool_ref formation_roster ;;
+        status) mmry_host_tool_ref formation_status ;;
         # #31789: the lead's operations are tools too. The example a usage line carries survives,
         # named by the tool's own argument, so the model is told what to pass as well as what to call.
         start)
@@ -678,6 +681,9 @@ _mmry_host_formation_tool() {
         assign)
             if (( $# == 0 )); then
                 mmry_host_tool_ref formation_assign
+            elif [[ "$*" == *"--name"* ]]; then
+                # #31410: renaming, which needs no member_id when it is this conversation's own.
+                mmry_host_tool_ref formation_assign "with name (and member_id to rename somebody else)"
             else
                 mmry_host_tool_ref formation_assign "with member_id (from the roster) and assignment"
             fi

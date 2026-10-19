@@ -1,6 +1,6 @@
 Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status`
 
 ## What This Does
 
@@ -11,6 +11,23 @@ automatically. You do not have to ask for them.
 **This command is what activates that.** Without it, this session does not know which formation
 it belongs to and nothing is delivered, because the delivery hook reads the formation from local
 session state and nothing else writes it.
+
+## Who Said It
+
+Every member has a member id, and usually a name: the name the session already has. In Claude Code
+that is the session's title, the name you gave the session; in Codex it is the thread's name.
+It is picked up when the session starts or joins the formation, so nobody has to type it. Each
+message from a member is labelled with that name and its member id:
+
+```
+  [Shopware V1.5 PM #1 (12)] the schema migration is in, pull before you run the tests
+  [Wingman 14] DIRECTED TO YOU: the validator tests pass
+  [MMRY] DIRECTED TO YOU: ASSIGNMENT. The formation lead has set what this session is working on.
+```
+
+A member with no name is shown by its role and member id, as the second line is. `[MMRY]` is the
+memory system itself, not a member. The roster, `status` and the close-out record show the same
+name beside the same member id, so a line can always be matched to a member.
 
 ## When A Member Actually Receives A Message
 
@@ -159,6 +176,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-start.sh" "<objective>" [ta
 This creates the formation and makes this session its lead. Report the id it prints, because the
 other sessions need it to join.
 
+The lead is shown to the others under this session's own name. To use a different one, add
+`--name "<name>"` after the objective.
+
 ### join
 
 The user gives a numeric formation id, for example `/mmry:formation join 42`.
@@ -177,7 +197,16 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-join.sh" <formationId>
    ```
 
-3. Report the outcome in one line: the objective it joined, or the reason it could not.
+   The others see this session under its own name, the session title. If the user gives a name,
+   for example `/mmry:formation join 42 --name "Checkout tests"`, pass it through:
+
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-join.sh" <formationId> --name "<name>"
+   ```
+
+3. Report the outcome in one line: the objective it joined, or the reason it could not. Include the
+   line saying which member this session is and the name the others see. If it says the session
+   has no name, say so; the others then see it by role and member id until it is given one.
 
    A refusal is usually one of two things, and both are worth saying plainly:
    - You share no access group with whoever created the formation. An administrator adds you.
@@ -218,8 +247,8 @@ shown at all is a separate fact, and the roster's read status already answers it
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-roster.sh" [formationId]
 ```
 
-Who is in the formation, with the **member id** for each one. With no argument it shows this
-session's own formation.
+Who is in the formation, with the **member id** for each one and, beside it, the member's **name**.
+A member with no name is shown by its role. With no argument it shows this session's own formation.
 
 The member id is what `say --to` addresses. Report the list as the script prints it. Members who
 have left are shown last and marked; a message cannot be directed at them, and the server refuses
@@ -316,6 +345,21 @@ To change only the role, pass an empty assignment:
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" 12 "" Lead
 ```
+
+#### Renaming a member
+
+A member's name is set when it joins, from the session's own name. To change it:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" 12 --name "Checkout tests"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" --name "Checkout tests"
+```
+
+The first renames member 12; only the lead, the person who started the formation or an
+administrator may rename somebody else. The second, with no member id, renames **this session**,
+which any member may do. A rename tells nobody and changes nothing else; the new name appears beside
+the member id from then on. The server refuses a name with line breaks or invisible characters, or
+over 100 characters.
 
 **Report what the script reports.** On success it prints what the roster now holds, read back from
 the server rather than echoed from the request. On a refusal it prints the server's own reason, and
@@ -509,11 +553,14 @@ left, one that is not in this formation, and a formation already closed out each
 ### status
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-state.sh" get
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-status.sh"
 ```
 
-Empty output means this session is in no formation. Otherwise it prints the formation id and the
-timestamp of the last message already surfaced.
+It says whether this session is in a formation, and if so which one, when the last message was
+shown here, which member this session is and the name the others see, and every member with its
+name beside its member id. A member with no name is shown by role and member id. Report it as
+printed. If the members could not be read from the service it says so, and the first lines are
+still true: they come from this session's own record.
 
 ## What Not To Do
 

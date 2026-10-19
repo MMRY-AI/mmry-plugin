@@ -197,11 +197,12 @@ MMRY_MCP_TOOLS='[
   {
     "name": "formation_join",
     "title": "Join a coordination group",
-    "description": "Join this conversation to a formation (coordination group) by its id. Messages from the other members then arrive on their own as you work. Use this, not the mmry_formation_* connector tools, to join: the connector enrols a different identity and no message would ever arrive. Joining prints two standing rules; follow them while in the formation.",
+    "description": "Join this conversation to a formation (coordination group) by its id. Messages from the other members then arrive on their own as you work. Use this, not the mmry_formation_* connector tools, to join: the connector enrols a different identity and no message would ever arrive. Joining prints two standing rules; follow them while in the formation. The others see this conversation by its Codex thread name unless name is given.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "formation_id": {"type": "integer"},
+        "name": {"type": "string", "description": "Optional. The name the other members see beside this conversation's member id. Leave unset to use this thread's own name."},
         "working_dir": {"type": "string", "description": "Absolute path of the project directory."}
       },
       "required": ["formation_id"]
@@ -252,6 +253,7 @@ MMRY_MCP_TOOLS='[
       "properties": {
         "objective": {"type": "string", "description": "What the formation is for, in a sentence anyone joining will understand."},
         "task_id": {"type": "integer", "description": "Optional id of the task this work belongs to."},
+        "name": {"type": "string", "description": "Optional. The name the other members see beside the lead's member id. Leave unset to use this thread's own name."},
         "working_dir": {"type": "string", "description": "Absolute path of the project directory."}
       },
       "required": ["objective"]
@@ -261,15 +263,15 @@ MMRY_MCP_TOOLS='[
   {
     "name": "formation_assign",
     "title": "Assign work in the coordination group",
-    "description": "As the lead, set what one member of this conversation'"'"'s formation is working on, its role, or both. Only that member is told. Member ids come from formation_roster.",
+    "description": "As the lead, set what one member of this conversation'"'"'s formation is working on, its role, or both. Only that member is told. Member ids come from formation_roster. Also renames a member with name: the lead may rename anybody, and any member may rename itself by giving name with no member_id.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "member_id": {"type": "integer", "description": "Roster entry id of the member."},
+        "member_id": {"type": "integer", "description": "Roster entry id of the member. Leave unset, with name, to rename this conversation'"'"'s own member."},
         "assignment": {"type": "string", "description": "What they should work on."},
-        "role": {"type": "string", "enum": ["Lead", "Wingman"], "description": "Optional new role."}
-      },
-      "required": ["member_id"]
+        "role": {"type": "string", "enum": ["Lead", "Wingman"], "description": "Optional new role."},
+        "name": {"type": "string", "description": "Optional new name, shown beside the member id."}
+      }
     },
     "annotations": {"title": "Assign work in the coordination group", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
   },
@@ -309,6 +311,13 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Remove a member from the coordination group", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false}
   },
   {
+    "name": "formation_status",
+    "title": "Show this conversation'"'"'s coordination group status",
+    "description": "Show which formation this conversation is in, its own member id and name, and every member with its name beside its member id. Reading it also delivers anything waiting.",
+    "inputSchema": {"type": "object", "properties": {}},
+    "annotations": {"title": "Show this conversation'"'"'s coordination group status", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
     "name": "formation_leave",
     "title": "Leave the coordination group",
     "description": "Release this conversation'"'"'s place in its formation, on the service and here, so it can join another.",
@@ -317,7 +326,7 @@ MMRY_MCP_TOOLS='[
   }
 ]'
 
-MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out (debrief), removing a member from and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
+MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster, the status and the close-out record of, closing out (debrief), removing a member from and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
 
 # ---------------------------------------------------------------------------------------------
 # ONE TOOL CALL.
@@ -354,23 +363,31 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
        (str("link_type") | need("link_type") | if IN("related","contradicts","supersedes","elaborates") then . else error("link_type must be related, contradicts, supersedes or elaborates") end)]
    elif $n == "memory_load" then ["session-start.sh"]
    elif $n == "formation_join" then ["formation-join.sh", (int("formation_id") | need("formation_id"))]
+      + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)
    elif $n == "formation_say" then ["formation-say.sh", (str("message") | need("message"))] + (if int("to_member_id") == null then [] else [int("to_member_id")] end)
    elif $n == "formation_progress" then
       ["formation-progress.sh", (str("state") | need("state") | if IN("Accepted","Done","Blocked","Abandoned") then . else error("state must be Accepted, Done, Blocked or Abandoned") end)]
       + (if (str("note") // "") != "" then [str("note")] else [] end)
    elif $n == "formation_start" then
       ["formation-start.sh", (str("objective") | need("objective"))] + (if int("task_id") == null then [] else [int("task_id")] end)
+      + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)
    elif $n == "formation_assign" then
       (str("role") // "") as $role
       | (str("assignment") // "") as $work
+      | (str("name") // "") as $nm
       | if $role != "" and ($role | IN("Lead","Wingman") | not) then error("role must be Lead or Wingman")
-        elif $work == "" and $role == "" then error("assignment or role is required")
-        else ["formation-assign.sh", (int("member_id") | need("member_id")), $work] + (if $role != "" then [$role] else [] end) end
+        elif $work == "" and $role == "" and $nm == "" then error("assignment, role or name is required")
+        elif int("member_id") == null and ($work != "" or $role != "") then error("member_id is required to assign work or a role")
+        else ["formation-assign.sh"]
+             + (if int("member_id") == null then [] else [int("member_id")] end)
+             + (if $work != "" or $role != "" then [$work] + (if $role != "" then [$role] else [] end) else [] end)
+             + (if $nm != "" then ["--name", $nm] else [] end) end
    elif $n == "formation_report" then ["formation-report.sh"] + (if int("formation_id") == null then [] else [int("formation_id")] end)
    elif $n == "formation_debrief" then ["formation-debrief.sh", (str("summary") | need("summary"))]
    elif $n == "formation_remove" then
       ["formation-remove.sh", (int("member_id") | need("member_id"))] + (if int("formation_id") == null then [] else [int("formation_id")] end)
    elif $n == "formation_roster" then ["formation-roster.sh"]
+   elif $n == "formation_status" then ["formation-status.sh"]
    elif $n == "formation_leave" then ["formation-leave.sh"]
    else error("unknown tool: \($n)") end) as $argv
 | "MMRY_SID=\([$sid] | @sh); MMRY_WD=\([$wd] | @sh); MMRY_ARGV=(\($argv | @sh))"

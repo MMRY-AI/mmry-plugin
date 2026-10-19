@@ -7,7 +7,11 @@
 # missing half: it enrols the session server-side AND records it locally, in that order, so local
 # state can never claim a membership the server did not grant.
 #
-# Usage: formation-join.sh <formationId>
+# Usage: formation-join.sh <formationId> [--name "<name>"]
+#
+# THE MEMBER'S NAME (#31410). Without --name the session's OWN name is used: the Claude Code
+# session title or the Codex thread name (mmry_session_display_name). --name always wins. With no
+# name available none is sent, and the others see this member by role and member id.
 # Exits 0 on success. On failure it exits non-zero and explains itself on stdout, because the
 # calling command passes that explanation straight to the user.
 set -euo pipefail
@@ -22,6 +26,14 @@ MMRY_FORMATION_REPORT_RULE="Report to the lead at every stopping point, with a m
 MMRY_FORMATION_ACK_RULE="When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement."
 
 formation_id="${1:-}"
+[[ $# -gt 0 ]] && shift
+explicit_name=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name) explicit_name="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
+        *) shift ;;
+    esac
+done
 if [[ -z "$formation_id" ]]; then
     echo "Which formation? Usage: $(mmry_host_formation_ref join "<formationId>")"
     exit 1
@@ -52,12 +64,35 @@ else
 fi
 mmry_register_session "$session_id" "$_mmry_client_name" "$PWD" 2>/dev/null || true
 
-if ! mmry_join_formation "$formation_id" "$session_id"; then
+# The name to join under (#31410): the one given, else the session's own, else none.
+display_name="$explicit_name"
+name_was_captured=""
+if [[ -z "$display_name" ]]; then
+    display_name="$(mmry_session_display_name "$session_id" 2>/dev/null || true)"
+    [[ -n "$display_name" ]] && name_was_captured=1
+fi
+
+joined=""
+if mmry_join_formation "$formation_id" "$session_id" "$display_name"; then
+    joined=1
+elif [[ "${MMRY_HTTP_CODE:-0}" == "400" && -n "$name_was_captured" ]]; then
+    # A name nobody typed must never cost the join. The service refused it (400), and a refusal
+    # writes nothing, so join once more without it; the member is then shown by role and id.
+    display_name=""
+    mmry_join_formation "$formation_id" "$session_id" "" && joined=1
+fi
+
+if [[ -z "$joined" ]]; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
         403) echo "Refused. Either you share no access group with whoever created formation ${formation_id}, or your account is not active. An administrator can add you to the group." ;;
         404) echo "Formation ${formation_id} does not exist, or it belongs to another account." ;;
         409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
+        400) if [[ -n "$explicit_name" ]]; then
+                 echo "The server refused that name, and nothing was joined. $(printf '%s' "${MMRY_RESPONSE:-}" | "${MMRY_JQ:-cat}" -r '.errors // .error // . | tostring' 2>/dev/null || true)"
+             else
+                 echo "Could not join formation ${formation_id} (HTTP ${code}). Nothing has been changed locally."
+             fi ;;
         *)   echo "Could not join formation ${formation_id} (HTTP ${code}). Nothing has been changed locally." ;;
     esac
     exit 1
@@ -76,6 +111,26 @@ if [[ -n "$objective" ]]; then
     echo "Joined formation ${formation_id}: ${objective}. Messages from the other members will now be surfaced automatically."
 else
     echo "Joined formation ${formation_id}. Messages from the other members will now be surfaced automatically."
+fi
+
+# WHO THE OTHERS SEE (#31410): this session's own roster entry, read back from the server's answer
+# (the roster carries a session id only on the caller's own rows), never the name that was asked for.
+own_line=""
+if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
+    own_line="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg sid "$session_id" "${MMRY_JQ_NAME_DEFS}"'
+        [(.members // [])[] | select(.sessionId == $sid and .leftDate == null)] | last
+        | if . == null then empty
+          elif ((.displayName // "") | mmry_name_clean) != "" then
+              "You are member \(.id), shown to the others as \"\(.displayName | mmry_name_label)\"."
+          else
+              "You are member \(.id), shown to the others as \(.role // "Member") \(.id), because this session has no name."
+          end' 2>/dev/null || true)"
+fi
+if [[ -n "$own_line" ]]; then
+    printf '%s\n' "${own_line//$'\r'/}"
+    case "$own_line" in
+        *"has no name"*) echo "Give it one with $(mmry_host_formation_ref assign '--name "<name>"')." ;;
+    esac
 fi
 
 # THE MEMBER'S STANDING RULES (#31744). Said at the moment of joining, because it is the one moment

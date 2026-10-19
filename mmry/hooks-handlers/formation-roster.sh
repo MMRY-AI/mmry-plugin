@@ -82,12 +82,14 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # #32270: a member somebody else took off is marked REMOVED, with who did it, because "has left"
 # would say the member chose to go. A server too old to send removedByEmail shows "has left", which
 # is still true.
-printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
+# #31410: each member's NAME sits beside its member id ("  12  Shopware V1.5 PM #1  Lead"); a member
+# with no name reads as its role and id ("  13  Wingman"). mmry_member_line is shared with the
+# status view, so the two cannot describe a member differently.
+printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
     (.members // [])
     | sort_by(.leftDate != null, .id)
     | .[]
-    | "  " + (.id | tostring)
-      + "  " + (.role // "member")
+    | mmry_member_line
       + "  " + (.email // "?")
       + (if .assignment then "  - " + .assignment else "" end)
       + (if .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]" else "" end)
