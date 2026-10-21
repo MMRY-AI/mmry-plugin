@@ -198,7 +198,7 @@ _assert_untouched() {
 
     _run_check PostToolUse parent
     [ "$status" -eq 2 ] || { echo "the lead did not get the message the agent left: ${status} ${output}"; return 1; }
-    [[ "$output" == *"Directed: please rebase onto develop"* ]]
+    [[ "$output" == *"Directed: please rebase onto develop"* ]] || return 1
     [ "$(_state)" = $'4242\n2026-10-21T12:00:00\n901' ]
 }
 
@@ -234,6 +234,6 @@ _assert_untouched() {
     _run_check PostToolUse parent codex
     [ "$status" -eq 0 ]
     [[ "$output" == *'"hookEventName":"PostToolUse"'* ]] || { echo "wrong contract: ${output}"; return 1; }
-    [[ "$output" == *"please rebase onto develop"* ]]
+    [[ "$output" == *"please rebase onto develop"* ]] || return 1
     [ "$(_state)" = $'4242\n2026-10-21T12:00:00\n901' ]
 }
