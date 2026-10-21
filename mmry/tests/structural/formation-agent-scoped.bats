@@ -10,7 +10,7 @@
 # and the lead, whose messages they were, never saw them.
 #
 # WHAT TELLS THEM APART, MEASURED (Claude Code 2.1.306, Windows 11, 2026-10-21; raw payloads in the
-# #31991 handback). A probe hook registered on every event, in a session that dispatched one agent:
+# docs/evidence/31991). A probe hook registered on every event, in a session that dispatched one agent:
 #
 #   parent's own events            session_id=S, no agent_id, no agent_type
 #   dispatched agent's PostToolUse session_id=S, agent_id="add22966ec6f3f9bf", agent_type="general-purpose"

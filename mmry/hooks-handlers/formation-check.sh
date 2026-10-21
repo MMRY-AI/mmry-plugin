@@ -329,7 +329,7 @@ fi
 # the lead never saw them. That is the defect #31991 exists to end.
 #
 # agent_id IS THE TEST, AND agent_type IS NOT. Measured on Claude Code 2.1.306 with a probe hook on
-# every event (the payloads are in the #31991 handback):
+# every event (method and payloads in docs/evidence/31991):
 #   the session's own events          no agent_id, no agent_type
 #   a --agent session's own events    agent_type (the --agent name), NO agent_id
 #   a dispatched agent's PostToolUse  agent_id and agent_type, with the parent's session_id
