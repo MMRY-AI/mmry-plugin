@@ -23,8 +23,8 @@
 #   A, everywhere read: no "record type", "structured record" or "data format".
 #   B, wherever the text is about the database: no "format", "formats", "record", "records",
 #      "recorded" or "recording" as a word. The text is about the database in the seven scripts, in the
-#      database section of a skill (a "## " heading that names records, formats or the
-#      database, down to the next "## " heading), and on any line that names one of the
+#      database section of a skill (a "## " or "### " heading that names records, formats
+#      or the database, down to the next heading of its level), and on any line that names one of the
 #      database's scripts, flags or tools or says "database". Elsewhere these are ordinary
 #      English (a Formation's close-out record, a date format) and are not this feature.
 #
@@ -108,8 +108,10 @@ while IFS= read -r entry; do
             if (kind == "script") {
                 if (raw ~ /^[ \t]*#/) next
             }
-            if (kind == "md" && raw ~ /^## /) {
-                feat = (tolower(raw) ~ /record|(^|[^a-z])formats?([^a-z]|$)|database/) ? 1 : 0
+            if (kind == "md" && raw ~ /^###? /) {
+                hit = (tolower(raw) ~ /record|(^|[^a-z])formats?([^a-z]|$)|database/) ? 1 : 0
+                if (raw ~ /^## /) { feat2 = hit; feat3 = 0 } else { feat3 = hit }
+                feat = feat2 || feat3
             }
 
             lraw = tolower(raw)

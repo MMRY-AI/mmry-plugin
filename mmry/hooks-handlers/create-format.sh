@@ -72,11 +72,11 @@ esac
 
 if mmry_create_format "$NAME" "$FIELDS" "$DESCRIPTION" "$MODE" "$IDENTITY" "$HINTS" "$VISIBILITY"; then
     if [[ -n "${MMRY_JQ:-}" ]]; then
-        printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '"Created record type \(.format.name) with id \(.format.rootId)."'
+        printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '"Created the database \(.format.name) with id \(.format.rootId)."'
     else
         printf '%s\n' "$MMRY_RESPONSE"
     fi
 else
-    _mmry_format_error "create record type"
+    _mmry_format_error "create database"
     exit 1
 fi

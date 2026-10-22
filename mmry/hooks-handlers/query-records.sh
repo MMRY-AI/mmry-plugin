@@ -54,7 +54,7 @@ fi
 if mmry_get_records "$FORMAT_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE"; then
     if [[ -n "${MMRY_JQ:-}" ]]; then
         printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
-            "\(.total) record(s) in \(.format.name):",
+            "\(.total) " + (if .total == 1 then "entry" else "entries" end) + " in \(.format.name):",
             "",
             (.entries[] |
                 # The route answers entryKey, recordedAt and note (the words the record was saved from), not a
@@ -62,7 +62,7 @@ if mmry_get_records "$FORMAT_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE"; 
                 # every record and never showed the words.
                 "id \(.id)"
                     + (if (.entryKey // "") != "" then " | \(.entryKey)" else "" end)
-                    + (if (.recordedAt // "") != "" then " | recorded \(.recordedAt)" else "" end),
+                    + (if (.recordedAt // "") != "" then " | saved \(.recordedAt)" else "" end),
                 (if (.note // "") != "" then "    words: \(.note)" else empty end),
                 (.values | to_entries[] | "    \(.key): " + (if .value == null then "(blank)" elif (.value | type) == "array" then (.value | map(tostring) | join(", ")) else (.value | tostring) end)),
                 "---")'
@@ -70,6 +70,6 @@ if mmry_get_records "$FORMAT_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE"; 
         printf '%s\n' "$MMRY_RESPONSE"
     fi
 else
-    _mmry_format_error "read records"
+    _mmry_format_error "read entries"
     exit 1
 fi

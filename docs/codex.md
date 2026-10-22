@@ -126,7 +126,7 @@ coordination group out**, because it ends the group for everyone in it, and **re
 from one, because that member stops receiving anything. Codex offers to always allow each one;
 choose that and you are not asked again.
 
-**Everything else is a script.** Changing who can see a memory, structured records, the other
+**Everything else is a script.** Changing who can see a memory, your AI database, the other
 formation operations, setup and feedback still run as one of MMRY's scripts. Those reach mmryai.com
 over the network and write in the `mmry` folder of your Codex home, which is outside your project,
 and Codex's default sandbox allows neither (seen in the desktop app on macOS, 2026-10-04). MMRY's

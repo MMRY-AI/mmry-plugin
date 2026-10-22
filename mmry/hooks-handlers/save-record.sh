@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$FORMAT_ID" || -z "$CONTENT" ]]; then
-    echo "Error: --format-id and --content are required. A record is still a memory and still" >&2
+    echo "Error: --format-id and --content are required. An entry is still a memory and still" >&2
     echo "       needs the words it was saved from." >&2
     exit 1
 fi
@@ -58,6 +58,6 @@ if mmry_create_record "$FORMAT_ID" "$CONTENT" "$FIELDS" "$TOPIC" "$SCOPE" "$RECO
         printf '%s\n' "$MMRY_RESPONSE"
     fi
 else
-    _mmry_format_error "save record"
+    _mmry_format_error "save entry"
     exit 1
 fi

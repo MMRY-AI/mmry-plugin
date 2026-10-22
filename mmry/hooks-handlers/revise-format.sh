@@ -76,7 +76,7 @@ fi
 
 if [[ $RETIRE -eq 1 || $REINSTATE -eq 1 ]]; then
     if [[ -n "$FIELDS" || -n "$NAME" || -n "$DESCRIPTION" || -n "$HINTS" ]]; then
-        echo "Error: --retire and --reinstate change whether a type COLLECTS, and take nothing else." >&2
+        echo "Error: --retire and --reinstate change whether a database COLLECTS, and take nothing else." >&2
         echo "       Run this twice if you mean to do both." >&2
         exit 1
     fi
@@ -95,9 +95,9 @@ report() {
     if [[ -n "${MMRY_JQ:-}" ]]; then
         printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
             if .format then
-                "RecordType: \(.format.name) (id \(.format.rootId), version \(.format.version))"
+                "Database: \(.format.name) (id \(.format.rootId), version \(.format.version))"
             elif (.entries != null) then
-                "It still holds \(.entries) record(s)."
+                "It still holds \(.entries) " + (if .entries == 1 then "entry" else "entries" end) + "."
             else tostring end'
     else
         printf '%s\n' "$MMRY_RESPONSE"
@@ -105,14 +105,14 @@ report() {
 }
 
 fail() {
-    _mmry_format_error "revise record type"
+    _mmry_format_error "revise database"
     exit 1
 }
 
 if [[ $RETIRE -eq 1 ]]; then
     mmry_retire_format "$ID" || fail
     report
-    echo "Retired. It keeps every record it holds and they stay readable; it just stops collecting new ones."
+    echo "Retired. It keeps every entry it holds and they stay readable; it just stops collecting new ones."
     exit 0
 fi
 
@@ -128,15 +128,15 @@ if [[ -n "$FIELDS" ]]; then
     # also fix the hints" is one call and one version rather than two of each.
     mmry_revise_format "$ID" "$FIELDS" "$NAME" "$DESCRIPTION" "$HINTS" || fail
     report
-    echo "Published a new version. Everything already recorded is unchanged and still readable;"
-    echo "records from before this version simply have no value for a field it just added."
+    echo "Published a new version. Every entry already saved is unchanged and still readable;"
+    echo "entries from before this version simply have no value for a field it just added."
     exit 0
 fi
 
 if [[ -n "$NAME" || -n "$DESCRIPTION" || -n "$HINTS" ]]; then
     mmry_rename_format "$ID" "$NAME" "$DESCRIPTION" "$HINTS" || fail
     report
-    [[ -n "$HINTS" ]] && echo "Those words now help the assistant choose this type. A save becomes a record when MMRY can tell which type it is, by its name or by these words, and has values for the type's fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."
+    [[ -n "$HINTS" ]] && echo "Those words now help the assistant choose this database. A save becomes an entry when MMRY can tell which database it belongs to, by its name or by these words, and has values for its fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."
     exit 0
 fi
 

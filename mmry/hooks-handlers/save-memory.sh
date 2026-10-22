@@ -119,7 +119,7 @@ if [[ -n "$RECORD_TYPE" || -n "$RECORD_FIELDS" || -n "$RECORD_NAME" ]]; then
     [[ -z "$TOPIC" ]] && missing+=" --topic"
     [[ -z "$CONTENT" ]] && missing+=" --content"
     if [[ -n "$missing" ]]; then
-        echo "Error: a save that names a record type is written directly rather than classified" >&2
+        echo "Error: a save that names a database is written directly rather than classified" >&2
         echo "       by the server, so it needs:${missing}" >&2
         exit 1
     fi

@@ -32,12 +32,12 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | `link-memories.sh` | Link two memories |
 | `search-memories.sh` | Search memories by keyword |
 | `list-groups.sh` | List your permission groups |
-| `list-formats.sh` | List the user's structured record types |
-| `create-format.sh` | Define a new structured record type |
-| `revise-format.sh` | Add a field to a type, rename it, retire it |
-| `save-record.sh` | Record something against a type, or update a record |
-| `query-records.sh` | Read records, filtered on their FIELDS |
-| `record-history.sh` | What a record used to hold, oldest change first |
+| `list-formats.sh` | List the user's databases (their AI database) |
+| `create-format.sh` | Set up a new database |
+| `revise-format.sh` | Add a field to a database, rename it, retire it |
+| `save-record.sh` | Save an entry in a database, or update one |
+| `query-records.sh` | Read entries, filtered on their FIELDS |
+| `record-history.sh` | What an entry used to hold, oldest change first |
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
@@ -63,40 +63,48 @@ mmry_get_active_sessions
 echo "$MMRY_RESPONSE"
 ```
 
-Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for structured records `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`, `mmry_get_record_history`.
+Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`, `mmry_get_record_history`.
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
-## Structured Records
+## Your AI Database
 
-### What they are, and when they are the right answer
+**What to call it.** MMRY AI markets this as **your AI database**: a database your assistant
+builds and fills in while the user talks. One thing the user tracks (their migraine log, their
+expenses, their sales leads) is **a database**; each item saved in it is **an entry**; its named
+values are **fields**. Say those words to the user. The scripts, flags and tools keep older names
+(`create-format.sh`, `--format-id`, `save-record.sh`, `--record-id`, `mmry_record`) because
+installed copies and connected assistants call them by those names; they are code, not words to
+repeat to the user.
+
+### What it is, and when it is the right answer
 
 Almost everything the user saves is an ordinary memory, and the ordinary `save-memory.sh` call is
-the right tool for it. But when they are accumulating **examples of a recurring shape** — every
-migraine and what preceded it, every expense, every job application, every recipe — a **record
-type** stores the same words with **named fields** alongside them. "How many of these had X" then
+the right tool for it. But when they are accumulating **examples of a recurring shape**: every
+migraine and what preceded it, every expense, every job application, every recipe, a **database**
+stores the same words with **named fields** alongside them. "How many of these had X" then
 becomes an answer rather than a guess.
 
-A record is an ordinary memory that additionally carries fields. Everything else about it is
+An entry is an ordinary memory that additionally carries fields. Everything else about it is
 unchanged: it appears in recall, in search and in the user's export, it is deactivated like any
 other, and **the user's own words are always kept verbatim**. Removing one is a deactivation.
 
-**Do not create a type for a single fact, a one-off note, or anything you would not expect a
-second example of.** Left unchecked a model creates one type per conversation and leaves the
-account full of types holding one record each. Run `list-formats.sh` first and reuse what is
-already there.
+**Do not set up a database for a single fact, a one-off note, or anything you would not expect a
+second example of.** Left unchecked a model sets up one per conversation and leaves the account
+full of databases holding one entry each. Run `list-formats.sh` first and reuse what is already
+there.
 
 ### Seeing what the user has
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh"
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh" --id 42   # one type in full
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh" --id 42   # one database in full
 ```
 
-### Defining one
+### Setting one up
 
 Design the fields from what the user actually said, using **their** words as the labels. Rough is
-fine — an unrecognised field type is stored as text rather than refused.
+fine: an unrecognised field type is stored as text rather than refused.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
@@ -111,35 +119,35 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
 
 `--match-hints` are the words the user would actually write about one of these ("migraine,
 headache, aura"). They are shown by `list-formats.sh` so that **you** recognise, in a later
-conversation, that what the user just said is another example of this type.
+conversation, that what the user just said is another example for this database.
 
-**When a save becomes a record.** A save becomes a record when MMRY can tell which type it
-belongs to **and** has values for that type's fields. The type is the one the save names, or the
-one whose hint words appear in it as whole words (the type with the most hint words wins, a tie
-chooses none, and a type with no hint words is never chosen this way). The values are the fields
-the save supplies, or labelled lines such as `Amount: 25`. Without both, the save stays an
-ordinary memory: naming a type with no values stays ordinary, and so do hint words with no
-supplied fields and no labelled lines.
-Naming the type and giving its fields is the reliable way, so when the user tells you something
-in their own words and it fits one of their types, **you** read the values out of their words and
-save it as a record naming the type (see the next section).
+**When a save becomes an entry.** A save becomes an entry when MMRY can tell which database it
+belongs to **and** has values for that database's fields. The database is the one the save names,
+or the one whose hint words appear in it as whole words (the database with the most hint words
+wins, a tie chooses none, and a database with no hint words is never chosen this way). The values
+are the fields the save supplies, or labelled lines such as `Amount: 25`. Without both, the save
+stays an ordinary memory: naming a database with no values stays ordinary, and so do hint words
+with no supplied fields and no labelled lines.
+Naming the database and giving its fields is the reliable way, so when the user tells you
+something in their own words and it fits one of their databases, **you** read the values out of
+their words and save it as an entry naming the database (see the next section).
 Run `list-formats.sh` whenever what they say looks like a recurring shape, so you know which
-types they have.
+databases they have.
 
-`--mode` decides what makes two records the same one:
+`--mode` decides what makes two entries the same one:
 
 | Mode | Use it when | Also needs |
 |------|-------------|-----------|
-| `append` | every entry is new and nothing is ever revised — a symptom log, expenses | |
-| `keyed` | records are named things that each change on their own — tasks, contacts, recipes | `--identity-field` |
-| `singleton` | there is only ever one — "my spouse", "this laptop" | |
+| `append` | every entry is new and nothing is ever revised: a log, such as symptoms or expenses | |
+| `keyed` | entries are named things that each change on their own: a list of tasks, contacts, recipes | `--identity-field` |
+| `singleton` | there is only ever one: "my spouse", "this laptop" | |
 
-### Recording against one
+### Saving an entry
 
 Two ways, and the difference matters:
 
-**As part of an ordinary save.** The user asked you to remember something, and the record is a
-decoration on that. Name the type and hand over the values you read out of their words:
+**As part of an ordinary save.** The user asked you to remember something, and the entry is a
+decoration on that. Name the database and hand over the values you read out of their words:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
@@ -150,20 +158,22 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --record-fields '{"severity":7,"triggers":["red wine","poor sleep"],"duration":"about five hours"}'
 ```
 
-**A save carrying a record type is classified by you, not by the server.** The ordinary save hands
+`--record-type` takes the database's name and `--record-fields` its field values.
+
+**A save naming a database is classified by you, not by the server.** The ordinary save hands
 your context to the server's AI layer, which picks tier, category and scope and may extract
-several memories from one context — and a set of fields has no single memory to belong to there.
+several memories from one context, and a set of fields has no single memory to belong to there.
 So this one writes **one** memory directly, and `--tier`, `--category`, `--scope`, `--topic` and
 `--content` are all required. The script says which are missing rather than letting the server
 refuse.
 
-**A save that names a type the server cannot use keeps the words.** A type that does not exist, a
-field it does not declare, a value too long for its column: all of them cost the structure and
-keep the words. The script prints `RecordedAs:` so you can tell which happened. **Report what
-actually happened**: saying "recorded in your migraine log" when it was stored as ordinary text
-is worse than saying nothing.
+**A save that names a database the server cannot use keeps the words.** A database that does not
+exist, a field it does not declare, a value too long for its column: all of them cost the fields
+and keep the words. The script prints `RecordedAs:` (the database the entry went into, or none) so
+you can tell which happened. **Report what actually happened**: saying "saved in your migraine
+log" when it was stored as ordinary text is worse than saying nothing.
 
-**A refused record save saves nothing.** If `--record-fields` is not one valid JSON object, the
+**A refused entry save saves nothing.** If `--record-fields` is not one valid JSON object, the
 server refuses the whole request and the script exits 1. It prints the server's reason, which
 looks like this:
 
@@ -175,7 +185,7 @@ Nothing was saved. Check that --record-fields is one valid JSON object, then run
 There is no `NewMemoryID` and no `RecordedAs`, and the user's words are NOT stored. Fix the
 fields and run the same save again, and tell the user it did not go through until it has.
 
-**As the request itself**, when writing the record *is* what the user asked for. This one
+**As the request itself**, when saving the entry *is* what the user asked for. This one
 **refuses** rather than falling back, so a mistyped field name comes back as an error naming the
 field:
 
@@ -186,16 +196,17 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-record.sh" \
   --fields '{"title":"Rewire the settings page","status":"done"}'
 ```
 
-Read the outcome and report it: `structured.created` is a new record, `structured.updated`
-changed an existing one, and `text.degraded` means the words were saved and the fields were not.
+`--format-id` is the database's id, from `list-formats.sh`. Read the outcome and report it:
+`structured.created` is a new entry, `structured.updated` changed an existing one, and
+`text.degraded` means the words were saved and the fields were not.
 An update changes **only** the fields you send; anything you leave out keeps its current value,
 and sending a field as `null` clears it.
 
-### Changing a type that already exists
+### Changing a database that already exists
 
 The shape of what somebody is collecting is **never right the first time**. When they want a
-field the type does not have, do not create a second type for the same thing — revise the one
-they have.
+field the database does not have, do not set up a second database for the same thing: revise the
+one they have.
 
 ```bash
 # add a field: send the WHOLE field list, not just the new one
@@ -211,24 +222,24 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --retire
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --reinstate
 ```
 
-**`--fields` replaces the whole list rather than appending to it.** Read the type first with
+**`--fields` replaces the whole list rather than appending to it.** Read the database first with
 `list-formats.sh --id 42`, take the fields it reports, add yours, and send the lot. A field you
-leave out is not deleted — the records carrying it keep it and stay readable — but the new
-version stops collecting it, which is rarely what the user meant.
+leave out is not deleted (the entries carrying it keep it and stay readable) but the new version
+stops collecting it, which is rarely what the user meant.
 
-**Revising publishes a new version and destroys nothing.** Every record already stored stays
-where it is and stays readable; records from before the change simply have no value for a field
-that did not exist yet. Filters and sorts span every version, so older records still come back.
+**Revising publishes a new version and destroys nothing.** Every entry already stored stays where
+it is and stays readable; entries from before the change simply have no value for a field that
+did not exist yet. Filters and sorts span every version, so older entries still come back.
 
-**Retiring is not deleting**, and it is worth saying so in those words — it sounds destructive
-and is not. A retired type keeps every record it holds, they stay searchable and stay in the
-user's export, and it simply stops collecting new ones. There is no way to delete a type, by
+**Retiring is not deleting**, and it is worth saying so in those words: it sounds destructive and
+is not. A retired database keeps every entry it holds, they stay searchable and stay in the
+user's export, and it simply stops collecting new ones. There is no way to delete a database, by
 design.
 
-### Asking questions of them
+### Asking questions of it
 
 This is what the whole thing is for. Use it when the question depends on the **values** rather
-than on the wording — how many, which ones, since when, sorted by what:
+than on the wording: how many, which ones, since when, sorted by what:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 --filter status=open
@@ -236,22 +247,23 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 \
   --filter severity=7 --order "createdDate desc" --page-size 20
 ```
 
-Filters are ANDed and they span **every version** of the type, so improving a type's shape later
-does not strand what was recorded under the old one. Every record comes back with every field the
-type declares, blank where nothing was recorded.
+Filters are ANDed and they span **every version** of the database, so improving its shape later
+does not strand what was saved under the old one. Every entry comes back with every field the
+database declares, blank where nothing was saved.
 
-`--order` takes a field key the type declares, or `createdDate`, each optionally followed by
+`--order` takes a field key the database declares, or `createdDate`, each optionally followed by
 ` asc` or ` desc`. `recent` and `oldest` are aliases for `createdDate desc` and `createdDate asc`.
 **A field key on its own sorts ascending; leaving `--order` out sorts newest first.** A `number`
-field sorts numerically, so 7 comes before 10; a `date` field sorts chronologically; a record that
-never recorded the field sorts last in both directions. Ordering by a `list` field, or by a key
-the type does not declare, comes back as an error naming the key rather than being ignored.
+field sorts numerically, so 7 comes before 10; a `date` field sorts chronologically; an entry with
+no value for the field sorts last in both directions. Ordering by a `list` field, or by a key the
+database does not declare, comes back as an error naming the key rather than being ignored.
 
-### Correcting a record
+### Correcting an entry
 
-A record written anywhere, here, through the connector, in the account area or over the REST
-API, is corrected from here the same way: find its id with `query-records.sh`, then send only what
-changes with `save-record.sh --record-id`. The words can be corrected too, with `--content`.
+An entry saved anywhere, here, through the connector, in the account area or over the REST API,
+is corrected from here the same way: find its id with `query-records.sh`, then send only what
+changes with `save-record.sh --record-id` (the entry's id). The words can be corrected too, with
+`--content`.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 --filter title="Rewire the settings page"
@@ -261,12 +273,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-record.sh" --format-id 42 --reco
 
 The outcome must read `structured.updated`. Anything else, report what it says.
 
-### What a record used to hold
+### What an entry used to hold
 
-Every change to a record is recorded as it happens, including the values it was first created
-with. Reach for this **before** telling the user a value has "always" been anything, and whenever
-they ask how something got to where it is: when a task moved to done, what a dose was before it
-was raised, whether they have already corrected this once.
+Every change to an entry is kept as it happens, including the values it was first saved with.
+Reach for this **before** telling the user a value has "always" been anything, and whenever they
+ask how something got to where it is: when a task moved to done, what a dose was before it was
+raised, whether they have already corrected this once.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/record-history.sh" --format-id 42 --record-id 9137
@@ -276,23 +288,23 @@ Changes come back **oldest first**, each naming the field, what it was, what it 
 who changed it. EIGHT names in the list are not fields but reserved keys, and each one arrives
 with a plain-English label you should use when you tell the customer what happened, rather than
 reading them the raw sentinel: the memory's own words, its topic, who can see it, its category,
-how long it lasts, its record name, the retired record it replaces, and the moment it was retired.
-The first two the customer can correct directly; the other six record things that happened to the
-record. `~content~` is the memory's own words and
+how long it lasts, its entry name, the retired entry it replaces, and the moment it was retired.
+The first two the customer can correct directly; the other six note things that happened to the
+entry. `~content~` is the memory's own words and
 `~topic~` is its topic, both of which the user can also correct.
 
-**A record on another account and a record that does not exist answer identically.** Do not report
-"it exists but you cannot see it" on a not-found: you do not know that, and saying it would be the
-disclosure the sameness exists to prevent.
+**An entry on another account and an entry that does not exist answer identically.** Do not
+report "it exists but you cannot see it" on a not-found: you do not know that, and saying it
+would be the disclosure the sameness exists to prevent.
 
-### One account, every surface
+### One database, every surface
 
-The same record types and the same records are reached from the MMRY connector (ChatGPT, Cursor,
+The same databases and the same entries are reached from the MMRY connector (ChatGPT, Cursor,
 Claude Desktop and the user's other connected tools) through the `mmry_format_*`, `mmry_record` and `mmry_record_history` tools,
-and over the REST API. **A customer can also correct a record themselves**, without asking anyone,
-at `mmryai.com/records` in their account area. A type defined here is visible there, a record
-written there is readable here, and a correction made in any of them is immediately true in all of
-them - there is one record and one update path, not a copy per client. Say so if the user asks:
+and over the REST API. **A customer can also correct an entry themselves**, without asking anyone,
+at `mmryai.com/records` in their account area. A database set up here is visible there, an entry
+saved there is readable here, and a correction made in any of them is immediately true in all of
+them: there is one entry and one update path, not a copy per client. Say so if the user asks:
 this is one account, not one client's private feature.
 
 ## Mid-Session Loading
