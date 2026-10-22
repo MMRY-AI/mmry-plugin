@@ -24,7 +24,7 @@ setup() {
 @test "list-formats: reads GET /api/data-formats and names each type" {
     run bash "$HANDLERS/list-formats.sh"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"2 record type(s)"* ]] || return 1
+    [[ "$output" == *"2 database(s)"* ]] || return 1
     [[ "$output" == *"Migraine log"* ]] || return 1
     [[ "$output" == *"Expenses"* ]] || return 1
     grep -q "GET http://localhost:5291/api/data-formats" "$LOG"
@@ -33,7 +33,7 @@ setup() {
 @test "list-formats: a type with no match hints says so, and says when a save becomes a record" {
     run bash "$HANDLERS/list-formats.sh"
     [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
-    [[ "$output" == *"a save becomes a record when it names this type and has values for its fields"* ]] || return 1
+    [[ "$output" == *"a save becomes an entry when it names this database and has values for its fields"* ]] || return 1
     # A type with hints says it can also be chosen by its words; a type with none must not.
     echo "$output" | grep "words that help choose it: (none)" | grep -q "or contains these words" && return 1
     echo "$output" | grep -v "(none)" | grep -q "or contains these words"
@@ -43,7 +43,7 @@ setup() {
 @test "list-formats: --id reads one type and lists its fields" {
     run bash "$HANDLERS/list-formats.sh" --id 42
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"Record type: Migraine log"* ]] || return 1
+    [[ "$output" == *"Database: Migraine log"* ]] || return 1
     [[ "$output" == *"severity (number)"* ]] || return 1
     [[ "$output" == *"triggers (list)"* ]] || return 1
     grep -q "GET http://localhost:5291/api/data-formats/42" "$LOG"
@@ -75,7 +75,7 @@ setup() {
     run bash "$HANDLERS/create-format.sh" --name "Migraine log" \
         --fields '[{"key":"severity","type":"number"}]' --match-hints "migraine, aura"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"Created record type Migraine log with id 42."* ]] || return 1
+    [[ "$output" == *"Created the database Migraine log with id 42."* ]] || return 1
     grep -q 'POST http://localhost:5291/api/data-formats' "$LOG"
     grep -q '"fieldSchema":"\[{\\"key\\":\\"severity\\"' "$LOG"
     grep -q '"matchHints":"migraine, aura"' "$LOG"
@@ -107,7 +107,7 @@ setup() {
     run bash "$HANDLERS/revise-format.sh" --id 42 --fields '[{"key":"severity","type":"number"}]'
     [[ "$status" -eq 0 ]] || return 1
     grep -q "POST http://localhost:5291/api/data-formats/42/versions" "$LOG"
-    [[ "$output" == *"RecordType: Migraine log (id 42, version 2)"* ]] || return 1
+    [[ "$output" == *"Database: Migraine log (id 42, version 2)"* ]] || return 1
     [[ "$output" == *"still readable"* ]] || return 1
 }
 
@@ -123,7 +123,7 @@ setup() {
     run bash "$HANDLERS/revise-format.sh" --id 42 --retire
     [[ "$status" -eq 0 ]] || return 1
     grep -q "POST http://localhost:5291/api/data-formats/42/retire" "$LOG"
-    [[ "$output" == *"It still holds 41 record(s)."* ]] || return 1
+    [[ "$output" == *"It still holds 41 entries."* ]] || return 1
     [[ "$output" == *"stops collecting new ones"* ]] || return 1
 }
 
@@ -210,7 +210,7 @@ setup() {
 @test "query-records: reports the total and every field of every record" {
     run bash "$HANDLERS/query-records.sh" --format-id 42
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"2 record(s) in Migraine log:"* ]] || return 1
+    [[ "$output" == *"2 entries in Migraine log:"* ]] || return 1
     [[ "$output" == *"severity: 7"* ]] || return 1
     [[ "$output" == *"triggers: red wine"* ]] || return 1
 }
@@ -415,7 +415,7 @@ _mmry_no_jq() {
     export MOCK_CURL_RESPONSE='{"entryId":9137,"changes":0,"history":[]}'
     run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"Nothing has changed since this record was written."* ]] || return 1
+    [[ "$output" == *"Nothing has changed since this entry was saved."* ]] || return 1
 }
 
 @test "record-history: a not-found is an error carrying the 404, with no claim it exists" {
@@ -520,7 +520,7 @@ _mmry_no_jq() {
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     grep -qF 'Error (HTTP 400): {"error":"Request body is required.","detail":null}' "$skill" || return 1
     grep -qF 'Nothing was saved.' "$skill" || return 1
-    grep -q 'A refused record save saves nothing' "$skill" || return 1
+    grep -q 'A refused entry save saves nothing' "$skill" || return 1
     ! grep -q 'This can never cost the save' "$skill"
 }
 
@@ -537,5 +537,5 @@ _mmry_no_jq() {
         fi
     done
     # And the SKILL states the rule in both halves.
-    grep -q "belongs to \*\*and\*\* has values for that type's fields" "$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+    grep -q "belongs to \*\*and\*\* has values for that database's fields" "$PLUGIN_ROOT/skills/memory-system/SKILL.md"
 }

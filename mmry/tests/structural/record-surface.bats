@@ -110,7 +110,7 @@ RECORD_HANDLERS=(
 
 @test "SKILL.md documents the structured-record surface" {
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
-    grep -q '## Structured Records' "$skill" || fail "SKILL.md has no Structured Records section"
+    grep -q '## Your AI Database' "$skill" || fail "SKILL.md has no AI database section (#32457, DD-150)"
     local missing=""
     for h in "${RECORD_HANDLERS[@]}"; do
         grep -q "$h" "$skill" || missing+=" $h"
@@ -136,8 +136,8 @@ RECORD_HANDLERS=(
 
 @test "SKILL.md documents record history and correction (#31827)" {
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
-    grep -q '### What a record used to hold' "$skill" || fail "no 'What a record used to hold' section"
-    grep -q '### Correcting a record' "$skill" || fail "no 'Correcting a record' section"
+    grep -q '### What an entry used to hold' "$skill" || fail "no 'What an entry used to hold' section"
+    grep -q '### Correcting an entry' "$skill" || fail "no 'Correcting an entry' section"
     grep -q 'mmryai.com/records' "$skill" || fail "SKILL.md never tells the assistant about mmryai.com/records"
     grep -q 'mmry_record_history' "$skill" || fail "'One account, every surface' omits the connector's history tool"
 }
@@ -150,8 +150,8 @@ RECORD_HANDLERS=(
     if grep -qi 'later ordinary save. be recognised and recorded\|recorded here without the user asking' "$skill"; then
         fail "SKILL.md still claims match hints alone route a plain save into a record type"
     fi
-    grep -q 'When a save becomes a record' "$skill" \
-        || fail "SKILL.md does not state when a save becomes a record"
-    grep -q 'Naming the type and giving its fields is the reliable way' "$skill" \
-        || fail "SKILL.md does not tell the assistant to name the type"
+    grep -q 'When a save becomes an entry' "$skill" \
+        || fail "SKILL.md does not state when a save becomes an entry"
+    grep -q 'Naming the database and giving its fields is the reliable way' "$skill" \
+        || fail "SKILL.md does not tell the assistant to name the database"
 }
