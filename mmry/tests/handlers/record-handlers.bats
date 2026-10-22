@@ -486,7 +486,7 @@ _mmry_no_jq() {
     run bash "$HANDLERS/query-records.sh" --format-id 42
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"words: Migraine on Tuesday after red wine."* ]] || return 1
-    [[ "$output" == *"id 1 | recorded 2026-10-07T09:00:00"* ]] || return 1
+    [[ "$output" == *"id 1 | saved 2026-10-07T09:00:00"* ]] || return 1
     [[ "$output" != *"(no topic)"* ]] || return 1
 }
 
@@ -495,7 +495,7 @@ _mmry_no_jq() {
 @test "revise-format: --match-hints says the words help choose the type, never that a save is filed by them (#32002)" {
     run bash "$HANDLERS/revise-format.sh" --id 42 --match-hints "migraine, headache"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"Those words now help the assistant choose this type. A save becomes a record when MMRY can tell which type it is, by its name or by these words, and has values for the type's fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."* ]] || return 1
+    [[ "$output" == *"Those words now help the assistant choose this database. A save becomes an entry when MMRY can tell which database it belongs to, by its name or by these words, and has values for its fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."* ]] || return 1
     [[ "$output" != *"recognised"* ]] || return 1
     [[ "$output" != *"from now on"* ]] || return 1
 }
