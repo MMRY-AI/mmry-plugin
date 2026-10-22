@@ -43,14 +43,17 @@ FAKECURL
 
 teardown() {
     local p
-    [[ -n "${STOPFILE:-}" ]] && touch "$STOPFILE"
+    if [[ -n "${STOPFILE:-}" ]]; then
+        touch "$STOPFILE" 2>/dev/null || true
+        wait "${SERVER_JOB:-}" 2>/dev/null || true
+    fi
     for p in $LIVE_PIDS; do kill "$p" 2>/dev/null || true; done
     rm -rf "$TEST_TMPDIR"
 }
 
 # A process that is alive for the length of a test, standing in for a running server.
 _live_pid() {
-    sleep 120 &
+    sleep 120 3>&- &
     LIVE_PID=$!
     LIVE_PIDS="$LIVE_PIDS $LIVE_PID"
 }
@@ -69,8 +72,8 @@ _start_real_server() {
     local init call
     init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
     call="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"formation_roster\",\"arguments\":{},\"_meta\":{\"sessionId\":\"$SID\"}}}"
-    { printf '%s\n%s\n' "$init" "$call"; while [ ! -f "$STOPFILE" ]; do sleep 0.2; done; } \
-        | bash "$SERVER" > "$TEST_TMPDIR/server.out" 2> "$TEST_TMPDIR/server.err" &
+    { printf '%s\n%s\n' "$init" "$call"; while [ ! -f "$STOPFILE" ] && [ -d "$TEST_TMPDIR" ]; do sleep 0.2; done; } 3>&- \
+        | bash "$SERVER" > "$TEST_TMPDIR/server.out" 2> "$TEST_TMPDIR/server.err" 3>&- &
     SERVER_JOB=$!
     local i=0
     while (( i < 100 )); do
