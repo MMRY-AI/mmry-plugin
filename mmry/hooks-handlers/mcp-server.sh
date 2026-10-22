@@ -62,6 +62,23 @@ export MMRY_HOST="${MMRY_HOST:-codex}"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-host.sh"
 
+# WHAT THIS SERVER LEAVES BEHIND FOR THE CUSTOMER (#32602). A start, a failed start, a running
+# process, and which conversation each process has served, so tools-check.sh can say in one step
+# why a conversation has no MMRY tools, and the Formation delivery hook can say so instead of staying
+# silent. Recorded before anything below can stop the start, so a failure after this line is named.
+# The records are a diagnosis, never a condition of serving: if the library is missing or will not
+# load, the same names do nothing and the tools are served exactly as before.
+mmry_ts_record_launch() { return 0; }
+mmry_ts_record_failure() { return 0; }
+mmry_ts_record_running() { return 0; }
+mmry_ts_record_exit() { return 0; }
+mmry_ts_record_session() { return 0; }
+if [[ -f "${HANDLER_DIR}/lib-tool-server.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${HANDLER_DIR}/lib-tool-server.sh" 2>/dev/null || true
+fi
+mmry_ts_record_launch "$PLUGIN_ROOT" || true
+
 # The jq resolver only. lib-jq.sh refuses to load on Codex without a credential, which is right for a
 # handler and wrong here: with no credential this server must still answer, so the assistant can be
 # told to run setup. Each handler it starts makes that check for itself, unaffected by this.
@@ -76,6 +93,7 @@ mmry_resolve_jq >/dev/null 2>&1 || true
 set +e
 if [[ -z "${MMRY_JQ:-}" ]]; then
     echo "MMRY AI MCP server: no usable jq was found, so it cannot start." >&2
+    mmry_ts_record_failure "no usable jq was found, so it could not start"
     exit 1
 fi
 JQ="$MMRY_JQ"
@@ -459,7 +477,10 @@ _mcp_tools_call() {
     MMRY_SID="" MMRY_WD=""
     MMRY_ARGV=()
     eval "$setup"
-    if [[ "$name" == formation_* || "$name" == memory_load ]] && [[ -z "$MMRY_SID" ]]; then
+    # Which conversation this process serves, so the Formation delivery hook can tell whether that
+    # conversation still has its tools (#32602). Once per conversation per process.
+    mmry_ts_record_session "$MMRY_SID"
+    if [[ "$name" == formation_*|| "$name" == memory_load ]] && [[ -z "$MMRY_SID" ]]; then
         # #31743: no script is offered here. The script would run in the sandbox and need Internet
         # access approval, which is the prompt this server exists to remove, and every Codex release
         # this was built against sends the conversation id on each call.
@@ -522,6 +543,10 @@ _mcp_dispatch() {
         *) _mcp_error "$id" -32601 "Method not found: ${method}" ;;
     esac
 }
+
+# Running from here on, and no longer once this process ends, however the loop ends (#32602).
+mmry_ts_record_running "$MMRY_MCP_VERSION"
+trap 'mmry_ts_record_exit' EXIT
 
 while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
