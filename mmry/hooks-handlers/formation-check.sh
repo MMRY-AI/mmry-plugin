@@ -827,6 +827,25 @@ _poll_once() {
     FORMATION_BLOCK+="are about to touch. A report to the lead is always worth sending: tell the lead when${nl}"
     FORMATION_BLOCK+="you finish, are blocked, are waiting, or stop with work still running. Beyond that,${nl}"
     FORMATION_BLOCK+="reply to the formation only when you have something worth transmitting."
+    # MESSAGES WITH NO TOOLS TO ANSWER THEM, SAID RATHER THAN LEFT SILENT (#32602 requirement 4).
+    # On Codex these messages arrive through hooks, which do not need MMRY's tool server, so a
+    # conversation whose server is not running still receives them and has no formation_say to
+    # reply with. When nothing shows a server running for this conversation, the block says so and
+    # how to get the tools back without giving up this conversation's place in the Formation. With
+    # the server running the block is byte for byte what it was. Codex only: Claude Code has no
+    # tool server. Appended after "transmitting." with no newline after it, which keeps the prompt
+    # path's .[:-1] taking off exactly the here-string's own newline.
+    _mmry_host_resolve
+    if [[ "$_MMRY_HOST_V" == "codex" && -f "${HANDLER_DIR}/lib-tool-server.sh" ]] \
+        && source "${HANDLER_DIR}/lib-tool-server.sh" 2>/dev/null; then
+        mmry_ts_status "$session_id" || true
+        if [[ "${MMRY_TS_STATE:-}" == "not-started" ]]; then
+            mmry_ts_missing_notice "$session_id" || true
+            if [[ -n "${MMRY_TS_NOTICE:-}" ]]; then
+                FORMATION_BLOCK+="${nl}${nl}${MMRY_TS_NOTICE}"
+            fi
+        fi
+    fi
     FORMATION_NEWEST="$newest"
     FORMATION_DIRECTED_IDS="${directed_ids//[!0-9,]/}"
     return 0
