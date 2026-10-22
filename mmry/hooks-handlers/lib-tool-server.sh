@@ -80,6 +80,7 @@ _mmry_ts_read2() {
 #   this-conversation  the server that served this conversation's last tool call is alive
 #   unattributed       a server is alive that started after this conversation's last record, or
 #                      this conversation has no record; it may be this conversation's
+#   starting           the last server started is alive and has not finished starting
 #   stopped            this conversation's server is gone and none has started since
 #   never              no server is alive and none has ever recorded a start here
 #   failed             no server is alive and the last start recorded why it could not finish
@@ -118,6 +119,16 @@ mmry_ts_status() {
             return 0
         fi
     done
+    # A server that has been started and is still getting ready counts as running: a reopened
+    # conversation's SessionStart delivery can run while Codex is still starting the server, and
+    # telling the customer the tools are missing at that moment would be wrong a second later.
+    if _mmry_ts_read2 "${MMRY_TS_DIR}/launched"; then
+        [[ "$MMRY_TS_L1" =~ ^[0-9]+$ ]] || MMRY_TS_L1=0
+        if (( MMRY_TS_L1 >= since )) && mmry_ts_pid_alive "$MMRY_TS_L2"; then
+            MMRY_TS_STATE="running"; MMRY_TS_DETAIL="starting"
+            return 0
+        fi
+    fi
     [[ "$MMRY_TS_DETAIL" == "stopped" ]] && return 0
     if [[ -f "${MMRY_TS_DIR}/failed" ]]; then
         MMRY_TS_DETAIL="failed"

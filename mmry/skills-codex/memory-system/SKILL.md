@@ -44,9 +44,14 @@ retiring takes a memory out of recall, a debrief ends the formation for every me
 member takes that member out of the formation. Tell the customer they can choose to always allow
 each one, and they will not be asked again.
 
-**If the mmry_plugin tools are not offered at all,** MMRY's tool server did not start. Tell the
-customer, and ask them to restart Codex; if the tools are still missing, report a problem (see the
-end of this skill). Do not substitute a script for one of these operations.
+**If the mmry_plugin tools are not offered at all,** MMRY's tool server is not running for this
+conversation. Tell the customer, and find out why with the missing-tools check under "If the MMRY
+tools are missing" below: it is one command, needs no network and changes nothing. The recovery
+keeps this conversation's place in a Formation: quit Codex completely, then reopen THIS SAME
+conversation. Never recover by starting a new conversation, by leaving and rejoining the Formation,
+or by using the `mmry_formation_*` connector tools: each of those joins as someone else. A
+Formation message that arrives while the tools are missing says so itself; tell the customer when
+you see it. Do not substitute a script for one of these operations.
 
 ## What happens without you doing anything
 
@@ -371,6 +376,30 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/setup/mmry-setup.sh"
 
 It opens a browser for the customer to sign in at mmryai.com and writes the credential. After it
 finishes, the customer restarts Codex.
+
+### If the MMRY tools are missing
+
+When this conversation is offered no mmry_plugin tools, find out why in one step:
+
+```bash
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/tools-check.sh"
+```
+
+It needs no network and changes nothing, so it runs in the sandbox without asking for access. Its
+first line is `MMRY tools: running` or `MMRY tools: not started`; the `Why:` line names the reason,
+and the rest says how to get the tools back. Tell the customer what it says, in plain words.
+
+The recovery is always the same shape: fix what the check names, quit Codex completely, then reopen
+THIS SAME conversation (in the desktop app, from the conversation list; in a terminal,
+`codex resume` with the id the check prints). Reopening the same conversation keeps its place in a
+Formation and its member id. Never recover by starting a new conversation, by leaving and rejoining
+the Formation, or by using the `mmry_formation_*` connector tools: each of those joins as someone
+else, so the other members see a new member and this conversation's messages stop arriving.
+
+If the check says MMRY's launcher is not marked executable, the customer runs the same command with
+`--recover` added, in a terminal; that is the one thing it repairs, and it never touches a Formation
+membership. If the tools are still missing after the recovery, report a problem (below), and paste
+the check's output into it.
 
 ### Reporting a problem
 

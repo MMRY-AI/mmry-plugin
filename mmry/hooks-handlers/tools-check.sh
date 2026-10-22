@@ -127,6 +127,8 @@ if [[ "$state" == "running" && "$plugin_disabled" == 0 && -z "$launcher_problem"
     echo "MMRY tools: running"
     if [[ "$detail" == "this-conversation" ]]; then
         echo "MMRY's tool server is running for this conversation."
+    elif [[ "$detail" == "starting" ]]; then
+        echo "MMRY's tool server is starting. Check again in a few seconds."
     else
         echo "MMRY's tool server is running on this machine."
     fi
