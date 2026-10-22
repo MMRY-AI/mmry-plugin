@@ -277,7 +277,12 @@ source "${HANDLER_DIR}/lib-hookread.sh" 2>/dev/null || exit 0
 
 session_id=""
 hook_event=""
+hook_agent_id=""
 hook_read_status="notty"
+# The three fields this hook takes from the payload, in ONE jq call. agent_id is the third (#31991):
+# see THE SESSION ITSELF, NOT AN AGENT IT DISPATCHED, below the parse. tostring, so an id that ever
+# arrives as a number is still seen as present.
+_fc_payload_fields='[(.session_id // ""), (.hook_event_name // ""), (.agent_id // "" | tostring)] | @tsv'
 if [[ ! -t 0 ]]; then
     mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
     payload="${MMRY_HOOK_PAYLOAD:-}"
@@ -294,18 +299,20 @@ if [[ ! -t 0 ]]; then
     # A here-string, not `printf | jq`: the pipeline was one more process (#31976). Same bytes in,
     # plus the newline a here-string ends with, which jq reads as whitespace.
     if [[ -n "$payload" && -n "${MMRY_JQ:-}" ]]; then
-        parsed="$("$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' <<< "$payload" 2>/dev/null || true)"
+        parsed="$("$MMRY_JQ" -r "$_fc_payload_fields" <<< "$payload" 2>/dev/null || true)"
         # A jq that has not been proved and did not answer: prove one the old way, and ask again.
         if [[ "$parsed" != *$'	'* && -n "$_fc_jq_unproved" ]]; then
             _fc_resolve_jq
             if [[ -n "${MMRY_JQ:-}" ]]; then
-                parsed="$("$MMRY_JQ" -r '[(.session_id // ""), (.hook_event_name // "")] | @tsv' <<< "$payload" 2>/dev/null || true)"
+                parsed="$("$MMRY_JQ" -r "$_fc_payload_fields" <<< "$payload" 2>/dev/null || true)"
             fi
         fi
         # @tsv always emits the separator, so a missing tab means jq produced nothing at all.
         if [[ "$parsed" == *$'	'* ]]; then
             session_id="${parsed%%$'	'*}"
-            hook_event="${parsed#*$'	'}"
+            _fc_rest="${parsed#*$'	'}"
+            hook_event="${_fc_rest%%$'	'*}"
+            [[ "$_fc_rest" == *$'	'* ]] && hook_agent_id="${_fc_rest#*$'	'}"
             # It answered, so it runs: the client's mmry_resolve_jq need not ask again.
             if [[ -n "$_fc_jq_unproved" ]]; then
                 _MMRY_JQ_VERIFIED="$MMRY_JQ"; export MMRY_JQ; _fc_jq_unproved=""
@@ -313,6 +320,30 @@ if [[ ! -t 0 ]]; then
         fi
     fi
 fi
+# ---- THE SESSION ITSELF, NOT AN AGENT IT DISPATCHED (#31991) ---------------------------------
+# A formation message is addressed to a SESSION, and it must be shown in that session. Claude Code
+# also runs this hook for the tool calls of an agent the session dispatched, and it gives that call
+# the PARENT's session_id - the agent's Bash shell even inherits the parent's CLAUDE_CODE_SESSION_ID,
+# so the registration's gate passes too. Before this, a lead with an agent running had its pending
+# messages printed into the agent's context and recorded as seen: the agent cannot act on them, and
+# the lead never saw them. That is the defect #31991 exists to end.
+#
+# agent_id IS THE TEST, AND agent_type IS NOT. Measured on Claude Code 2.1.306 with a probe hook on
+# every event (method and payloads in docs/evidence/31991):
+#   the session's own events          no agent_id, no agent_type
+#   a --agent session's own events    agent_type (the --agent name), NO agent_id
+#   a dispatched agent's PostToolUse  agent_id and agent_type, with the parent's session_id
+#   a dispatched agent's SubagentStop agent_id and agent_type, with the parent's session_id
+# A formation lead usually runs with --agent, so skipping on agent_type would silence the very
+# session the message is for. Codex has the same shape: codex-rs hooks/src/schema.rs serialises
+# agent_id only for a thread-spawned subagent, and subagent hooks carry the parent's session id.
+#
+# So an event that names an agent leaves here, before the membership record is read: nothing is
+# polled (a poll moves the read position and reports directed lines as read), nothing is shown,
+# nothing is marked, and no idle watch or lock is started. The parent's own next event delivers it,
+# exactly once, through the ordinary path below. No process is spent: the field came out of the
+# one jq call above.
+[[ -z "$hook_agent_id" ]] || exit 0
 # Nothing proved the jq above (no payload, or one that did not parse): prove it the old way now.
 if [[ -n "$_fc_jq_unproved" ]]; then
     _fc_resolve_jq
