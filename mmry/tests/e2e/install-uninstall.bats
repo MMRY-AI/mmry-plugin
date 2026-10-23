@@ -240,9 +240,10 @@ _assert_only_customer_permissions_left() {
     local py=""
     command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(sys.version_info[0] < 3)' && py=python3
     [[ -n "$py" ]] || skip "python3 is not available"
-    # A copy beside an empty hooks-handlers: lib-jq.sh cannot be sourced, so the fallback runs. The
-    # directory exists because bash 3.2 (macOS) aborts this script under set -e when it does not.
+    # A copy whose lib-jq.sh finds no jq, which is the condition that reaches the fallback. A stub,
+    # not a missing file: bash 3.2 (macOS) aborts under set -e when a sourced file is missing.
     mkdir -p "$TEST_TMPDIR/bare/setup" "$TEST_TMPDIR/bare/hooks-handlers"
+    printf '%s\n' 'mmry_resolve_jq() { return 1; }' > "$TEST_TMPDIR/bare/hooks-handlers/lib-jq.sh"
     cp "$UNINSTALL_SCRIPT" "$TEST_TMPDIR/bare/setup/uninstall.sh"
     _seed_upgraded_settings "$HOME/.claude/settings.json"
     run bash "$TEST_TMPDIR/bare/setup/uninstall.sh"
