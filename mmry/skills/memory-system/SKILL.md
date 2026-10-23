@@ -35,9 +35,13 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | `list-formats.sh` | List the user's databases (their AI database) |
 | `create-format.sh` | Set up a new database |
 | `revise-format.sh` | Add a field to a database, rename it, retire it |
+| `rename-format.sh` | Rename a database, or change its description or the words that help choose it |
+| `retire-format.sh` | Retire a database (it stops collecting; nothing is deleted) |
+| `reinstate-format.sh` | Start a retired database collecting again |
 | `save-record.sh` | Save an entry in a database, or update one |
 | `query-records.sh` | Read entries, filtered on their FIELDS |
 | `record-history.sh` | What an entry used to hold, oldest change first |
+| `database.sh` | What `/mmry:database` runs: one subcommand, handed to the script above that does it |
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
@@ -306,6 +310,10 @@ at `mmryai.com/records` in their account area. A database set up here is visible
 saved there is readable here, and a correction made in any of them is immediately true in all of
 them: there is one entry and one update path, not a copy per client. Say so if the user asks:
 this is one account, not one client's private feature.
+
+The user can also start any of this with `/mmry:database` (create, list, add, find, correct,
+history, retire, restore). It is not needed: asking in plain words, as in the examples above,
+does the same.
 
 ## Mid-Session Loading
 

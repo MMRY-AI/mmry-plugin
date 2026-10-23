@@ -7,8 +7,8 @@ Usage: `/mmry:database create "what you want to keep track of"` | `/mmry:databas
 Your AI database is a set of databases your assistant keeps for you as you talk: every migraine
 and what preceded it, every expense, every job application. A **database** is one of those; each
 item in it is an **entry**; its named values are **fields**. Use these words with the customer.
-The scripts below keep their internal names (a database is a "format", an entry a "record"), and
-those names are never said to the customer.
+The script names and flags below (`--format-id`, `--record-id`) are internal names, kept as
+they are; never say them to the customer.
 
 **This command is a shortcut, not the only way.** Asking in plain words ("keep track of my
 migraines", "how many expenses over 50 this month?") does exactly the same, through the same
@@ -36,7 +36,7 @@ log"), run `list` first and use the id it shows. Where they name an entry ("the 
 
 ### create
 
-Set up a new database for something the customer will record again and again.
+Set up a new database for something the customer will keep track of again and again.
 
 1. Run `list` first. If a database for the same thing already exists, say so and offer to use it
    rather than setting up a second one.
@@ -90,10 +90,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" find --format-id <databa
 ### correct
 
 Change an entry already saved. Only the fields you send change; the rest keep their values.
+`--content` becomes the entry's words, so send the entry as it should now read ("Migraine on
+Tuesday after red wine, a 5"), not only the change; the earlier words stay in its history.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" correct --format-id <database> --record-id <entry> \
-    --content "<the customer's words for the correction>" --fields '{"severity":5}'
+    --content "<the entry, as it should now read>" --fields '{"severity":5}'
 ```
 
 ### history
