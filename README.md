@@ -21,6 +21,7 @@ stop MMRY working.
 | Continuity notes saved before the context is compressed | yes | not available: Codex gives plugins no moment before it compresses |
 | An accepted plan saved as a decision record | yes | not available: Codex has no plan-accepted moment |
 | Typed slash commands such as /mmry:save | yes | not available: ask in plain words, for example "save this" |
+| Help listing everything MMRY does | `/mmry:help` | the help skill: type `$mmry:help`, or ask for the MMRY help |
 
 [docs/codex.md](docs/codex.md) states each Codex gap and what you get instead.
 
