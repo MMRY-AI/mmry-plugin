@@ -557,9 +557,9 @@ setup() {
 }
 
 @test "req4: the Claude Code commands directory still holds every command file, by name" {
-    # Nine before #31411, which added foundation-status. Named rather than counted, so a removal
-    # and an unrelated addition cannot cancel out.
-    local want="feedback formation foundation-status help load-memories save search setup uninstall visibility"
+    # Nine before #31411, which added foundation-status, and #32443 added database. Named rather
+    # than counted, so a removal and an unrelated addition cannot cancel out.
+    local want="database feedback formation foundation-status help load-memories save search setup uninstall visibility"
     run bash -c "cd '$PLUGIN_ROOT/commands' && ls *.md | sed 's/\\.md\$//' | tr -d '\\r' | sort | tr '\\n' ' ' | sed 's/ \$//'"
     assert_output "$want"
 }

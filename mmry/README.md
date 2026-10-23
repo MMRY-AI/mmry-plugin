@@ -149,6 +149,7 @@ Both failures are recorded in `mmry-foundation.log` in your temp directory. Sett
 - `/mmry:save` — Save a memory (or just say "remember this")
 - `/mmry:setup` — Run or re-run the account setup flow
 - `/mmry:load-memories` — Manually reload memories mid-session (e.g., after switching context)
+- `/mmry:database`: start and use a database in your AI database (create, list, add, find, correct, history, retire, restore), or just ask in plain words. Claude Code only; `/mmry:help` lists every command.
 
 ## Skill
 

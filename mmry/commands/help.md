@@ -40,6 +40,16 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:formation leave` takes this session out of the Formation.
   - `/mmry:formation remove <memberId>` takes a member whose session has dropped off the Formation (the lead or an administrator).
   - `/mmry:formation status` shows which Formation this session is in.
+- `/mmry:database <subcommand>` starts and uses a database in your AI database. Asking in plain words does the same. The subcommands:
+  - `/mmry:database create "what to keep track of"` sets up a database, with fields named in your words.
+  - `/mmry:database list` lists your databases, or one database in full with its fields.
+  - `/mmry:database add <database> "the entry"` saves a new entry.
+  - `/mmry:database find <database> [field=value]` finds entries by the values in their fields.
+  - `/mmry:database correct <database> <entry> "what changes"` corrects an entry already saved.
+  - `/mmry:database history <database> <entry>` shows what an entry held before, and when it changed.
+  - `/mmry:database retire <database>` stops a database collecting new entries. Nothing is deleted.
+  - `/mmry:database restore <database>` starts a retired database collecting again.
+  - You can also see your databases and correct any entry yourself at https://mmryai.com/records.
 
 ## Things You Can Say
 
