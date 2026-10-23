@@ -410,12 +410,12 @@ server.
 window is a separate participation with its own work, so each reports for itself.
 
 **Done and Abandoned end with a prompt to save your own outcome** (#32682). When this session
-records Done or Abandoned for its own work, the script prints this, followed by the command to save
-it with. Accepted and Blocked do not, and neither does a lead reporting for somebody else:
+records Done or Abandoned for its own work, the script prints this, with the command to save it with
+between its two sentences. Accepted and Blocked do not, and neither does a lead reporting for somebody else:
 
-> Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. If you have saved all of that since your last report, there is nothing more to save.
+> Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. Save it with /mmry:save. If you have saved all of that since your last report, there is nothing more to save.
 
-Act on it with `/mmry:save` before you go on. The report is already recorded when it appears; the
+Act on it with `/mmry:save` before you go on; the last sentence is only for a session that has already done it. The report is already recorded when it appears; the
 prompt holds nothing up and is not itself saved. It is shown even when you saved recently, because
 only you know whether that save holds all of it.
 
@@ -533,7 +533,7 @@ This releases the session on the service as well as stopping delivery here (#311
 
 Never tell the user the session left when the script did not say it did. Somebody who believes they left, and then cannot join anything, has nothing on screen to explain it.
 
-**A completed leave ends with the prompt to save your own outcome** (#32682), the same text `progress` prints for Done and Abandoned, followed by the command to save it with. Act on it with `/mmry:save`: the formation's close-out record is the lead's account, and what this session finished, handed over and wrote down is lost to the next session unless it saves it. The two outcomes that leave the session in the formation (refused, unreachable) do not print it.
+**A completed leave ends with the prompt to save your own outcome** (#32682), the same text `progress` prints for Done and Abandoned, with the command to save it with between its two sentences. Act on it with `/mmry:save`: the formation's close-out record is the lead's account, and what this session finished, handed over and wrote down is lost to the next session unless it saves it. The two outcomes that leave the session in the formation (refused, unreachable) do not print it.
 
 A session that has lost track of which formation it was in can still run this: the service resolves the membership from the session itself, so no formation id is needed.
 

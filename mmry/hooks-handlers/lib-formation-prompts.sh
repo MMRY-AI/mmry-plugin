@@ -19,7 +19,7 @@
 # NOT A GATE AND NOT STORED (DD-156). Printing it makes no call and changes no exit code. It is
 # shown every time, even to a member that has already saved: the plugin cannot see every save route
 # a member has, and a prompt wrongly withheld loses the outcome, which is the defect this fixes. Its
-# last sentence lets a member that has saved everything move on.
+# last sentence, which follows the save route, lets a member that has saved everything move on.
 #
 # ASCII, NO APOSTROPHES, as the report-to-lead rule (#31744): text that needs no escaping in any
 # surface's literal is text that cannot drift by an escape.
@@ -30,17 +30,21 @@
 # (file-integrity.bats); both handlers that source this already run under it.
 set -euo pipefail
 
-MMRY_FORMATION_SAVE_OUTCOME="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. If you have saved all of that since your last report, there is nothing more to save."
+# The prompt is two sentences with the save route between them: the outcome sentence, the route,
+# then the skip sentence. The skip sentence is last, never before the route: a route that follows
+# "there is nothing more to save" reads as a contradiction.
+MMRY_FORMATION_SAVE_OUTCOME_ASK="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are."
+MMRY_FORMATION_SAVE_OUTCOME_SKIP="If you have saved all of that since your last report, there is nothing more to save."
 
-# Print the save prompt with this host's save route, as one line.
+# Print the save prompt with this host's save route between its two sentences, as one line.
 mmry_formation_save_outcome_prompt() {
     local route=""
     if declare -F mmry_host_command_ref >/dev/null 2>&1; then
         route="$(mmry_host_command_ref save 2>/dev/null || true)"
     fi
     if [[ -n "$route" ]]; then
-        printf '%s Save it with %s.\n' "$MMRY_FORMATION_SAVE_OUTCOME" "$route"
+        printf '%s Save it with %s. %s\n' "$MMRY_FORMATION_SAVE_OUTCOME_ASK" "$route" "$MMRY_FORMATION_SAVE_OUTCOME_SKIP"
     else
-        printf '%s\n' "$MMRY_FORMATION_SAVE_OUTCOME"
+        printf '%s %s\n' "$MMRY_FORMATION_SAVE_OUTCOME_ASK" "$MMRY_FORMATION_SAVE_OUTCOME_SKIP"
     fi
 }

@@ -268,9 +268,9 @@ which member is the lead.
 
 `formation_leave`, and `formation_progress` with `Done` or `Abandoned` for your own work, end with
 this prompt. Act on it with `memory_save` before you do anything else; it is the same on every
-platform:
+platform, except that the middle sentence names that platform's way to save:
 
-> Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. If you have saved all of that since your last report, there is nothing more to save.
+> Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. Save it with the mmry_plugin memory_save tool. If you have saved all of that since your last report, there is nothing more to save.
 
 Listing formations and claiming an area have no tool and are scripts, and neither has been
 tested from Codex yet; see the next section.

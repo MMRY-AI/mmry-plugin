@@ -23,7 +23,10 @@
 # not a gate and keeps no state; its last sentence lets a member that has saved everything skip it.
 
 # THE PROMPT, as one literal. If a surface drifts from this, the surface is wrong.
-SAVE_PROMPT="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. If you have saved all of that since your last report, there is nothing more to save."
+SAVE_ASK="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are."
+SAVE_SKIP="If you have saved all of that since your last report, there is nothing more to save."
+# The order on every surface: the outcome sentence, the save route, then the skip sentence.
+SAVE_PROMPT="${SAVE_ASK} ${SAVE_SKIP}"
 
 setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"
@@ -47,8 +50,8 @@ teardown() {
 # The save route each host names after the prompt.
 _route_line() {
     case "$1" in
-        codex) printf '%s Save it with the mmry_plugin memory_save tool.' "$SAVE_PROMPT" ;;
-        *)     printf '%s Save it with /mmry:save.' "$SAVE_PROMPT" ;;
+        codex) printf '%s Save it with the mmry_plugin memory_save tool. %s' "$SAVE_ASK" "$SAVE_SKIP" ;;
+        *)     printf '%s Save it with /mmry:save. %s' "$SAVE_ASK" "$SAVE_SKIP" ;;
     esac
 }
 
@@ -272,7 +275,8 @@ _no_prompt() {
     [[ "$SAVE_PROMPT" == *"what you handed to whom"* ]] || return 1
     [[ "$SAVE_PROMPT" == *"where your notes are"* ]] || return 1
     # And the handler holds exactly this text, so the assertions above are about what is printed.
-    grep -q -F -- "MMRY_FORMATION_SAVE_OUTCOME=\"${SAVE_PROMPT}\"" "${HANDLERS}/lib-formation-prompts.sh"
+    grep -q -F -- "MMRY_FORMATION_SAVE_OUTCOME_ASK=\"${SAVE_ASK}\"" "${HANDLERS}/lib-formation-prompts.sh"
+    grep -q -F -- "MMRY_FORMATION_SAVE_OUTCOME_SKIP=\"${SAVE_SKIP}\"" "${HANDLERS}/lib-formation-prompts.sh"
 }
 
 @test "req3: the prompt is plain ASCII with no apostrophe, so it needs no escaping on any surface" {
@@ -282,20 +286,37 @@ _no_prompt() {
 
 # ---- Requirement 4: one text on every surface -----------------------------------------------------
 
-@test "req4: the prompt is byte-identical in leave and progress, on Claude Code and on Codex" {
-    local got=() o
-    _leave claude;          got+=("$(printf '%s\n' "$output" | tr -d '\r' | grep -o "^Save your own outcome.*nothing more to save\.")")
-    _leave codex;           got+=("$(printf '%s\n' "$output" | tr -d '\r' | grep -o "^Save your own outcome.*nothing more to save\.")")
-    _progress claude Done;  got+=("$(printf '%s\n' "$output" | tr -d '\r' | grep -o "^Save your own outcome.*nothing more to save\.")")
-    _progress codex Abandoned; got+=("$(printf '%s\n' "$output" | tr -d '\r' | grep -o "^Save your own outcome.*nothing more to save\.")")
-    for o in "${got[@]}"; do
-        [ "$o" = "$SAVE_PROMPT" ] || { echo "drifted: $o"; return 1; }
+# The prompt line from the last run, carriage returns removed.
+_prompt_line() {
+    printf '%s\n' "$output" | tr -d '\r' | grep "^Save your own outcome"
+}
+
+@test "req4: the prompt is byte-identical in leave and progress, with only the save route differing by host" {
+    local got
+    _leave claude;             got="$(_prompt_line)"
+    [ "$got" = "$(_route_line claude)" ] || { echo "drifted: $got"; return 1; }
+    _progress claude Done;     got="$(_prompt_line)"
+    [ "$got" = "$(_route_line claude)" ] || { echo "drifted: $got"; return 1; }
+    _leave codex;              got="$(_prompt_line)"
+    [ "$got" = "$(_route_line codex)" ] || { echo "drifted: $got"; return 1; }
+    _progress codex Abandoned; got="$(_prompt_line)"
+    [ "$got" = "$(_route_line codex)" ] || { echo "drifted: $got"; return 1; }
+}
+
+@test "req4: on every host the save route comes between the two sentences and the skip sentence is last" {
+    local host line
+    for host in claude codex; do
+        _leave "$host"
+        line="$(_prompt_line)"
+        [[ "$line" == "$SAVE_ASK Save it with "* ]] || { echo "route does not follow the outcome sentence: $line"; return 1; }
+        [[ "$line" == *" $SAVE_SKIP" ]] || { echo "the skip sentence is not last: $line"; return 1; }
+        [[ "$line" != *"nothing more to save. Save it with"* ]] || return 1
     done
 }
 
-@test "req4: the command page and the Codex skill carry the prompt byte for byte" {
-    grep -q -F -- "> ${SAVE_PROMPT}" "${PLUGIN_DIR}/commands/formation.md"
-    grep -q -F -- "> ${SAVE_PROMPT}" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+@test "req4: the command page and the Codex skill carry the prompt byte for byte, each with its own route" {
+    grep -q -F -- "> $(_route_line claude)" "${PLUGIN_DIR}/commands/formation.md"
+    grep -q -F -- "> $(_route_line codex)" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
 }
 
 @test "req4: the connector in the service carries the same prompt" {
@@ -304,5 +325,7 @@ _no_prompt() {
     fi
     local cs="${MMRY_SERVICE_REPO}/src/Mnemo.Api/Services/FormationMemberPrompts.cs"
     [ -f "$cs" ]
-    grep -q -F -- "\"${SAVE_PROMPT}\"" "$cs"
+    grep -q -F -- "\"${SAVE_ASK}\"" "$cs"
+    grep -q -F -- "\"${SAVE_SKIP}\"" "$cs"
+    grep -q -F -- 'SaveOutcomeAsk + " Save it with mmry_save. " + SaveOutcomeSkip' "$cs"
 }
