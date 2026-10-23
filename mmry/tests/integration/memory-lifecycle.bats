@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# memory-lifecycle.bats — Create -> retrieve -> reinforce -> deactivate (live API).
+# memory-lifecycle.bats — Create -> retrieve -> deactivate (live API).
 # Requires MMRY_INTEGRATION_API_KEY env var.
 
 load '../helpers/test-helper'
@@ -55,18 +55,6 @@ _api() {
     local code
     code="$(echo "$response" | tail -1)"
     [[ "$code" == "200" ]]
-}
-
-@test "lifecycle: reinforce memory (204)" {
-    [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
-    [[ ! -f "$BATS_FILE_TMPDIR/memory_id" ]] && skip "No memory ID from create test"
-    local mid
-    mid="$(cat "$BATS_FILE_TMPDIR/memory_id")"
-    local response
-    response="$(_api POST "/api/memories/${mid}/reinforce")"
-    local code
-    code="$(echo "$response" | tail -1)"
-    [[ "$code" == "204" ]]
 }
 
 @test "lifecycle: deactivate memory (204)" {

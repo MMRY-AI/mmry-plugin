@@ -178,20 +178,6 @@ case "$URL" in
         HTTP_CODE="204"
         RESPONSE_BODY=''
         ;;
-    */api/memories/*/reinforce)
-        HTTP_CODE="204"
-        RESPONSE_BODY=''
-        ;;
-    */api/memories/*/links/*)
-        if [[ "$METHOD" == "DELETE" ]]; then
-            HTTP_CODE="204"
-            RESPONSE_BODY=''
-        fi
-        ;;
-    */api/memories/*/links)
-        HTTP_CODE="201"
-        RESPONSE_BODY='{"id":1}'
-        ;;
     */api/memories/*/related)
         HTTP_CODE="200"
         RESPONSE_BODY='[{"id":2,"topic":"Related Memory","content":"Related content","memoryTier":"Operational","scope":"global","linkType":"related"}]'

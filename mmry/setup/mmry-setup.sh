@@ -500,9 +500,7 @@ if [[ "$(mmry_host)" == "claude" ]]; then
 SETTINGS_FILE="$(mmry_host_config_dir)/settings.json"
 MMRY_PERMISSIONS=(
     "Bash(*save-memory.sh*)"
-    "Bash(*reinforce-memory.sh*)"
     "Bash(*deactivate-memory.sh*)"
-    "Bash(*link-memories.sh*)"
     "Bash(*search-memories.sh*)"
     "Bash(*list-groups.sh*)"
     "Bash(*submit-feedback.sh*)"

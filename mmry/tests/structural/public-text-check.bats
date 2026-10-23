@@ -15,8 +15,8 @@
 #      that file and the planted line.
 #   3. The same copy passes again once the planted line is gone, so a refusal is caused by the
 #      planted term and nothing else.
-#   4. Code identifiers that happen to contain a banned word (the handler file name, the
-#      client function and the Codex MCP tool name memory_reinforce) pass.
+#   4. Nothing is allow-listed (#32640): a handler, function or tool name carrying a banned word is
+#      refused like any other text, and so is describing how memories are connected or marked used.
 #   5. The Codex MCP server's tool titles, tool descriptions and server instructions are read,
 #      and the rest of that file (code) is not.
 #   6. CI runs the check.
@@ -202,23 +202,101 @@ _refuses_then_passes() {
 
 @test "code in the Codex MCP server outside the tool text is not read" {
     local f="$COPY/mmry/hooks-handlers/mcp-server.sh"
-    printf '%s
-' '# memory_reinforce posts to /api/memories/{id}/reinforce'         'elif $n == "memory_reinforce" then ["reinforce-memory.sh"]' >> "$f"
+    printf '%s\n' '# memory_retire sends DELETE /api/memories/{id}' \
+        'elif $n == "memory_retire" then ["deactivate-memory.sh"]' >> "$f"
     run bash "$CHECK" "$COPY"
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 }
 
-@test "the Codex MCP tool name memory_reinforce is code and passes" {
-    _plant_in_tools '    "description": "Use the id with memory_reinforce or memory_link.",' >/dev/null
-    run bash "$CHECK" "$COPY"
-    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-}
-
-@test "handler and function names are code and pass" {
+@test "32640 req2: a tool name carrying a banned word in a Codex MCP tool description is refused" {
     local line
-    line="$(_plant 'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/reinforce-memory.sh" 42 and `mmry_reinforce_memory`')"
+    line="$(_plant_in_tools '    "description": "Use the id with memory_rein''force.",')"
     run bash "$CHECK" "$COPY"
-    [[ "$status" -eq 0 ]] || { echo "code identifier on line ${line} was refused"; echo "$output"; return 1; }
+    [[ "$status" -ne 0 && "$output" == *"mmry/hooks-handlers/mcp-server.sh:${line}:"* ]] \
+        || { echo "description on line ${line} not refused"; echo "$output"; return 1; }
+}
+
+@test "32640 req2: refuses linking in a Codex MCP tool description" {
+    local line
+    line="$(_plant_in_tools '    "description": "Record a relationship between two memories, then link them.",')"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -ne 0 && "$output" == *"mmry/hooks-handlers/mcp-server.sh:${line}:"* ]] \
+        || { echo "description on line ${line} not refused"; echo "$output"; return 1; }
+}
+
+@test "32640 req2: a handler name carrying a banned word is refused" {
+    _refuses_then_passes 'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/rein''force-memory.sh" 42'
+}
+
+@test "32640 req2: a client function name carrying a banned word is refused" {
+    _refuses_then_passes 'Available functions: `mmry_save`, `mmry_rein''force_memory`.'
+}
+
+@test "32640 req2: refuses a heading about linking" {
+    _refuses_then_passes "## Linking"
+}
+
+@test "32640 req2: refuses linking two memories" {
+    _refuses_then_passes "| Link two memories |"
+}
+
+@test "32640 req2: refuses memories linked to each other" {
+    _refuses_then_passes "Memories can be linked to each other to form a network."
+}
+
+@test "32640 req2: refuses a link type" {
+    _refuses_then_passes "Call it with source_id, target_id and link_type."
+}
+
+@test "32640 req2: refuses reading related memories" {
+    _refuses_then_passes "# Get related memories"
+}
+
+@test "32640 req2: refuses the related-memories function" {
+    _refuses_then_passes "mmry_get_related 42"
+}
+
+@test "32640 req2: refuses a link-memory handler name" {
+    _refuses_then_passes 'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/li''nk-memories.sh" 42 87'
+}
+
+@test "32640 req2: refuses marking a memory as used" {
+    _refuses_then_passes "| Mark a memory as used, after it guided your work |"
+}
+
+@test "32640 req2: refuses marking a memory useful" {
+    _refuses_then_passes "Saving, searching, marking useful, retiring and reloading memories."
+}
+
+@test "32640 req2: refuses saying a memory was useful" {
+    _refuses_then_passes "It records that the memory was useful."
+}
+
+@test "32640 req2: refuses a link or reinforce word planted in a Codex skill, a command, a README and the docs" {
+    local f t
+    for f in mmry/skills-codex/memory-system/SKILL.md mmry/commands/save.md mmry/README.md README.md docs/codex.md; do
+        for t in "Link two memories with the tool." "Reinforce the memory that helped."; do
+            cp "$COPY/$f" "$COPY/$f.orig"
+            printf '%s\n' "$t" >> "$COPY/$f"
+            run bash "$CHECK" "$COPY"
+            [[ "$status" -ne 0 && "$output" == *"$f:"* ]] || { echo "not refused in $f: $t"; echo "$output"; return 1; }
+            mv "$COPY/$f.orig" "$COPY/$f"
+        done
+    done
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "32640: a link that is not about memories passes (an email link)" {
+    _plant "Open the link in the email to finish signing in." >/dev/null
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "32640: a task the memory came from passes" {
+    _plant "When a memory comes from a task, pass --task-id to record which task it came from." >/dev/null
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 }
 
 @test "a duration unrelated to a memory kind passes (formation listening)" {
@@ -235,16 +313,16 @@ _refuses_then_passes() {
 
 # Every handler, client function and flag the Claude Code skill named at develop c61f565, before
 # the text was cleaned, and every handler and MMRY tool the Codex skill names at develop 79d2211
-# (#88 moved the Codex skill's everyday operations from scripts to MMRY's MCP tools). Removing an explanation must not remove a step the assistant performs, and the
-# one step that was explained by the mechanic (marking a used search result) is the one most at
-# risk of being dropped with it.
-CLAUDE_STEPS="save-memory.sh search-memories.sh reinforce-memory.sh deactivate-memory.sh
-link-memories.sh list-groups.sh visibility.sh make-private.sh list-formats.sh create-format.sh
+# (#88 moved the Codex skill's everyday operations from scripts to MMRY's MCP tools), less the two
+# handlers, three client functions and two tools #32640 removed. Removing an explanation must not
+# remove a step the assistant performs.
+CLAUDE_STEPS="save-memory.sh search-memories.sh deactivate-memory.sh
+list-groups.sh visibility.sh make-private.sh list-formats.sh create-format.sh
 revise-format.sh save-record.sh query-records.sh record-history.sh mmry-client.sh
-mmry_get_memories mmry_get_related mmry_delete_link mmry_reinforce_memory --ids --supersedes
+mmry_get_memories --ids --supersedes
 --record-type --record-fields --visibility --permission-group-id"
 CODEX_STEPS="list-groups.sh visibility.sh make-private.sh formation-list.sh formation-claim.sh
-submit-feedback.sh mmry-setup.sh memory_save memory_search memory_reinforce memory_link
+submit-feedback.sh mmry-setup.sh memory_save memory_search
 memory_retire memory_load formation_join formation_say formation_progress formation_roster
 formation_start formation_assign formation_report formation_debrief formation_leave supersedes"
 
@@ -260,21 +338,18 @@ formation_start formation_assign formation_report formation_debrief formation_le
     [[ -z "$missing" ]] || { echo "no longer named:$missing"; return 1; }
 }
 
-@test "both skills still tell the assistant to mark a search result that guided the work" {
-    # DD-140: search does not record use on the server, so this step stays with the assistant
-    # until a server change makes it unnecessary. Removing it would shorten memory lifetimes.
+@test "32640 req3: both skills still correct a memory by saving a replacement" {
     local f="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
-    grep -q 'search-memories.sh" --ids' "$f" || { echo "$f: no --ids search before marking"; return 1; }
-    grep -q 'reinforce-memory.sh" 42' "$f" || { echo "$f: no step marking the used memory"; return 1; }
-    # Codex does it with MMRY's tools (#88): memory_search prints the id, memory_reinforce marks it.
+    grep -q '^## Correcting a Memory' "$f" || { echo "$f: no correction section"; return 1; }
+    grep -q -- '--supersedes 42 --working-dir' "$f" || { echo "$f: no save with --supersedes"; return 1; }
+    grep -q 'search-memories.sh" --ids' "$f" || { echo "$f: no --ids search for the id"; return 1; }
     f="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md"
-    grep -q 'call `memory_reinforce` with its id' "$f" || { echo "$f: no step marking the used memory"; return 1; }
-    grep -q '| `memory_reinforce` | `id` |' "$f" || { echo "$f: memory_reinforce missing from the tool table"; return 1; }
-}
-
-@test "the Codex MCP server still offers memory_reinforce under its own name" {
-    # Renaming a tool is a behaviour change; #32272 only rewords what the assistant reads.
-    grep -q '"name": "memory_reinforce"' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"
+    grep -q '^## Correcting a memory' "$f" || { echo "$f: no correction section"; return 1; }
+    grep -q 'call `memory_save`' "$f" || { echo "$f: no memory_save call"; return 1; }
+    grep -q '`supersedes` set to the id of the wrong one' "$f" || { echo "$f: no supersedes"; return 1; }
+    # And the save command points at the section that still exists.
+    grep -q 'skill'"'"'s "Correcting a Memory" section' "$PLUGIN_ROOT/commands/save.md" \
+        || { echo "save.md does not point at the correction section"; return 1; }
 }
 
 @test "CI runs the check" {

@@ -1240,25 +1240,6 @@ mmry_deactivate_memory() {
     _mmry_request DELETE "/api/memories/$1"
 }
 
-mmry_reinforce_memory() {
-    # Usage: mmry_reinforce_memory ID
-    _mmry_request POST "/api/memories/$1/reinforce"
-}
-
-mmry_create_link() {
-    # Usage: mmry_create_link SOURCE_ID TARGET_ID LINK_TYPE
-    local body
-    body="$(_mmry_build_json \
-        "#targetMemoryId" "$2" \
-        "linkType" "$3")"
-    _mmry_request POST "/api/memories/$1/links" "$body"
-}
-
-mmry_delete_link() {
-    # Usage: mmry_delete_link SOURCE_ID TARGET_ID
-    _mmry_request DELETE "/api/memories/$1/links/$2"
-}
-
 mmry_get_related() {
     # Usage: mmry_get_related MEMORY_ID
     _mmry_request GET "/api/memories/$1/related"

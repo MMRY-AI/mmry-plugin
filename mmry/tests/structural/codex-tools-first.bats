@@ -3,7 +3,7 @@
 # tools cover (#31743, fix round 1).
 #
 # WHY. MMRY's tool server (codex-mcp.json, server mmry_plugin) is started by Codex outside its
-# sandbox, so memory_save, memory_search, memory_reinforce, memory_link, memory_retire,
+# sandbox, so memory_save, memory_search, memory_retire,
 # memory_load, formation_join, formation_say, formation_progress, formation_roster and
 # formation_leave reach MMRY AI with no Internet access prompt. The script for the same operation,
 # run by the model itself, is inside the sandbox and fails with HTTP 000 until the customer
@@ -24,10 +24,10 @@
 
 load '../helpers/test-helper'
 
-# The scripts of the sixteen operations the tool server covers. A name here on a Codex surface is
+# The scripts of the fourteen operations the tool server covers. A name here on a Codex surface is
 # an instruction to run the sandboxed script. #31789 added the lead's four: start, assign, report
 # and debrief. #32270 added remove (formation_remove).
-TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|progress|roster|leave|start|assign|report|debrief|remove))\.sh'
+TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|deactivate-memory|session-start|formation-(join|say|progress|roster|leave|start|assign|report|debrief|remove))\.sh'
 
 # The same thing said in prose, which is how docs/codex.md said it before this round.
 TOOL_COVERED_PROSE_RE='(the save script|formation join script|run the save|the search script|the join script)'
@@ -65,8 +65,8 @@ _script_hits() {
     while IFS= read -r t; do
         grep -qF "\`$t\`" "$SKILL" || missing="${missing} $t"
     done < <(_server_tools)
-    # 16 since #32270 added formation_remove; 17 since #31410 added formation_status.
-    [ "$(_server_tools | grep -c .)" -eq 17 ] || { echo "expected 17 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
+    # 16 since #32270 added formation_remove; 17 since #31410 added formation_status; 15 since #32640.
+    [ "$(_server_tools | grep -c .)" -eq 15 ] || { echo "expected 15 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
     # Any memory_* or formation_* name in backticks must be one the server offers. The connector's
     # mmry_formation_* tools are a different, warned-about thing and are excluded by the prefix,
     # and an argument such as formation_id is not a tool.
@@ -143,15 +143,15 @@ ${f#$REPO_ROOT/}: ${hits}"
 }
 
 @test "the scanner is real: it finds every tool-covered script name in a line built to contain them" {
-    # A regex that matches nothing makes every test above green. Feed it the sixteen names.
+    # A regex that matches nothing makes every test above green. Feed it the fourteen names.
     local f="$BATS_TEST_TMPDIR/probe.md" n
-    printf '%s\n' save-memory.sh search-memories.sh reinforce-memory.sh link-memories.sh \
+    printf '%s\n' save-memory.sh search-memories.sh \
         deactivate-memory.sh session-start.sh formation-join.sh formation-say.sh \
         formation-progress.sh formation-roster.sh formation-leave.sh \
         formation-start.sh formation-assign.sh formation-report.sh formation-debrief.sh \
         formation-remove.sh > "$f"
     n="$(_script_hits "$f" | grep -c .)"
-    [ "$n" -eq 16 ]
+    [ "$n" -eq 14 ]
     # And it leaves alone the scripts no tool covers.
     printf '%s\n' list-groups.sh visibility.sh formation-list.sh formation-claim.sh submit-feedback.sh mmry-setup.sh > "$f"
     [ -z "$(_script_hits "$f")" ]
@@ -177,7 +177,7 @@ _server_say() {
         '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"formation_roster","arguments":{}}}' \
         '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_load","arguments":{}}}' \
         '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"memory_save","arguments":{}}}' \
-        '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"memory_link","arguments":{"source_id":1,"target_id":2,"link_type":"x"}}}')"
+        '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"memory_retire","arguments":{"id":"x"}}}')"
     # All six answered, so the scan below has something to scan.
     [ "$(printf '%s\n' "$out" | grep -c '"id":[1-6]')" -eq 6 ] || { echo "$out"; return 1; }
     # 3 and 4 are the no-conversation refusal, 5 and 6 argument refusals.

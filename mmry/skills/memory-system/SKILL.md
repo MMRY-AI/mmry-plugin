@@ -16,7 +16,7 @@ You have access to a persistent memory store via the MMRY AI REST API. Use it to
 - **Context compression** — You'll be prompted to save a Momentary "Session Continuity" memory before compression
 - **Plan accepted** — You'll be prompted to save accepted plans as Decision memories
 
-This skill covers everything else: how to store memories, query mid-session, search, link, and manage the memory system.
+This skill covers everything else: how to store memories, query mid-session, search, correct, and manage the memory system.
 
 ## How to Execute Memory Operations
 
@@ -27,9 +27,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | Script | Operation |
 |--------|-----------|
 | `save-memory.sh` | Store a new memory |
-| `reinforce-memory.sh` | Mark a memory as used, after it guided your work |
 | `deactivate-memory.sh` | Deactivate a memory |
-| `link-memories.sh` | Link two memories |
 | `search-memories.sh` | Search memories by keyword |
 | `list-groups.sh` | List your permission groups |
 | `list-formats.sh` | List the user's databases (their AI database) |
@@ -45,7 +43,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
 
-**Run in background** when you don't need the result immediately: memory saves, marking a memory as used, deactivations, and links rarely need to block the conversation. Use `run_in_background: true` on the Bash tool call so the script executes without blocking.
+**Run in background** when you don't need the result immediately: memory saves and deactivations rarely need to block the conversation. Use `run_in_background: true` on the Bash tool call so the script executes without blocking.
 
 ### Custom Queries (source the client library)
 
@@ -58,16 +56,12 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 mmry_search_memories "authentication" "backend"
 echo "$MMRY_RESPONSE"
 
-# Get related memories
-mmry_get_related 42
-echo "$MMRY_RESPONSE"
-
 # Get active sessions
 mmry_get_active_sessions
 echo "$MMRY_RESPONSE"
 ```
 
-Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_reinforce_memory`, `mmry_create_link`, `mmry_delete_link`, `mmry_get_related`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`, `mmry_get_record_history`.
+Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`, `mmry_get_record_history`.
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
@@ -375,56 +369,10 @@ REASON: Sync failures with distributor catalog when using SKU.
 We had a long discussion about identifiers and after considering several options we decided UPC was the best choice for various reasons.
 ```
 
-## Associative Linking
-
-Memories can be linked to each other to form associative networks. Links are separate from the memory data itself — they represent relationships between memories.
-
-### Link Types
-
-| Type | Directionality | Meaning |
-|------|---------------|---------|
-| `related` | Symmetric | Same topic area |
-| `supersedes` | Directional | Source replaces target |
-| `elaborates` | Directional | Source adds detail to target |
-| `contradicts` | Symmetric | Conflict, flag for human review |
-
-### Creating Links
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/link-memories.sh" 42 87 "related"
-```
-
-For symmetric types (`related`, `contradicts`), the API normalizes order automatically — you don't need to worry about which ID goes first.
-
-### Retrieving Related Memories
-
-```bash
-source "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
-mmry_get_related 42
-echo "$MMRY_RESPONSE"
-```
-
-Returns all linked memories in both directions (outgoing and incoming), with `linkType` and `linkDirection` fields. Only returns active memories.
-
-This is a deliberate call — related memories are NOT automatically loaded at startup. Use it when you want to explore connections.
-
-### Removing Links
-
-```bash
-source "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
-mmry_delete_link 42 87
-```
-
-### When to Link
-
-- **Link at storage time** when the relationship is obvious (e.g., a new decision that supersedes an old one)
-- **Link during discovery** when you realize two loaded memories are related
-- **Do not bulk-link** retrospectively — links should reflect genuine associations, not retroactive organization
-
-### Supersedes Pattern
+## Correcting a Memory
 
 When a fact or decision changes, save the new memory with `--supersedes <old id>`. MMRY AI saves
-it, retires the old memory so it stops being recalled, and links the two:
+it and retires the old memory, so only the new one is recalled from then on:
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --context "DECISION: Use UPC as primary. SKU as fallback. EAN for EU markets." \
@@ -479,17 +427,6 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" "refund" "backend
 - When doing cross-scope work and you suspect related knowledge exists
 - When a keyword keeps coming up and you want to check if there's institutional knowledge about it
 - When you need context that was not loaded at session start
-
-### When a Search Result Guides Your Work
-
-When a memory you found by searching shapes what you do, run `reinforce-memory.sh` with its id,
-in the background. It records that the memory was useful. Search with `--ids` to see the id, and
-run it only for a memory that actually guided the work, not for every match:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/search-memories.sh" --ids "UPC"
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/reinforce-memory.sh" 42
-```
 
 ## Memory Tier Hierarchy
 
@@ -579,10 +516,10 @@ Sessions are automatically registered at session start. The 8-hour auto-expiry h
 ## Scopes
 Use consistent, lowercase scope names for your organization's platforms and projects. Examples: `global`, `frontend`, `backend`, `infrastructure`, `marketing`
 
-## Task Linkage
+## Task References
 The memory store is for **institutional knowledge** — decisions, patterns, lessons learned. The task management system is the source of truth for **what work is being done**.
 
-When a memory originates from a specific task, include the `--task-id` parameter to link back to it. This is optional and should be omitted for memories that aren't tied to a specific task.
+When a memory originates from a specific task, include the `--task-id` parameter to record which task it came from. This is optional and should be omitted for memories that aren't tied to a specific task.
 
 **Use --task-id when:**
 - A lesson was learned while working a specific task
@@ -596,7 +533,7 @@ When a memory originates from a specific task, include the `--task-id` parameter
 
 **Examples:**
 ```bash
-# Linked to a task: lesson learned during specific work
+# From a task: lesson learned during specific work
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --tier "Operational" --category "Issue" --scope "backend" \
   --topic "Missing Transaction IDs" \
@@ -604,7 +541,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --source "joel" --task-id "TSK-4521" \
   --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
 
-# No task link: general convention (omit --task-id)
+# Not from a task: general convention (omit --task-id)
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --tier "Foundation" --category "Convention" --scope "global" \
   --topic "SQL Security Pattern" \
