@@ -218,8 +218,10 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    - You share no access group with whoever created the formation. An administrator adds you.
      This does NOT apply to your own formations: since #31122 a person needs no access group with
      themselves, so your own other windows can always join.
-   - This session already belongs to another formation. Run `/mmry:formation leave` first, which
-     since #31194 releases it on the service and frees it to join this one.
+   - This session is still a member of another formation that is active. The refusal names it
+     (#32401); run `/mmry:formation leave` first, which since #31194 releases it on the service
+     and frees it to join this one. A formation that has been closed out no longer holds the
+     session: joining or starting another releases it, with no leave needed.
 
    **Every window joins for itself.** Membership is held per session, so starting a formation in
    one terminal does not enrol the others; each runs join with the id.

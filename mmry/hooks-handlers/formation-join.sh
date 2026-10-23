@@ -87,7 +87,7 @@ if [[ -z "$joined" ]]; then
     case "$code" in
         403) echo "Refused. Either you share no access group with whoever created formation ${formation_id}, or your account is not active. An administrator can add you to the group." ;;
         404) echo "Formation ${formation_id} does not exist, or it belongs to another account." ;;
-        409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
+        409) mmry_formation_held_refusal; echo ;;   # names the formation that holds the session (#32401)
         400) if [[ -n "$explicit_name" ]]; then
                  echo "The server refused that name, and nothing was joined. $(printf '%s' "${MMRY_RESPONSE:-}" | "${MMRY_JQ:-cat}" -r '.errors // .error // . | tostring' 2>/dev/null || true)"
              else
