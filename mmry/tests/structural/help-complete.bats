@@ -103,6 +103,50 @@ _missing() {
     [[ "$output" == *"database subcommand zzfake"* ]] || { echo "not named: $output"; return 1; }
 }
 
+# The database how-to (#32442 req 3): its own "## Your AI database" section in /mmry:help, the same
+# steps as the help page at mmryai.com/help#databases, each with an example request in the
+# customer's own words, and every /mmry:database subcommand shown inside the section. The step
+# labels are the contract with the help page; the subcommands are derived from commands/database.md
+# like the lists above, so a new subcommand without an example in the section fails here.
+DB_STEPS=("Start a database" "Add an entry" "Ask about your entries" "Correct an entry" "See an entry's history" "Stop a database" "Start it again")
+
+# The text of the "## Your AI database" section, up to the next "## " heading. Empty when absent.
+_db_section() { tr -d '\r' < "$1/commands/help.md" | awk '/^## /{on = ($0 == "## Your AI database")} on'; }
+
+# Print every part of the database how-to the help text does not carry. Empty output means complete.
+_db_missing() {
+    local root="$1" sec step sub
+    sec="$(_db_section "$root")"
+    [ -n "$sec" ] || { echo 'section "## Your AI database"'; return; }
+    for step in "${DB_STEPS[@]}"; do
+        # One bullet per step: "- **<step>:**" followed by an example request in double quotes.
+        printf '%s\n' "$sec" | grep -Fq -- "- **${step}:** \"" || echo "step \"${step}\" with an example request"
+    done
+    for sub in $(_subcommands "$root" database); do
+        printf '%s\n' "$sec" | grep -Eq "/mmry:database ${sub}([^a-z]|\$)" || echo "database subcommand ${sub} in the section"
+    done
+}
+
+@test "help: carries the database how-to as its own section, each step with an example request (#32442)" {
+    local root; root="$(_root)"
+    run _db_missing "$root"
+    [ -z "$output" ] || { echo "help.md database section does not carry:"; echo "$output"; return 1; }
+}
+
+@test "help: a database how-to missing its section or a step is refused, naming it (#32442)" {
+    local root copy; root="$(_root)"
+    copy="$BATS_TEST_TMPDIR/plugin"; mkdir -p "$copy"
+    cp -R "$root/commands" "$copy/commands"
+    # A step with no example request is named.
+    sed -i.bak 's/^- \*\*Correct an entry:\*\* "/- **Correct an entry:** /' "$copy/commands/help.md"
+    run _db_missing "$copy"
+    [[ "$output" == *'step "Correct an entry"'* ]] || { echo "step not named: $output"; return 1; }
+    # A help with no database section at all is named.
+    sed -i.bak 's/^## Your AI database$/## Something else/' "$copy/commands/help.md"
+    run _db_missing "$copy"
+    [[ "$output" == *'section "## Your AI database"'* ]] || { echo "section not named: $output"; return 1; }
+}
+
 @test "help: carries no Memory types section" {
     local help; help="$(_root)/commands/help.md"
     run grep -inE 'memory types|strategic|momentary' "$help"

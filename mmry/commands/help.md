@@ -51,6 +51,19 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:database restore <database>` starts a retired database collecting again.
   - You can also see your databases and correct any entry yourself at https://mmryai.com/records.
 
+## Your AI database
+
+Claude can keep a database for anything you track again and again, such as your expenses, your migraines or your job applications. Each item in a database is an entry. Ask in plain words or use `/mmry:database`; both do the same. A new database is private unless you ask Claude to share it with everyone on your account. `/mmry:database list` shows each database's id.
+
+- **Start a database:** "Keep track of my expenses for me: how much each one was, what it was for, and the date." Claude sets up an Expenses database with the fields Amount, What it was for and Date. Or: `/mmry:database create "job applications: the company, the role, the date I applied and where it stands"`.
+- **Add an entry:** "I spent $42 on lunch with a client today." Claude saves it as an entry and tells you what it saved. Or: `/mmry:database add <database> "Applied to Globex for Senior Analyst on Monday"`.
+- **Ask about your entries:** "Which of my expenses were over $20?" Claude answers from the values in your entries. Or: `/mmry:database find <database> status=interviewing`.
+- **Correct an entry:** "That lunch was actually $48, not $42." Claude changes that entry, and the values you do not mention stay as they are. Or: `/mmry:database correct <database> <entry> "Globex invited me to interview"`.
+- **See an entry's history:** "Show me the history of the lunch entry." Claude lists every change, oldest first, with when it was made. Or: `/mmry:database history <database> <entry>`.
+- **Stop a database:** "Stop keeping my expenses for now." Nothing is deleted: every entry stays readable and in your export. Or: `/mmry:database retire <database>`.
+- **Start it again:** "Start keeping my expenses again." Or: `/mmry:database restore <database>`.
+- **See your databases:** `/mmry:database list` lists them, and you can see every entry and correct it yourself at https://mmryai.com/records.
+
 ## Things You Can Say
 
 You can talk to Claude naturally about your memories:
