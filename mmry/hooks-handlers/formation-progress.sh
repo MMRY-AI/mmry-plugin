@@ -32,6 +32,8 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-formation-prompts.sh"
 
 first="${1:-}"
 second="${2:-}"
@@ -47,7 +49,9 @@ fi
 # this wrong in the other direction - treating a state as an id - is what would silently report the
 # wrong member, so it is resolved here rather than sent and hoped for.
 member_id=""
+member_named=0
 if [[ "$first" =~ ^[1-9][0-9]*$ ]]; then
+    member_named=1
     member_id="$first"
     progress="$second"
     note="$third"
@@ -151,13 +155,36 @@ if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
     applied="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.progress // empty' 2>/dev/null || true)"
 fi
 
+# #32682: WAS THIS THIS SESSION'S OWN OUTCOME? With no member id given it is, by construction. With
+# one given it is only when the entry the server read back is this session's: a lead marking
+# somebody else's work Done is not finishing anything of its own, and is not prompted.
+own_report=0
+if [[ "$member_named" -eq 0 ]]; then
+    own_report=1
+elif [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+    reported_session="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.sessionId // empty' 2>/dev/null || true)"
+    [[ -n "$reported_session" && "$reported_session" == "$session_id" ]] && own_report=1
+fi
+
+# Done and Abandoned only, decided on the state the server read back when there is one (#31192),
+# and on the state asked for only when the answer could not be read.
+_save_prompt_if_finished() {
+    local finished; finished="$(printf '%s' "${applied:-$progress}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$own_report" -eq 1 && ( "$finished" == "done" || "$finished" == "abandoned" ) ]]; then
+        mmry_formation_save_outcome_prompt
+    fi
+    return 0
+}
+
 if [[ -z "$applied" ]]; then
     # No jq, or a body that could not be read. Say what is known rather than inventing a
     # confirmation.
     echo "The server accepted the report for member ${member_id} in formation ${formation_id}. Run $(mmry_host_formation_ref report) to see what the record now says."
+    _save_prompt_if_finished
     exit 0
 fi
 
 printf 'Member %s in formation %s is now recorded as %s.\n' "$member_id" "$formation_id" "$applied"
 printf 'It is in the close-out record from here on. The lead sees this after its next tool call; no other member was told.\n'
+_save_prompt_if_finished
 exit 0
