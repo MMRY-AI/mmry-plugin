@@ -1329,6 +1329,32 @@ mmry_create_formation() {
     _mmry_request POST "/api/formations" "$body"
 }
 
+# The refusal a start or join gets when this session already holds a seat (HTTP 409), as one line
+# (#32401). The service names the formation that holds the session and the step that releases it
+# ("This session is still a member of formation 36 (...), which is still active. Leave formation 36
+# to release the session, then start or join again."), and this prints that sentence followed by
+# this host's own leave command. Before #32401 both handlers printed a fixed sentence naming
+# nothing, after a close-out the formation in question was no longer listed anywhere, and the only
+# way to learn which one it was was to run leave and read its answer (production feedback 41).
+#
+# A service older than #32401 names no formation; it gets the old sentence, word for word. The
+# service's text is flattened to one line and stripped of control characters before it is printed,
+# because it carries an objective a person typed.
+#
+# Usage: mmry_formation_held_refusal   (reads MMRY_RESPONSE; prints one line, no newline)
+mmry_formation_held_refusal() {
+    local said=""
+    if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
+        said="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.error // empty' 2>/dev/null || true)"
+    fi
+    said="$(printf '%s' "$said" | tr '\r\n\t' '   ' | tr -d '\000-\037\177')"
+    if [[ "$said" =~ formation\ [0-9]+ ]]; then
+        printf '%s To leave it, run %s.' "$said" "$(mmry_host_formation_ref leave)"
+    else
+        printf 'This session already belongs to an active formation. Run %s first.' "$(mmry_host_formation_ref leave)"
+    fi
+}
+
 # Close out a formation with the lead's summary (#31104). The server consolidates the summary into
 # lasting memories and only records the transition if that actually happened; a failed
 # consolidation returns 502 with the formation left Active (DD-70), so retrying is safe.

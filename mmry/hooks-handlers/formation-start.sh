@@ -91,7 +91,7 @@ if [[ -z "$started" ]]; then
     code="${MMRY_HTTP_CODE:-0}"
     case "$code" in
         400) echo "The server refused the objective. ${MMRY_RESPONSE:-}" ;;
-        409) echo "This session already belongs to an active formation. Run $(mmry_host_formation_ref leave) first." ;;
+        409) mmry_formation_held_refusal; echo ;;   # names the formation that holds the session (#32401)
         *)   echo "Could not start a formation (HTTP ${code}). Nothing has been changed locally." ;;
     esac
     exit 1
