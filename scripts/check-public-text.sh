@@ -17,14 +17,11 @@
 # that file are read; the rest is code. docs/evidence/ is engineering evidence kept for QA
 # (raw request logs and traces), not documentation, and is not read.
 #
-# WHAT IS AN INTERNAL MECHANIC. How long each kind of memory lasts, how memories are kept alive,
-# and the server's route list. Connected assistants already keep these out of every tool
-# description (DD-48); this holds the plugin to the same rule.
+# WHAT IS AN INTERNAL MECHANIC. How long each kind of memory lasts, how memories are kept and
+# organised, and the server's route list. Connected assistants already keep these out of every
+# tool description (DD-48); this holds the plugin to the same rule.
 #
-# CODE IS NOT PROSE. The handler file name reinforce-memory.sh, the client function
-# mmry_reinforce_memory and the Codex MCP tool name memory_reinforce are code in a public
-# repository and cannot be hidden (renaming the tool would change behaviour), so those three
-# identifiers are removed from a line before it is checked. Nothing else is allow-listed.
+# NOTHING IS ALLOW-LISTED (#32640). A line is checked as written, code identifiers included.
 #
 # Portable to the bash 3.2 and BSD awk macOS ships: no mapfile, no GNU-only flags.
 
@@ -82,12 +79,13 @@ while IFS= read -r path; do
                 if (!keep) next
             }
             line = tolower(raw)
-            gsub(/reinforce-memory\.sh/, "", line)
-            gsub(/mmry_reinforce_memory/, "", line)
-            gsub(/memory_reinforce/, "", line)
 
             what = ""
             if (line ~ /reinforc/)                                   what = "reinforce or reinforcement"
+            else if (line ~ /mark(s|ed|ing)? ([a-z]+ )?([a-z]+ )?([a-z]+ )?(as )?(used|useful)|memory was useful/) what = "marking a memory used"
+            else if (line ~ /linking|associative|link[ _-]?types?|link-memor|_link([^a-z]|$)|related memor|get_related/ ||
+                     (line ~ /(^|[^a-z0-9_])links?(ed)?([^a-z0-9_]|$)/ && line ~ /memor/))
+                what = "linking memories"
             else if (line ~ /expiration clock|expiry clock|tier clock/) what = "expiry clock"
             else if (line ~ /access[ _-]?count/)                     what = "access count"
             else if (line ~ /\/api\//)                               what = "server route"

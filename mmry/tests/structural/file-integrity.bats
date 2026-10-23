@@ -25,16 +25,8 @@ load '../helpers/test-helper'
     [[ -f "$PLUGIN_ROOT/hooks-handlers/save-memory.sh" ]]
 }
 
-@test "hooks-handlers/reinforce-memory.sh exists" {
-    [[ -f "$PLUGIN_ROOT/hooks-handlers/reinforce-memory.sh" ]]
-}
-
 @test "hooks-handlers/deactivate-memory.sh exists" {
     [[ -f "$PLUGIN_ROOT/hooks-handlers/deactivate-memory.sh" ]]
-}
-
-@test "hooks-handlers/link-memories.sh exists" {
-    [[ -f "$PLUGIN_ROOT/hooks-handlers/link-memories.sh" ]]
 }
 
 @test "hooks-handlers/search-memories.sh exists" {

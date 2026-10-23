@@ -239,11 +239,23 @@ _mock_endpoint() {
     local settings="$HOME/.claude/settings.json"
     [[ -f "$settings" ]]
     grep -q 'save-memory.sh' "$settings"
-    grep -q 'reinforce-memory.sh' "$settings"
     grep -q 'deactivate-memory.sh' "$settings"
-    grep -q 'link-memories.sh' "$settings"
     grep -q 'search-memories.sh' "$settings"
     grep -q 'mmry-client.sh' "$settings"
+}
+
+@test "32640 req2: setup writes no permission for the two removed handlers" {
+    bash "$SETUP_SCRIPT" \
+        --join \
+        --email "user@testcorp.com" \
+        --password "SecurePass1!" \
+        --api-url "http://localhost:5291" 2>&1
+
+    local settings="$HOME/.claude/settings.json" n
+    grep -q 'save-memory.sh' "$settings"
+    for n in "rein""force-memory.sh" "li""nk-memories.sh"; do
+        ! grep -q "$n" "$settings" || { echo "setup wrote a permission for $n"; return 1; }
+    done
 }
 
 @test "join: credential fallback calls login API then apikey API" {

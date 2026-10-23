@@ -57,13 +57,14 @@ PLUGIN_NAMES=("mmry@mmry-plugin" "mmry@internal-plugins")
 MARKETPLACE_NAMES=("mmry-plugin" "internal-plugins")
 MMRY_PERMISSIONS=(
     "Bash(*save-memory.sh*)"
-    "Bash(*reinforce-memory.sh*)"
     "Bash(*deactivate-memory.sh*)"
-    "Bash(*link-memories.sh*)"
     "Bash(*search-memories.sh*)"
     "Bash(*submit-feedback.sh*)"
     "Bash(*mmry-client.sh*)"
 )
+# Every "Bash(*<name>-memory.sh*)" and "Bash(*<name>-memories.sh*)" permission is one setup wrote for
+# a memory handler, current or from an earlier version (#32640).
+MMRY_HANDLER_PERMISSION_RE='^Bash\(\*[a-z]+-memor(y|ies)\.sh\*\)$'
 
 echo ""
 echo "=== MMRY AI Uninstall ==="
@@ -126,6 +127,11 @@ else
                 if .permissions.allow then .permissions.allow -= [$p] else . end
             ')"
         done
+        # And every memory handler permission an earlier version of setup wrote, including handlers
+        # this version no longer ships (#32640), so an upgraded install is left clean too.
+        settings="$(echo "$settings" | "$MMRY_JQ" --arg re "$MMRY_HANDLER_PERMISSION_RE" '
+            if .permissions.allow then .permissions.allow |= map(select(test($re) | not)) else . end
+        ')"
         settings="$(echo "$settings" | "$MMRY_JQ" '
             if .permissions.allow and (.permissions.allow | length) == 0 then del(.permissions.allow) else . end |
             if .permissions and (.permissions | length) == 0 then del(.permissions) else . end
@@ -144,15 +150,14 @@ else
 
         if [[ -n "$PY_CMD" ]]; then
             "$PY_CMD" - "$SETTINGS_PATH" << 'PYEOF'
-import json, sys
+import json, re, sys
 sf = sys.argv[1]
+handler_perm = re.compile(r"^Bash\(\*[a-z]+-memor(y|ies)\.sh\*\)$")
 plugin_names = ["mmry@mmry-plugin", "mmry@internal-plugins"]
 marketplace_names = ["mmry-plugin", "internal-plugins"]
 mmry_perms = [
     "Bash(*save-memory.sh*)",
-    "Bash(*reinforce-memory.sh*)",
     "Bash(*deactivate-memory.sh*)",
-    "Bash(*link-memories.sh*)",
     "Bash(*search-memories.sh*)",
     "Bash(*submit-feedback.sh*)",
     "Bash(*mmry-client.sh*)"
@@ -171,7 +176,7 @@ if "extraKnownMarketplaces" in data:
         del data["extraKnownMarketplaces"]
 data.pop("autoMemoryEnabled", None)
 if "permissions" in data and "allow" in data["permissions"]:
-    data["permissions"]["allow"] = [p for p in data["permissions"]["allow"] if p not in mmry_perms]
+    data["permissions"]["allow"] = [p for p in data["permissions"]["allow"] if p not in mmry_perms and not handler_perm.match(p)]
     if not data["permissions"]["allow"]:
         del data["permissions"]["allow"]
     if not data["permissions"]:

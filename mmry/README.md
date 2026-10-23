@@ -153,7 +153,7 @@ Both failures are recorded in `mmry-foundation.log` in your temp directory. Sett
 
 ## Skill
 
-- `/mmry:memory-system` — Full documentation on how to store, retrieve, search, link, and manage memories
+- `/mmry:memory-system` — Full documentation on how to store, retrieve, search, correct, and manage memories
 
 ## Auto-Updates
 

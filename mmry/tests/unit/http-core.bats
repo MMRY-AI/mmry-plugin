@@ -23,7 +23,7 @@ setup() {
 }
 
 @test "request: returns 0 for 204 response" {
-    run _mmry_request POST "/api/memories/1/reinforce"
+    run _mmry_request PUT "/api/memories/1/visibility"
     [[ "$status" -eq 0 ]]
 }
 

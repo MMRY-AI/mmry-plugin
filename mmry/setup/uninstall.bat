@@ -67,9 +67,7 @@ if %ERRORLEVEL% EQU 0 goto :codex_install
   "$marketplaceNames = @('mmry-plugin', 'internal-plugins');" ^
   "$mmryPerms = @(" ^
   "  'Bash(*save-memory.sh*)'," ^
-  "  'Bash(*reinforce-memory.sh*)'," ^
   "  'Bash(*deactivate-memory.sh*)'," ^
-  "  'Bash(*link-memories.sh*)'," ^
   "  'Bash(*search-memories.sh*)'," ^
   "  'Bash(*mmry-client.sh*)'" ^
   ");" ^
@@ -121,7 +119,7 @@ if %ERRORLEVEL% EQU 0 goto :codex_install
   "" ^
   "  # Remove MMRY AI permissions" ^
   "  if ($settings.PSObject.Properties['permissions'] -and $settings.permissions.PSObject.Properties['allow']) {" ^
-  "    $settings.permissions.allow = @($settings.permissions.allow | Where-Object { $_ -notin $mmryPerms });" ^
+  "    $settings.permissions.allow = @($settings.permissions.allow | Where-Object { ($_ -notin $mmryPerms) -and ($_ -cnotmatch '\ABash\(\*[a-z]+-memor(y|ies)\.sh\*\)\z') });" ^
   "    $changed = $true;" ^
   "    if ($settings.permissions.allow.Count -eq 0) {" ^
   "      $settings.permissions.PSObject.Properties.Remove('allow')" ^
