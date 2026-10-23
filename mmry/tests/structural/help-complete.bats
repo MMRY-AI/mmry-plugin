@@ -158,3 +158,152 @@ _db_missing() {
     run grep -inE 'verbatim' <(head -5 "$help")
     [ "$status" -eq 0 ] || { echo "no verbatim instruction in the first lines"; return 1; }
 }
+
+# ------------------------------------------------------------------------------------------------
+# #32606 (DD-159): one help source per platform, each held complete against that platform's real
+# surface. The Claude Code checks above are unchanged. Below, the Codex help skill and the
+# connector's help.
+#
+# CODEX. The one help text is skills-codex/help/SKILL.md (Codex lists it as mmry:help). Three lists
+# are derived from shipped files, never typed here:
+#   1. every tool hooks-handlers/mcp-server.sh publishes: a four-space "name": "word" line in its
+#      tool list (a parameter's "name" is indented deeper, so it never matches);
+#   2. every script the Codex memory skill tells the assistant to run, as hooks-handlers/x.sh or
+#      setup/x.sh;
+#   3. the Foundation status check, hooks-handlers/foundation-status.sh.
+#
+# CONNECTOR. The one help text is src/Mnemo.Api/Mcp/ConnectorHelp.md in the API repository, which
+# is private, so plugin CI cannot read it. These tests run against an API checkout named by
+# MMRY_API_ROOT and are skipped, saying so, without one. The API's own CI gate is
+# ConnectorHelpTests (dotnet test), which checks the same text against the tools and prompts by
+# reflection.
+# ------------------------------------------------------------------------------------------------
+
+# The tools mcp-server.sh publishes to Codex, one per line.
+_codex_tools() { tr -d '\r' < "$1/hooks-handlers/mcp-server.sh" | grep -oE '^    "name": "[a-z_]+"' | sed -E 's/.*"([a-z_]+)"$/\1/'; }
+
+# The scripts the Codex memory skill runs, by file name, one per line.
+_codex_scripts() {
+    tr -d '\r' < "$1/skills-codex/memory-system/SKILL.md" \
+        | grep -oE '(hooks-handlers|setup)/[a-z-]+\.sh' | sed 's#.*/##' | sort -u
+}
+
+# Print everything the Codex help skill does not name. Empty output means complete.
+_codex_missing() {
+    local root="$1" help="$1/skills-codex/help/SKILL.md" t s
+    [ -f "$help" ] || { echo "skills-codex/help/SKILL.md (no Codex help skill)"; return 0; }
+    for t in $(_codex_tools "$root"); do
+        grep -Eq "(^|[^a-z_])${t}([^a-z_]|\$)" "$help" || echo "codex tool ${t} (hooks-handlers/mcp-server.sh)"
+    done
+    for s in $(_codex_scripts "$root"); do
+        grep -Fq "$s" "$help" || echo "codex script ${s} (skills-codex/memory-system/SKILL.md)"
+    done
+    grep -Fq "foundation-status.sh" "$help" || echo "codex Foundation check foundation-status.sh"
+}
+
+@test "help (codex): the help skill is packaged where the Codex manifest finds skills, named help" {
+    local root skills help; root="$(_root)"
+    skills="$(jq -r '.skills' "$root/.codex-plugin/plugin.json" | tr -d '\r')"
+    [ "$skills" = "./skills-codex/" ] || { echo "Codex skills path is $skills"; return 1; }
+    help="$root/skills-codex/help/SKILL.md"
+    [ -f "$help" ] || { echo "no $help"; return 1; }
+    # A direct child of the skills folder, with frontmatter naming it "help": Codex lists a
+    # plugin's skills prefixed with the plugin's name, so the customer calls it mmry:help.
+    [ "$(tr -d '\r' < "$help" | head -1)" = "---" ] || { echo "no frontmatter"; return 1; }
+    tr -d '\r' < "$help" | sed -n '2,6p' | grep -qx 'name: help' || { echo "frontmatter does not say name: help"; return 1; }
+    tr -d '\r' < "$help" | sed -n '2,6p' | grep -q '^description: ' || { echo "no description"; return 1; }
+    # Claude Code has /mmry:help; its skills folder does not get a second help.
+    [ ! -e "$root/skills/help" ] || { echo "skills/help exists for Claude Code"; return 1; }
+}
+
+@test "help (codex): names every Codex tool, every script operation and the Foundation check" {
+    local root; root="$(_root)"
+    run _codex_missing "$root"
+    [ -z "$output" ] || { echo "skills-codex/help/SKILL.md does not name:"; echo "$output"; return 1; }
+}
+
+@test "help (codex): the derived lists are not empty and hold the known members" {
+    local root tools scripts t s; root="$(_root)"
+    tools="$(_codex_tools "$root" | tr '\n' ' ')"
+    [ "$(_codex_tools "$root" | wc -l)" -ge 15 ] || { echo "only: $tools"; return 1; }
+    for t in memory_save memory_search memory_retire memory_load formation_start formation_status formation_leave; do
+        [[ " $tools" == *" $t "* ]] || { echo "missing $t in: $tools"; return 1; }
+    done
+    # A parameter's "name" never leaks in as a tool.
+    [[ " $tools" != *" name "* ]] || { echo "parameter leaked: $tools"; return 1; }
+    scripts="$(_codex_scripts "$root" | tr '\n' ' ')"
+    [ "$(_codex_scripts "$root" | wc -l)" -ge 10 ] || { echo "only: $scripts"; return 1; }
+    for s in visibility.sh submit-feedback.sh mmry-setup.sh save-record.sh tools-check.sh; do
+        [[ " $scripts" == *" $s "* ]] || { echo "missing $s in: $scripts"; return 1; }
+    done
+}
+
+@test "help (codex): a tool added to the Codex tool server with no help line is refused, naming it" {
+    local root copy; root="$(_root)"
+    copy="$BATS_TEST_TMPDIR/plugin"; mkdir -p "$copy/hooks-handlers"
+    cp -R "$root/skills-codex" "$copy/skills-codex"
+    { cat "$root/hooks-handlers/mcp-server.sh"; printf '    "name": "zz_fake_tool",\n'; } > "$copy/hooks-handlers/mcp-server.sh"
+    run _codex_missing "$copy"
+    [[ "$output" == *"codex tool zz_fake_tool"* ]] || { echo "not named: $output"; return 1; }
+}
+
+@test "help (codex): a help skill that leaves a capability out is refused, naming it" {
+    local root copy; root="$(_root)"
+    copy="$BATS_TEST_TMPDIR/plugin"; mkdir -p "$copy/hooks-handlers"
+    cp -R "$root/skills-codex" "$copy/skills-codex"
+    cp "$root/hooks-handlers/mcp-server.sh" "$copy/hooks-handlers/"
+    sed -i.bak -e 's/formation_report/the close-out tool/g' -e 's/foundation-status\.sh/the status script/g' \
+        "$copy/skills-codex/help/SKILL.md"
+    run _codex_missing "$copy"
+    [[ "$output" == *"codex tool formation_report"* ]] || { echo "tool not named: $output"; return 1; }
+    [[ "$output" == *"foundation-status.sh"* ]] || { echo "Foundation check not named: $output"; return 1; }
+}
+
+@test "help (codex): opens, after its frontmatter, with the instruction to show the text verbatim" {
+    local help; help="$(_root)/skills-codex/help/SKILL.md"
+    run grep -inE 'verbatim' <(tr -d '\r' < "$help" | awk 'n>=2 {print} /^---$/ {n++}' | head -6)
+    [ "$status" -eq 0 ] || { echo "no verbatim instruction after the frontmatter"; return 1; }
+}
+
+# The connector's tools and prompts, read from the [McpServerTool] and [McpServerPrompt] attributes
+# the API's tools/list and prompts/list are built from. A prompt named by a constant (Name = Name)
+# is resolved to that file's `const string Name = "..."`.
+_connector_names() {
+    local mcp="$1/src/Mnemo.Api/Mcp" f
+    cat "$mcp"/*.cs | tr -d '\r' | grep -oE 'McpServer(Tool|Prompt)\(Name = "[a-z_-]+"' | sed -E 's/.*"([a-z_-]+)"$/\1/'
+    for f in "$mcp"/*.cs; do
+        if tr -d '\r' < "$f" | grep -q 'McpServerPrompt(Name = Name'; then
+            tr -d '\r' < "$f" | grep -oE 'const string Name = "[a-z_-]+"' | sed -E 's/.*"([a-z_-]+)"$/\1/'
+        fi
+    done
+}
+
+_connector_missing() {
+    local api="$1" help="$1/src/Mnemo.Api/Mcp/ConnectorHelp.md" n
+    [ -f "$help" ] || { echo "src/Mnemo.Api/Mcp/ConnectorHelp.md (no connector help)"; return 0; }
+    for n in $(_connector_names "$api" | sort -u); do
+        tr -d '\r' < "$help" | grep -Eq "(^|[^A-Za-z0-9_-])${n}([^A-Za-z0-9_-]|\$)" || echo "connector ${n}"
+    done
+}
+
+_api_root() {
+    [ -n "${MMRY_API_ROOT:-}" ] && [ -d "$MMRY_API_ROOT/src/Mnemo.Api/Mcp" ] && return 0
+    skip "MMRY_API_ROOT is not set to an MMRY API checkout. The API repository is private; its CI gate for the connector help is ConnectorHelpTests (dotnet test)."
+}
+
+@test "help (connector): names every tool and prompt the connector publishes" {
+    _api_root
+    local n; n="$(_connector_names "$MMRY_API_ROOT" | sort -u | wc -l)"
+    [ "$n" -ge 34 ] || { echo "only $n connector tools and prompts found"; return 1; }
+    run _connector_missing "$MMRY_API_ROOT"
+    [ -z "$output" ] || { echo "ConnectorHelp.md does not name:"; echo "$output"; return 1; }
+}
+
+@test "help (connector): a help text that leaves a tool out is refused, naming it" {
+    _api_root
+    local copy="$BATS_TEST_TMPDIR/api/src/Mnemo.Api/Mcp"; mkdir -p "$copy"
+    cp "$MMRY_API_ROOT"/src/Mnemo.Api/Mcp/*.cs "$MMRY_API_ROOT"/src/Mnemo.Api/Mcp/ConnectorHelp.md "$copy/"
+    sed -i.bak 's/mmry_forget/the forget tool/g' "$copy/ConnectorHelp.md"
+    run _connector_missing "$BATS_TEST_TMPDIR/api"
+    [ "$output" = "connector mmry_forget" ] || { echo "got: $output"; return 1; }
+}

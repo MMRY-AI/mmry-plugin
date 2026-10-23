@@ -201,6 +201,11 @@ flow?" "Make that last one private." "Start a formation for the checkout work." 
 skill describing every operation and reaches for it. In practice this is how most people already use
 MMRY on Claude Code; what you lose is the certainty of typing an exact command.
 
+**To see everything MMRY does on Codex,** call the help skill by name: type `$mmry:help`, or ask
+"show me the MMRY help". It is the Codex counterpart of `/mmry:help`, and it also names the Foundation
+status check, which tells you whether your Foundation directives reached your assistant on your most
+recent prompt.
+
 ### 2. There is no prompt before your conversation is trimmed
 
 When a Claude Code conversation is about to be compacted, MMRY interrupts and asks the assistant to

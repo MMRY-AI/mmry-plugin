@@ -19,6 +19,8 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-formation-prompts.sh"
 
 session_id="$(mmry_session_id)"  # CLAUDE_SESSION_ID is unset in the command runtime; the Bash tool provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
@@ -61,6 +63,10 @@ if [[ "$leave_rc" -eq 0 ]]; then
         echo "Left the formation. The service has released this session, so it can join another formation now."
     fi
     echo "No further messages from it will be surfaced here. Everyone else in it is unaffected."
+    # #32682: the member's own outcome, printed after the release is confirmed so it never holds
+    # the leave up. A refused leave is not prompted: the session is still a member and is told to
+    # resolve that first, and it sees this when the leave that releases it succeeds.
+    mmry_formation_save_outcome_prompt
     exit 0
 fi
 
@@ -72,6 +78,8 @@ code="${MMRY_HTTP_CODE:-0}"
 if [[ "$code" == "404" ]]; then
     echo "The service has no record of this session being in a formation, so there was nothing to release."
     echo "Messages will not be surfaced here either way."
+    # #32682: the session is finished with the formation either way, so its outcome is worth saving.
+    mmry_formation_save_outcome_prompt
     exit 0
 fi
 
