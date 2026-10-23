@@ -240,8 +240,9 @@ _assert_only_customer_permissions_left() {
     local py=""
     command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(sys.version_info[0] < 3)' && py=python3
     [[ -n "$py" ]] || skip "python3 is not available"
-    # A copy with no hooks-handlers beside it: lib-jq.sh cannot be sourced, so the fallback runs.
-    mkdir -p "$TEST_TMPDIR/bare/setup"
+    # A copy beside an empty hooks-handlers: lib-jq.sh cannot be sourced, so the fallback runs. The
+    # directory exists because bash 3.2 (macOS) aborts this script under set -e when it does not.
+    mkdir -p "$TEST_TMPDIR/bare/setup" "$TEST_TMPDIR/bare/hooks-handlers"
     cp "$UNINSTALL_SCRIPT" "$TEST_TMPDIR/bare/setup/uninstall.sh"
     _seed_upgraded_settings "$HOME/.claude/settings.json"
     run bash "$TEST_TMPDIR/bare/setup/uninstall.sh"
