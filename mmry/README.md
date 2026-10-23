@@ -12,9 +12,9 @@ This plugin serves two hosts from one codebase, and they are not set up the same
   `/mmry:search`, `/mmry:formation`) are available.
 - **OpenAI Codex** - see **[docs/codex.md](../docs/codex.md)** for installation, setup, what is
   and is not supported, and how to uninstall. Codex has no typed slash commands; you ask for what
-  you want in plain words. Do not follow the Claude Code instructions below on Codex: the setup
-  command differs, and running the wrong one writes your credential into the other product's
-  account file.
+  you want in plain words, and `$mmry:help` shows everything MMRY does there. Do not follow the
+  Claude Code instructions below on Codex: the setup command differs, and running the wrong one
+  writes your credential into the other product's account file.
 
 ## Requirements
 
