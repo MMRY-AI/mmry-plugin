@@ -33,10 +33,10 @@ FORMAT_ID="" RECORD_ID=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --format-id)
-            [[ $# -ge 2 ]] || { echo "Error: --format-id needs the record type's id." >&2; exit 1; }
+            [[ $# -ge 2 ]] || { echo "Error: --format-id needs the database's id." >&2; exit 1; }
             FORMAT_ID="$2"; shift 2 ;;
         --record-id)
-            [[ $# -ge 2 ]] || { echo "Error: --record-id needs the record's id." >&2; exit 1; }
+            [[ $# -ge 2 ]] || { echo "Error: --record-id needs the entry's id." >&2; exit 1; }
             RECORD_ID="$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
@@ -61,7 +61,7 @@ if mmry_get_record_history "$FORMAT_ID" "$RECORD_ID"; then
     if [[ -n "${MMRY_JQ:-}" ]]; then
         count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.changes // (.history | length)')"
         if [[ "$count" == "0" ]]; then
-            echo "Nothing has changed since this record was written."
+            echo "Nothing has changed since this entry was saved."
         else
             printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
                 .history[]
@@ -74,6 +74,6 @@ if mmry_get_record_history "$FORMAT_ID" "$RECORD_ID"; then
         printf '%s\n' "$MMRY_RESPONSE"
     fi
 else
-    _mmry_format_error "read record history"
+    _mmry_format_error "read entry history"
     exit 1
 fi

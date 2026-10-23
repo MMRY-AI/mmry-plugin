@@ -55,6 +55,13 @@ jobs:
         shell: /bin/bash -e {0}
         run: bash scripts/check-public-text.sh
 
+      # #32457 (DD-150 in the mmry repository): the AI database is called a database and its
+      # items entries wherever customers and assistants read the plugin; script, flag and tool
+      # names keep their older words. The suite runs it again in structural/database-names-check.bats.
+      - name: Check customer-readable text for the AI database names
+        shell: /bin/bash -e {0}
+        run: bash scripts/check-database-names.sh
+
       - name: Run offline tests (structural + unit + handlers)
         # /bin/bash explicitly, so the step's own shell is the stock one on macOS too.
         shell: /bin/bash -e {0}

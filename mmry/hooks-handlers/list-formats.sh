@@ -39,7 +39,7 @@ else
 fi
 
 if [[ $ok -ne 0 ]]; then
-    _mmry_format_error "list record types"
+    _mmry_format_error "list databases"
     exit 1
 fi
 
@@ -56,11 +56,11 @@ fi
 
 if [[ -n "$FORMAT_ID" ]]; then
     printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
-        "Record type: \(.format.name)  (id \(.format.rootId), version \(.format.version) of \(.format.versions))",
-        "Records held: \(.format.entries)",
+        "Database: \(.format.name)  (id \(.format.rootId), version \(.format.version) of \(.format.versions))",
+        "Entries held: \(.format.entries)",
         "Identity: \(.format.entryKeyMode)" + (if .format.identityField then " on \(.format.identityField)" else "" end),
         "Visible to: \(.format.visibility)",
-        "Words that help choose it: " + (if (.format.matchHints // "") == "" then "(none - name this type when you record against it)" else .format.matchHints end),
+        "Words that help choose it: " + (if (.format.matchHints // "") == "" then "(none - name this database when you save an entry to it)" else .format.matchHints end),
         "Fields:",
         (.fields[] | "  \(.key) (\(.type))" + (if .retired then "  [no longer collected]" else "" end))'
     exit 0
@@ -68,15 +68,15 @@ fi
 
 count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length')"
 if [[ "$count" == "0" ]]; then
-    echo "No structured record types yet."
+    echo "No databases yet."
     echo "Create one with create-format.sh when the user is accumulating examples of a"
     echo "recurring shape they will later want to count or compare."
     exit 0
 fi
-echo "${count} record type(s):"
+echo "${count} database(s):"
 echo ""
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] |
-    "id \(.rootId) | \(.name) | \(.entries) record(s) | words that help choose it: " +
-    (if (.matchHints // "") == "" then "(none)" else .matchHints end) + " | a save becomes a record when it names this type" + (if (.matchHints // "") == "" then "" else " or contains these words" end) + " and has values for its fields"'
+    "id \(.rootId) | \(.name) | \(.entries) " + (if .entries == 1 then "entry" else "entries" end) + " | words that help choose it: " +
+    (if (.matchHints // "") == "" then "(none)" else .matchHints end) + " | a save becomes an entry when it names this database" + (if (.matchHints // "") == "" then "" else " or contains these words" end) + " and has values for its fields"'
 echo ""
-echo "Run with --id <id> for the fields a type collects."
+echo "Run with --id <id> for the fields a database collects."

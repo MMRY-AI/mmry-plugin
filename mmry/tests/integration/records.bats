@@ -56,7 +56,7 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
         --fields '[{"key":"amount","label":"Amount","type":"number"},{"key":"merchant","label":"Merchant","type":"text"},{"key":"kind","label":"Kind","type":"text"}]' \
         --mode append --match-hints "spent, paid, bought"
     [[ "$status" -eq 0 ]] || fail "create-format.sh failed: $output"
-    [[ "$output" == *"Created record type ${name}"* ]] || fail "unexpected: $output"
+    [[ "$output" == *"Created the database ${name}"* ]] || fail "unexpected: $output"
     local id
     id="$(printf '%s' "$output" | grep -o 'id [0-9]*' | head -1 | sed 's/id //')"
     [[ -n "$id" ]] || fail "no format id in: $output"
@@ -94,16 +94,16 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
 
     _plugin query-records.sh --format-id "$id" --filter kind=food
     [[ "$status" -eq 0 ]] || fail "query failed: $output"
-    [[ "$output" == *"1 record(s)"* ]] || fail "expected exactly the food record: $output"
+    [[ "$output" == *"1 entry in"* ]] || fail "expected exactly the food record: $output"
     [[ "$output" == *"amount: 42"* ]] || fail "$output"
     [[ "$output" == *"words: I spent 42 dollars on lunch"* ]] || fail "the user's words are missing: $output"
     [[ "$output" != *"Metro rail"* ]] || fail "the filter did not filter: $output"
 
     _plugin query-records.sh --format-id "$id" --filter amount=15
-    [[ "$output" == *"1 record(s)"* && "$output" == *"Metro rail"* ]] || fail "query by number: $output"
+    [[ "$output" == *"1 entry in"* && "$output" == *"Metro rail"* ]] || fail "query by number: $output"
 
     _plugin query-records.sh --format-id "$id" --order "amount desc"
-    [[ "$output" == *"2 record(s)"* ]] || fail "$output"
+    [[ "$output" == *"2 entries in"* ]] || fail "$output"
     local first_42 first_15
     first_42="$(printf '%s\n' "$output" | grep -n 'amount: 42' | head -1 | cut -d: -f1)"
     first_15="$(printf '%s\n' "$output" | grep -n 'amount: 15' | head -1 | cut -d: -f1)"

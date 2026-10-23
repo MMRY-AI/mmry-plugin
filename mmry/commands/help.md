@@ -53,7 +53,7 @@ You can talk to Claude naturally about your memories:
 - **`/mmry:foundation-status`** reports whether your Foundation directives are actually reaching this assistant right now: whether re-injection is on, whether the locally stored copy still matches the record MMRY wrote when it last fetched your directives, how many directives and bytes it holds, whether the most recent prompt received them in full, in part or by reference, and how long ago they were last sent. It is a local check and makes no network call. Read-only.
 - **"Forget the memory about the old API endpoint."** Claude deactivates it.
 - **"Load my memories."** Reloads your memories mid-session (same as `/mmry:load-memories`).
-- **"Define a record type for our bug reports, then save one."** Claude creates a structured record type, saves records of it, and can query them or show a record's history.
+- **"Keep track of our bug reports, then save one."** Claude sets up a database for them with fields named in your words, saves each bug report as an entry, and can answer questions about the values or show an entry's history.
 
 ## Tips
 
