@@ -142,7 +142,7 @@ MMRY_MCP_TOOLS='[
       "type": "object",
       "properties": {
         "content": {"type": "string", "description": "What to remember."},
-        "supersedes": {"type": "integer", "description": "Id of a memory this one corrects. It is retired and linked to the new one."},
+        "supersedes": {"type": "integer", "description": "Id of a memory this one corrects. It is retired, and this one replaces it."},
         "visibility": {"type": "string", "enum": ["Global", "Private", "Group"], "description": "Who can see it. Leave unset for the customer'"'"'s default."},
         "permission_group_id": {"type": "integer", "description": "The group, when visibility is Group."},
         "working_dir": {"type": "string", "description": "Absolute path of the project directory this is about."}
@@ -154,7 +154,7 @@ MMRY_MCP_TOOLS='[
   {
     "name": "memory_search",
     "title": "Search memories",
-    "description": "Search MMRY AI memories by keyword. Search finds memories that were not loaded at session start. Each match is printed with its id, tier, scope and topic, then its content. Use the id with memory_reinforce, memory_link, memory_retire, or memory_save and supersedes; do not show ids to the customer unless they ask.",
+    "description": "Search MMRY AI memories by keyword. Search finds memories that were not loaded at session start. Each match is printed with its id, tier, scope and topic, then its content. Use the id with memory_retire, or memory_save and supersedes; do not show ids to the customer unless they ask.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -166,35 +166,9 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Search memories", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
   },
   {
-    "name": "memory_reinforce",
-    "title": "Mark a memory useful",
-    "description": "Record that a memory you found with memory_search was useful. Call it only when that memory genuinely guided the work.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {"id": {"type": "integer", "description": "The memory id, from memory_search."}},
-      "required": ["id"]
-    },
-    "annotations": {"title": "Mark a memory useful", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
-  },
-  {
-    "name": "memory_link",
-    "title": "Link two memories",
-    "description": "Record a relationship between two memories. related and contradicts are symmetric; supersedes and elaborates run from the first memory to the second.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "source_id": {"type": "integer"},
-        "target_id": {"type": "integer"},
-        "link_type": {"type": "string", "enum": ["related", "contradicts", "supersedes", "elaborates"]}
-      },
-      "required": ["source_id", "target_id", "link_type"]
-    },
-    "annotations": {"title": "Link two memories", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
-  },
-  {
     "name": "memory_retire",
     "title": "Retire a memory",
-    "description": "Retire (deactivate) a memory so it is no longer recalled. Nothing is deleted; the record is kept. To correct a memory, prefer memory_save with supersedes, which retires the old one and links the two.",
+    "description": "Retire (deactivate) a memory so it is no longer recalled. Nothing is deleted; the record is kept. To correct a memory, prefer memory_save with supersedes, which retires the old one and saves its replacement.",
     "inputSchema": {
       "type": "object",
       "properties": {"id": {"type": "integer", "description": "The memory id, from memory_search."}},
@@ -344,7 +318,7 @@ MMRY_MCP_TOOLS='[
   }
 ]'
 
-MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster, the status and the close-out record of, closing out (debrief), removing a member from and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
+MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools reach it directly and need no Internet access approval, so use them instead of running MMRY's bash scripts whenever a tool here does the job: saving, searching, correcting, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster, the status and the close-out record of, closing out (debrief), removing a member from and leaving a coordination group (formation). For anything without a tool here, follow the memory-system skill."
 
 # ---------------------------------------------------------------------------------------------
 # ONE TOOL CALL.
@@ -374,11 +348,7 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
       + (if $wd != "" then ["--working-dir", $wd] else [] end)
    elif $n == "memory_search" then
       ["search-memories.sh", "--ids", (str("query") | need("query"))] + (if (str("scope") // "") != "" then [str("scope")] else [] end)
-   elif $n == "memory_reinforce" then ["reinforce-memory.sh", (int("id") | need("id"))]
    elif $n == "memory_retire" then ["deactivate-memory.sh", (int("id") | need("id"))]
-   elif $n == "memory_link" then
-      ["link-memories.sh", (int("source_id") | need("source_id")), (int("target_id") | need("target_id")),
-       (str("link_type") | need("link_type") | if IN("related","contradicts","supersedes","elaborates") then . else error("link_type must be related, contradicts, supersedes or elaborates") end)]
    elif $n == "memory_load" then ["session-start.sh"]
    elif $n == "formation_join" then ["formation-join.sh", (int("formation_id") | need("formation_id"))]
       + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)

@@ -1,6 +1,6 @@
 ---
 name: memory-system
-description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, marking useful, linking, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out, removing a member from and leaving a formation, are calls to the mmry_plugin tools, never scripts.
+description: The MMRY AI persistent memory system for Codex. Memories load automatically at session start and are saved back as the work happens, so context survives between sessions, machines and teammates. Use this skill whenever the user asks to remember, recall, search, forget or share something, or wants to coordinate with another assistant session. Saving, searching, correcting, retiring and reloading memories, and starting, joining, messaging, assigning work in, reporting progress in, reading the roster and the close-out record of, closing out, removing a member from and leaving a formation, are calls to the mmry_plugin tools, never scripts.
 ---
 
 # MMRY AI memory system (Codex)
@@ -20,8 +20,6 @@ approves Internet access for the conversation, which is the prompt these tools e
 |---|---|---|
 | Save a memory, or correct a wrong one | `memory_save` | `content`; optional `supersedes`, `visibility`, `permission_group_id`, `working_dir` |
 | Search memories (prints each match's id) | `memory_search` | `query`; optional `scope` |
-| Record that a memory you found by searching was useful | `memory_reinforce` | `id` |
-| Link two memories | `memory_link` | `source_id`, `target_id`, `link_type` |
 | Retire (deactivate) a memory | `memory_retire` | `id` |
 | Reload memories now | `memory_load` | optional `working_dir` |
 | Join a formation, as this conversation | `formation_join` | `formation_id`; optional `working_dir` |
@@ -116,9 +114,7 @@ Bad: `We had a long discussion about identifiers and decided UPC was best for va
 Call `memory_search` with keywords as `query`, and optionally a `scope` such as `backend`. Each
 match is printed with its id, tier, scope and topic, then its content.
 
-Search finds memories that were not loaded at session start. When a memory you found by searching
-genuinely guides the work, call `memory_reinforce` with its id; it records that the memory was
-useful. Call it only for a memory that guided the work.
+Search finds memories that were not loaded at session start.
 
 ## Reloading memories mid-session
 
@@ -148,19 +144,12 @@ Foundation is sacred: only core values and `Initialization` category memories be
 Categories: `Initialization`, `Decision`, `Fact`, `Convention`, `Issue`.
 Scopes: consistent lowercase names, e.g. `global`, `frontend`, `backend`, `infrastructure`.
 
-## Linking
-
-Call `memory_link` with `source_id`, `target_id` and `link_type`. Types: `related` and
-`contradicts` (symmetric), `supersedes` and `elaborates` (directional, from the first memory to the
-second). When a decision changes, save the new one with `supersedes` rather than deleting anything;
-see "Correcting a memory" below.
-
 ## Correcting a memory
 
 When the customer says a remembered fact is wrong, or a decision has changed, call `memory_save`
 with the corrected version as `content` and `supersedes` set to the id of the wrong one, for
-example `supersedes 42`. MMRY AI saves it, retires the old memory so it stops being recalled, and
-links the two.
+example `supersedes 42`. MMRY AI saves it and retires the old memory, so only the new one is
+recalled from then on. Correct a memory this way rather than retiring it and saving a new one.
 
 Read the result, because it says whether the replacement happened:
 

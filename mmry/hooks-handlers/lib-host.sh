@@ -637,7 +637,7 @@ mmry_host_tool_ref() {
     _mmry_host_resolve
     [[ "$_MMRY_HOST_V" == "codex" ]] || return 1
     case "$tool" in
-        memory_save|memory_search|memory_reinforce|memory_link|memory_retire|memory_load) ;;
+        memory_save|memory_search|memory_retire|memory_load) ;;
         formation_join|formation_say|formation_progress|formation_roster|formation_leave) ;;
         # #31410: the status view, with each member's name beside its member id.
         formation_status) ;;
@@ -1044,10 +1044,10 @@ mmry_host_codex_access_hint() {
     # tool needs no access. Said FIRST, so the model reaches for the tool rather than the request.
     # Not for setup ($1 given), which has no tool.
     if [[ -z "${1:-}" ]]; then
-        echo "network access. If this was a save, search, reinforce, link, retire or reload, or a"
+        echo "network access. If this was a save, search, retire or reload, or a"
         echo "formation start, join, say, assign, progress report, roster, status, report, debrief, remove a"
         echo "member or leave, do not ask for access: call the matching mmry_plugin tool instead (memory_save,"
-        echo "memory_search, memory_reinforce, memory_link, memory_retire, memory_load,"
+        echo "memory_search, memory_retire, memory_load,"
         echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
         echo "formation_roster, formation_status, formation_report, formation_debrief, formation_remove,"
         echo "formation_leave), which needs"

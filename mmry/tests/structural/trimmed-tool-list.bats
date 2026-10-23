@@ -66,7 +66,7 @@ setup() {
     local n out
     for n in "memory_rein""force" "memory_li""nk"; do
         out="$(MMRY_HOST=codex CODEX_HOME="$BATS_TEST_TMPDIR/codex" bash -c \
-            'source "$1/hooks-handlers/lib-host.sh"; mmry_host_tool_ref "$2"; echo " rc=$?"' _ "$PLUGIN_ROOT" "$n")"
+            'source "$1/hooks-handlers/lib-host.sh"; if mmry_host_tool_ref "$2"; then echo " rc=0"; else echo " rc=1"; fi' _ "$PLUGIN_ROOT" "$n")"
         [[ "$out" == " rc=1" ]] || { echo "$n: $out"; return 1; }
     done
     # Control: a tool that remains is still referenced.
