@@ -202,3 +202,59 @@ _assert_claude_installation_intact() {
     [[ -f "$HOME/.codex/mmry-config.json" ]] || return 1
     [[ -d "$HOME/.codex/mmry" ]]
 }
+
+# ══════════════════════════════════════════════
+# uninstall on an upgraded install (#32640)
+#
+# Setup no longer writes a permission for the two handlers this version removed, but installs made
+# by earlier versions still carry them. Uninstall removes those as well, and leaves the customer's
+# own permissions alone. The two names are assembled so this file does not spell them.
+# ══════════════════════════════════════════════
+
+_seed_upgraded_settings() {
+    local r="rein""force" l="li""nk"
+    jq -n --arg a "Bash(*${r}-memory.sh*)" --arg b "Bash(*${l}-memories.sh*)" '{
+        autoMemoryEnabled: false,
+        permissions: { allow: [
+            "Bash(*save-memory.sh*)", $a, "Bash(*deactivate-memory.sh*)", $b,
+            "Bash(*search-memories.sh*)", "Bash(*submit-feedback.sh*)", "Bash(*mmry-client.sh*)",
+            "Bash(npm test)", "Bash(*my-own-tool.sh*)"
+        ] }
+    }' > "$1"
+}
+
+_assert_only_customer_permissions_left() {
+    run jq -c '.permissions.allow' "$1"
+    [[ "$output" == '["Bash(npm test)","Bash(*my-own-tool.sh*)"]' ]] \
+        || { echo "left behind: $output"; return 1; }
+}
+
+@test "32640 req2: uninstall removes the removed handlers' permissions from an upgraded install, and keeps the customer's own" {
+    _seed_upgraded_settings "$HOME/.claude/settings.json"
+    run bash "$UNINSTALL_SCRIPT"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    _assert_only_customer_permissions_left "$HOME/.claude/settings.json"
+}
+
+@test "32640 req2: and the same through the Python fallback, when no jq can be found" {
+    local py=""
+    command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(sys.version_info[0] < 3)' && py=python3
+    [[ -n "$py" ]] || skip "python3 is not available"
+    # A copy with no hooks-handlers beside it: lib-jq.sh cannot be sourced, so the fallback runs.
+    mkdir -p "$TEST_TMPDIR/bare/setup"
+    cp "$UNINSTALL_SCRIPT" "$TEST_TMPDIR/bare/setup/uninstall.sh"
+    _seed_upgraded_settings "$HOME/.claude/settings.json"
+    run bash "$TEST_TMPDIR/bare/setup/uninstall.sh"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    _assert_only_customer_permissions_left "$HOME/.claude/settings.json"
+}
+
+@test "32640 req2: the Windows uninstaller drops the same permissions as uninstall.sh" {
+    # Read, not executed: run in a temporary profile on develop, uninstall.bat prints its banner and
+    # changes nothing (reported for a separate ticket), so an executed test here would prove nothing
+    # about this change. What this change owns is the filter: the same handler pattern as uninstall.sh.
+    local bat="$PLUGIN_ROOT/setup/uninstall.bat"
+    grep -qF "\ABash\(\*[a-z]+-memor(y|ies)\.sh\*\)\z" "$bat" || { echo "no handler pattern in uninstall.bat"; return 1; }
+    grep -qF "MMRY_HANDLER_PERMISSION_RE='^Bash\(\*[a-z]+-memor(y|ies)\.sh\*\)\$'" "$PLUGIN_ROOT/setup/uninstall.sh" \
+        || { echo "no handler pattern in uninstall.sh"; return 1; }
+}

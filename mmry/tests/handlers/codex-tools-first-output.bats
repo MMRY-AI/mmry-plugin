@@ -18,7 +18,7 @@ load '../helpers/test-helper'
 
 # The scripts of the operations the tool server covers.
 # #31789 added the lead's four: start, assign, report and debrief. #32270 added remove.
-TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|reinforce-memory|link-memories|deactivate-memory|session-start|formation-(join|say|roster|leave|start|assign|report|debrief|remove))\.sh'
+TOOL_COVERED_SCRIPTS_RE='(save-memory|search-memories|deactivate-memory|session-start|formation-(join|say|roster|leave|start|assign|report|debrief|remove))\.sh'
 # formation-progress.sh is tool-covered only for this conversation's own report; the lead reporting
 # for ANOTHER member (a member id first) has no tool and keeps the script.
 PROGRESS_OWN_RE='formation-progress\.sh( <Accepted|$|[^ 0-9<]| [^0-9<])'

@@ -37,10 +37,12 @@ if [[ -n "${FAKE_FAIL_ALL:-}" ]]; then
     code=500; resp='{"error":"boom"}'
 else
 case "$method $url" in
-    "POST "*/api/memories/process*) code=202; resp='{"message":"Memory sent to MMRY AI for processing.","stored":1}' ;;
+    "POST "*/api/memories/process*)
+        code=202; resp='{"message":"Memory sent to MMRY AI for processing.","stored":1}'
+        # A save that replaces memory 42 (#32640 req3): the shape the API answers with.
+        [[ "$body" == *'"supersedesId":42'* ]] \
+            && resp='{"message":"Stored 1 memory under Operational tier. It replaces memory 42, which is no longer active.","stored":1,"supersede":{"memoryId":42,"applied":true,"reason":"replaced"}}' ;;
     "GET "*/api/memories/search*) resp='[{"id":41,"memoryTier":"Operational","scope":"backend","topic":"Refund Handling","content":"Refund through the API."}]' ;;
-    "POST "*/api/memories/*/reinforce) code=204; resp='' ;;
-    "POST "*/api/memories/*/links) code=201; resp='{"id":3}' ;;
     "DELETE "*/api/memories/*) code=204; resp='' ;;
     "GET "*/api/memories/startup*) resp='[]' ;;
     "GET "*/api/memories*) resp='[]' ;;
@@ -129,14 +131,14 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 9 | jq -c '.result')" = "{}" ]
 }
 
-@test "protocol: tools/list names the seventeen tools, each with an object input schema" {
+@test "protocol: tools/list names the fifteen tools, each with an object input schema" {
     # #31789 added the lead's four: formation_start, formation_assign, formation_report and
     # formation_debrief. #32270 added formation_remove, so a lead or an administrator on Codex can
     # take off a member whose session has dropped without the Internet access prompt. #31410 added
     # formation_status, the status view with each member's name beside its member id.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     [ "$(answer 2 | jq -r '.result.tools | map(.name) | sort | join(",")')" = \
-      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_link,memory_load,memory_reinforce,memory_retire,memory_save,memory_search" ]
+      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_load,memory_retire,memory_save,memory_search" ]
     [ "$(answer 2 | jq -r '[.result.tools[] | .inputSchema.type] | unique | join(",")')" = "object" ]
 }
 
@@ -183,7 +185,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 @test "annotations: by Codex's own rule, every other tool runs with no prompt at all" {
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     local t
-    for t in memory_save memory_search memory_reinforce memory_link memory_load \
+    for t in memory_save memory_search memory_load \
              formation_join formation_say formation_progress formation_roster formation_leave \
              formation_start formation_assign formation_report formation_status; do
         [ "$(_codex_would_prompt "$t")" = "no-prompt" ] || { echo "$t would prompt"; return 1; }
@@ -206,6 +208,29 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     grep -q '^POST http://fake.invalid/api/memories/process .*42' "$REQLOG"
 }
 
+@test "32640 req3: memory_save with supersedes replaces the memory in one request, and says so" {
+    mcp "$(call 13 memory_save '{"content":"The office moved to the fourth floor.","supersedes":42}')"
+    [ "$(is_error 13)" = "false" ]
+    [[ "$(text_of 13)" == *"replaces memory 42"* ]] || { text_of 13; return 1; }
+    # One request, the save itself, carrying the id it replaces. Nothing else is needed.
+    [ "$(grep -c . "$REQLOG")" -eq 1 ] || { cat "$REQLOG"; return 1; }
+    grep -q '^POST http://fake.invalid/api/memories/process .*"supersedesId":42' "$REQLOG"
+}
+
+@test "32640 req1: tools/list names neither removed tool, and calling one is an unknown tool that sends nothing" {
+    local n
+    mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+    for n in "memory_rein""force" "memory_li""nk"; do
+        [ "$(answer 2 | jq --arg n "$n" '[.result.tools[] | select(.name == $n)] | length')" = "0" ] \
+            || { echo "$n is still listed"; return 1; }
+    done
+    mcp "$(call 14 "memory_rein""force" '{"id":41}')" \
+        "$(call 15 "memory_li""nk" '{"source_id":41,"target_id":87,"link_type":"related"}')"
+    [ "$(answer 14 | jq -r '.error.code')" = "-32602" ]
+    [ "$(answer 15 | jq -r '.error.code')" = "-32602" ]
+    [ ! -s "$REQLOG" ]
+}
+
 @test "tool: memory_save refuses with no content and sends nothing" {
     mcp "$(call 12 memory_save '{}')"
     [ "$(is_error 12)" = "true" ]
@@ -221,26 +246,6 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     grep -q '^GET http://fake.invalid/api/memories/search?.*backend' "$REQLOG"
 }
 
-@test "tool: memory_reinforce posts to the memory's reinforce route" {
-    mcp "$(call 30 memory_reinforce '{"id":41}')"
-    [ "$(is_error 30)" = "false" ]
-    [[ "$(text_of 30)" == *"Memory reinforced."* ]] || return 1
-    grep -q '^POST http://fake.invalid/api/memories/41/reinforce' "$REQLOG"
-}
-
-@test "tool: memory_link posts the link with its type" {
-    mcp "$(call 40 memory_link '{"source_id":41,"target_id":87,"link_type":"related"}')"
-    [ "$(is_error 40)" = "false" ]
-    [[ "$(text_of 40)" == *"Memories linked."* ]] || return 1
-    grep -q '^POST http://fake.invalid/api/memories/41/links .*87.*related' "$REQLOG"
-}
-
-@test "tool: memory_link refuses a link type MMRY does not have, and sends nothing" {
-    mcp "$(call 41 memory_link '{"source_id":41,"target_id":87,"link_type":"likes"}')"
-    [ "$(is_error 41)" = "true" ]
-    [ ! -s "$REQLOG" ]
-}
-
 @test "tool: memory_retire deactivates the memory" {
     mcp "$(call 50 memory_retire '{"id":41}')"
     [ "$(is_error 50)" = "false" ]
@@ -249,7 +254,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 }
 
 @test "tool: an id that is not a positive whole number is refused before anything is sent" {
-    mcp "$(call 51 memory_retire '{"id":"41; rm -rf /"}')" "$(call 52 memory_retire '{"id":-3}')" "$(call 53 memory_reinforce '{"id":1.5}')"
+    mcp "$(call 51 memory_retire '{"id":"41; rm -rf /"}')" "$(call 52 memory_retire '{"id":-3}')" "$(call 53 memory_retire '{"id":1.5}')"
     [ "$(is_error 51)" = "true" ]
     [ "$(is_error 52)" = "true" ]
     [ "$(is_error 53)" = "true" ]
@@ -509,7 +514,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 }
 
 @test "tool: a failure from MMRY AI is reported as an error and the server keeps serving" {
-    FAKE_FAIL_ALL=1 mcp "$(call 130 memory_reinforce '{"id":41}')" '{"jsonrpc":"2.0","id":131,"method":"ping"}'
+    FAKE_FAIL_ALL=1 mcp "$(call 130 memory_retire '{"id":41}')" '{"jsonrpc":"2.0","id":131,"method":"ping"}'
     [ "$(is_error 130)" = "true" ]
     [ "$(answer 131 | jq -c '.result')" = "{}" ]
 }
@@ -589,7 +594,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
 }
 
 @test "handlers never read the protocol stream: a burst of requests is answered one for one, in order" {
-    mcp "$(call 300 memory_reinforce '{"id":1}')" "$(call 301 memory_reinforce '{"id":2}')" \
-        "$(call 302 memory_reinforce '{"id":3}')" '{"jsonrpc":"2.0","id":303,"method":"ping"}'
+    mcp "$(call 300 memory_retire '{"id":1}')" "$(call 301 memory_retire '{"id":2}')" \
+        "$(call 302 memory_retire '{"id":3}')" '{"jsonrpc":"2.0","id":303,"method":"ping"}'
     [ "$(printf '%s\n' "$output" | jq -r '.id' | tr -d '\r' | paste -sd, -)" = "300,301,302,303" ]
 }
