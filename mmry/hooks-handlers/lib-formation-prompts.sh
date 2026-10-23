@@ -25,6 +25,10 @@
 # surface's literal is text that cannot drift by an escape.
 #
 # Other standing member prompts belong beside this one.
+#
+# set -euo pipefail is the repository convention for every script in this directory
+# (file-integrity.bats); both handlers that source this already run under it.
+set -euo pipefail
 
 MMRY_FORMATION_SAVE_OUTCOME="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. If you have saved all of that since your last report, there is nothing more to save."
 
