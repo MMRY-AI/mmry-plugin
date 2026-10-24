@@ -108,6 +108,14 @@ mmry_foundation_hash_v() {
     printf -v _MMRY_FND_HASH '%08x%08x' "$f" "$j"
 }
 
+# The repository's one guard on the other product's credential (#31245 TC6, mmry-client.sh and
+# lib-foundation-switch.sh define the same body): false on Codex, so a Codex session never keys its copy
+# from the Claude Code account. Defined here only when no earlier file has, because this library is
+# sourced before both of them; declare -F is a builtin, so it costs no process.
+declare -F _mmry_claude_config_fallback_ok >/dev/null 2>&1 || _mmry_claude_config_fallback_ok() {
+    [[ "${MMRY_HOST:-}" != "codex" ]]
+}
+
 # The config file the client would load, into _MMRY_FND_CFG (empty when there is none), in
 # mmry_load_config's order: $MMRY_CONFIG_FILE while it exists, the plugin root, then the Claude Code
 # file - never on Codex, which must not fall back to the other product's account (#31245 TC6).
@@ -118,7 +126,7 @@ _mmry_fnd_config_file_v() {
         _MMRY_FND_CFG="$MMRY_CONFIG_FILE"
     elif [[ -n "$root" && -f "${root}/mmry-config.json" ]]; then
         _MMRY_FND_CFG="${root}/mmry-config.json"
-    elif [[ "${MMRY_HOST:-}" != "codex" && -n "${HOME:-}" && -f "${HOME}/.claude/mmry-config.json" ]]; then
+    elif _mmry_claude_config_fallback_ok && [[ -n "${HOME:-}" && -f "${HOME}/.claude/mmry-config.json" ]]; then
         _MMRY_FND_CFG="${HOME}/.claude/mmry-config.json"
     fi
 }
