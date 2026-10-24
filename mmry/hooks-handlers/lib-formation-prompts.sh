@@ -30,20 +30,23 @@
 # (file-integrity.bats); both handlers that source this already run under it.
 set -euo pipefail
 
-# The prompt is two sentences with the save route between them: the outcome sentence, the route,
-# then the skip sentence. The skip sentence is last, never before the route: a route that follows
-# "there is nothing more to save" reads as a contradiction.
-MMRY_FORMATION_SAVE_OUTCOME_ASK="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are."
-MMRY_FORMATION_SAVE_OUTCOME_SKIP="If you have saved all of that since your last report, there is nothing more to save."
+# The prompt is three sentences: the ask, the save route ("Use <route>."), then the skip sentence.
+# The skip sentence is last, never before the route: a route that follows "skip this" reads as a
+# contradiction.
+MMRY_FORMATION_SAVE_OUTCOME_ASK="Save what you did before you go: tasks and their status, what shipped, handoffs, and where your notes are."
+MMRY_FORMATION_SAVE_OUTCOME_SKIP="Skip this if you already saved it."
 
-# Print the save prompt with this host's save route between its two sentences, as one line.
+# Print the save prompt with this host's save route between the ask and the skip sentence, as one
+# line. The route is derived from the host, then shortened on Codex to "the memory_save tool", the
+# form Eric approved (#32682); the host reference says "the mmry_plugin memory_save tool".
 mmry_formation_save_outcome_prompt() {
     local route=""
     if declare -F mmry_host_command_ref >/dev/null 2>&1; then
         route="$(mmry_host_command_ref save 2>/dev/null || true)"
     fi
     if [[ -n "$route" ]]; then
-        printf '%s Save it with %s. %s\n' "$MMRY_FORMATION_SAVE_OUTCOME_ASK" "$route" "$MMRY_FORMATION_SAVE_OUTCOME_SKIP"
+        route="${route/the mmry_plugin /the }"
+        printf '%s Use %s. %s\n' "$MMRY_FORMATION_SAVE_OUTCOME_ASK" "$route" "$MMRY_FORMATION_SAVE_OUTCOME_SKIP"
     else
         printf '%s %s\n' "$MMRY_FORMATION_SAVE_OUTCOME_ASK" "$MMRY_FORMATION_SAVE_OUTCOME_SKIP"
     fi
