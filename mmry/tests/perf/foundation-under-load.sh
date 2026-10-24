@@ -31,9 +31,17 @@ mkdir -p "$W/home/.claude" "$W/t"
 d="$W/t"
 awk -v n="$LINES" 'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: keep every sentence short and every claim backed by something you ran.\n", i }' > "$W/body"
 read -r s b < <(cksum < "$W/body")
-{ printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$LINES" "$b" "$s"; cat "$W/body"; printf 'END OF FOUNDATION SET'; } > "$d/mmry-foundation-set.md"
-printf 'sess-load' > "$d/mmry-foundation.session"
 printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"load-key","foundationReinject":"true"}' > "$d/mmry-config.json"
+# Since #32889 the set and the marker are named by the account the config names, and the record carries
+# the key; a hook without the key library beside it is an older version and reads the unkeyed names.
+acct="" setf="$d/mmry-foundation-set.md" sessf="$d/mmry-foundation.session" rec="mmry-foundation v2 entries=$LINES bytes=$b cksum=$s"
+if [[ -f "${HOOK%/*}/lib-foundation-key.sh" ]]; then
+    acct="$(MMRY_CONFIG_FILE="$d/mmry-config.json" bash -c 'source "$1"; mmry_foundation_account_key' _ "${HOOK%/*}/lib-foundation-key.sh")"
+    setf="$d/mmry-foundation-set.$acct.md"; sessf="$d/mmry-foundation.session.$acct"
+    rec="mmry-foundation v3 entries=$LINES bytes=$b cksum=$s acct=$acct"
+fi
+{ printf '%s\n' "$rec"; cat "$W/body"; printf 'END OF FOUNDATION SET'; } > "$setf"
+printf 'sess-load' > "$sessf"
 export TMPDIR="$d" MMRY_TMPDIR="$d" HOME="$W/home" MMRY_CONFIG_FILE="$d/mmry-config.json"
 PAYLOAD='{"session_id":"sess-load-1","transcript_path":"/x","cwd":"/x","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}'
 want="$(cat "$W/body"; printf .)"; want="${want%.}"; want="${want%$'\n'}"

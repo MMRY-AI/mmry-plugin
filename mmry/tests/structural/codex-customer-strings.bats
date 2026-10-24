@@ -160,6 +160,9 @@ _allowed_reason() {
         "mmry-client.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f \"\${HOME:-}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
         "lib-foundation-switch.sh|cfg=\"\${HOME}/.claude/mmry-config.json\"") printf 'N'; return 0 ;;
+        # (N) #32889: the Foundation copy's account key reads the same file, in the client's order.
+        "lib-foundation-key.sh|elif _mmry_claude_config_fallback_ok && [[ -n \"\${HOME:-}\" && -f \"\${HOME}/.claude/mmry-config.json\" ]]; then") printf 'N'; return 0 ;;
+        "lib-foundation-key.sh|_MMRY_FND_CFG=\"\${HOME}/.claude/mmry-config.json\"") printf 'N'; return 0 ;;
         # (L) #31789: the Codex lead notice recommends Claude Code BY NAME, because a Claude Code
         #     session leading is the remedy for a Codex lead that cannot hear its members while
         #     idle. mmry_host_lead_notice returns before this line on any host but Codex.
@@ -284,6 +287,8 @@ uninstall.bat|"Write-Host 'Restart Claude Code to take effect.';" ^
 mmry-client.sh|elif _mmry_claude_config_fallback_ok && [[ -f "${HOME}/.claude/mmry-config.json" ]]; then
 lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f "${HOME:-}/.claude/mmry-config.json" ]]; then
 lib-foundation-switch.sh|cfg="${HOME}/.claude/mmry-config.json"
+lib-foundation-key.sh|elif _mmry_claude_config_fallback_ok && [[ -n "${HOME:-}" && -f "${HOME}/.claude/mmry-config.json" ]]; then
+lib-foundation-key.sh|_MMRY_FND_CFG="${HOME}/.claude/mmry-config.json"
 KEYS
 
     [ -z "$missing" ] || {

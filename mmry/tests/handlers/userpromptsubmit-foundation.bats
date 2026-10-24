@@ -9,13 +9,13 @@ load '../helpers/foundation-set'
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
+    SET="$(fnd_set_file)"
     # Every real session has one of these: SessionStart writes the session id here and clears
     # the delivery record beside it (#31583 QA round 4, finding 4c). Without it the handler
     # cannot tell its own delivery record from one an earlier session left in a shared temp
     # directory, and correctly fails safe by staying quiet. A fixture with no token is
     # therefore testing the no-SessionStart path, not the ordinary one.
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    printf 'session-under-test' > "$(fnd_session_file)"
 }
 
 # Seal whatever is staged in $CACHE into the set file the hook reads (#31583, #31597).
@@ -72,13 +72,15 @@ manifest_now() {
 }
 
 @test "userpromptsubmit-foundation: a stale cache triggers a gated background refresh (lock created)" {
+    # The key is part of the set's name since #32889, so it is exported before the set is sealed.
+    export MMRY_FOUNDATION_REFRESH_SECONDS=1
+    export MMRY_API_KEY="test-key"
+    SET="$(fnd_set_file)"
     printf -- '- Foundation fact.\n' > "$CACHE"
     manifest_now
     # The file the hook reads and ages is the set file, not the staged copy (#31597). Touching the
     # staged copy left the set file new, so this passed only when a second happened to elapse.
     touch -t 202001010000 "$SET"   # force the set to look stale
-    export MMRY_FOUNDATION_REFRESH_SECONDS=1
-    export MMRY_API_KEY="test-key"
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
     # Still emitted the current (pre-refresh) cache this turn — non-blocking.
@@ -323,7 +325,7 @@ _big_foundation_set() {
 }
 
 @test "userpromptsubmit-foundation: #31583 a record that is present but malformed is refused, not ignored" {
-    fnd_set_with 'mmry-foundation v2 garbage not a record' $'- Identity: Eric builds MMRY.\n'
+    fnd_set_with 'mmry-foundation v3 garbage not a record' $'- Identity: Eric builds MMRY.\n'
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -443,6 +445,8 @@ _make_config() {
   "foundationRefreshSeconds": 0
 }
 EOF
+    # The account changed, so a set sealed before this moves to its name (#32889).
+    fnd_follow_config
 }
 
 _registered_timeout() {
@@ -690,6 +694,8 @@ _codex_home_with_credential() {
   "foundationRefreshSeconds": 0
 }
 EOF
+    # The same account _make_config names, so a set sealed before either moves to its name (#32889).
+    FND_CONFIG_OVERRIDE="$d/mmry-config.json" fnd_follow_config
     printf '%s' "$d"
 }
 
@@ -878,6 +884,7 @@ _broken_bash_dir() {
   "foundationRefreshSeconds": 0
 }
 EOF
+    fnd_follow_config
     local shim; shim="$(_make_slow_jq 20)"
 
     # SIGKILL, because that is what the harness does on timeout: no trap, no cleanup, nothing.
@@ -954,6 +961,7 @@ _write_toggle_config() {
   "foundationRefreshSeconds": 0
 }
 EOF
+    fnd_follow_config
 }
 
 @test "userpromptsubmit-foundation: foundationReinject=false in CONFIG silences the crash notice it recommends (#31434 QA)" {
@@ -1105,6 +1113,9 @@ _stage_codex_install() {
     handler="$(_stage_codex_install "$root")"
     printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"k","foundationReinject":"true"}' \
         > "$root/mmry-config.json"
+    # The handler reads that config, so the set is sealed and named for it (#32889).
+    export FND_CONFIG_OVERRIDE="$root/mmry-config.json"
+    SET="$(fnd_set_file)"
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
 
@@ -1170,7 +1181,7 @@ _stage_codex_install() {
     # A record that claims nothing, on a set file that holds two directives (#31597: one file).
     local s b
     read -r s b < <(cksum < "$CACHE")
-    fnd_set_with "mmry-foundation v2 entries=0 bytes=${b} cksum=${s}" "$(cat "$CACHE")"
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=${b} cksum=${s} acct=$(fnd_acct)" "$(cat "$CACHE")"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]                      # never blocks the prompt
@@ -1187,7 +1198,7 @@ _stage_codex_install() {
     # stores one, so the prompt has nothing to add.
     : > "$CACHE"
     manifest_now "$CACHE" 0
-    [[ "$(fnd_set_record)" == 'mmry-foundation v2 entries=0 bytes=0 '* ]] || return 1
+    [[ "$(fnd_set_record)" == 'mmry-foundation v3 entries=0 bytes=0 '* ]] || return 1
     printf 'session-under-test' > "$TEST_TMPDIR/.mmry-foundation-empty-told"
 
     run bash "$HANDLER"

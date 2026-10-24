@@ -21,9 +21,9 @@ setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
+    SET="$(fnd_set_file)"
     # SessionStart writes this in every real session; see userpromptsubmit-foundation.bats.
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    printf 'session-under-test' > "$(fnd_session_file)"
     HEAD_ONE="The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive."
 }
 
@@ -327,7 +327,7 @@ _pointed() {
 @test "parts: a failure straight after a delivery reads NOT, and a delivery straight after a failure reads IN FULL" {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"; _seal
     # With no config the client never runs jq, and a slow jq would delay nothing.
-    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"; fnd_follow_config
     local slow="$TEST_TMPDIR/slow-jq.sh"
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
@@ -662,7 +662,7 @@ _version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v
 
 @test "parts: #31411 a part that fails names itself and does not say the whole turn went without" {
     _seed_lines 380
-    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"; fnd_follow_config
     local slow="$TEST_TMPDIR/slow-jq.sh"
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
@@ -709,7 +709,7 @@ _version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v
 @test "parts: #31583 a part 2-6 that runs out of time records it, and the status names the part and the cause" {
     _seed_lines 380
     _fire 1 S17; _fire 2 S17; _fire 4 S17
-    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"; fnd_follow_config
     local slow="$TEST_TMPDIR/slow-jq.sh"
     printf '%s\n' '#!/usr/bin/env bash' 'for a in "$@"; do [[ "$a" == "--version" ]] && exec jq "$@"; done' 'sleep 20' 'exec jq "$@"' > "$slow"
     chmod +x "$slow"
@@ -847,7 +847,7 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     _fire_all S44
     # Architecture's 2b: the set is now verified empty, under a record whose byte count still reaches
     # part 3, so part 3 runs its loader, which finds nothing to send. That exit used to write nothing.
-    fnd_set_with 'mmry-foundation v2 entries=0 bytes=40000 cksum=0' ''
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=40000 cksum=0 acct=$(fnd_acct)" ''
     _fire 3 S44
     [[ "$(cat "$(_outcome_file S44 3)")" =~ ^S44\ [0-9]+\ none$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S44 3)")"; return 1; }
 }

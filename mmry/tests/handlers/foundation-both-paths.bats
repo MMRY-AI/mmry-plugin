@@ -29,7 +29,7 @@ setup() {
     export CLAUDE_SESSION_ID="tc5-session"
     export HOME="$TEST_TMPDIR/fakehome"
     mkdir -p "$HOME/.claude/mmry/hooks-handlers" "$HOME/.claude/mmry/setup"
-    CACHE="$TEST_TMPDIR/mmry-foundation-set.md"
+    CACHE="$(fnd_set_file)"
 }
 
 # Fire every part the way Claude Code does, one process each, and gather what the assistant

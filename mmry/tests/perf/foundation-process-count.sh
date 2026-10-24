@@ -39,11 +39,20 @@ seed() { # a fresh temp dir with a sealed set of $LINES directives and a realist
         awk -v n="$LINES" 'BEGIN { for (i = 1; i <= n; i++) printf "- Directive %04d: keep every sentence short and every claim backed by something you ran.\n", i }' > "$d/body"
     fi
     read -r s b < <(cksum < "$d/body")
-    { printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$LINES" "$b" "$s"; cat "$d/body"; printf 'END OF FOUNDATION SET'; } > "$d/mmry-foundation-set.md"
-    printf 'sess-count' > "$d/mmry-foundation.session"
     # A configured install: an API key, so part 1 takes its refresh-age path as a customer's does;
     # the set was just written, so no refresh actually starts. The URL is a discard port.
     printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"count-key","foundationReinject":"true"}' > "$d/mmry-config.json"
+    # Since #32889 the set and the marker are named by the account the config names, and the record
+    # carries the key; a hook without the key library beside it is an older version and reads the
+    # unkeyed names.
+    local acct="" setf="$d/mmry-foundation-set.md" sessf="$d/mmry-foundation.session" rec="mmry-foundation v2 entries=$LINES bytes=$b cksum=$s"
+    if [[ -f "${HOOK%/*}/lib-foundation-key.sh" ]]; then
+        acct="$(MMRY_CONFIG_FILE="$d/mmry-config.json" bash -c 'source "$1"; mmry_foundation_account_key' _ "${HOOK%/*}/lib-foundation-key.sh")"
+        setf="$d/mmry-foundation-set.$acct.md"; sessf="$d/mmry-foundation.session.$acct"
+        rec="mmry-foundation v3 entries=$LINES bytes=$b cksum=$s acct=$acct"
+    fi
+    { printf '%s\n' "$rec"; cat "$d/body"; printf 'END OF FOUNDATION SET'; } > "$setf"
+    printf 'sess-count' > "$sessf"
 }
 
 driver() { # $1 = command per part (k substituted), $2 = temp dir
