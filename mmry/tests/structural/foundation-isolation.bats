@@ -17,6 +17,7 @@
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
 
 setup() {
     setup_mock_curl
@@ -200,4 +201,114 @@ _ctx() { jq -j '.hookSpecificOutput.additionalContext // ""' <<<"$1" | tr -d '\r
     done
     out="$(_codex_status "$home" codex-solo-01)"
     [[ "$out" == *"VERIFIED - 1 directives"* && "$out" == *"Delivered:    IN FULL"* ]] || { echo "$out"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# TEST CASE 2, requirement 3. A copy stamped for another account or server, standing where this
+# session's copy would be, is reported as not this configuration and never as VERIFIED, and the prompt
+# hook refuses it rather than injecting it. The ordinary case, another account's copy beside this one
+# under its own name, is NOT LOADED YET for this session, never that account's count.
+# ---------------------------------------------------------------------------------------------
+@test "isolation: foundation-status on a copy written for another account or server says NOT THIS CONFIGURATION, never VERIFIED" {
+    local sid="claude-foreign-01" out ctx theirs mine
+    # The Integration account's set, sealed as its writer would, but placed under the production
+    # session's name: a copied file, or a key collision, whichever way it got there.
+    export MMRY_API_URL="$INT_URL" MMRY_API_KEY="$INT_KEY"
+    theirs="$(fnd_acct)"
+    export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"
+    mine="$(fnd_set_file)"
+    printf -- '- Rule: %s\n' "$INT_DIRECTIVE" > "$TEST_TMPDIR/theirs.md"
+    fnd_seal "$TEST_TMPDIR/theirs.md" 1 "$mine" "$theirs"
+    printf '%s' "$sid" > "$(fnd_session_file)"
+
+    out="$(_claude_status "$sid" "$PROD_URL" "$PROD_KEY")"
+    [[ "$out" == *"NOT THIS CONFIGURATION"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"different account or server"* ]] || { echo "$out"; return 1; }
+    [[ "$out" == *"REFUSED, not used"* ]] || { echo "$out"; return 1; }
+    [[ "$out" != *"VERIFIED"* ]] || { echo "reported VERIFIED: $out"; return 1; }
+
+    # And the prompt hook: nothing of it is injected, and the turn is told so.
+    out="$(_claude_prompt "$sid" "$PROD_URL" "$PROD_KEY")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" != *"$INT_DIRECTIVE"* ]] || { echo "the foreign copy was injected: ${ctx:0:300}"; return 1; }
+    [[ "$ctx" == *"could not verify this account"* ]] || { echo "no refusal notice: ${ctx:0:300}"; return 1; }
+    [[ "$out" == *"different account or server"* ]] || { echo "the person was not told why: $out"; return 1; }
+}
+
+@test "isolation: another account's copy beside this session's, under its own name, reads as NOT LOADED YET here, never as its count" {
+    local int_sid="codex-int-02" prod_sid="claude-prod-02" codex out
+    codex="$(_codex_home int2 "$INT_URL" "$INT_KEY")"
+    _codex_start "$codex" "$int_sid" "$INT_DIRECTIVE" >/dev/null
+    # The production session has not loaded anything yet.
+    out="$(_claude_status "$prod_sid" "$PROD_URL" "$PROD_KEY")"
+    [[ "$out" == *"NOT LOADED YET"* ]] || { echo "$out"; return 1; }
+    [[ "$out" != *"1 directives"* && "$out" != *"VERIFIED"* ]] || { echo "reported the other account's copy: $out"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# TEST CASE 3, requirement 4. The machine-wide, unkeyed mmry-foundation-set.md and mmry-foundation.session
+# an older plugin left are never read: a session that has fetched its own set injects its own, a session
+# that has not injects nothing and is told NOT LOADED YET, and nothing of the legacy file reaches a prompt.
+# The files are left alone unless nothing has touched them for a week, when SessionStart's sweep takes
+# them with the other week-old Foundation leftovers; an older plugin still running keeps its copy.
+# ---------------------------------------------------------------------------------------------
+_legacy_copy() {
+    # Sealed exactly as plugin 2.10 to 2.14 wrote it: a v2 record, no account key, the unkeyed name.
+    local body="$TEST_TMPDIR/legacy-body.md" s b
+    printf -- '- Rule: %s\n' "$1" > "$body"
+    read -r s b < <(cksum < "$body")
+    { printf 'mmry-foundation v2 entries=1 bytes=%s cksum=%s\n' "$b" "$s"; cat "$body"; printf 'END OF FOUNDATION SET'; } > "$TEST_TMPDIR/mmry-foundation-set.md"
+    printf 'legacy-session-id' > "$TEST_TMPDIR/mmry-foundation.session"
+}
+
+@test "isolation: a legacy unkeyed mmry-foundation-set.md is ignored - the upgraded hook injects the account's own set, fetched fresh" {
+    local sid="claude-upgrade-01" out ctx
+    _legacy_copy "LEGACY: a directive left by an older plugin version, possibly another account's."
+    _claude_start "$sid" "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE_1" "$PROD_DIRECTIVE_2" >/dev/null
+    out="$(_claude_prompt "$sid" "$PROD_URL" "$PROD_KEY")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$PROD_DIRECTIVE_1"* && "$ctx" == *"$PROD_DIRECTIVE_2"* ]] || { echo "own set not injected: ${ctx:0:300}"; return 1; }
+    [[ "$ctx" != *"LEGACY:"* ]] || { echo "the legacy copy was injected: ${ctx:0:300}"; return 1; }
+    # The legacy file is untouched: an older plugin in another session may still be using it.
+    [[ -f "$TEST_TMPDIR/mmry-foundation-set.md" && -f "$TEST_TMPDIR/mmry-foundation.session" ]] || { echo "the legacy files were removed on sight"; return 1; }
+    [[ "$(cat "$TEST_TMPDIR/mmry-foundation.session")" == "legacy-session-id" ]] || { echo "the legacy marker was rewritten"; return 1; }
+}
+
+@test "isolation: with only a legacy copy present and nothing fetched, the hook injects nothing and status says NOT LOADED YET" {
+    local sid="claude-upgrade-02" out ctx
+    _legacy_copy "LEGACY: a directive left by an older plugin version."
+    out="$(_claude_prompt "$sid" "$PROD_URL" "$PROD_KEY")"; ctx="$(_ctx "$out")"
+    [[ -z "$ctx" ]] || { echo "something was injected from nothing but a legacy copy: ${ctx:0:300}"; return 1; }
+    out="$(_claude_status "$sid" "$PROD_URL" "$PROD_KEY")"
+    [[ "$out" == *"NOT LOADED YET"* && "$out" != *"VERIFIED"* ]] || { echo "$out"; return 1; }
+}
+
+@test "isolation: the legacy files are swept by SessionStart only once they are a week old" {
+    _legacy_copy "LEGACY"
+    touch -t 202001010000 "$TEST_TMPDIR/mmry-foundation-set.md" "$TEST_TMPDIR/mmry-foundation.session"
+    _claude_start claude-sweep-01 "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE_1" >/dev/null
+    [[ ! -e "$TEST_TMPDIR/mmry-foundation-set.md" && ! -e "$TEST_TMPDIR/mmry-foundation.session" ]] || { echo "week-old legacy files were kept"; return 1; }
+    # And this session's own keyed copy, just written, is there.
+    export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"
+    [[ -f "$(fnd_set_file)" ]] || { echo "the session's own copy is missing"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# REQUIREMENT 2, the session marker. With no session id in the payload the hook files its records under
+# the marker SessionStart wrote. The marker is keyed too, so another account's start does not replace it,
+# and this session's status still recognises its own delivery afterwards.
+# ---------------------------------------------------------------------------------------------
+@test "isolation: the session marker is per account - another account starting does not take over this session's records" {
+    local prod_sid="claude-marker-01" out codex
+    _claude_start "$prod_sid" "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE_1" >/dev/null
+    # A prompt with no session id: records are stamped with the marker's token.
+    out="$(printf '{"hook_event_name":"UserPromptSubmit","prompt":"hi"}' \
+        | env MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY" MMRY_AUTH_METHOD=apikey MMRY_FOUNDATION_REFRESH_SECONDS=0 \
+              bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 2>/dev/null)"
+    [[ "$(_ctx "$out")" == *"$PROD_DIRECTIVE_1"* ]] || { echo "control: no delivery: ${out:0:200}"; return 1; }
+    # The other account starts on the same machine.
+    codex="$(_codex_home marker "$INT_URL" "$INT_KEY")"
+    _codex_start "$codex" codex-marker-01 "$INT_DIRECTIVE" >/dev/null
+    # Asked with no session id, the production status reads its own marker, which still names its own
+    # session, so the delivery it made a moment ago is still its own.
+    out="$(env MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY" MMRY_AUTH_METHOD=apikey bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh" 2>/dev/null)"
+    [[ "$out" == *"Delivered:    IN FULL"* ]] || { echo "the delivery was lost to the other account's start: $out"; return 1; }
 }
