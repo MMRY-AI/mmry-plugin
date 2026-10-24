@@ -238,6 +238,14 @@ them. They read the same in Claude Code, in Codex and in a connected assistant:
 >
 > When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
 
+Each member is also given one rule for its own role:
+
+> As the lead, delegate and check in: when a member is idle or reports Done, give it the next piece of work or tell it there is none, and do not do work yourself that an idle member could take. Keep for yourself the coordinating, the deciding and the reviewing.
+>
+> As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
+
+**The lead hears who is free.** A member with no active work for 15 minutes is named to the lead, up to three times, 30 minutes apart, and the roster marks it. A member's own Done asks the lead: Is there anything else I can do? A lead on Codex or a connected assistant sees this on its next action, not while idle.
+
 **Address the report to the lead,** with `say --to <leadMemberId>`; the roster shows which member
 is the lead. A report to the lead is never chatter, so the guidance about not narrating to the
 formation does not apply to it. Where the stopping point is also a change of state, record it with

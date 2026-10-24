@@ -30,6 +30,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
 - `/mmry:formation <subcommand>` coordinates several assistants on one job, as a Formation. The subcommands:
   - `/mmry:formation start "objective"` begins a Formation with this session as its lead.
   - `/mmry:formation join <id>` puts this session in a Formation.
+  - Each member is given a rule for its role, and the lead is told which members have had no work for 15 minutes.
   - `/mmry:formation roster` lists the members and the ids to address them by.
   - `/mmry:formation say "message" [--to <memberId>]` sends a message to the other members, or to one member.
   - `/mmry:formation assign <memberId> "work"` gives one member its work (the lead).

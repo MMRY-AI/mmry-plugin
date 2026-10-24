@@ -17,6 +17,8 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-formation-roles.sh"
 
 objective="${1:-}"
 task_id=""
@@ -116,6 +118,9 @@ if [[ -n "$display_name" ]]; then
     echo "The others see you as \"${display_name}\"."
 fi
 echo "You are the lead. Tell the others to run $(mmry_host_formation_ref join "${formation_id}"), then use $(mmry_host_formation_ref say) to keep them posted."
+# #32683: the lead's own rule, held in lib-formation-roles.sh. The same text the service sends a
+# member promoted to lead.
+echo "${MMRY_FORMATION_LEAD_RULE}"
 # #31789: on Codex the lead is told it hears its members only on its next action, what to do
 # instead, and that a Claude Code session should lead. Prints nothing on Claude Code.
 if declare -F mmry_host_lead_notice >/dev/null 2>&1; then
