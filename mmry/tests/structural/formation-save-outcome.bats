@@ -23,8 +23,8 @@
 # not a gate and keeps no state; its last sentence lets a member that has saved everything skip it.
 
 # THE PROMPT, as one literal. If a surface drifts from this, the surface is wrong.
-SAVE_ASK="Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are."
-SAVE_SKIP="If you have saved all of that since your last report, there is nothing more to save."
+SAVE_ASK="Save what you did before you go: tasks and their status, what shipped, handoffs, and where your notes are."
+SAVE_SKIP="Skip this if you already saved it."
 # The order on every surface: the outcome sentence, the save route, then the skip sentence.
 SAVE_PROMPT="${SAVE_ASK} ${SAVE_SKIP}"
 
@@ -50,8 +50,8 @@ teardown() {
 # The save route each host names after the prompt.
 _route_line() {
     case "$1" in
-        codex) printf '%s Save it with the mmry_plugin memory_save tool. %s' "$SAVE_ASK" "$SAVE_SKIP" ;;
-        *)     printf '%s Save it with /mmry:save. %s' "$SAVE_ASK" "$SAVE_SKIP" ;;
+        codex) printf '%s Use the memory_save tool. %s' "$SAVE_ASK" "$SAVE_SKIP" ;;
+        *)     printf '%s Use /mmry:save. %s' "$SAVE_ASK" "$SAVE_SKIP" ;;
     esac
 }
 
@@ -141,7 +141,7 @@ _has_line() {
 }
 
 _no_prompt() {
-    [[ "$output" != *"Save your own outcome"* ]] || { echo "the prompt was printed:"; echo "$output"; return 1; }
+    [[ "$output" != *"Save what you did before you go"* ]] || { echo "the prompt was printed:"; echo "$output"; return 1; }
 }
 
 # ---- Requirement 1: leaving --------------------------------------------------------------------
@@ -166,7 +166,7 @@ _no_prompt() {
     _leave claude
     local left at
     left="$(printf '%s\n' "$output" | grep -n "Left formation" | head -1 | cut -d: -f1)"
-    at="$(printf '%s\n' "$output" | grep -n "Save your own outcome" | head -1 | cut -d: -f1)"
+    at="$(printf '%s\n' "$output" | grep -n "Save what you did before you go" | head -1 | cut -d: -f1)"
     [ -n "$left" ] && [ -n "$at" ]
     [ "$at" -gt "$left" ]
 }
@@ -269,10 +269,10 @@ _no_prompt() {
 # ---- Requirement 3: what the prompt names ------------------------------------------------------
 
 @test "req3: the prompt names tasks and final states, what shipped, what was handed over, and the notes" {
-    [[ "$SAVE_PROMPT" == *"Save your own outcome to MMRY"* ]] || return 1
-    [[ "$SAVE_PROMPT" == *"the tasks you worked on and the final state of each"* ]] || return 1
+    [[ "$SAVE_PROMPT" == "Save what you did before you go"* ]] || return 1
+    [[ "$SAVE_PROMPT" == *"tasks and their status"* ]] || return 1
     [[ "$SAVE_PROMPT" == *"what shipped"* ]] || return 1
-    [[ "$SAVE_PROMPT" == *"what you handed to whom"* ]] || return 1
+    [[ "$SAVE_PROMPT" == *"handoffs"* ]] || return 1
     [[ "$SAVE_PROMPT" == *"where your notes are"* ]] || return 1
     # And the handler holds exactly this text, so the assertions above are about what is printed.
     grep -q -F -- "MMRY_FORMATION_SAVE_OUTCOME_ASK=\"${SAVE_ASK}\"" "${HANDLERS}/lib-formation-prompts.sh"
@@ -288,7 +288,7 @@ _no_prompt() {
 
 # The prompt line from the last run, carriage returns removed.
 _prompt_line() {
-    printf '%s\n' "$output" | tr -d '\r' | grep "^Save your own outcome"
+    printf '%s\n' "$output" | tr -d '\r' | grep "^Save what you did before you go"
 }
 
 @test "req4: the prompt is byte-identical in leave and progress, with only the save route differing by host" {
@@ -303,20 +303,23 @@ _prompt_line() {
     [ "$got" = "$(_route_line codex)" ] || { echo "drifted: $got"; return 1; }
 }
 
-@test "req4: on every host the save route comes between the two sentences and the skip sentence is last" {
+@test "req4: on every host the save route comes between the ask and the skip sentence, and the skip sentence is last" {
     local host line
     for host in claude codex; do
         _leave "$host"
         line="$(_prompt_line)"
-        [[ "$line" == "$SAVE_ASK Save it with "* ]] || { echo "route does not follow the outcome sentence: $line"; return 1; }
+        [[ "$line" == "$SAVE_ASK Use "* ]] || { echo "route does not follow the outcome sentence: $line"; return 1; }
         [[ "$line" == *" $SAVE_SKIP" ]] || { echo "the skip sentence is not last: $line"; return 1; }
-        [[ "$line" != *"nothing more to save. Save it with"* ]] || return 1
+        [[ "$line" != *"Skip this if you already saved it. Use"* ]] || return 1
     done
 }
 
-@test "req4: the command page and the Codex skill carry the prompt byte for byte, each with its own route" {
-    grep -q -F -- "> $(_route_line claude)" "${PLUGIN_DIR}/commands/formation.md"
-    grep -q -F -- "> $(_route_line codex)" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+@test "req4: the command page and the Codex skill each say once to act on the prompt, with their own save route" {
+    # One sentence each (#32682 follow-up), not a quotation of the prompt: a quotation is a copy to drift.
+    grep -q -F -- "prints a short prompt to save what you did; act on it with \`/mmry:save\`" "${PLUGIN_DIR}/commands/formation.md"
+    grep -q -F -- "act on it with \`memory_save\`" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+    [ "$(grep -c -F -- "prints a short prompt to save what you did" "${PLUGIN_DIR}/commands/formation.md")" -eq 1 ]
+    [[ "$(cat "${PLUGIN_DIR}/commands/formation.md" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md")" != *"nothing more to save"* ]] || return 1
 }
 
 @test "req4: the connector in the service carries the same prompt" {
@@ -327,5 +330,5 @@ _prompt_line() {
     [ -f "$cs" ]
     grep -q -F -- "\"${SAVE_ASK}\"" "$cs"
     grep -q -F -- "\"${SAVE_SKIP}\"" "$cs"
-    grep -q -F -- 'SaveOutcomeAsk + " Save it with mmry_save. " + SaveOutcomeSkip' "$cs"
+    grep -q -F -- 'SaveOutcomeAsk + " Use mmry_save. " + SaveOutcomeSkip' "$cs"
 }
