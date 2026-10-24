@@ -409,15 +409,7 @@ server.
 **Reporting for another window of your own account is refused too,** and that is not a bug. Each
 window is a separate participation with its own work, so each reports for itself.
 
-**Done and Abandoned end with a prompt to save your own outcome** (#32682). When this session
-records Done or Abandoned for its own work, the script prints this, with the command to save it with
-between its two sentences. Accepted and Blocked do not, and neither does a lead reporting for somebody else:
-
-> Save your own outcome to MMRY now, so the next session has it: the tasks you worked on and the final state of each, what shipped, what you handed to whom, and where your notes are. Save it with /mmry:save. If you have saved all of that since your last report, there is nothing more to save.
-
-Act on it with `/mmry:save` before you go on; the last sentence is only for a session that has already done it. The report is already recorded when it appears; the
-prompt holds nothing up and is not itself saved. It is shown even when you saved recently, because
-only you know whether that save holds all of it.
+When you record Done or Abandoned for your own work, or leave, MMRY prints a short prompt to save what you did; act on it with `/mmry:save` (#32682).
 
 **Report what the script reports.** On success it prints the state the server read back, not the
 one that was asked for. On a refusal it prints the server's own reason: no such member, a formation
@@ -532,8 +524,6 @@ This releases the session on the service as well as stopping delivery here (#311
 - The service could not be reached. Same warning, different cause.
 
 Never tell the user the session left when the script did not say it did. Somebody who believes they left, and then cannot join anything, has nothing on screen to explain it.
-
-**A completed leave ends with the prompt to save your own outcome** (#32682), the same text `progress` prints for Done and Abandoned, with the command to save it with between its two sentences. Act on it with `/mmry:save`: the formation's close-out record is the lead's account, and what this session finished, handed over and wrote down is lost to the next session unless it saves it. The two outcomes that leave the session in the formation (refused, unreachable) do not print it.
 
 A session that has lost track of which formation it was in can still run this: the service resolves the membership from the session itself, so no formation id is needed.
 
