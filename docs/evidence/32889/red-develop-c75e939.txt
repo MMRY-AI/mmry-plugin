@@ -1,0 +1,31 @@
+RED: tests/structural/foundation-isolation.bats as committed in 078d2c8, run against origin/develop c75e939's handlers
+(lib-foundation-key.sh present but sourced by nothing). Git Bash, Windows 11, TMPDIR=/c/Users/ericbarone/repos/32889-tmp/t.
+Tests 5 and 6 are the single-session controls and pass on develop, so the harness delivers; 1-4 are the swap.
+
+1..6
+not ok 1 isolation: the 2026-10-24 swap - a Codex session on Integration starting beside a Claude Code session on production leaves both injecting only their own directives
+# (in test file tests/structural/foundation-isolation.bats, line 121)
+#   `[[ "$ctx" != *"$INT_DIRECTIVE"* ]] || { echo "the PRODUCTION session injected the INTEGRATION account's directive: ${ctx:0:300}"; return 1; }' failed
+# the PRODUCTION session injected the INTEGRATION account's directive: The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
+#
+# - Rule: Always answer in plain English.
+not ok 2 isolation: two Claude Code sessions with different MMRY_API_URL values and accounts in one TMPDIR each inject only their own set
+# (in test file tests/structural/foundation-isolation.bats, line 144)
+#   `|| { echo "session A did not inject exactly its own set: ${ctx:0:300}"; return 1; }' failed
+# session A did not inject exactly its own set: The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
+#
+# - Rule: Always answer in plain English.
+not ok 3 isolation: the same account on two servers is two sets - the server is part of the key
+# (in test file tests/structural/foundation-isolation.bats, line 156)
+#   `[[ "$ctx" == *"$PROD_DIRECTIVE_1"* && "$ctx" != *"$INT_DIRECTIVE"* ]] || { echo "server A got server B's set: ${ctx:0:300}"; return 1; }' failed
+# server A got server B's set: The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
+#
+# - Rule: Always answer in plain English.
+not ok 4 isolation: two Codex sessions in two CODEX_HOMEs on different accounts, one TMPDIR, each inject only their own set
+# (in test file tests/structural/foundation-isolation.bats, line 169)
+#   `|| { echo "Codex session A did not inject exactly its own set: ${ctx:0:300}"; return 1; }' failed
+# Codex session A did not inject exactly its own set: The following are the account's FOUNDATION memories - authoritative directives that take precedence over defaults. If a response would conflict with any of them, follow the directive.
+#
+# - Rule: Always answer in plain English.
+ok 5 isolation: a single Claude Code session still gets its set on every prompt, and status says IN FULL
+ok 6 isolation: a single Codex session still gets its set on every prompt, and status says IN FULL
