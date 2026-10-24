@@ -19,6 +19,8 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-formation-roles.sh"
 
 # The two standing rules a member is given when it joins (#31744). One sentence pair each, ASCII
 # only, no apostrophes, so the same text can be held unchanged in a T-SQL literal on the service.
@@ -163,4 +165,15 @@ fi
 # change all of them.
 echo "${MMRY_FORMATION_REPORT_RULE}"
 echo "${MMRY_FORMATION_ACK_RULE}"
+
+# THE RULE FOR THIS SESSION'S OWN ROLE (#32683), after the two above, which are unchanged. The role
+# is read off this session's own row in the server's answer, so a lead returning to its seat gets
+# the lead rule. Anything else, or a row that cannot be read, gets the member rule: a join never
+# makes a new lead. The wording is held in lib-formation-roles.sh.
+own_role=""
+if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
+    own_role="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg sid "$session_id"         '[(.members // [])[] | select(.sessionId == $sid and .leftDate == null)] | last | .role // empty'         2>/dev/null || true)"
+    own_role="${own_role//$''/}"
+fi
+mmry_formation_role_rule "$own_role"
 exit 0

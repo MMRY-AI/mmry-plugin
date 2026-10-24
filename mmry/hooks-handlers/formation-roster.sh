@@ -85,6 +85,8 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # #31410: each member's NAME sits beside its member id ("  12  Shopware V1.5 PM #1  Lead"); a member
 # with no name reads as its role and id ("  13  Wingman"). mmry_member_line is shared with the
 # status view, so the two cannot describe a member differently.
+# #32683: a member with no active work (no assignment, Done or Abandoned) carries idleSince from the
+# service, and its line says since when. A server that does not send the field shows no mark.
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
     (.members // [])
     | sort_by(.leftDate != null, .id)
@@ -93,6 +95,8 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
       + "  " + (.email // "?")
       + (if .assignment then "  - " + .assignment else "" end)
       + (if .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]" else "" end)
+      + (if (.idleSince // null) != null and .leftDate == null
+         then "  (no active assignment since " + ((.idleSince | tostring)[11:16]) + " UTC)" else "" end)
       + (if .leftDate == null then ""
          elif .removedByEmail then "   (removed by " + .removedByEmail + "; cannot be addressed)"
          elif .removedByUserId then "   (removed; cannot be addressed)"

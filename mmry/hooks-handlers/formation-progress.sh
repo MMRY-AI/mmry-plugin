@@ -34,6 +34,8 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${HANDLER_DIR}/mmry-client.sh"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-formation-prompts.sh"
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-formation-roles.sh"
 
 first="${1:-}"
 second="${2:-}"
@@ -186,5 +188,13 @@ fi
 
 printf 'Member %s in formation %s is now recorded as %s.\n' "$member_id" "$formation_id" "$applied"
 printf 'It is in the close-out record from here on. The lead sees this after its next tool call; no other member was told.\n'
+# #32683: A MEMBER'S OWN DONE ASKS THE LEAD FOR MORE WORK. The service ends the lead's PROGRESS
+# notice with the question; this tells the member so. Not for a lead's own Done, which has nobody
+# to ask, not for somebody else's Done, and not for any other state.
+applied_role="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.role // empty' 2>/dev/null || true)"
+if [[ "$own_report" -eq 1 && "$(printf '%s' "${applied//$'\r'/}" | tr '[:upper:]' '[:lower:]')" == "done" \
+      && "$(printf '%s' "${applied_role//$'\r'/}" | tr '[:upper:]' '[:lower:]')" != "lead" ]]; then
+    printf '%s\n' "$MMRY_FORMATION_OFFER_SENT"
+fi
 _save_prompt_if_finished
 exit 0
