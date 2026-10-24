@@ -65,6 +65,37 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 # Resolved without sourcing the client, so the supervisor stays cheap. Must match
 # MMRY_TMPDIR in mmry-client.sh.
 _FOUND_TMPDIR="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
+# THE HOST FIRST, BEFORE ANY CONFIG IS READ (#31245 QA, moved up by #32889). lib-host.sh settles which
+# product this copy serves and, on Codex, points MMRY_CONFIG_FILE at the Codex credential. The set's
+# name below is keyed by the account that config names, so it must be known before the name is; a
+# Codex copy run without MMRY_HOST exported used to reach this point with the Claude file as the only
+# candidate (tests/handlers/codex-qa-delta.bats, qa3). This block used to sit inside the supervisor,
+# after the quick exit; every part pays it now, and it is functions and string work with no process
+# on any shipped path (lib-host.sh measures it). A host with no credential of its own stays silent,
+# as before (#31245 QA round 4): a hook that fires unattended on every prompt fails open and quiet.
+# ONLY AN EXPLICIT REFUSAL STOPS US; a missing lib-host.sh must not (hook-guard.sh says why).
+# Sourced in this shell, not a subshell, and lib-host.sh's `set -e` is undone straight after: this
+# handler deliberately runs without it.
+if [[ -f "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" >/dev/null 2>&1
+    set +e
+    if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
+        if ! mmry_host_assert_own_credential >/dev/null 2>&1; then
+            exit 0
+        fi
+    fi
+fi
+# THE SET AND THE SESSION MARKER ARE NAMED BY THE ACCOUNT AND SERVER THIS SESSION IS CONFIGURED FOR
+# (#32889): mmry-foundation-set.<key>.md and mmry-foundation.session.<key>. One machine-wide name let a
+# session on another account rewrite them under this one, which then injected that account's
+# directives. The key costs no process (lib-foundation-key.sh: the environment, else a text scan of
+# the config, hashed in bash), so every part of every prompt can afford it before anything else runs.
+# shellcheck source=/dev/null
+source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-key.sh"
+mmry_foundation_set_name_v "$_FOUND_TMPDIR";     _FND_SETF="$_MMRY_FND_SET_NAME"
+mmry_foundation_session_name_v "$_FOUND_TMPDIR"; _FND_SESSF="$_MMRY_FND_SESSION_NAME"
+_FND_ACCT="$_MMRY_FND_ACCT"
 # KNOWN LIMITATION, stated rather than hidden: this marker is per-TMPDIR, not per-session,
 # exactly like the mmry-foundation.md cache it guards. Two Claude Code sessions sharing a
 # TMPDIR can therefore have one session report the other's cut-short turn. CORRECTED (#31583 QA
@@ -251,11 +282,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
 fi
 
 if (( MMRY_FND_PART > 1 )); then
-    _fnd_m="${_FOUND_TMPDIR}/mmry-foundation-set.md"
+    _fnd_m="$_FND_SETF"
     _fnd_mb=""
     [[ -f "$_fnd_m" && -r "$_fnd_m" ]] && { IFS= read -r _fnd_mb < "$_fnd_m" 2>/dev/null || _fnd_mb=""; }
     _fnd_quiet=1
-    if [[ "$_fnd_mb" =~ ^mmry-foundation\ v2\ .*bytes=([0-9]+) ]] && (( BASH_REMATCH[1] >= (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )); then
+    if [[ "$_fnd_mb" =~ ^mmry-foundation\ v3\ .*bytes=([0-9]+) ]] && (( BASH_REMATCH[1] >= (MMRY_FND_PART - 1) * (MMRY_FND_PART_CAP / 2 - 8) )); then
         _fnd_quiet=0
     fi
     if (( _fnd_quiet )); then
@@ -264,7 +295,7 @@ if (( MMRY_FND_PART > 1 )); then
         # round 2, R4).
         if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _fnd_qtok="${MMRY_FND_SID:-}"
-            [[ -z "$_fnd_qtok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _fnd_qtok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _fnd_qtok=""; }
+            [[ -z "$_fnd_qtok" && -f "$_FND_SESSF" ]] && { _fnd_qtok="$(<"$_FND_SESSF")" 2>/dev/null || _fnd_qtok=""; }
             _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"
         fi
         exit 0
@@ -406,7 +437,7 @@ _mmry_outcome() {
 # (#31583 QA round 3, R4(a)), the second this firing started, so the status command can tell this
 # prompt's records from an earlier prompt's.
 _mmry_fnd_outcome_line() {
-    local tok="${MMRY_FND_SID:-}" f="${_FOUND_TMPDIR}/mmry-foundation.session"
+    local tok="${MMRY_FND_SID:-}" f="$_FND_SESSF"
     # read, not $(<file): it runs after a failed emit too, where a command substitution would capture
     # the stale bytes (see _mmry_fnd_spoil).
     [[ -z "$tok" && -f "$f" && -r "$f" ]] && { IFS= read -r tok < "$f" 2>/dev/null || [[ -n "$tok" ]] || tok=""; }
@@ -468,7 +499,7 @@ _mmry_fnd_part1_said() {
     local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t end=$(( SECONDS + $1 ))
     _FND_P1=""
     (( end > DEADLINE )) && end=$DEADLINE
-    [[ -z "$tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || tok=""; }
+    [[ -z "$tok" && -f "$_FND_SESSF" ]] && { tok="$(<"$_FND_SESSF")" 2>/dev/null || tok=""; }
     [[ -n "$tok" ]] || return 1
     while :; do
         l=""
@@ -711,7 +742,7 @@ _FND_TRAILER='END OF FOUNDATION SET'
 # The session these files belong to: the payload's id, else SessionStart's token, as every record here.
 # _FND_STAMP is what a record is stamped with; _FND_KEY is the same, made safe for a file name.
 _mmry_fnd_key() {
-    local f="${_FOUND_TMPDIR}/mmry-foundation.session"
+    local f="$_FND_SESSF"
     _FND_STAMP="${MMRY_FND_SID:-}"
     if [[ -z "$_FND_STAMP" && -f "$f" && -r "$f" ]]; then
         _FND_STAMP="$(<"$f")" 2>/dev/null || _FND_STAMP=""
@@ -739,10 +770,10 @@ $4"
 # The set held in raw set-file text $1, exactly as mmry_read_foundation_set hands it back, into
 # _FND_CONTENT, and its record into _FND_HDR_E/B/C. Fails on a file with no record line.
 _mmry_fnd_content_of() {
-    local LC_ALL=C re='^mmry-foundation v2 entries=([0-9]+) bytes=([0-9]+) cksum=([0-9]+)$' h b
+    local LC_ALL=C re='^mmry-foundation v3 entries=([0-9]+) bytes=([0-9]+) cksum=([0-9]+) acct=([0-9a-f]{16})$' h b
     h="${1%%$'\n'*}"
     [[ "$h" != "$1" && "$h" =~ $re ]] || return 1
-    _FND_HDR_E="${BASH_REMATCH[1]}" _FND_HDR_B="${BASH_REMATCH[2]}" _FND_HDR_C="${BASH_REMATCH[3]}"
+    _FND_HDR_E="${BASH_REMATCH[1]}" _FND_HDR_B="${BASH_REMATCH[2]}" _FND_HDR_C="${BASH_REMATCH[3]}" _FND_HDR_A="${BASH_REMATCH[4]}"
     b="${1#*$'\n'}"
     [[ "$b" == *"$_FND_TRAILER" ]] && b="${b%"$_FND_TRAILER"}"
     _FND_CONTENT="${b%$'\n'}"
@@ -796,7 +827,7 @@ _mmry_fnd_deliver() {
 #     the cut counts in characters).
 _mmry_fnd_serve_prepared() {
     local LC_ALL=C
-    local setf="${_FOUND_TMPDIR}/mmry-foundation-set.md" f="${_FOUND_TMPDIR}/.mmry-foundation-prepared.${_FND_KEY}"
+    local setf="$_FND_SETF" f="${_FOUND_TMPDIR}/.mmry-foundation-prepared.${_FND_KEY}"
     local re='^mmry-fnd-prepared v1 ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)(( [0-9]+)+)$'
     local raw="" p="" idx setid n entries bytes kmax cap len ends e prev=0 big=0 k="$MMRY_FND_PART" start=0
     local nonascii=$'[\x80-\xff]'
@@ -811,6 +842,8 @@ _mmry_fnd_serve_prepared() {
     [[ -n "$raw" && "${p#*$'\n'}" == "$raw" ]] || return 1
     _mmry_fnd_content_of "$raw" || return 1
     [[ "$_FND_HDR_C" == "$setid" && "$_FND_HDR_E" == "$entries" && "$_FND_HDR_B" == "$bytes" ]] || return 1
+    # And the set is this account's (#32889), as the verifier that prepared it required.
+    [[ "$_FND_HDR_A" == "$_FND_ACCT" ]] || return 1
     (( ${#_FND_CONTENT} == len )) || return 1
     [[ "$_FND_CONTENT" =~ $nonascii ]] && big=1
     # Digits and spaces only, by the pattern above, so the split cannot glob.
@@ -948,7 +981,7 @@ _mmry_fnd_prepare() {
             _FND_ROUTE=worker; _mmry_fnd_result worker; return 0
         fi
     fi
-    MMRY_FND_CKSUM_SECS="$left" mmry_read_foundation_set "${_FOUND_TMPDIR}/mmry-foundation-set.md"
+    MMRY_FND_CKSUM_SECS="$left" mmry_read_foundation_set "$_FND_SETF"
     rc=$?
     case "$rc" in
         0) ;;
@@ -1133,16 +1166,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # handler deliberately runs without it, because a failure here must never fail the
     # customer's prompt. -u and pipefail are already on from line 46, so `set +e` restores
     # exactly the options this file chose.
-    if [[ -f "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" ]]; then
-        # shellcheck source=/dev/null
-        source "${PLUGIN_ROOT}/hooks-handlers/lib-host.sh" >/dev/null 2>&1
-        set +e
-        if declare -F mmry_host_assert_own_credential >/dev/null 2>&1; then
-            if ! mmry_host_assert_own_credential >/dev/null 2>&1; then
-                exit 0
-            fi
-        fi
-    fi
+    # SOURCED AT THE TOP OF THIS FILE SINCE #32889, before the set's name is computed: the name is keyed
+    # by the account, the account comes from the config, and which config is this host's is exactly
+    # what lib-host.sh settles. The credential refusal is asked there too, so nothing below changes.
 
     # AFTER lib-host.sh, NOT BEFORE IT (#31245 QA). The off switch decides whether the Claude
     # config may be read, and on Codex the answer comes from the host, which lib-host.sh settles.
@@ -1473,6 +1499,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             unreadable)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy could not be read, so nothing was sent."
                 ;;
+            foreign)
+                # The copy is another account's or another server's (#32889). Nothing of it was used.
+                _WHY="Nothing was truncated and nothing was guessed at; the stored copy was written for a different account or server, so none of it was sent."
+                ;;
             blank)
                 _WHY="Nothing was truncated and nothing was guessed at; the stored copy checks out but contains no readable text, so there was nothing to send."
                 ;;
@@ -1619,7 +1649,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # Part 1 only: it owns everything said about the set as a whole.
         if (( MMRY_FND_PART == 1 )) && [[ "$_FND_KIND" == *" empty" ]]; then
             _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
-            [[ -z "$_etok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _etok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _etok=""; }
+            [[ -z "$_etok" && -f "$_FND_SESSF" ]] && { _etok="$(<"$_FND_SESSF")" 2>/dev/null || _etok=""; }
             _etok="${_etok:-no-session}"
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
             if [[ "$_etok" != "$_etold_tok" ]]; then
@@ -1663,7 +1693,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # telling its customer never stops another from telling theirs.
         _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""
         _tok="${MMRY_FND_SID:-}"
-        [[ -z "$_tok" && -f "${_FOUND_TMPDIR}/mmry-foundation.session" ]] && { _tok="$(<"${_FOUND_TMPDIR}/mmry-foundation.session")" 2>/dev/null || _tok=""; }
+        [[ -z "$_tok" && -f "$_FND_SESSF" ]] && { _tok="$(<"$_FND_SESSF")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
             _fnd_host_refs
@@ -1720,7 +1750,8 @@ mmry_load_config 2>/dev/null || true
 
 REINJECT="${MMRY_FOUNDATION_REINJECT:-true}"
 REFRESH_SECS="${MMRY_FOUNDATION_REFRESH_SECONDS:-86400}"
-CACHE="${MMRY_TMPDIR}/mmry-foundation-set.md"
+# Named by this session's account and server (#32889), as the supervisor's _FND_SETF is.
+CACHE="$(mmry_foundation_set_path "$MMRY_TMPDIR")"
 # Kept for the supervisor's failure log only. Nothing on the happy path writes here any
 # more: the line that did recorded a truncation that no longer happens, and recorded it
 # wrongly - it printed the length AFTER the cut, so every one of the 1,457 entries on the

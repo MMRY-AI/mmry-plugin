@@ -12,6 +12,7 @@
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
 
 setup() {
     setup_mock_curl
@@ -74,7 +75,7 @@ _registered_session_id() {
     _reload CLAUDE_CODE_SESSION_ID=env-sess-1
     [ "$status" -eq 0 ]
     [ "$(_registered_session_id)" = "env-sess-1" ] || { cat "${TEST_TMPDIR}/curl-log.txt"; return 1; }
-    [ "$(cat "${TEST_TMPDIR}/mmry-foundation.session")" = "env-sess-1" ]
+    [ "$(cat "$(fnd_session_file)")" = "env-sess-1" ]
 }
 
 @test "reload: req3 CLAUDE_SESSION_ID wins over CLAUDE_CODE_SESSION_ID, as the chain always did" {

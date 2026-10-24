@@ -85,7 +85,7 @@ _avg_ms() {
 # path and would report a cost that has nothing to do with what a customer pays. The fixture is
 # staged in the file named by $1 and sealed into mmry-foundation-set.md beside it.
 _manifest_for() {
-    fnd_seal "$1" "" "$(dirname "$1")/mmry-foundation-set.md"
+    fnd_seal "$1" "" "$(fnd_set_file "$(dirname "$1")")"
 }
 
 _write_config() {
@@ -99,6 +99,8 @@ _write_config() {
   "foundationRefreshSeconds": 0
 }
 EOF
+    # The account changed, so a set sealed before this moves to its name (#32889).
+    fnd_follow_config
 }
 
 @test "hook-budgets: the file under test is the repo's shipped hooks.json, not an installed copy" {

@@ -63,7 +63,10 @@ if declare -F mmry_host_label >/dev/null 2>&1; then
     _fs_x="$(mmry_host_label)" && [[ -n "$_fs_x" ]] && _FS_HOST="$_fs_x"
 fi
 
-CACHE="${MMRY_TMPDIR}/mmry-foundation-set.md"
+# Named by this session's account and server (#32889): another account's copy on this machine is a
+# different file, and is never read here; a copy under this name stamped for another account is
+# reported below as NOT THIS CONFIGURATION, never as VERIFIED.
+CACHE="$(mmry_foundation_set_path "$MMRY_TMPDIR")"
 # THIS SESSION, by its own id (#31583 QA round 6, R4(c)). The command runtime provides
 # CLAUDE_CODE_SESSION_ID; the per-prompt hook reads the same id from its payload, so both file this
 # session's records under one name and another session's are never read here. With no id, the old
@@ -164,6 +167,7 @@ if (( _verdict != 0 )); then
     _prose="${_reason#*|}"
     case "$_state" in
         bad-manifest)             _label="PRESENT BUT UNVERIFIABLE" ;;
+        foreign)                  _label="NOT THIS CONFIGURATION" ;;
         inconsistent)             _label="INCONSISTENT" ;;
         size|contents|unreadable) _label="DAMAGED" ;;
         blank)                    _label="EMPTY OF TEXT" ;;
@@ -193,7 +197,7 @@ echo "Stored copy:  VERIFIED - ${_exp_entries} directives, ${_act_bytes} bytes, 
 # Evidence counts only if it is newer than this session's start (the token SessionStart wrote)
 # and, for a failure, newer than the last successful delivery. Older lines belong to a turn the
 # customer has already moved past, or to an earlier session in the same temp directory.
-_session_file="${MMRY_TMPDIR}/mmry-foundation.session"
+_session_file="$(mmry_foundation_session_path "$MMRY_TMPDIR")"
 _tok="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$_sid")"
 _parts_max="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 [[ "$_parts_max" =~ ^[1-9][0-9]*$ ]] || _parts_max=6

@@ -20,10 +20,10 @@ setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
+    SET="$(fnd_set_file)"
     CFG="$TEST_TMPDIR/mmry-config.json"
     export MMRY_CONFIG_FILE="$CFG"
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    printf 'session-under-test' > "$(fnd_session_file)"
 }
 
 _seed_valid_cache() {
@@ -313,7 +313,7 @@ _slow_cksum_dir() {
     printf '2026-01-01T00:00:00 foundation reinjection FAILED: deadline exceeded (10s), worker killed\n' > "$TEST_TMPDIR/mmry-foundation.log"
     # SessionStart for THIS session happens after that line was written.
     sleep 1
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    printf 'session-under-test' > "$(fnd_session_file)"
 
     run bash "$STATUSCMD"
     [[ "$output" != *'NOT on the most recent prompt'* ]] || return 1

@@ -19,7 +19,7 @@ setup() {
     STATUS_CMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
+    SET="$(fnd_set_file)"
 }
 
 manifest_now() {
@@ -89,7 +89,7 @@ _recorded_bytes() {
     printf -- '- Identity: Eric builds MMRY.\n- Value: clarity over cleverness.\n' > "$CACHE"
     local s b
     read -r s b < <(cksum < "$CACHE")
-    fnd_set_with "mmry-foundation v2 entries=0 bytes=${b} cksum=${s}" "$(cat "$CACHE")"
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=${b} cksum=${s} acct=$(fnd_acct)" "$(cat "$CACHE")"
 
     # What the handler does with it, measured here rather than assumed.
     run bash "$HANDLER"
@@ -174,7 +174,7 @@ _recorded_bytes() {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     local s b
     read -r s b < <(cksum < "$CACHE")
-    fnd_set_with "mmry-foundation v2 entries=0 bytes=${b} cksum=${s}" "$(cat "$CACHE")"
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=${b} cksum=${s} acct=$(fnd_acct)" "$(cat "$CACHE")"
     run bash "$STATUS_CMD"
     [[ "$output" == *'INCONSISTENT'* ]]
 }
@@ -183,7 +183,7 @@ _recorded_bytes() {
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now
     # What SessionStart leaves once it has stored a set (#31597): its session token, and the marker.
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    printf 'session-under-test' > "$(fnd_session_file)"
     bash -c 'source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1; mmry_foundation_mark_stored "$2" "" 1' _ "$PLUGIN_ROOT" "$TEST_TMPDIR"
     rm -f "$SET"
     run bash "$STATUS_CMD"

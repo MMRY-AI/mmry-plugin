@@ -35,7 +35,13 @@ export HOME="$W/home" TMPDIR="$W" MMRY_TMPDIR="$W" MMRY_CONFIG_FILE="$W/mmry-con
 mkdir -p "$HOME/.claude"
 unset CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID MMRY_API_KEY MMRY_API_URL
 printf '{"foundationReinject": true, "foundationRefreshSeconds": 0}\n' > "$MMRY_CONFIG_FILE"
-printf 'race-session' > "$W/mmry-foundation.session"
+# The marker and the set are named by the account the config names since #32889 (here: the default server
+# and no key); an older hook, with no key library beside it, uses the unkeyed names.
+SESSION_FILE="$W/mmry-foundation.session"
+if [[ -f "${HOOK%/*}/lib-foundation-key.sh" ]]; then
+    SESSION_FILE="$(bash -c 'source "$1"; mmry_foundation_session_name_v "$2"; printf "%s" "$_MMRY_FND_SESSION_NAME"' _ "${HOOK%/*}/lib-foundation-key.sh" "$W")"
+fi
+printf 'race-session' > "$SESSION_FILE"
 
 # Two sets that differ in size and on every line, so any mixture of them is detectable.
 _set_json() {
@@ -51,10 +57,15 @@ _set_json() {
 _set_json A 40 > "$W/A.json"
 _set_json B 70 > "$W/B.json"
 
-# The cache path the hook under test reads, taken from the hook itself so this runs on any version.
-CACHE_NAME="$(grep -o 'CACHE="${MMRY_TMPDIR}/[^"]*"' "$HOOK" | head -1 | sed 's|.*/||; s|"$||')"
-[[ -n "$CACHE_NAME" ]] || { echo "could not find the cache path in $HOOK"; exit 2; }
-CACHE="$W/$CACHE_NAME"
+# The cache path the hook under test reads, taken from the version beside it so this runs on any version:
+# the key library names it since #32889; before that the hook's worker spelled it out.
+if [[ -f "${HOOK%/*}/lib-foundation-key.sh" ]]; then
+    CACHE="$(bash -c 'source "$1"; mmry_foundation_set_name_v "$2"; printf "%s" "$_MMRY_FND_SET_NAME"' _ "${HOOK%/*}/lib-foundation-key.sh" "$W")"
+else
+    CACHE_NAME="$(grep -o 'CACHE="${MMRY_TMPDIR}/[^"]*"' "$HOOK" | head -1 | sed 's|.*/||; s|"$||')"
+    [[ -n "$CACHE_NAME" ]] || { echo "could not find the cache path in $HOOK"; exit 2; }
+    CACHE="$W/$CACHE_NAME"
+fi
 
 # The writer, in its own process, using the plugin's writer exactly as SessionStart and the refresh do.
 cat > "$W/writer.sh" <<'WRITER'

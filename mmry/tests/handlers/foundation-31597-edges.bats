@@ -23,7 +23,7 @@ setup() {
     unset CLAUDE_SESSION_ID CLAUDE_CODE_SESSION_ID
     export HOME="$TEST_TMPDIR/fakehome"
     mkdir -p "$HOME/.claude/mmry/hooks-handlers" "$HOME/.claude/mmry/setup"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
+    SET="$(fnd_set_file)"
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     START="$PLUGIN_ROOT/hooks-handlers/session-start.sh"
 }
@@ -104,7 +104,7 @@ _show() { echo "expected: $(od -c "$1" | tail -4)"; echo "received: $(od -c "$2"
     export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
     _start r3a
     _start r3b
-    [ "$(cat "$TEST_TMPDIR/mmry-foundation.session")" = "r3b" ] || { echo "control: the token is not session b's"; return 1; }
+    [ "$(cat "$(fnd_session_file)")" = "r3b" ] || { echo "control: the token is not session b's"; return 1; }
 
     export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_DELAY=3
     export MOCK_CURL_RESPONSE='[{"memoryTier":"Foundation","topic":"One","content":"first"},{"memoryTier":"Foundation","topic":"Two","content":"second"}]'
@@ -132,7 +132,7 @@ _THREE='[{"memoryTier":"Foundation","topic":"One","content":"first"},{"memoryTie
 
     export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE="$_THREE"
     _load_memories lm1
-    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v2 entries=3 '* ]] || { echo "control: load-memories stored no set"; return 1; }
+    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v3 entries=3 '* ]] || { echo "control: load-memories stored no set"; return 1; }
 
     export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
     rm -f "$SET"
@@ -149,7 +149,7 @@ _THREE='[{"memoryTier":"Foundation","topic":"One","content":"first"},{"memoryTie
 
     export MOCK_CURL_RESPONSE="$_THREE"
     _load_memories lm2
-    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v2 entries=3 '* ]] || { echo "control: load-memories stored no set"; return 1; }
+    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v3 entries=3 '* ]] || { echo "control: load-memories stored no set"; return 1; }
 
     export MOCK_CURL_HTTP_CODE="500" MOCK_CURL_RESPONSE='{"error":"server down"}'
     rm -f "$SET"
@@ -168,7 +168,7 @@ _EMPTY_WORDS='this account has no Foundation directives'
     export MOCK_CURL_HTTP_CODE="200"
     export MOCK_CURL_RESPONSE='[{"memoryTier":"Strategic","topic":"Plan","content":"not a directive"}]'
     _start tc4a
-    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v2 entries=0 bytes=0 '* ]] || { echo "control: no empty set stored"; return 1; }
+    [[ "$(fnd_set_record "$SET")" == 'mmry-foundation v3 entries=0 bytes=0 '* ]] || { echo "control: no empty set stored"; return 1; }
     run jq -r '.systemMessage // empty' "$TEST_TMPDIR/start-tc4a.json"
     [[ "$output" == *"$_EMPTY_WORDS"* ]] || { echo "SessionStart said: $(cat "$TEST_TMPDIR/start-tc4a.json")"; return 1; }
     # It is a notice, not a fault.
@@ -223,7 +223,7 @@ _EMPTY_WORDS='this account has no Foundation directives'
 }
 
 @test "#31597 TC4: once per SESSION, so another session on the same machine is told too" {
-    fnd_set_with 'mmry-foundation v2 entries=0 bytes=0 cksum=4294967295' ''
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=0 cksum=4294967295 acct=$(fnd_acct)" ''
     _prompt tc4e1
     [[ "$(cat "$TEST_TMPDIR/prompt.json")" == *"$_EMPTY_WORDS"* ]] || { echo "session 1 not told"; return 1; }
     _prompt tc4e1
@@ -235,7 +235,7 @@ _EMPTY_WORDS='this account has no Foundation directives'
 # Only part 1 speaks about the set as a whole. A record whose byte count reaches part 3 while saying
 # the set is empty makes part 3 run its loader, which finds the set empty; it must not tell as well.
 @test "#31597 TC4: only part 1 gives the empty notice" {
-    fnd_set_with 'mmry-foundation v2 entries=0 bytes=40000 cksum=4294967295' ''
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=40000 cksum=4294967295 acct=$(fnd_acct)" ''
     run bash "$HOOK" --part 3 < "$(_payload tc4f)"
     [ -z "$output" ] || { echo "part 3 said: $output"; return 1; }
     run bash "$HOOK" --part 1 < "$(_payload tc4f)"
@@ -320,7 +320,7 @@ _EMPTY_WORDS='this account has no Foundation directives'
     local out id copy
     out="$(cat "$TEST_TMPDIR/prompt.json")"
     [[ "$out" == *'too large to show here'* ]] || { echo "control: not delivered by reference: ${out:0:300}"; return 1; }
-    id="$(fnd_set_record "$SET")"; id="${id##*cksum=}"
+    id="$(fnd_set_record "$SET")"; id="${id##*cksum=}"; id="${id%% *}"
     copy="$TEST_TMPDIR/mmry-foundation.byref.tc5d.md"
     [ -f "$copy" ] || { echo "no copy at $copy"; ls -a "$TEST_TMPDIR"; return 1; }
     { cat "$TEST_TMPDIR/want.bin"; printf '\n\nEND OF FOUNDATION SET %s\n' "$id"; } > "$TEST_TMPDIR/want-copy.bin"

@@ -237,14 +237,22 @@ fi
 # one. An earlier version of this comment claimed only the first, safer direction could happen.
 # Real per-session scoping needs the per-prompt hook to know its own session id, which it does
 # not today; that is its own piece of work.
-printf '%s' "$SESSION_ID" > "${MMRY_TMPDIR}/mmry-foundation.session" 2>/dev/null || true
+# NAMED BY THIS SESSION'S ACCOUNT AND SERVER (#32889), as the set is: another account's session starting
+# on this machine writes its own marker and never this one.
+printf '%s' "$SESSION_ID" > "$(mmry_foundation_session_path "$MMRY_TMPDIR")" 2>/dev/null || true
 rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
+# THE MACHINE-WIDE COPY AN OLDER PLUGIN LEFT IS IGNORED, AND REMOVED ONLY WHEN IT IS SAFE (#32889). The
+# unkeyed mmry-foundation-set.md and mmry-foundation.session are never read by this version, so an
+# upgrade cannot inject what they hold. They are not removed on sight: an older plugin still running in
+# another session on this machine reads and rewrites them, and deleting them under it would make that
+# session report its directives DISAPPEARED on every prompt. They go with the week-old sweep below, by
+# the rule it already applies: a file nothing has touched in seven days belongs to no running session.
 # Records named by session id (#31583 QA round 6) are never cleared by the session that wrote them,
 # because it cannot know it has ended. They are a few dozen bytes each; anything a week old is from
 # a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
 # The per-prompt hook's prepared set, claim, result and cut-short markers (#31893) are one each per
 # session (a claim also leaves one small file per change of the set), and go the same way.
-find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' \) -mtime +7 -delete 2>/dev/null || true
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' \) -mtime +7 -delete 2>/dev/null || true
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
