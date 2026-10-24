@@ -86,11 +86,11 @@ _codex_start() {
               MOCK_CURL_RESPONSE="$(_startup_body "$@")" \
               bash "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" session-start 2>/dev/null
 }
-#   _codex_prompt <codex-home> <sid>
+#   _codex_prompt <codex-home> <sid> [part]
 _codex_prompt() {
     printf '{"session_id":"%s","turn_id":"t1","transcript_path":null,"cwd":"/w","hook_event_name":"UserPromptSubmit","model":"m","permission_mode":"default","prompt":"hi"}' "$2" \
         | env -u MMRY_CONFIG_FILE -u MMRY_HOST -u MMRY_API_URL -u MMRY_API_KEY CODEX_HOME="$1" MMRY_FOUNDATION_REFRESH_SECONDS=0 \
-              bash "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" userpromptsubmit-foundation --part 1 2>/dev/null
+              bash "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" userpromptsubmit-foundation --part "${3:-1}" 2>/dev/null
 }
 #   _codex_status <codex-home> <sid>
 _codex_status() {
@@ -311,4 +311,36 @@ _legacy_copy() {
     # session, so the delivery it made a moment ago is still its own.
     out="$(env MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY" MMRY_AUTH_METHOD=apikey bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh" 2>/dev/null)"
     [[ "$out" == *"Delivered:    IN FULL"* ]] || { echo "the delivery was lost to the other account's start: $out"; return 1; }
+}
+
+# Found by the mutation harness (tests/mutation/run-32889-mutations.sh): every two-account test above
+# also used two servers, so a key hashed from the server alone passed them all. A customer with two
+# accounts on one server is the ordinary case.
+@test "isolation: two accounts on ONE server are two sets - the account is part of the key" {
+    local a_sid="claude-acct-a" b_sid="claude-acct-b" out ctx
+    _claude_start "$a_sid" "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE_1" >/dev/null
+    _claude_start "$b_sid" "$PROD_URL" "$INT_KEY"  "$INT_DIRECTIVE" >/dev/null
+    out="$(_claude_prompt "$a_sid" "$PROD_URL" "$PROD_KEY")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$PROD_DIRECTIVE_1"* && "$ctx" != *"$INT_DIRECTIVE"* ]] || { echo "account A got account B's set: ${ctx:0:300}"; return 1; }
+    out="$(_claude_prompt "$b_sid" "$PROD_URL" "$INT_KEY")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$INT_DIRECTIVE"* && "$ctx" != *"$PROD_DIRECTIVE_1"* ]] || { echo "account B got account A's set: ${ctx:0:300}"; return 1; }
+}
+
+# Found by the same harness: a supervisor that keyed the name from the environment alone, ignoring the
+# config file, still delivered part 1 on Codex, because the worker it fell back to parses the config with
+# jq and found the set under its right name. Parts 2 to 6 have no such fallback: their quick exit reads
+# the record under the supervisor's name, and under the wrong name they leave saying "none". So a Codex
+# session whose identity comes only from its config file must get a multi-part set whole.
+@test "isolation: a Codex session identified by its config file alone gets a multi-part set whole, every part under its own name" {
+    local home out ctx k i directives=()
+    for (( i = 1; i <= 140; i++ )); do
+        directives+=("Directive $(printf '%03d' "$i"): keep every sentence short and every claim backed by something you ran.")
+    done
+    home="$(_codex_home multipart "$INT_URL" "$INT_KEY")"
+    _codex_start "$home" codex-multipart-01 "${directives[@]}" >/dev/null
+    for k in 1 2; do
+        out="$(_codex_prompt "$home" codex-multipart-01 "$k")"; ctx="$(_ctx "$out")"
+        [[ "$ctx" == *"This is PART $k OF 2 of the set, version "* ]] || { echo "part $k missing or not labelled $k of 2: ${ctx:0:200}"; return 1; }
+    done
+    [[ "$ctx" == *"Directive 140:"* ]] || { echo "the last directive did not arrive in part 2: ${ctx: -200}"; return 1; }
 }

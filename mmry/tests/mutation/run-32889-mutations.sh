@@ -44,11 +44,9 @@ add account-not-in-key "the key is hashed from the server alone, so two accounts
     'local id="${_MMRY_FND_ID_URL}"$'"'"'\n'"'"'"${_MMRY_FND_ID_KEY}"' \
     'local id="${_MMRY_FND_ID_URL}"' "$K"
 add reader-accepts-any-account "the reader believes a record stamped for another account" \
-    '    if [[ "$exp_acct" != "$_MMRY_FND_ACCT" ]]; then
-        MMRY_FND_VERDICT='"'"'foreign|' \
-    '    if false; then
-        MMRY_FND_VERDICT='"'"'foreign|' "$C"
-add env-ignored "the environment'"'"'s MMRY_API_URL and MMRY_API_KEY are not part of the identity, only the config file is" \
+    '    if [[ "$exp_acct" != "$_MMRY_FND_ACCT" ]]; then' \
+    '    if false; then' "$C"
+add env-ignored "MMRY_API_URL and MMRY_API_KEY from the environment are not part of the identity, only the config file is" \
     '    local url="${MMRY_API_URL:-}" key="${MMRY_API_KEY:-}" txt=""' \
     '    local url="" key="" txt=""' "$K"
 add config-ignored "the config file is not part of the identity, only the environment is" \
