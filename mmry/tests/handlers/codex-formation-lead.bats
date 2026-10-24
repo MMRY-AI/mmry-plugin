@@ -111,10 +111,13 @@ _assert_customer_typography() {
 }
 
 @test "req: on Claude Code the start confirmation is unchanged, byte for byte" {
+    # #32683 adds one line on purpose: the lead's own role rule (lib-formation-roles.sh), on every
+    # host. The rest is unchanged.
     local out; out="$(_claude "$HH/formation-start.sh" "migrate the billing schema")"
     local expected
     expected="$(printf '%s\n' 'Started formation 42: migrate the billing schema' \
-        'You are the lead. Tell the others to run /mmry:formation join 42, then use /mmry:formation say to keep them posted.')"
+        'You are the lead. Tell the others to run /mmry:formation join 42, then use /mmry:formation say to keep them posted.' \
+        'As the lead, delegate and check in: when a member is idle or reports Done, give it the next piece of work or tell it there is none, and do not do work yourself that an idle member could take. Keep for yourself the coordinating, the deciding and the reviewing.')"
     [ "$out" = "$expected" ] || { echo "--- expected"; echo "$expected"; echo "--- actual"; echo "$out"; return 1; }
 }
 
