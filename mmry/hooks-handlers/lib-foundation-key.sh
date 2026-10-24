@@ -46,14 +46,21 @@
 [[ -n "${_MMRY_LIB_FND_KEY_SOURCED:-}" ]] && return 0
 _MMRY_LIB_FND_KEY_SOURCED=1
 
-# The repository convention, which file-integrity.bats enforces, put back the way the caller had it:
-# the per-prompt hook runs without errexit on purpose, because nothing in Foundation re-injection may
-# fail a prompt, and this file is sourced by it first of all (the same dance as lib-foundation-switch.sh).
-_mmry_fkey_had_errexit=0
-case "$-" in *e*) _mmry_fkey_had_errexit=1 ;; esac
+# The repository convention, which file-integrity.bats enforces, then ALL THREE options put back the way
+# the caller had them. This file is sourced by three kinds of caller: mmry-client.sh (errexit on), the
+# per-prompt hook (errexit off on purpose, because nothing in Foundation re-injection may fail a prompt)
+# and the test helpers (bats' own options, pipefail off). Restoring errexit alone, as
+# lib-foundation-switch.sh can because its two callers already set -u and pipefail, left pipefail on in
+# the test shell and four Foundation suites failed with SIGPIPE (141) on `cmd | grep -q`.
+# foundation-isolation.bats checks every combination.
+_mmry_fkey_opts="$-"
+_mmry_fkey_pipefail=0
+[[ -o pipefail ]] && _mmry_fkey_pipefail=1
 set -euo pipefail
-(( _mmry_fkey_had_errexit )) || set +e
-unset _mmry_fkey_had_errexit
+case "$_mmry_fkey_opts" in *e*) ;; *) set +e ;; esac
+case "$_mmry_fkey_opts" in *u*) ;; *) set +u ;; esac
+(( _mmry_fkey_pipefail )) || set +o pipefail
+unset _mmry_fkey_opts _mmry_fkey_pipefail
 
 # The default the client applies when nothing names a server (mmry-client.sh, _MMRY_DEFAULT_URL).
 _MMRY_FND_DEFAULT_URL="https://mmryai.com"

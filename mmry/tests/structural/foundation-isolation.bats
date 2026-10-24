@@ -344,3 +344,22 @@ _legacy_copy() {
     done
     [[ "$ctx" == *"Directive 140:"* ]] || { echo "the last directive did not arrive in part 2: ${ctx: -200}"; return 1; }
 }
+
+# The key library is sourced by mmry-client.sh (errexit on), by the per-prompt hook (errexit off on
+# purpose) and by the test helpers (bats' own options). It carries the repository's set -euo pipefail
+# line, so it must put every one of the three options back the way the caller had it: a caller with
+# pipefail off that gained it would see `cmd | grep -q` fail with SIGPIPE (141), as four Foundation
+# suites did when only errexit was restored.
+@test "isolation: sourcing lib-foundation-key.sh leaves the caller's errexit, nounset and pipefail as they were" {
+    local lib="$PLUGIN_ROOT/hooks-handlers/lib-foundation-key.sh" o got
+    for o in "" "-e" "-u" "-o pipefail" "-e -u" "-e -o pipefail" "-u -o pipefail" "-e -u -o pipefail"; do
+        got="$(bash -c "set +e +u +o pipefail; set $o -o noglob; set +o noglob
+            source '$lib'
+            r=''; [[ \$- == *e* ]] && r+=e; [[ \$- == *u* ]] && r+=u; [[ -o pipefail ]] && r+=p; printf '%s' \"\$r\"" 2>&1)"
+        local want=""
+        [[ "$o" == *-e* ]] && want+=e
+        [[ "$o" == *-u* ]] && want+=u
+        [[ "$o" == *pipefail* ]] && want+=p
+        [[ "$got" == "$want" ]] || { echo "caller set '$o': options after sourcing are '$got', want '$want'"; return 1; }
+    done
+}
