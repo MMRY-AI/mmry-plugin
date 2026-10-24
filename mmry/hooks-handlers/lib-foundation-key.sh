@@ -46,6 +46,15 @@
 [[ -n "${_MMRY_LIB_FND_KEY_SOURCED:-}" ]] && return 0
 _MMRY_LIB_FND_KEY_SOURCED=1
 
+# The repository convention, which file-integrity.bats enforces, put back the way the caller had it:
+# the per-prompt hook runs without errexit on purpose, because nothing in Foundation re-injection may
+# fail a prompt, and this file is sourced by it first of all (the same dance as lib-foundation-switch.sh).
+_mmry_fkey_had_errexit=0
+case "$-" in *e*) _mmry_fkey_had_errexit=1 ;; esac
+set -euo pipefail
+(( _mmry_fkey_had_errexit )) || set +e
+unset _mmry_fkey_had_errexit
+
 # The default the client applies when nothing names a server (mmry-client.sh, _MMRY_DEFAULT_URL).
 _MMRY_FND_DEFAULT_URL="https://mmryai.com"
 
