@@ -26,6 +26,13 @@ make_set() { # $1 = lines
     # Both formats (#31597), so either side of the comparison finds its own: the two-file pair an
     # older hook reads, and the single set file, record line first and trailer last, that 31597 reads.
     { printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$1" "$b" "$s"; cat "$d/mmry-foundation.md"; printf 'END OF FOUNDATION SET'; } > "$d/mmry-foundation-set.md"
+    # And the keyed v3 file #32889 reads, named for the account this run has (none: the default server
+    # and no key), when the hook beside $H has the key library.
+    if [[ -f "${H%/*}/lib-foundation-key.sh" ]]; then
+        local acct; acct="$(bash -c 'source "$1"; mmry_foundation_account_key' _ "${H%/*}/lib-foundation-key.sh")"
+        printf 'sess-lat' > "$d/mmry-foundation.session.$acct"
+        { printf 'mmry-foundation v3 entries=%s bytes=%s cksum=%s acct=%s\n' "$1" "$b" "$s" "$acct"; cat "$d/mmry-foundation.md"; printf 'END OF FOUNDATION SET'; } > "$d/mmry-foundation-set.$acct.md"
+    fi
     printf '%s' "$d"; }
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
 

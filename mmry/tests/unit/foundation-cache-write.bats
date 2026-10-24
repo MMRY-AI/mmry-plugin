@@ -47,7 +47,7 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
     run mmry_write_foundation_cache "$(_resp)" "$CACHE"
     [ "$status" -eq 0 ]
     [ -f "$CACHE" ]
-    [[ "$(fnd_set_record "$CACHE")" == 'mmry-foundation v2 entries=2 '* ]] || return 1
+    [[ "$(fnd_set_record "$CACHE")" == 'mmry-foundation v3 entries=2 '* ]] || return 1
     _body | grep -q 'Eric builds MMRY.' || return 1
     _body | grep -q 'Clarity over cleverness.' || return 1
     # Tier filtering still holds.
@@ -64,7 +64,9 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
     local first last
     first="$(fnd_set_record "$CACHE")"
-    [[ "$first" =~ ^mmry-foundation\ v2\ entries=[0-9]+\ bytes=[0-9]+\ cksum=[0-9]+$ ]] || { echo "record: [$first]"; return 1; }
+    [[ "$first" =~ ^mmry-foundation\ v3\ entries=[0-9]+\ bytes=[0-9]+\ cksum=[0-9]+\ acct=[0-9a-f]{16}$ ]] || { echo "record: [$first]"; return 1; }
+    # The account key the record carries is this configuration's (#32889).
+    [[ "$first" == *" acct=$(fnd_acct)" ]] || { echo "record is not stamped for this account: [$first]"; return 1; }
     # The trailer is the last thing in the file, with no newline after it: $(<file) drops trailing
     # newlines, and the trailer is what keeps the set's own last byte from being one of them.
     last="$(tail -c 21 "$CACHE")"
@@ -119,7 +121,7 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
     # would satisfy "a record was written" and protect nothing.
     [[ "$rec" == *"bytes=$count"* ]] || return 1
     [[ "$rec" == *"cksum=$sum"* ]] || return 1
-    [[ "$rec" == mmry-foundation\ v2\ * ]]
+    [[ "$rec" == mmry-foundation\ v3\ * ]]
 }
 
 @test "write_foundation_cache: entries are counted from the RESPONSE, not by counting lines" {
@@ -154,11 +156,11 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
 
 @test "write_foundation_cache: leaves no temporary file behind, on success or on failure" {
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation-set.md.* 2>/dev/null | wc -l | tr -d ' '"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation-set.*.md.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 
     mmry_write_foundation_cache 'not json' "$CACHE" || true
-    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation-set.md.* 2>/dev/null | wc -l | tr -d ' '"
+    run bash -c "ls '$TEST_TMPDIR'/mmry-foundation-set.*.md.* 2>/dev/null | wc -l | tr -d ' '"
     [ "$output" = "0" ]
 }
 
@@ -166,7 +168,7 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
     # Distinct from damage, and it must be, or every such account is warned on every prompt.
     run mmry_write_foundation_cache '[{"memoryTier":"Strategic","topic":"T","content":"C"}]' "$CACHE"
     [ "$status" -eq 0 ]
-    [[ "$(fnd_set_record "$CACHE")" == 'mmry-foundation v2 entries=0 bytes=0 '* ]] || return 1
+    [[ "$(fnd_set_record "$CACHE")" == 'mmry-foundation v3 entries=0 bytes=0 '* ]] || return 1
     [ "$(fnd_set_body "$CACHE" | wc -c | tr -d ' ')" -eq 0 ]
 }
 

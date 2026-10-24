@@ -154,8 +154,11 @@ _host_of() {
     # The set is one sealed file since #31597 (develop); fnd_seal writes it as the writer does.
     local cache="$TEST_TMPDIR/mmry-foundation.md"
     printf -- '- Identity: Eric builds MMRY.\n' > "$cache"
-    fnd_seal "$cache" 1 "$TEST_TMPDIR/mmry-foundation-set.md"
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    # Named and stamped for the CODEX account (#32889): that is the one the copy must resolve, and a
+    # copy that keyed on the Claude file would look for, and refuse, another account's set.
+    export FND_CONFIG_OVERRIDE="$CX/mmry-config.json"
+    fnd_seal "$cache" 1 "$(fnd_set_file)"
+    printf 'session-under-test' > "$(fnd_session_file)"
 
     run env -u MMRY_HOST -u CODEX_HOME -u MMRY_CONFIG_FILE -u CLAUDE_PLUGIN_ROOT HOME="$HOME" \
         bash "$state/hooks-handlers/userpromptsubmit-foundation.sh" < /dev/null

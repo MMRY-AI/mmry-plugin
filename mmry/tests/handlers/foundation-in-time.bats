@@ -26,8 +26,8 @@ load '../helpers/foundation-set'
 setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
+    SET="$(fnd_set_file)"
+    printf 'session-under-test' > "$(fnd_session_file)"
     REAL_CKSUM="$(command -v cksum)"
     REAL_JQ="$(command -v jq)"
     SHIMS="$TEST_TMPDIR/shims"
@@ -112,7 +112,7 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
 @test "in-time: the daily refresh is still decided, off the prompt's path, and at most once in its interval" {
     _seed_lines 3
     # A configured account whose set is a year old: a refresh is due.
-    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":60}\n' > "$MMRY_CONFIG_FILE"
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":60}\n' > "$MMRY_CONFIG_FILE"; fnd_follow_config
     touch -t 202501010000 "$SET"
     _fire 1
     _ctx 1
@@ -427,7 +427,7 @@ _logging_shim() {
 @test "in-time R1: a part past half its deadline leaves the refresh decision, a process, to a quicker prompt" {
     _seed_lines 3
     # A configured account whose set is a year old: a refresh is due.
-    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":60}\n' > "$MMRY_CONFIG_FILE"
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":60}\n' > "$MMRY_CONFIG_FILE"; fnd_follow_config
     touch -t 202501010000 "$SET"
     # Verification takes 2.2 s of a 4 s deadline, so the part finishes past half of it.
     _cksum_shim 2.2

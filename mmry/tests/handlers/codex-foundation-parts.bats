@@ -35,8 +35,6 @@ CODEX_SPILL_BYTES=10000
 
 setup() {
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
-    printf 'session-under-test' > "$TEST_TMPDIR/mmry-foundation.session"
     CODEX_DIR="$TEST_TMPDIR/codexhome"
     mkdir -p "$CODEX_DIR/mmry"
     cat > "$CODEX_DIR/mmry-config.json" <<'EOF'
@@ -50,6 +48,11 @@ setup() {
 EOF
     # The Claude credential the control runs use. Same values, the other product's location.
     cp "$CODEX_DIR/mmry-config.json" "$MMRY_CONFIG_FILE"
+    # The set and the marker are named by that account (#32889), so they are placed after the config
+    # exists: both the Codex run (reading CODEX_HOME's copy) and the Claude control (reading
+    # MMRY_CONFIG_FILE) key the same values to the same name.
+    SET="$(fnd_set_file)"
+    printf 'session-under-test' > "$(fnd_session_file)"
 }
 
 # Seal a staged cache into the set file the hook reads, as the writer does (#31597 on develop:

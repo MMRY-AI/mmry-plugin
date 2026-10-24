@@ -26,7 +26,7 @@ setup() {
     export MMRY_API_KEY="test-key" MMRY_AUTH_METHOD="apikey" MMRY_API_URL="http://localhost:5291"
     source "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
     CACHE="$TEST_TMPDIR/staged.md"
-    SET="$TEST_TMPDIR/mmry-foundation-set.md"
+    SET="$(fnd_set_file)"
 }
 
 _state()  { printf '%s' "${1%%|*}"; }
@@ -94,7 +94,7 @@ _state()  { printf '%s' "${1%%|*}"; }
 }
 
 @test "verify: state bad-manifest, a record line present but unparseable" {
-    fnd_set_with 'mmry-foundation v2 garbage' $'- Identity: Eric builds MMRY.\n'
+    fnd_set_with 'mmry-foundation v3 garbage' $'- Identity: Eric builds MMRY.\n'
     run mmry_verify_foundation_cache "$SET"
     [ "$status" -eq 3 ]
     [ "$(_state "$output")" = "bad-manifest" ]
@@ -114,7 +114,7 @@ _state()  { printf '%s' "${1%%|*}"; }
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     local s b
     read -r s b < <(cksum < "$CACHE")
-    fnd_set_with "mmry-foundation v2 entries=0 bytes=${b} cksum=${s}" "$(cat "$CACHE")"
+    fnd_set_with "mmry-foundation v3 entries=0 bytes=${b} cksum=${s} acct=$(fnd_acct)" "$(cat "$CACHE")"
     run mmry_verify_foundation_cache "$SET"
     [ "$status" -eq 3 ]
     [ "$(_state "$output")" = "inconsistent" ]
@@ -188,7 +188,7 @@ _state()  { printf '%s' "${1%%|*}"; }
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     local s b
     read -r s b < <(cksum < "$CACHE")
-    { printf 'mmry-foundation v2 entries=1 bytes=%s cksum=%s trailing\n' "$b" "$s"; cat "$CACHE"; printf 'END OF FOUNDATION SET'; } > "$SET"
+    { printf 'mmry-foundation v3 entries=1 bytes=%s cksum=%s acct=%s trailing\n' "$b" "$s" "$(fnd_acct)"; cat "$CACHE"; printf 'END OF FOUNDATION SET'; } > "$SET"
     run mmry_verify_foundation_cache "$SET"
     [ "$status" -eq 3 ] || { echo "accepted: $output"; return 1; }
     [ "$(_state "$output")" = "bad-manifest" ]
@@ -197,7 +197,7 @@ _state()  { printf '%s' "${1%%|*}"; }
 # A file that is ONE line, a well-formed record with no newline after it, has no set at all. It is
 # refused as an unreadable record, not read as a record whose set is the record itself.
 @test "verify: #31597 a lone record line with no newline is refused as bad-manifest" {
-    printf 'mmry-foundation v2 entries=0 bytes=0 cksum=4294967295' > "$SET"
+    printf 'mmry-foundation v3 entries=0 bytes=0 cksum=4294967295 acct=%s' "$(fnd_acct)" > "$SET"
     run mmry_verify_foundation_cache "$SET"
     [ "$status" -eq 3 ] || { echo "accepted: $output"; return 1; }
     [ "$(_state "$output")" = "bad-manifest" ]

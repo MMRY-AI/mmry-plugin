@@ -19,13 +19,17 @@ set -euo pipefail
 # MMRY_CLIENT_DEFINE_ONLY=1 this file defines its functions and its defaults and starts nothing; jq is
 # not resolved and the config is not loaded, so a caller that sets it may call only functions that
 # need neither. Every other caller is unchanged.
-if [[ "${MMRY_CLIENT_DEFINE_ONLY:-}" != "1" ]]; then
 _mmry_client_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_mmry_client_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_client_dir="."
+# THE ACCOUNT-AND-SERVER KEY THE FOUNDATION COPY IS NAMED BY (#32889). Functions only, no process, so
+# it is loaded for every caller, the definitions-only one included: the set verifier below needs it.
+# shellcheck source=/dev/null
+source "${_mmry_client_dir}/lib-foundation-key.sh"
+if [[ "${MMRY_CLIENT_DEFINE_ONLY:-}" != "1" ]]; then
 source "${_mmry_client_dir}/lib-jq.sh"
-unset _mmry_client_dir
 mmry_resolve_jq || true
 fi
+unset _mmry_client_dir
 
 # ============================================================================
 # 1. CONFIG LOADING
@@ -284,8 +288,16 @@ _mmry_mtime() {
 # record, which then refused it as damaged until its own next write. Each version keeps its own file
 # now, so they cannot interfere, and a file written by an earlier version is never read here.
 #
+# A NAME PER ACCOUNT AND SERVER, mmry-foundation-set.<key>.md (#32889). One machine-wide name let a
+# Codex session on the Integration test account rewrite the file under a production Claude Code
+# session, which then injected the other account's one directive and reported it VERIFIED. The key
+# is hashed from the API URL and the API key this session is configured with (lib-foundation-key.sh),
+# so two sessions share a file only when they are one account on one server, and the record line
+# carries the same key so a copy under the wrong name is refused rather than injected ("foreign").
+# The unkeyed mmry-foundation-set.md and mmry-foundation.session an older plugin left are never read.
+#
 # THE LAYOUT, exactly:
-#   mmry-foundation v2 entries=<n> bytes=<b> cksum=<c>\n
+#   mmry-foundation v3 entries=<n> bytes=<b> cksum=<c> acct=<key>\n
 #   <the set: b bytes, POSIX cksum c, one "- topic: content" line per memory>
 #   END OF FOUNDATION SET                       (no newline after it)
 # The trailer exists because the single read uses $(<file), which drops trailing newlines; with the
@@ -304,8 +316,17 @@ _mmry_mtime() {
 MMRY_FND_TRAILER='END OF FOUNDATION SET'
 
 mmry_foundation_set_path() {
-    # Usage: mmry_foundation_set_path [dir]
-    printf '%s/mmry-foundation-set.md' "${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
+    # Usage: mmry_foundation_set_path [dir]   -> <dir>/mmry-foundation-set.<account key>.md (#32889)
+    mmry_foundation_set_name_v "${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
+    printf '%s' "$_MMRY_FND_SET_NAME"
+}
+
+# The session marker, named by the same key (#32889): SessionStart writes the session id here and the
+# no-session-id fallbacks read it, so one account's start never replaces another account's token.
+mmry_foundation_session_path() {
+    # Usage: mmry_foundation_session_path [dir]   -> <dir>/mmry-foundation.session.<account key>
+    mmry_foundation_session_name_v "${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
+    printf '%s' "$_MMRY_FND_SESSION_NAME"
 }
 
 # ONE verification, used by BOTH readers (#31583 QA round one).
@@ -347,8 +368,8 @@ mmry_foundation_set_path() {
 # must then fail SAFE, which for a warning means staying quiet.
 mmry_foundation_session_token() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}"
-    local f="${dir}/mmry-foundation.session"
-    local t=""
+    local f t=""
+    mmry_foundation_session_name_v "$dir"; f="$_MMRY_FND_SESSION_NAME"
     # Regular files only (#31583 QA round 5): a FIFO put in place of either file blocked the
     # read, and with it every prompt, until the 10-second deadline.
     [[ -f "$f" && -r "$f" ]] && { t="$(<"$f")" 2>/dev/null || t=""; }
@@ -512,8 +533,8 @@ mmry_read_foundation_set() {
     # Bytes, not characters, from here on: the record counts bytes, and byte-wise pattern work
     # avoids the multibyte rescans that cost seconds on large sets (#31411 QA, performance).
     local LC_ALL=C
-    local re='^mmry-foundation v2 entries=([0-9]+) bytes=([0-9]+) cksum=([0-9]+)$'
-    local header="${raw%%$'\n'*}" body="" exp_entries exp_bytes exp_cksum
+    local re='^mmry-foundation v3 entries=([0-9]+) bytes=([0-9]+) cksum=([0-9]+) acct=([0-9a-f]{16})$'
+    local header="${raw%%$'\n'*}" body="" exp_entries exp_bytes exp_cksum exp_acct
     # THE RECORD IS THE FIRST LINE, AND ITS ABSENCE IS A REFUSAL. The state token and the words
     # are the ones the separate manifest file had, because to the customer it is the same fault:
     # what was stored cannot be shown to be the account's own. A file of plain directives with no
@@ -522,7 +543,16 @@ mmry_read_foundation_set() {
         MMRY_FND_VERDICT='bad-manifest|the manifest describing the cached directives is unreadable, so they cannot be shown to be the account'"'"'s own'
         return 3
     fi
-    exp_entries="${BASH_REMATCH[1]}"; exp_bytes="${BASH_REMATCH[2]}"; exp_cksum="${BASH_REMATCH[3]}"
+    exp_entries="${BASH_REMATCH[1]}"; exp_bytes="${BASH_REMATCH[2]}"; exp_cksum="${BASH_REMATCH[3]}"; exp_acct="${BASH_REMATCH[4]}"
+    # THE RECORD NAMES THE ACCOUNT AND SERVER IT WAS STORED FOR, AND IT MUST BE THIS ONE (#32889). The
+    # file is already named by that key, so this is reached only by a copy put under the wrong name, a
+    # key collision, or a reader whose own key is computed differently: in every case the set cannot be
+    # shown to be this account's, and it is refused before a byte of it is believed.
+    mmry_foundation_account_key_v
+    if [[ "$exp_acct" != "$_MMRY_FND_ACCT" ]]; then
+        MMRY_FND_VERDICT='foreign|the stored directives belong to a different account or server than the one this session is configured for, so they are not this account'"'"'s own'
+        return 3
+    fi
     body="${raw#*$'\n'}"
     # The trailer is removed when it is there. When it is not, the body is left as read and the
     # byte count below decides: a set cut short loses its trailer and fails on length.
@@ -675,7 +705,10 @@ mmry_write_foundation_cache() {
     read -r sum count < <(cksum < "$body" 2>/dev/null)
     [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$body" 2>/dev/null; return 1; }
 
-    if ! { printf 'mmry-foundation v2 entries=%s bytes=%s cksum=%s\n' "$entries" "$count" "$sum" \
+    # Stamped with the account-and-server key this writer is configured for (#32889), the same key the
+    # file is named by, so a reader can tell whose set it holds without trusting the name.
+    mmry_foundation_account_key_v
+    if ! { printf 'mmry-foundation v3 entries=%s bytes=%s cksum=%s acct=%s\n' "$entries" "$count" "$sum" "$_MMRY_FND_ACCT" \
            && cat "$body" \
            && printf '%s' "$MMRY_FND_TRAILER"; } > "$tmp" 2>/dev/null
     then
