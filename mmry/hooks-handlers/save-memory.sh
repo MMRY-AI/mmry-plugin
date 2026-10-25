@@ -211,6 +211,7 @@ else
         echo "MMRY AI: ${MMRY_PROCESS_MESSAGE}" >&2
     else
         _mmry_format_error "save"
+        echo "Nothing was saved. Check that --record-fields is one valid JSON object, then run the save again." >&2
     fi
     exit 1
 fi
