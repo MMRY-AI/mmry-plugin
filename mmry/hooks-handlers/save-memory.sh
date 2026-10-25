@@ -161,7 +161,7 @@ if [[ -n "$RECORD_TYPE" || -n "$RECORD_FIELDS" || -n "$RECORD_NAME" ]]; then
         # A REFUSED RECORD SAVE STORES NOTHING (#32002). Said here, beside the server's own words,
         # so the assistant does not report a save that did not happen. The SKILL describes it too.
         if [[ "$MMRY_HTTP_CODE" == "400" ]]; then
-            echo "Nothing was saved. Check that --record-fields is one valid JSON object, then run the save again." >&2
+            : # mutated
         fi
         exit 1
     fi
