@@ -35,14 +35,14 @@ There are no commands to type on Codex. Ask in plain words, and your assistant u
 
 ## Your AI database
 
-Keep track of something you will want to count, filter or compare later, such as expenses, sales leads or a migraine log. Each thing you track is a database, each item in it is an entry, and its named values are fields.
+Keep track of something you will want to count, filter or compare later, such as expenses, sales leads or a migraine log. Databases work in Codex through the MMRY AI connector, which you add once in a terminal. Add it, then sign in:
 
-- "Keep track of my expenses." Your assistant checks for a database you already have, or sets one up with fields named in your words.
-- "Add today's taxi, 25 dollars, travel." Saves an entry.
-- "How many travel expenses this month?" Finds entries by their fields.
-- "What did that entry say before?" Shows an entry's history.
-- "Retire my expenses database." It stops collecting new entries, and nothing is deleted.
-- You can also see your databases and correct any entry yourself at https://mmryai.com/records.
+```
+codex mcp add mmry --url https://mmryai.com/mcp
+codex mcp login mmry
+```
+
+Then ask in plain words, for example "Keep track of my expenses." You can see your databases and correct any entry yourself at https://mmryai.com/records.
 
 ## Formations
 
@@ -86,7 +86,7 @@ Everything with a tool in brackets above is a call to that `mmry_plugin` tool: c
 | Item | Script |
 |---|---|
 | Who sees a memory | `hooks-handlers/visibility.sh`, `hooks-handlers/make-private.sh`, `hooks-handlers/list-groups.sh` |
-| AI database | `hooks-handlers/list-formats.sh`, `hooks-handlers/create-format.sh`, `hooks-handlers/save-record.sh`, `hooks-handlers/query-records.sh`, `hooks-handlers/record-history.sh`, `hooks-handlers/revise-format.sh` |
+| AI database (Claude Code only: in Codex the customer uses the MMRY connector, so do not run these from Codex) | `hooks-handlers/list-formats.sh`, `hooks-handlers/create-format.sh`, `hooks-handlers/save-record.sh`, `hooks-handlers/query-records.sh`, `hooks-handlers/record-history.sh`, `hooks-handlers/revise-format.sh` |
 | Listing Formations, claiming an area | `hooks-handlers/formation-list.sh`, `hooks-handlers/formation-claim.sh` |
 | Foundation status check | `hooks-handlers/foundation-status.sh` |
 | Setup | `setup/mmry-setup.sh` |
