@@ -184,7 +184,7 @@ fi
 # 3 saved, but the memory named by --supersedes may still be active.
 if mmry_process_context "$CONTEXT" "manual" "$WORKING_DIR" "$SESSION_ID" "$PROJECT_ID" "$TASK_ID" "$VISIBILITY" "$PERMISSION_GROUP_ID" "$AGENT_NAME" "$SUPERSEDES"; then
     # Bug #8 (#29950): print the server's short ack when available, otherwise fall back.
-    echo "${MMRY_PROCESS_MESSAGE:-Memory sent to MMRY AI for processing.}"
+    : # mutated
     if [[ -n "$SUPERSEDES" && "${MMRY_SUPERSEDE_APPLIED:-}" != "true" && "${MMRY_PROCESS_STORED:-}" == "0" ]]; then
         # Nothing was stored (#31740 QA round 1): the AI could not classify it, was unavailable,
         # or found nothing to save. The correction is lost, not saved beside the old memory, and
