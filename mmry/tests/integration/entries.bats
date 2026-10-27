@@ -49,7 +49,7 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
 
 # ---- requirement 1 ----------------------------------------------------------------------------
 
-@test "records live: define a record type from Claude Code" {
+@test "entries live: define a database from Claude Code" {
     [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
     local name="Expenses 31827 $(date +%s)"
     _plugin create-database.sh --name "$name" --description "Every expense, from bats" \
@@ -67,7 +67,7 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
     [[ "$output" == *"$name"* ]] || fail "the new type is not listed: $output"
 }
 
-@test "records live: a save in the user's own words becomes a RECORD on that type" {
+@test "entries live: a save in the user's own words becomes an ENTRY in that database" {
     [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
     local name; name="$(_state format_name)"
     [[ -n "$name" ]] || fail "the type was not created by the first test, so this cannot run"
@@ -87,7 +87,7 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
     [[ "$output" == *"SavedInDatabase: ${name}"* ]] || fail "second save did not become a record: $output"
 }
 
-@test "records live: a question is answered from the VALUES, not the wording" {
+@test "entries live: a question is answered from the VALUES, not the wording" {
     [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
     local id; id="$(_state database_id)"
     [[ -n "$id" ]] || fail "the type was not created by the first test, so this cannot run"
@@ -147,7 +147,7 @@ _connector() {
         | sed -n 's/^data: //;/^{/p' | _jq -r '.result.content[0].text // empty'
 }
 
-@test "records live: a record made through the CONNECTOR is read and corrected from Claude Code" {
+@test "entries live: an entry made through the CONNECTOR is read and corrected from Claude Code" {
     [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
     [[ -z "${MMRY_INTEGRATION_JWT:-}" ]] && skip "MMRY_INTEGRATION_JWT not set (connector tests)"
     command -v openssl >/dev/null || skip "openssl is needed for the connector's PKCE"
@@ -163,7 +163,7 @@ _connector() {
     [[ "$made" == *"structured.created"* ]] || fail "the connector did not create a record: $made"
     rec="$(_jq -r '.MemoryId // .memoryId' <<<"$made")"
     [[ "$rec" =~ ^[0-9]+$ ]] || fail "no record id from the connector: $made"
-    _keep connector_record "$rec"
+    _keep connector_entry "$rec"
 
     # READ from Claude Code.
     _plugin query-entries.sh --database-id "$id" --filter kind=books
@@ -183,11 +183,11 @@ _connector() {
         || fail "the connector does not see the plugin's correction: $(head -c 600 <<<"$back")"
 }
 
-@test "records live: Claude Code reads what the record used to hold, and so does the connector" {
+@test "entries live: Claude Code reads what the entry used to hold, and so does the connector" {
     [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
     local id rec tok
     [[ -z "${MMRY_INTEGRATION_JWT:-}" ]] && skip "MMRY_INTEGRATION_JWT not set (connector tests)"
-    id="$(_state database_id)"; rec="$(_state connector_record)"; tok="$(_state connector_token)"
+    id="$(_state database_id)"; rec="$(_state connector_entry)"; tok="$(_state connector_token)"
     [[ -n "$id" && -n "$rec" ]] || fail "no connector record from the previous test, so this cannot run"
 
     _plugin entry-history.sh --database-id "$id" --entry-id "$rec"
@@ -202,11 +202,11 @@ _connector() {
         || fail "the connector's history differs: $(head -c 600 <<<"$hist")"
 }
 
-@test "records live: a record on another account answers not-found, identically to one that never existed" {
+@test "entries live: an entry on another account answers not-found, identically to one that never existed" {
     [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
     [[ -z "${MMRY_INTEGRATION_STRANGER_API_KEY:-}" ]] && skip "MMRY_INTEGRATION_STRANGER_API_KEY not set"
     [[ -z "${MMRY_INTEGRATION_JWT:-}" ]] && skip "MMRY_INTEGRATION_JWT not set (it probes the connector record)"
-    local id rec; id="$(_state database_id)"; rec="$(_state connector_record)"
+    local id rec; id="$(_state database_id)"; rec="$(_state connector_entry)"
     [[ -n "$id" && -n "$rec" ]] || fail "no connector record from the previous tests, so this cannot run"
 
     export MMRY_INTEGRATION_API_KEY="$MMRY_INTEGRATION_STRANGER_API_KEY"

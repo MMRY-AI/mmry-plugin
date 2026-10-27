@@ -158,7 +158,7 @@ while IFS= read -r entry; do
                 if (length(text) > 140) text = substr(text, 1, 137) "..."
                 printf "%s:%d: %s: %s\n", rel, NR, what, text
             }
-        }' "$path")"
+        }' "${code_list[@]}")"
     if [ -n "$out" ]; then
         n="$(printf '%s\n' "$out" | wc -l | tr -d '[:space:]')"
         findings=$((findings + n))
@@ -213,6 +213,81 @@ if [ -d "$HH" ]; then
             esac
         done
     fi
+fi
+
+# ---- Rule N in the code: every shell name and every database test name (#32957 fix round 3) ----
+# Fix round 2 read the script names, the options, the client functions that call /api/databases and
+# the Codex tools, so a usage comment's RECORD_FIELDS_JSON, a test array RECORD_HANDLERS and the
+# feature's own test names kept the old words and the check passed. This reads every shell file in
+# mmry/ and scripts/ (.sh, .bash, .bats): each function it defines, each variable it sets, declares
+# or expands, and each upper-case placeholder in a "Usage:" comment. A name carrying format (not
+# formation) or record is refused unless SHELL_ALLOWED lists it, with why it is another feature's.
+# The generic words alone (record, records, recorded, format, formats) are allowed only in a file
+# about another feature (a Formation, the Foundation check, the tool server's own bookkeeping).
+# In the database's own test files, a test's name (@test "...") is read under rules A and B as well.
+SHELL_ALLOWED=" _MMRY_FS_RECORD_RE _fnd_any_record fnd_set_record mmry_foundation_record_path _records _recorded _recorded_bytes \
+mmry_ts_record_exit mmry_ts_record_failure mmry_ts_record_launch mmry_ts_record_running mmry_ts_record_session _record_running_server \
+mmry_record_session_agent _recording_curl_dir _record_body _format_error "
+# Why: _MMRY_FS_RECORD_RE, _record_body, _recording_curl_dir: a Formation's local membership record
+# and close-out record. _fnd_*, fnd_set_record, mmry_foundation_record_path, _records, _recorded*:
+# the Foundation delivery record. mmry_ts_record_*, _record_running_server: the Codex tool server
+# records its own start. mmry_record_session_agent: the verb. _format_error: an error message's format.
+GENERIC_ELSEWHERE='formation|foundation|tool-server|mcp-server|codex-missing-tools'
+DATABASE_TESTS='entry-handlers[.]bats|entries[.]bats|entry-surface[.]bats|database-command[.]bats'
+code_files="$( { [ -d "$ROOT/mmry" ] && find "$ROOT/mmry" -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.bats' \) -print
+                 [ -d "$ROOT/scripts" ] && find "$ROOT/scripts" -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.bats' \) -print; } \
+               | grep -v '/[.]git/' | grep -v '/tests/libs/' | grep -v '/tests/test_helper/' | sort)"
+code_list=()
+while IFS= read -r path; do [ -n "$path" ] && code_list+=("$path"); done <<CODEFILES
+$code_files
+CODEFILES
+code_count=${#code_list[@]}
+if [ "$code_count" -gt 0 ]; then
+    out="$(awk -v root="$ROOT/" -v allowed="$SHELL_ALLOWED" -v elsewhere="$GENERIC_ELSEWHERE" -v dbtests="$DATABASE_TESTS" '
+        function old(id,   l) { l = tolower(id); gsub(/formation/, "", l); return l ~ /format|record/ }
+        function judge(id) {
+            if (!old(id)) return
+            if (index(allowed, " " id " ")) return
+            if ((id == "record" || id == "records" || id == "recorded" || id == "format" || id == "formats") && rel ~ elsewhere) return
+            printf "%s:%d: identifier: %s\n", rel, FNR, id
+        }
+        FNR == 1 { rel = FILENAME; if (index(rel, root) == 1) rel = substr(rel, length(root) + 1) }
+        {
+            line = $0; sub(/\r$/, "", line)
+            if (line ~ /^[ \t]*#/) {
+                if (line ~ /Usage:/) { s = line; while (match(s, /[A-Z][A-Z0-9_]*[A-Z0-9]/)) { judge(substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH) } }
+                next
+            }
+            if (line ~ /^[ \t]*@test /) {
+                if (rel ~ dbtests) {
+                    t = tolower(line)
+                    if (t ~ /record[- \t]+types?|structured[- \t]+records?|data[- \t]+formats?|(^|[^a-z0-9_.-])(records?|recorded|recording|formats?)([^a-z0-9_.-]|$)/)
+                        printf "%s:%d: test name: %s\n", rel, FNR, line
+                }
+                next
+            }
+            if (match(line, /^[ \t]*(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*[(][)]/)) {
+                t = substr(line, RSTART, RLENGTH); sub(/^[ \t]*(function[ \t]+)?/, "", t); sub(/[ \t]*[(][)]$/, "", t); judge(t)
+            }
+            s = line; while (match(s, /[$][{]?[A-Za-z_][A-Za-z0-9_]*/)) { t = substr(s, RSTART, RLENGTH); sub(/^[$][{]?/, "", t); judge(t); s = substr(s, RSTART + RLENGTH) }
+            s = line; while (match(s, /(^|[ \t;(])[A-Za-z_][A-Za-z0-9_]*[+]?=/)) { t = substr(s, RSTART, RLENGTH); sub(/^[ \t;(]/, "", t); sub(/[+]?=$/, "", t); judge(t); s = substr(s, RSTART + RLENGTH) }
+            s = line; while (match(s, /(local|declare|readonly|export|unset)([ \t]+-[a-zA-Z]+)*[ \t]+[A-Za-z_][A-Za-z0-9_ \t]*/)) {
+                t = substr(s, RSTART, RLENGTH); sub(/^(local|declare|readonly|export|unset)([ \t]+-[a-zA-Z]+)*[ \t]+/, "", t)
+                n = split(t, a, /[ \t]+/); for (i = 1; i <= n; i++) if (a[i] != "") judge(a[i])
+                s = substr(s, RSTART + RLENGTH)
+            }
+        }' "${code_list[@]}")"
+    if [ -n "$out" ]; then
+        n="$(printf '%s\n' "$out" | wc -l | tr -d '[:space:]')"
+        findings=$((findings + n))
+        report="${report}${out}
+"
+    fi
+fi
+files=$((files + code_count))
+if [ -d "$ROOT/mmry/hooks-handlers" ] && [ "$code_count" -lt 50 ]; then
+    echo "check-database-names: read only ${code_count} shell files for names under $ROOT" >&2
+    exit 2
 fi
 
 if [ "$files" -eq 0 ]; then

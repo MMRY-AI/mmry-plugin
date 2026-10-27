@@ -30,7 +30,7 @@ setup() {
     grep -q "GET http://localhost:5291/api/databases" "$LOG"
 }
 
-@test "list-databases: a type with no match hints says so, and says when a save becomes a record" {
+@test "list-databases: a database with no match hints says so, and says when a save becomes an entry" {
     run bash "$HANDLERS/list-databases.sh"
     [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
     [[ "$output" == *"a save becomes an entry when it names this database and has values for its fields"* ]] || return 1
@@ -119,7 +119,7 @@ setup() {
     [[ "$output" == *"Headache log"* ]] || return 1
 }
 
-@test "revise-database: --retire reports the records it still holds" {
+@test "revise-database: --retire reports the entries it still holds" {
     run bash "$HANDLERS/revise-database.sh" --id 42 --retire
     [[ "$status" -eq 0 ]] || return 1
     grep -q "POST http://localhost:5291/api/databases/42/retire" "$LOG"
@@ -207,7 +207,7 @@ setup() {
     [[ "$output" == *"--database-id is required"* ]] || return 1
 }
 
-@test "query-entries: reports the total and every field of every record" {
+@test "query-entries: reports the total and every field of every entry" {
     run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"2 entries in Migraine log:"* ]] || return 1
@@ -248,7 +248,7 @@ setup() {
 
 # --- save-memory, the routed save --------------------------------------------
 
-@test "save-memory: a record flag sends the structured block to POST /api/memories" {
+@test "save-memory: an entry flag sends the structured block to POST /api/memories" {
     # Not to /api/memories/process. That route carries no structured block and may extract
     # several memories from one context, leaving no single memory for the fields to belong to.
     run bash "$HANDLERS/save-memory.sh" \
@@ -261,7 +261,7 @@ setup() {
     grep -q '"structured":{"databaseName":"Migraine log","fields":{"severity":7}}' "$LOG"
 }
 
-@test "save-memory: a routed save with no format in the response says so plainly" {
+@test "save-memory: a routed save with no database in the response says so plainly" {
     # The mock's plain {"id":99} is exactly what a degraded save looks like: the words were
     # stored, the structure was not. Reporting "recorded in your migraine log" here is the lie.
     run bash "$HANDLERS/save-memory.sh" \
@@ -272,7 +272,7 @@ setup() {
     [[ "$output" == *"SavedInDatabase: (none - saved as ordinary text, the structure was not stored)"* ]] || return 1
 }
 
-@test "save-memory: a routed save names the format the SERVER stored" {
+@test "save-memory: a routed save names the database the SERVER stored" {
     export MOCK_CURL_HTTP_CODE=201
     export MOCK_CURL_RESPONSE='{"id":99,"database":{"rootId":42,"name":"Migraine log"}}'
     run bash "$HANDLERS/save-memory.sh" \
@@ -282,7 +282,7 @@ setup() {
     [[ "$output" == *"SavedInDatabase: Migraine log"* ]] || return 1
 }
 
-@test "save-memory: a name inside the user's own content is not read as a format" {
+@test "save-memory: a name inside the user's own content is not read as a database" {
     # The customer's content can contain anything, including a JSON snippet with a name key.
     # Reading the whole body for "name" would report a format that was never stored.
     export MOCK_CURL_HTTP_CODE=201
@@ -295,14 +295,14 @@ setup() {
     [[ "$output" == *"SavedInDatabase: (none"* ]] || return 1
 }
 
-@test "save-memory: a record flag without the classification is refused, naming what is missing" {
+@test "save-memory: an entry flag without the classification is refused, naming what is missing" {
     run bash "$HANDLERS/save-memory.sh" --context "anything" --database-name "Migraine log"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--tier"* ]] || return 1
     [[ "$output" == *"--content"* ]] || return 1
 }
 
-@test "save-memory: without a record flag nothing changes - it still goes to the AI route" {
+@test "save-memory: without an entry flag nothing changes - it still goes to the AI route" {
     run bash "$HANDLERS/save-memory.sh" --context "Remember that we use UPC as the identifier."
     [[ "$status" -eq 0 ]] || return 1
     grep -q "/api/memories/process" "$LOG"
@@ -339,7 +339,7 @@ _mmry_no_jq() {
     env MMRY_JQ_SKIP_SYSTEM=1 MMRY_JQ_VENDOR_DIR="$TEST_TMPDIR/no-jq-vendor"         MMRY_API_URL="http://localhost:5291" MMRY_API_KEY="test-api-key"         MMRY_AUTH_METHOD="apikey" "$@"
 }
 
-@test "save-memory (no jq): names the format the server stored, read from the format block" {
+@test "save-memory (no jq): names the database the server stored, read from the database block" {
     export MOCK_CURL_HTTP_CODE=201
     export MOCK_CURL_RESPONSE='{"id":99,"content":"C","database":{"name":"Migraine log","rootId":42}}'
     run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --database-name "Migraine log"
@@ -347,7 +347,7 @@ _mmry_no_jq() {
     [[ "$output" == *"SavedInDatabase: Migraine log"* ]] || return 1
 }
 
-@test "save-memory (no jq): a name inside the user's own content is not read as a format" {
+@test "save-memory (no jq): a name inside the user's own content is not read as a database" {
     export MOCK_CURL_HTTP_CODE=201
     export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Database\"}","database":null}'
     run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --database-name "Migraine log"
@@ -356,7 +356,7 @@ _mmry_no_jq() {
     [[ "$output" == *"SavedInDatabase: (none"* ]] || return 1
 }
 
-@test "save-memory (no jq): a top-level name beside a null format is not read as the format" {
+@test "save-memory (no jq): a top-level name beside a null database is not read as the database" {
     # THE CASE THAT ACTUALLY SEPARATES the scoped extractor from a whole-body grep. A name buried
     # in the customer's content cannot be confused for a real one - the encoder escapes it as
     # \"name\", so a naive grep for "name": never matches it and the earlier fixture stays green
@@ -382,7 +382,7 @@ _mmry_no_jq() {
     [[ ! -s "$LOG" ]] || ! grep -q "history" "$LOG"
 }
 
-@test "entry-history: reads the history route for that record" {
+@test "entry-history: reads the history route for that entry" {
     run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
     [[ "$status" -eq 0 ]] || return 1
     grep -q "GET http://localhost:5291/api/databases/42/entries/9137/history" "$LOG"
@@ -410,7 +410,7 @@ _mmry_no_jq() {
     [[ "$output" == *"by Probe User"* ]] || return 1
 }
 
-@test "entry-history: a record with no changes says so instead of printing nothing" {
+@test "entry-history: an entry with no changes says so instead of printing nothing" {
     export MOCK_CURL_HTTP_CODE=200
     export MOCK_CURL_RESPONSE='{"entryId":9137,"changes":0,"history":[]}'
     run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
@@ -436,7 +436,7 @@ _mmry_no_jq() {
 
 # --- correcting a record made elsewhere (#31827 requirement 2) ----------------
 
-@test "save-entry: --entry-id sends the id so the record is UPDATED, and reports the update" {
+@test "save-entry: --entry-id sends the id so the entry is UPDATED, and reports the update" {
     export MOCK_CURL_HTTP_CODE=200
     export MOCK_CURL_RESPONSE='{"outcome":"structured.updated","memoryId":99,"entryId":9137}'
     run bash "$HANDLERS/save-entry.sh" --database-id 42 --entry-id 9137 \
@@ -480,7 +480,7 @@ _mmry_no_jq() {
     grep -q '"supersedesId":123' "$LOG"
 }
 
-@test "query-entries: shows the words each record was saved from, not a topic the route never sends" {
+@test "query-entries: shows the words each entry was saved from, not a topic the route never sends" {
     # Read from Integration (#31827): entries carry note, entryKey and savedAt. The first port
     # printed .topic, which is absent, so every record read "(no topic)" and its words were lost.
     run bash "$HANDLERS/query-entries.sh" --database-id 42
@@ -500,7 +500,7 @@ _mmry_no_jq() {
     [[ "$output" != *"from now on"* ]] || return 1
 }
 
-@test "save-memory: a record save with malformed fields is refused as the SKILL describes, and stores nothing (#32002)" {
+@test "save-memory: an entry save with malformed fields is refused as the SKILL describes, and stores nothing (#32002)" {
     export MOCK_CURL_HTTP_CODE=400
     # The REAL body: GlobalExceptionHandler answers a malformed request body with this envelope
     # (seen live on Integration, 2026-10-10), not plain text.
@@ -524,7 +524,7 @@ _mmry_no_jq() {
     ! grep -q 'This can never cost the save' "$skill"
 }
 
-@test "no plugin message or guidance contradicts when a save becomes a record (#32002)" {
+@test "no plugin message or guidance contradicts when a save becomes an entry (#32002)" {
     # The rule (MemoryDatabaseRouter): a save becomes a record when MMRY can tell which type it
     # belongs to (named, or chosen by hint words) AND has values for that type's fields (supplied,
     # or labelled lines). Neither "the hints alone file a save" nor "a plain save never becomes a

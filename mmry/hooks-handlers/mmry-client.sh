@@ -998,7 +998,7 @@ _mmry_build_json() {
 # ============================================================================
 
 mmry_create_memory() {
-    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID] [AGENT_NAME] [DATABASE_NAME] [RECORD_FIELDS_JSON] [ENTRY_NAME]
+    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID] [AGENT_NAME] [DATABASE_NAME] [ENTRY_FIELDS_JSON] [ENTRY_NAME]
     #
     # THE LAST THREE ARE THE STRUCTURED BLOCK (#31460, ported by #31827) and every one of them is
     # optional. They come AFTER the agent name (#30320) so no shipped caller's positions move. They
@@ -1349,8 +1349,8 @@ mmry_leave_formation() {
 # plugin user could only ever join a formation that something else had created, and nothing they
 # have could create one. Requirement 2 of #31104 asks for a message to reach another session with no
 # manual step, and calling the API by hand to start the formation is a manual step.
-mmry_create_databaseion() {
-    # Usage: mmry_create_databaseion "objective" SESSION_ID [TASK_ID] [DISPLAY_NAME]
+mmry_create_formation() {
+    # Usage: mmry_create_formation "objective" SESSION_ID [TASK_ID] [DISPLAY_NAME]
     # #31410: the lead's readable name, omitted entirely when empty.
     local objective="$1" session_id="$2" task_id="${3:-}" display_name="${4:-}"
     local body

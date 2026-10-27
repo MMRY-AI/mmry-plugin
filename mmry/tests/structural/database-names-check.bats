@@ -42,10 +42,12 @@ setup() {
     cp "$REPO_ROOT/README.md" "$COPY/README.md"
     cp "$REPO_ROOT"/docs/*.md "$COPY/docs/"
     local f
-    for f in mcp-server.sh create-database.sh list-databases.sh revise-database.sh save-entry.sh \
-             query-entries.sh entry-history.sh save-memory.sh rename-database.sh retire-database.sh \
-             reinstate-database.sh database.sh mmry-client.sh; do
-        cp "$PLUGIN_ROOT/hooks-handlers/$f" "$COPY/mmry/hooks-handlers/"
+    # #32957 fix round 3: the check reads every shell file's names, so the copy carries all of the
+    # handlers and the tests (not the vendored bats libraries, which the check skips).
+    cp "$PLUGIN_ROOT"/hooks-handlers/* "$COPY/mmry/hooks-handlers/" 2>/dev/null || true
+    mkdir -p "$COPY/mmry/tests"
+    for f in "$PLUGIN_ROOT"/tests/*; do
+        case "$(basename "$f")" in libs) ;; *) cp -R "$f" "$COPY/mmry/tests/" ;; esac
     done
 }
 
@@ -199,6 +201,53 @@ SKILL="mmry/skills/memory-system/SKILL.md"
     cp "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh" "$f"
     run bash "$CHECK" "$COPY"
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+# Rule N in the code (#32957 fix round 3). QA found RECORD_FIELDS_JSON in a usage comment, and the
+# feature's own test names and test arrays still said record; the check passed them because it read
+# only script names, options, client functions and Codex tools. Each plant below puts one back.
+_code_refused() { # file (relative to the copy), line to append, text the refusal must contain
+    printf '%s\n' "$2" >> "$COPY/$1"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"$3"* ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N code: a usage placeholder named with record is refused (RECORD_FIELDS_JSON)" {
+    _code_refused mmry/hooks-handlers/mmry-client.sh \
+        '    # Usage: mmry_create_memory TIER CATEGORY [DATABASE_NAME] [RECORD_FIELDS_JSON] [ENTRY_NAME]' \
+        "mmry-client.sh:"*": identifier: RECORD_FIELDS_JSON"
+}
+
+@test "rule N code: a shell function named with record is refused" {
+    _code_refused mmry/hooks-handlers/save-entry.sh '_print_record() { :; }' "save-entry.sh:"*": identifier: _print_record"
+}
+
+@test "rule N code: a variable named with format is refused, set or expanded" {
+    _code_refused mmry/hooks-handlers/query-entries.sh 'format_id="$1"' "query-entries.sh:"*": identifier: format_id"
+}
+
+@test "rule N code: a generic local named record is refused in a database script, and allowed in a Formation one" {
+    _code_refused mmry/hooks-handlers/entry-history.sh '    local record' "entry-history.sh:"*": identifier: record"
+    cp "$PLUGIN_ROOT/hooks-handlers/entry-history.sh" "$COPY/mmry/hooks-handlers/entry-history.sh"
+    printf '%s\n' '    local record' >> "$COPY/mmry/hooks-handlers/formation-report.sh"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N code: a test array named with record is refused (RECORD_HANDLERS)" {
+    _code_refused mmry/tests/structural/entry-surface.bats 'RECORD_HANDLERS=(save-entry.sh)' "entry-surface.bats:"*": identifier: RECORD_HANDLERS"
+}
+
+@test "rule N code: a database test named with record is refused, and a Foundation test is not" {
+    _code_refused mmry/tests/handlers/entry-handlers.bats '@test "query-entries: reports every record" {' "entry-handlers.bats:"*": test name:"
+    cp "$PLUGIN_ROOT/tests/handlers/entry-handlers.bats" "$COPY/mmry/tests/handlers/entry-handlers.bats"
+    printf '%s\n' '@test "parts: the record line is kept" {' >> "$COPY/mmry/tests/handlers/foundation-parts.bats"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N code: the damaged Formation function mmry_create_databaseion would not hide a record name" {
+    _code_refused mmry/hooks-handlers/formation-start.sh 'mmry_create_record_formation() { :; }' "identifier: mmry_create_record_formation"
 }
 
 @test "'record' outside the database is ordinary English and passes; 'record type' never does" {
