@@ -56,11 +56,21 @@ jobs:
         run: bash scripts/check-public-text.sh
 
       # #32457 (DD-150 in the mmry repository): the AI database is called a database and its
-      # items entries wherever customers and assistants read the plugin; script, flag and tool
-      # names keep their older words. The suite runs it again in structural/database-names-check.bats.
+      # items entries wherever customers and assistants read the plugin, and since #32957 (DD-164)
+      # in every name too. The suite runs it again in structural/database-names-check.bats.
       - name: Check customer-readable text for the AI database names
         shell: /bin/bash -e {0}
         run: bash scripts/check-database-names.sh
+
+      # #32957 fix round 3: round 1's substring rename damaged a Formation name
+      # (mmry_create_formation became mmry_create_database-ion) and no check noticed. Every Formation
+      # name on develop must still exist, and no rename may join a letter onto database or entry.
+      # The checkout is shallow, so develop is fetched first as the base to compare with.
+      - name: Check a rename kept every Formation name and damaged no word
+        shell: /bin/bash -e {0}
+        run: |
+          git fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          bash scripts/check-rename-damage.sh --base origin/develop
 
       - name: Run offline tests (structural + unit + handlers)
         # /bin/bash explicitly, so the step's own shell is the stock one on macOS too.
