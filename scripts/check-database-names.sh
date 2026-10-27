@@ -158,7 +158,7 @@ while IFS= read -r entry; do
                 if (length(text) > 140) text = substr(text, 1, 137) "..."
                 printf "%s:%d: %s: %s\n", rel, NR, what, text
             }
-        }' "${code_list[@]}")"
+        }' "$path")"
     if [ -n "$out" ]; then
         n="$(printf '%s\n' "$out" | wc -l | tr -d '[:space:]')"
         findings=$((findings + n))
@@ -266,6 +266,9 @@ if [ "$code_count" -gt 0 ]; then
                 }
                 next
             }
+            # A single-quoted string is literal text (a sed expression, a planted line in a test),
+            # never a name the shell defines or expands, so it is not read.
+            gsub(/\047[^\047]*\047/, "\047\047", line)
             if (match(line, /^[ \t]*(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*[(][)]/)) {
                 t = substr(line, RSTART, RLENGTH); sub(/^[ \t]*(function[ \t]+)?/, "", t); sub(/[ \t]*[(][)]$/, "", t); judge(t)
             }
