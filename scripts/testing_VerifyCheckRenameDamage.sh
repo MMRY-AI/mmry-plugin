@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testing_VerifyCheckRenameDamage.sh - proves scripts/check-rename-damage.sh (#32957 fix round 3) can
+# testing_VerifyCheckRenameDamage.sh - proves scripts/check-rename-damage.sh (#32957 fix rounds 3 and 4) can
 # FAIL. The same file lives in MMRY-AI/mmry and MMRY-AI/mmry-plugin. Each control works in a scratch
 # git worktree of HEAD (the real tree is never touched), plants one change, and the guard must exit
 # 1 naming it. The positive control (the worktree as committed) must exit 0.
@@ -47,8 +47,13 @@ if [ -f mmry/hooks-handlers/mmry-client.sh ]; then
     control "round 1's damage: mmry_create_formation -> mmry_create_databaseion" mmry/hooks-handlers/mmry-client.sh \
         's/\bmmry_create_formation\b/mmry_create_databaseion/g' "damaged word: databaseion"
     control "a Formation function renamed away" mmry/hooks-handlers/mmry-client.sh \
-        's/\bmmry_create_formation\b/mmry_start_group/g' "formation name gone: mmry_create_formation" \
+        's/\bmmry_create_formation\b/mmry_start_group/g' "formation name gone from code: mmry_create_formation" \
         mmry/hooks-handlers/formation-start.sh
+    # Fix round 4: a name left behind in a comment (and in the workflow YAML, which still names it)
+    # must not count as present. Only code lines are renamed; line 1 gains a comment naming the old one.
+    control "a Formation function renamed away, its name left only in a comment" mmry/hooks-handlers/mmry-client.sh \
+        's/\bmmry_create_formation\b/mmry_start_group/g unless /^\s*#/; $_ .= "# was mmry_create_formation\n" if $. == 1' \
+        "formation name gone from code: mmry_create_formation" mmry/hooks-handlers/formation-start.sh
     control "a damaged entry join" mmry/hooks-handlers/save-entry.sh 's/^(#!.*)$/$1\n# saves one myentry/' "damaged word: myentry"
     ffile="mmry/hooks-handlers/formation-start.sh"
 else
@@ -58,6 +63,10 @@ else
     control "a Formation test name renamed away" src/Mnemo.Api.Tests/Mcp/FormationProgressClaimReportMcpToolTests.cs \
         's/\bEvery_new_tool_states_the_pull_only_delivery_contract_and_says_Formation\b/Every_new_tool_states_the_pull_only_delivery_contract/' \
         "formation name gone: Every_new_tool_states_the_pull_only_delivery_contract_and_says_Formation"
+    # Fix round 4: a renamed helper whose old name survives only in a comment (and in prose) is gone.
+    control "a Formation helper renamed away, its name left only in a comment" testing/backend/lib/db.ts \
+        's/\breadMemoryFormationId\b/readMemoryStartId/g unless /^\s*\/\//; $_ .= "// was readMemoryFormationId\n" if $. == 1' \
+        "formation name gone from code: readMemoryFormationId" testing/backend/tests/formation-transmissions.test.ts
     control "a damaged entry join" src/Mnemo.Api/Services/AiDatabaseService.cs 's/out var storedValues/out var storedEntryion/' "damaged word: entryion"
     ffile="testing/backend/tests/formation-transmissions.test.ts"
 fi

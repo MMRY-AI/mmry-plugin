@@ -62,6 +62,40 @@ while IFS= read -r name; do
     where="$(git grep -l -w -F "$name" "$base" -- . 2>/dev/null | head -1 | sed "s|^$base:||")"
     report "formation name gone: $name (on $base in $where)"
 done < "$tmp/gone"
+# Code, not words about code. A name that is in the repository only inside a comment, a Markdown page
+# or a workflow file is not kept: renaming mmry_create_formation away and leaving "# calls
+# mmry_create_formation" must fail. So every name that the CODE of the base uses (function
+# definitions and calls, methods, test names, routes in code strings: shell, C#, TypeScript, JavaScript
+# and SQL files, comment text removed) must still appear in code in the working tree. The two repos
+# hold different languages, so each pass simply finds nothing where there are no such files.
+# Self-tests (testing_Verify*.sh) are left out: they name identifiers inside the changes they plant.
+CODE_EXCLUDE=":(exclude)mmry/tests/libs/** :(exclude)docs/evidence/** :(exclude)**/node_modules/** :(exclude)**/bin/** :(exclude)**/obj/** :(exclude)**/testing_Verify*.sh :(exclude)scripts/check-rename-damage.sh :(exclude)scripts/testing_VerifyCheckRenameDamage.sh"
+# Each stripper drops whole-line comments and trailing ones. A // is a comment only after a space or
+# at the start of a line, so the // in https:// is kept.
+strip_slash() { sed -E -e 's#^[[:space:]]*(//|/\*|\*).*$##' -e 's#[[:space:]]//.*$##'; }
+strip_hash()  { sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//'; }
+strip_dash()  { sed -e 's/^[[:space:]]*--.*$//' -e 's/[[:space:]]--[[:space:]].*$//'; }
+code_dump() { # $1 = ref, or empty for the working tree
+    # shellcheck disable=SC2086
+    { git grep -h -I -e '' $1 -- ':(glob)**/*.cs' ':(glob)**/*.ts' ':(glob)**/*.mjs' ':(glob)**/*.js' $CODE_EXCLUDE 2>/dev/null | strip_slash
+      git grep -h -I -e '' $1 -- ':(glob)**/*.sh' ':(glob)**/*.bats' $CODE_EXCLUDE 2>/dev/null | strip_hash
+      git grep -h -I -e '' $1 -- ':(glob)**/*.sql' $CODE_EXCLUDE 2>/dev/null | strip_dash
+    } | grep -o -E "$TOKEN" | sed -e 's|[./-]*$||' | LC_ALL=C sort -u
+}
+code_dump "$base" > "$tmp/cbase"
+code_dump "" > "$tmp/chead"
+ncode="$(wc -l < "$tmp/cbase" | tr -d ' ')"
+if [ "$ncode" -lt 5 ]; then
+    echo "check-rename-damage: found only $ncode Formation names in the code of $base; refusing to call that a pass" >&2
+    exit 2
+fi
+LC_ALL=C comm -23 "$tmp/cbase" "$tmp/chead" | LC_ALL=C comm -23 - "$tmp/gone" > "$tmp/cgone"
+while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    # shellcheck disable=SC2086
+    where="$(git grep -l -w -F "$name" "$base" -- ':(glob)**/*.cs' ':(glob)**/*.ts' ':(glob)**/*.mjs' ':(glob)**/*.js' ':(glob)**/*.sh' ':(glob)**/*.bats' ':(glob)**/*.sql' $CODE_EXCLUDE 2>/dev/null | head -1 | sed "s|^$base:||")"
+    report "formation name gone from code: $name (code on $base in $where; the tree keeps it only in a comment, prose or not at all)"
+done < "$tmp/cgone"
 # File paths with formation in them.
 git ls-tree -r --name-only "$base" | grep -i 'formation' | grep -v '^mmry/tests/libs/' | grep -v '^docs/evidence/' | LC_ALL=C sort > "$tmp/pbase"
 git ls-files | grep -i 'formation' | grep -v '^mmry/tests/libs/' | grep -v '^docs/evidence/' | LC_ALL=C sort > "$tmp/phead"
