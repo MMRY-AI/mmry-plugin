@@ -17,7 +17,7 @@
 #
 # WHAT IS READ. The same customer-readable surfaces as check-public-text.sh (the Claude Code and
 # Codex skills, the commands, the READMEs, the top-level docs pages, the Codex MCP server's tool
-# titles, descriptions and instructions), plus every non-comment line of the seven scripts that
+# titles, descriptions and instructions), plus every non-comment line of the eight scripts that
 # serve the database, because what they print is what the assistant reads and repeats.
 #
 # RULE N, THE NAMES (#32957). Formation is a different feature: "formation" is not the old word.
@@ -32,7 +32,7 @@
 # TWO RULES.
 #   A, everywhere read: no "record type", "structured record" or "data format".
 #   B, wherever the text is about the database: no "format", "formats", "record", "records",
-#      "recorded" or "recording" as a word. The text is about the database in the seven scripts, in the
+#      "recorded" or "recording" as a word. The text is about the database in the eight scripts, in the
 #      database section of a skill (a "## " or "### " heading that names records, formats
 #      or the database, down to the next heading of its level), and on any line that names one of the
 #      database's scripts, flags or tools or says "database". Elsewhere these are ordinary
@@ -59,8 +59,9 @@ if [ ! -d "$ROOT" ]; then
     exit 2
 fi
 
-# The seven scripts that serve the database. Every non-comment line is read under both rules.
-FEATURE_SCRIPTS="create-database.sh list-databases.sh revise-database.sh save-entry.sh query-entries.sh entry-history.sh save-memory.sh"
+# The eight scripts that serve the database. Every non-comment line is read under both rules.
+# database.sh joined in #32957 fix round 1: it prints the account page's address, which rule N reads.
+FEATURE_SCRIPTS="create-database.sh list-databases.sh revise-database.sh save-entry.sh query-entries.sh entry-history.sh save-memory.sh database.sh"
 # The scripts whose options rule N reads: every database script, the dispatcher and save-memory.sh.
 OPTION_SCRIPTS="create-database.sh list-databases.sh revise-database.sh rename-database.sh retire-database.sh reinstate-database.sh save-entry.sh query-entries.sh entry-history.sh database.sh save-memory.sh"
 # A retired script, option, tool, client function or route, named anywhere (#32957), and the account
