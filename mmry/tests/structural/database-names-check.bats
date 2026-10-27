@@ -209,25 +209,25 @@ SKILL="mmry/skills/memory-system/SKILL.md"
 _code_refused() { # file (relative to the copy), line to append, text the refusal must contain
     printf '%s\n' "$2" >> "$COPY/$1"
     run bash "$CHECK" "$COPY"
-    [[ "$status" -eq 1 && "$output" == *"$3"* ]] || { echo "$output"; return 1; }
+    [[ "$status" -eq 1 && "$output" == *"$1:"* && "$output" == *"$3"* ]] || { echo "$output"; return 1; }
 }
 
 @test "rule N code: a usage placeholder named with record is refused (RECORD_FIELDS_JSON)" {
     _code_refused mmry/hooks-handlers/mmry-client.sh \
         '    # Usage: mmry_create_memory TIER CATEGORY [DATABASE_NAME] [RECORD_FIELDS_JSON] [ENTRY_NAME]' \
-        "mmry-client.sh:"*": identifier: RECORD_FIELDS_JSON"
+        "identifier: RECORD_FIELDS_JSON"
 }
 
 @test "rule N code: a shell function named with record is refused" {
-    _code_refused mmry/hooks-handlers/save-entry.sh '_print_record() { :; }' "save-entry.sh:"*": identifier: _print_record"
+    _code_refused mmry/hooks-handlers/save-entry.sh '_print_record() { :; }' "identifier: _print_record"
 }
 
 @test "rule N code: a variable named with format is refused, set or expanded" {
-    _code_refused mmry/hooks-handlers/query-entries.sh 'format_id="$1"' "query-entries.sh:"*": identifier: format_id"
+    _code_refused mmry/hooks-handlers/query-entries.sh 'format_id="$1"' "identifier: format_id"
 }
 
 @test "rule N code: a generic local named record is refused in a database script, and allowed in a Formation one" {
-    _code_refused mmry/hooks-handlers/entry-history.sh '    local record' "entry-history.sh:"*": identifier: record"
+    _code_refused mmry/hooks-handlers/entry-history.sh '    local record' "identifier: record"
     cp "$PLUGIN_ROOT/hooks-handlers/entry-history.sh" "$COPY/mmry/hooks-handlers/entry-history.sh"
     printf '%s\n' '    local record' >> "$COPY/mmry/hooks-handlers/formation-report.sh"
     run bash "$CHECK" "$COPY"
@@ -235,11 +235,11 @@ _code_refused() { # file (relative to the copy), line to append, text the refusa
 }
 
 @test "rule N code: a test array named with record is refused (RECORD_HANDLERS)" {
-    _code_refused mmry/tests/structural/entry-surface.bats 'RECORD_HANDLERS=(save-entry.sh)' "entry-surface.bats:"*": identifier: RECORD_HANDLERS"
+    _code_refused mmry/tests/structural/entry-surface.bats 'RECORD_HANDLERS=(save-entry.sh)' "identifier: RECORD_HANDLERS"
 }
 
 @test "rule N code: a database test named with record is refused, and a Foundation test is not" {
-    _code_refused mmry/tests/handlers/entry-handlers.bats '@test "query-entries: reports every record" {' "entry-handlers.bats:"*": test name:"
+    _code_refused mmry/tests/handlers/entry-handlers.bats '@test "query-entries: reports every record" {' "test name: @test \"query-entries: reports every record\""
     cp "$PLUGIN_ROOT/tests/handlers/entry-handlers.bats" "$COPY/mmry/tests/handlers/entry-handlers.bats"
     printf '%s\n' '@test "parts: the record line is kept" {' >> "$COPY/mmry/tests/handlers/foundation-parts.bats"
     run bash "$CHECK" "$COPY"
