@@ -246,7 +246,7 @@ _code_refused() { # file (relative to the copy), line to append, text the refusa
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 }
 
-@test "rule N code: the damaged Formation function mmry_create_databaseion would not hide a record name" {
+@test "rule N code: a Formation script is still read for names, so a record name planted in it is refused" {
     _code_refused mmry/hooks-handlers/formation-start.sh 'mmry_create_record_formation() { :; }' "identifier: mmry_create_record_formation"
 }
 
