@@ -73,7 +73,7 @@ _requests() { grep -c . "$URLS" 2>/dev/null || true; }
 
 # The payloads, in the shape Claude Code 2.1.292 sent them in the probe (only the fields that matter).
 _ups_renewal() {
-    printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"<task-notification>\\n<summary>Stop hook feedback</summary>\\n</task-notification>\\n<system-reminder>\\nStop hook blocking error from command \\"Stop\\": MMRY FORMATION WATCH RENEWED (formation 4242). No message arrived in the last 28 minutes. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with exactly: Still listening.\\n\\n</system-reminder>"}' "$CLAUDE_SESSION_ID"
+    printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"<task-notification>\\n<summary>Stop hook feedback</summary>\\n</task-notification>\\n<system-reminder>\\nStop hook blocking error from command \\"Stop\\": MMRY FORMATION WATCH RENEWED (formation 4242). No message arrived in the last 28 minutes. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with: Still listening. If you are waiting on the user'\''s answer to a question, add that question on one more line; otherwise add nothing.\\n\\n</system-reminder>"}' "$CLAUDE_SESSION_ID"
 }
 _ups_typed() {
     printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"%s"}' "$CLAUDE_SESSION_ID" "$1"
@@ -223,4 +223,47 @@ _stop_check_ms() {
     [ -d "${TMPDIR}/.mmry-formation-renewed-$(_sid)" ] || { echo "no renewal marker left for the next watch"; return 1; }
     run grep -c '_lock_is_stale "\$_renew_marker" 120 || _offset=\$_IDLE_LATE_UNTIL' "${HANDLERS}/formation-check.sh"
     [ "$output" -eq 1 ]
+}
+
+# #32929: the reply may now carry the question the assistant waits on, on one more line. Recognition
+# is by the marker plus the notice in the prompt, never by the reply text; these pin that.
+_renewal_turn_reply() {
+    local hdir="$1" reply="$2" payload
+    payload="${BATS_TEST_TMPDIR}/ups.json"; _ups_renewal > "$payload"
+    UPS_RC=0; UPS_OUT="$(bash "${hdir}/formation-check.sh" < "$payload" 2>&1)" || UPS_RC=$?
+    payload="${BATS_TEST_TMPDIR}/stop.json"; _stop_payload "$reply" > "$payload"
+    STOP_RC=0; STOP_OUT="$(bash "${hdir}/stop-check.sh" < "$payload" 2>&1)" || STOP_RC=$?
+}
+
+@test "renewal reply with a question line: still a renewal, no save prompt, no extra turn, no request" {
+    _renew
+    local count_before; count_before="$(cat "${TMPDIR}/.mmry-stop-count" 2>/dev/null || echo none)"
+    _renewal_turn_reply "$HANDLERS" 'Still listening.\nShall I deploy 32929 to Integration now?'
+    [ "$UPS_RC" -eq 0 ] && [ -z "$UPS_OUT" ] || { echo "the prompt check said something: ${UPS_RC} ${UPS_OUT}"; return 1; }
+    [ "$STOP_RC" -eq 0 ] || { echo "the save prompt fired on a renewal reply with a question (rc ${STOP_RC}): ${STOP_OUT}"; return 1; }
+    [ -z "$STOP_OUT" ] || { echo "the save check said: ${STOP_OUT}"; return 1; }
+    [ "$(_requests)" -eq 0 ] || { echo "requests: $(cat "$URLS")"; return 1; }
+    [ "$(_stop_marker_age)" -gt 900 ] || { echo "the save debounce was reset"; return 1; }
+    [ "$(cat "${TMPDIR}/.mmry-stop-count" 2>/dev/null || echo none)" = "$count_before" ] || return 1
+    [ ! -e "${TMPDIR}/.mmry-renewal-turn-$(_sid)" ] || { echo "the marker was not consumed"; return 1; }
+    [ -d "${TMPDIR}/.mmry-formation-renewed-$(_sid)" ] || { echo "the renewal marker was removed"; return 1; }
+}
+
+@test "renewal reply with no question: the single line is still a renewal" {
+    _renew
+    _renewal_turn_reply "$HANDLERS" 'Still listening.'
+    [ "$UPS_RC" -eq 0 ] && [ -z "$UPS_OUT" ] || return 1
+    [ "$STOP_RC" -eq 0 ] && [ -z "$STOP_OUT" ] || { echo "save prompt fired: ${STOP_RC} ${STOP_OUT}"; return 1; }
+    [ "$(_requests)" -eq 0 ] || return 1
+}
+
+@test "renewal reply with a question line: the next ordinary turn still gets the save prompt back" {
+    # The marker is spent by the renewal turn, so a question line leaves no standing exemption.
+    _renew
+    _renewal_turn_reply "$HANDLERS" 'Still listening.\nWhich branch should I use?'
+    [ "$STOP_RC" -eq 0 ] || return 1
+    touch -t 202001010000.00 "${TMPDIR}/.mmry-stop-checked"
+    _stop_payload "Here is the status." "" false > "${BATS_TEST_TMPDIR}/stop.json"
+    run bash -c "bash '${HANDLERS}/stop-check.sh' < '${BATS_TEST_TMPDIR}/stop.json'"
+    [ "$status" -eq 2 ] || { echo "the save prompt did not come back: ${status}"; return 1; }
 }
