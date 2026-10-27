@@ -14,7 +14,7 @@ load '../helpers/mock-config'
 
 HANDLERS=""
 LOG=""
-PORTAL="See your databases and correct any entry yourself at https://mmryai.com/records"
+PORTAL="See your databases and correct any entry yourself at https://mmryai.com/databases"
 
 setup() {
     setup_mock_curl
@@ -42,7 +42,7 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
 
 @test "database page: says database and entry, and tells the assistant to keep the portal line" {
     local page="$PLUGIN_ROOT/commands/database.md"
-    grep -q "https://mmryai.com/records" "$page"
+    grep -q "https://mmryai.com/databases" "$page"
     grep -q "keep that line in your answer" "$page"
     # DD-150: the customer's words. DD-164 (#32957): the names too, so no retired script or option.
     ! grep -qiE 'record type' "$page"
@@ -69,7 +69,7 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
     run db create --description "no name or fields"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--name and --fields are required"* ]] || return 1
-    [[ "$output" != *"mmryai.com/records"* ]] || return 1
+    [[ "$output" != *"mmryai.com/databases"* ]] || return 1
     [[ ! -f "$LOG" ]] || ! grep -q "api/databases" "$LOG"
 }
 
@@ -175,7 +175,7 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
     run db retire --id 42
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"Error (HTTP 404)"* ]] || return 1
-    [[ "$output" != *"mmryai.com/records"* ]] || return 1
+    [[ "$output" != *"mmryai.com/databases"* ]] || return 1
 }
 
 @test "no subcommand, or an unknown one, prints the usage and sends nothing" {

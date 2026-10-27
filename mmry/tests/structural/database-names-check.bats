@@ -132,7 +132,7 @@ SKILL="mmry/skills/memory-system/SKILL.md"
 }
 
 @test "the new identifiers pass" {
-    _passes "$SKILL" 'The database: `save-entry.sh --database-id 42 --entry-id 9 --database-name X`, `mmry_entry_save`, `mmry_database_list`, `SavedInDatabase:`, `entryName`, mmryai.com/records.'
+    _passes "$SKILL" 'The database: `save-entry.sh --database-id 42 --entry-id 9 --database-name X`, `mmry_entry_save`, `mmry_database_list`, `SavedInDatabase:`, `entryName`, mmryai.com/databases.'
 }
 
 @test "rule N: an old script, option, tool or route named in a skill is refused" {
@@ -141,6 +141,18 @@ SKILL="mmry/skills/memory-system/SKILL.md"
     _refuses_then_passes "$SKILL" 'The connector calls mmry_record for this.'
     _refuses_then_passes "$SKILL" 'The route is /api/data-formats/42/entries.'
     _refuses_then_passes "mmry/commands/database.md" 'Run list-formats.sh first.'
+}
+
+@test "rule N: the account database page's retired address is refused (#32957, DD-164 decision 6)" {
+    _refuses_then_passes "$SKILL" 'See and correct your entries at mmryai.com/records.'
+    _refuses_then_passes "mmry/commands/help.md" '- You can correct any entry yourself at https://mmryai.com/records'
+    _refuses_then_passes "mmry/commands/database.md" 'The run ends with https://mmryai.com/records, the account page.'
+    # The script that prints it: the address in database.sh's closing line.
+    local f="$COPY/mmry/hooks-handlers/database.sh"
+    sed 's#PORTAL_URL="https://mmryai.com/databases"#PORTAL_URL="https://mmryai.com/records"#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    grep -q 'mmryai.com/records"' "$f" || { echo "plant missing"; return 1; }
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"mmry/hooks-handlers/database.sh:"* ]] || { echo "$output"; return 1; }
 }
 
 @test "rule N: an old name in a script's comment is refused" {

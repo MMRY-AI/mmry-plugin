@@ -42,7 +42,7 @@ codex mcp add mmry --url https://mmryai.com/mcp
 codex mcp login mmry
 ```
 
-Then ask in plain words, for example "Keep track of my expenses." You can see your databases and correct any entry yourself at https://mmryai.com/records.
+Then ask in plain words, for example "Keep track of my expenses." You can see your databases and correct any entry yourself at https://mmryai.com/databases.
 
 ## Formations
 

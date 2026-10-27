@@ -138,7 +138,7 @@ RECORD_HANDLERS=(
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     grep -q '### What an entry used to hold' "$skill" || fail "no 'What an entry used to hold' section"
     grep -q '### Correcting an entry' "$skill" || fail "no 'Correcting an entry' section"
-    grep -q 'mmryai.com/records' "$skill" || fail "SKILL.md never tells the assistant about mmryai.com/records"
+    grep -q 'mmryai.com/databases' "$skill" || fail "SKILL.md never tells the assistant about mmryai.com/databases"
     grep -q 'mmry_entry_history' "$skill" || fail "'One account, every surface' omits the connector's history tool"
 }
 

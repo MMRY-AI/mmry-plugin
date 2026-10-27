@@ -399,7 +399,7 @@ one, and `text.degraded` means the words were kept but the fields were not. An u
 the fields you send. `query-entries.sh` answers how many, which ones and in what order from the
 values; `entry-history.sh` lists what an entry used to hold, oldest first. Retiring stops a
 database collecting and deletes nothing. The same databases and entries are in Claude Code,
-through the MMRY connector and at mmryai.com/records. These scripts have not been tried from a
+through the MMRY connector and at mmryai.com/databases. These scripts have not been tried from a
 live Codex session yet: if you run one, say so.
 
 ### Setting up

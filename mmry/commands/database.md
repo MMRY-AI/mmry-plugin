@@ -26,7 +26,7 @@ Take the subcommand and its words from `$ARGUMENTS`. If `$ARGUMENTS` is empty or
 subcommand below, do not guess: show the Usage line above and ask what they want to do.
 
 **Print what the script prints,** then say in one or two plain sentences what happened. Every
-successful run ends with the line naming `https://mmryai.com/records`, the account page where the
+successful run ends with the line naming `https://mmryai.com/databases`, the account page where the
 customer sees their databases and corrects any entry themselves: keep that line in your answer.
 On an error, pass the script's message through; do not report success.
 

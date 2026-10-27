@@ -300,7 +300,7 @@ would be the disclosure the sameness exists to prevent.
 The same databases and the same entries are reached from the MMRY connector (ChatGPT, Cursor,
 Claude Desktop and the user's other connected tools) through the `mmry_database_*`, `mmry_entry_save` and `mmry_entry_history` tools,
 and over the REST API. **A customer can also correct an entry themselves**, without asking anyone,
-at `mmryai.com/records` in their account area. A database set up here is visible there, an entry
+at `mmryai.com/databases` in their account area. A database set up here is visible there, an entry
 saved there is readable here, and a correction made in any of them is immediately true in all of
 them: there is one entry and one update path, not a copy per client. Say so if the user asks:
 this is one account, not one client's private feature.

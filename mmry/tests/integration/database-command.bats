@@ -12,7 +12,7 @@
 load '../helpers/test-helper'
 
 URL="${MMRY_INTEGRATION_URL:-https://integration.mmryai.com}"
-PORTAL="See your databases and correct any entry yourself at https://mmryai.com/records"
+PORTAL="See your databases and correct any entry yourself at https://mmryai.com/databases"
 
 setup_file() {
     if [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]]; then

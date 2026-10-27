@@ -26,7 +26,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # The account page. Customer-facing, so it is the production address on every environment.
-PORTAL_URL="https://mmryai.com/records"
+PORTAL_URL="https://mmryai.com/databases"
 
 usage() {
     echo "Usage: database.sh <subcommand> [arguments]" >&2

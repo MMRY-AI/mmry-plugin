@@ -26,7 +26,8 @@
 #   - no client function in mmry-client.sh that calls /api/databases carries format or record;
 #   - no tool the Codex local MCP server lists (mcp-server.sh) is named with format or record;
 #   - no surface above, comments included, names a retired script, option, tool or route
-#     (create-format.sh, --record-id, mmry_record, /api/data-formats and the rest).
+#     (create-format.sh, --record-id, mmry_record, /api/data-formats and the rest), or the account
+#     database page's retired address mmryai.com/records (it is mmryai.com/databases).
 #
 # TWO RULES.
 #   A, everywhere read: no "record type", "structured record" or "data format".
@@ -62,8 +63,9 @@ fi
 FEATURE_SCRIPTS="create-database.sh list-databases.sh revise-database.sh save-entry.sh query-entries.sh entry-history.sh save-memory.sh"
 # The scripts whose options rule N reads: every database script, the dispatcher and save-memory.sh.
 OPTION_SCRIPTS="create-database.sh list-databases.sh revise-database.sh rename-database.sh retire-database.sh reinstate-database.sh save-entry.sh query-entries.sh entry-history.sh database.sh save-memory.sh"
-# A retired script, option, tool, client function or route, named anywhere (#32957).
-OLD_NAMES='create-format|list-formats|revise-format|rename-format|retire-format|reinstate-format|save-record|query-records|record-history|--format-id|--record-id|--record-type|--record-fields|--record-name|mmry_format_|mmry_records?([^a-z_]|$)|mmry_record_history|mmry_list_formats|mmry_get_format([^a-z_]|$)|mmry_create_format|mmry_revise_format|mmry_rename_format|mmry_retire_format|mmry_reinstate_format|mmry_create_record|mmry_get_records|mmry_get_record_history|_mmry_format_|data-formats|formatId|recordId|recordName|recordType|recordFields'
+# A retired script, option, tool, client function or route, named anywhere (#32957), and the account
+# database page's retired address mmryai.com/records (now mmryai.com/databases, DD-164 decision 6).
+OLD_NAMES='create-format|list-formats|revise-format|rename-format|retire-format|reinstate-format|save-record|query-records|record-history|--format-id|--record-id|--record-type|--record-fields|--record-name|mmry_format_|mmry_records?([^a-z_]|$)|mmry_record_history|mmry_list_formats|mmry_get_format([^a-z_]|$)|mmry_create_format|mmry_revise_format|mmry_rename_format|mmry_retire_format|mmry_reinstate_format|mmry_create_record|mmry_get_records|mmry_get_record_history|_mmry_format_|data-formats|formatId|recordId|recordName|recordType|recordFields|mmryai[.]com/records([^a-z_-]|$)'
 
 # One path and its kind per line: "md", "mcp" or "script".
 _surfaces() {
