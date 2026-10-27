@@ -114,7 +114,10 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
 
     [ "$status" -eq 2 ] || { echo "expected a renewal wake (exit 2), got ${status}: ${output}"; return 1; }
     [[ "$output" == *"MMRY FORMATION WATCH RENEWED (formation 4242)"* ]] || { echo "no renewal notice: ${output}"; return 1; }
-    [[ "$output" == *"Reply with exactly: Still listening."* ]] || return 1
+    # #32929: the reply is "Still listening." plus, only when the assistant waits on the person, the
+    # question on one more line. "exactly" is gone, because it forbade the second line.
+    [[ "$output" == *"Reply with: Still listening. If you are waiting on the user's answer to a question, add that question on one more line; otherwise add nothing."* ]] || { echo "renewal instruction wrong: ${output}"; return 1; }
+    [[ "$output" != *"Reply with exactly"* ]] || { echo "the old instruction is still there"; return 1; }
     # A renewal is not a message, and must never be dressed as one.
     [[ "$output" != *"MMRY AI Formation Transmission"* ]] || return 1
     # It polled first, and asked about membership exactly once, at the end.

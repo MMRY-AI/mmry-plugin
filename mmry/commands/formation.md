@@ -50,7 +50,7 @@ are four moments a member receives:
 **The watch renews itself, and you may see it do so.** Claude Code lets a background check run for
 a limited time, so after about half an hour of silence the watch hands over to a fresh one. To do
 that it wakes the session briefly with a note that MMRY is still listening; the session replies
-"Still listening." and a new watch starts. That short turn in the window is expected and needs
+"Still listening." (with the question it is waiting on you to answer, on one more line, if there is one) and a new watch starts. That short turn in the window is expected and needs
 nothing from anybody. The watch stops renewing when the listening limit below is reached, when this
 session leaves the formation, joins a different one, or the service says it is no longer a member,
 for example because the formation was closed out.
