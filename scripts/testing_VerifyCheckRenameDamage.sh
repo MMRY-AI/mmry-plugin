@@ -31,11 +31,12 @@ run_guard() { bash "$wt/$guard" --base "$base" --root "$wt" 2>&1; }
 out="$(run_guard)"; rc=$?
 [ $rc -eq 0 ] && ok "positive control: HEAD as committed passes" || { bad "positive control (exit $rc)"; printf '%s\n' "$out" | tail -5; }
 
-control() { # name, file, perl substitution, text the output must contain
+control() { # name, file, perl substitution, text the output must contain[, another file to apply it to]
     reset_wt
     local f="$wt/$2"
     [ -f "$f" ] || { bad "$1: $2 does not exist, so the control is void"; return; }
     cp "$f" "$tmp/orig"; perl -pi -e "$3" "$f"
+    [ -n "${5:-}" ] && perl -pi -e "$3" "$wt/$5"
     if cmp -s "$f" "$tmp/orig"; then bad "$1: the plant changed nothing, so the control is void"; return; fi
     local o rc; o="$(run_guard)"; rc=$?
     if [ $rc -eq 1 ] && printf '%s' "$o" | grep -qF -- "$4"; then ok "$1 refused"; else bad "$1 (exit $rc, wanted: $4)"; printf '%s\n' "$o" | tail -3; fi
@@ -46,7 +47,8 @@ if [ -f mmry/hooks-handlers/mmry-client.sh ]; then
     control "round 1's damage: mmry_create_formation -> mmry_create_databaseion" mmry/hooks-handlers/mmry-client.sh \
         's/\bmmry_create_formation\b/mmry_create_databaseion/g' "damaged word: databaseion"
     control "a Formation function renamed away" mmry/hooks-handlers/mmry-client.sh \
-        's/\bmmry_create_formation\b/mmry_start_group/g' "formation name gone: mmry_create_formation"
+        's/\bmmry_create_formation\b/mmry_start_group/g' "formation name gone: mmry_create_formation" \
+        mmry/hooks-handlers/formation-start.sh
     control "a damaged entry join" mmry/hooks-handlers/save-entry.sh 's/^(#!.*)$/$1\n# saves one myentry/' "damaged word: myentry"
     ffile="mmry/hooks-handlers/formation-start.sh"
 else
