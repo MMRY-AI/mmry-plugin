@@ -1255,7 +1255,7 @@ case "$mode" in
         else
             _quiet="${MMRY_IDLE_POLL_SECONDS} seconds"
         fi
-        printf '%s\n' "MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with exactly: Still listening." >&2 || exit 0
+        printf '%s\n' "MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with: Still listening. If you are waiting on the user's answer to a question, add that question on one more line; otherwise add nothing." >&2 || exit 0
         exit 2
         ;;
 
