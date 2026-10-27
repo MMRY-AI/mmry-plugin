@@ -42,7 +42,7 @@ codex mcp add mmry --url https://mmryai.com/mcp
 codex mcp login mmry
 ```
 
-Then ask in plain words, for example "Keep track of my expenses." You can see your databases and correct any entry yourself at https://mmryai.com/records.
+Then ask in plain words, for example "Keep track of my expenses." You can see your databases and correct any entry yourself at https://mmryai.com/databases.
 
 ## Formations
 
@@ -86,7 +86,7 @@ Everything with a tool in brackets above is a call to that `mmry_plugin` tool: c
 | Item | Script |
 |---|---|
 | Who sees a memory | `hooks-handlers/visibility.sh`, `hooks-handlers/make-private.sh`, `hooks-handlers/list-groups.sh` |
-| AI database (Claude Code only: in Codex the customer uses the MMRY connector, so do not run these from Codex) | `hooks-handlers/list-formats.sh`, `hooks-handlers/create-format.sh`, `hooks-handlers/save-record.sh`, `hooks-handlers/query-records.sh`, `hooks-handlers/record-history.sh`, `hooks-handlers/revise-format.sh` |
+| AI database (Claude Code only: in Codex the customer uses the MMRY connector, so do not run these from Codex) | `hooks-handlers/list-databases.sh`, `hooks-handlers/create-database.sh`, `hooks-handlers/save-entry.sh`, `hooks-handlers/query-entries.sh`, `hooks-handlers/entry-history.sh`, `hooks-handlers/revise-database.sh` |
 | Listing Formations, claiming an area | `hooks-handlers/formation-list.sh`, `hooks-handlers/formation-claim.sh` |
 | Foundation status check | `hooks-handlers/foundation-status.sh` |
 | Setup | `setup/mmry-setup.sh` |

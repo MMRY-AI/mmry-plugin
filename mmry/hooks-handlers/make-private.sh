@@ -31,7 +31,7 @@ GROUP_ID="${3:-}"
 # means right after a save.
 if [[ -z "$MEMORY_ID" ]]; then
     if ! mmry_get_memories; then
-        _mmry_format_error "look up your recent memories"
+        _mmry_print_error "look up your recent memories"
         exit 1
     fi
     MEMORY_ID="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
@@ -64,6 +64,6 @@ if mmry_set_memory_visibility "$MEMORY_ID" "$VIS" "$GROUP_ID"; then
     esac
 else
     # 403 here means the caller did not save that memory.
-    _mmry_format_error "change that memory's visibility"
+    _mmry_print_error "change that memory's visibility"
     exit 1
 fi

@@ -431,7 +431,7 @@ _compare_hosts() {
     out="$(MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" MMRY_API_KEY=k MMRY_API_URL=http://fake.invalid \
         bash -c 'source "'"${HANDLERS}"'/mmry-client.sh" >/dev/null 2>&1
                  MMRY_HTTP_CODE=401 MMRY_RESPONSE=unauthorized
-                 _mmry_format_error "save"' 2>&1)"
+                 _mmry_print_error "save"' 2>&1)"
     [[ "$out" != *"/mmry:"* ]] || return 1
     [[ "$out" == *"bash ${CODEX_DIR}/mmry/setup/mmry-setup.sh"* ]] || return 1
 
@@ -439,7 +439,7 @@ _compare_hosts() {
     claude_out="$(MMRY_API_KEY=k MMRY_API_URL=http://fake.invalid \
         bash -c 'source "'"${HANDLERS}"'/mmry-client.sh" >/dev/null 2>&1
                  MMRY_HTTP_CODE=401 MMRY_RESPONSE=unauthorized
-                 _mmry_format_error "save"' 2>&1)"
+                 _mmry_print_error "save"' 2>&1)"
     [[ "$claude_out" == *"Run /mmry:setup to re-authenticate."* ]]
 }
 

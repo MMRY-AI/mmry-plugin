@@ -42,6 +42,6 @@ if mmry_search_memories "$KEYWORDS" "$SCOPE"; then
         printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] | "\(.memoryTier) | \(.scope) | \(.topic)\n  \(.content)\n---"'
     fi
 else
-    _mmry_format_error
+    _mmry_print_error
     exit 1
 fi

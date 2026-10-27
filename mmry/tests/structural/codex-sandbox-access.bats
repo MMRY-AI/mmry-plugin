@@ -30,7 +30,7 @@ _format_error() {
     env ${host:+MMRY_HOST=$host} CODEX_HOME="$CODEX_DIR" bash -c '
         source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1 || exit 9
         MMRY_HTTP_CODE="$2" MMRY_RESPONSE="$3"
-        _mmry_format_error save
+        _mmry_print_error save
     ' _ "$PLUGIN_ROOT" "$code" "$resp" 2>&1
 }
 

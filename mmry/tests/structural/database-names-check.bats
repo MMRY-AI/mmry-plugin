@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
-# database-names-check.bats - the release check that keeps the AI database's internal names out of
-# what customers and assistants read in the plugin (#32457, DD-150 in the mmry repository).
+# database-names-check.bats - the release check that keeps the AI database's old names out of what
+# customers and assistants read in the plugin, and out of the names they run (#32457 DD-150,
+# #32957 DD-164 in the mmry repository).
 #
 # Why this exists:
 # The AI database is marketed as a database the assistant builds while you talk, made of entries.
@@ -13,13 +14,16 @@
 #   1. The check passes the real repository and names no file.
 #   2. Each internal name, planted into a copy of a surface, is refused, and the refusal names the
 #      file and the planted line; the copy passes again once the line is gone.
-#   3. Identifiers that contain the old words (script names, flags, tool names, RecordedAs) pass,
-#      so no script, flag or tool had to be renamed (requirement 3).
+#   3. The new identifiers (script names, options, tool names, SavedInDatabase) pass, and since #32957
+#      an old one is refused wherever it is named, a script's comment included (rule N).
 #   4. "record" outside the database (a Formation's close-out record) is not refused, while
 #      "record type" is refused everywhere.
 #   5. A script's comment is not read; what it prints is.
 #   6. The check reads the Codex skill, the help command, the docs and the Codex MCP server.
 #   7. CI runs the check.
+#   8. Rule N (#32957): a script named with format or record, an option a database script accepts,
+#      a database client function, and a tool the Codex local server lists are each refused when
+#      planted, and each refusal names what was planted.
 
 load '../helpers/test-helper'
 
@@ -38,9 +42,12 @@ setup() {
     cp "$REPO_ROOT/README.md" "$COPY/README.md"
     cp "$REPO_ROOT"/docs/*.md "$COPY/docs/"
     local f
-    for f in mcp-server.sh create-format.sh list-formats.sh revise-format.sh save-record.sh \
-             query-records.sh record-history.sh save-memory.sh; do
-        cp "$PLUGIN_ROOT/hooks-handlers/$f" "$COPY/mmry/hooks-handlers/"
+    # #32957 fix round 3: the check reads every shell file's names, so the copy carries all of the
+    # handlers and the tests (not the vendored bats libraries, which the check skips).
+    cp "$PLUGIN_ROOT"/hooks-handlers/* "$COPY/mmry/hooks-handlers/" 2>/dev/null || true
+    mkdir -p "$COPY/mmry/tests"
+    for f in "$PLUGIN_ROOT"/tests/*; do
+        case "$(basename "$f")" in libs) ;; *) cp -R "$f" "$COPY/mmry/tests/" ;; esac
     done
 }
 
@@ -114,7 +121,7 @@ SKILL="mmry/skills/memory-system/SKILL.md"
 
 @test "refuses 'record' and 'format' on a line about the database" {
     _refuses_then_passes "$SKILL" "Each record in the database keeps its words."
-    _refuses_then_passes "$SKILL" "Run list-formats.sh to see each format."
+    _refuses_then_passes "$SKILL" "Run list-databases.sh to see each format."
 }
 
 @test "refuses 'record' inside the database section of the skill" {
@@ -126,8 +133,121 @@ SKILL="mmry/skills/memory-system/SKILL.md"
     [[ "$status" -eq 1 && "$output" == *"${SKILL}:${line}:"* ]] || { echo "$output"; return 1; }
 }
 
-@test "identifiers carrying the old words pass, so nothing had to be renamed" {
-    _passes "$SKILL" 'The database: `save-record.sh --format-id 42 --record-id 9 --record-type X`, `mmry_record`, `mmry_format_list`, `RecordedAs:`, `recordName`, mmryai.com/records.'
+@test "the new identifiers pass" {
+    _passes "$SKILL" 'The database: `save-entry.sh --database-id 42 --entry-id 9 --database-name X`, `mmry_entry_save`, `mmry_database_list`, `SavedInDatabase:`, `entryName`, mmryai.com/databases.'
+}
+
+@test "rule N: an old script, option, tool or route named in a skill is refused" {
+    _refuses_then_passes "$SKILL" 'Run `save-record.sh --format-id 42` to add one.'
+    _refuses_then_passes "$SKILL" 'Run `entries` with --record-id 9.'
+    _refuses_then_passes "$SKILL" 'The connector calls mmry_record for this.'
+    _refuses_then_passes "$SKILL" 'The route is /api/data-formats/42/entries.'
+    _refuses_then_passes "mmry/commands/database.md" 'Run list-formats.sh first.'
+}
+
+@test "rule N: the account database page's retired address is refused (#32957, DD-164 decision 6)" {
+    _refuses_then_passes "$SKILL" 'See and correct your entries at mmryai.com/records.'
+    _refuses_then_passes "mmry/commands/help.md" '- You can correct any entry yourself at https://mmryai.com/records'
+    _refuses_then_passes "mmry/commands/database.md" 'The run ends with https://mmryai.com/records, the account page.'
+    # The script that prints it: the address in database.sh's closing line.
+    local f="$COPY/mmry/hooks-handlers/database.sh"
+    sed 's#PORTAL_URL="https://mmryai.com/databases"#PORTAL_URL="https://mmryai.com/records"#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    grep -q 'mmryai.com/records"' "$f" || { echo "plant missing"; return 1; }
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"mmry/hooks-handlers/database.sh:"* ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N: an old name in a script's comment is refused" {
+    _refuses_then_passes "mmry/hooks-handlers/query-entries.sh" "# Usage: bash query-records.sh --format-id ID"
+}
+
+@test "rule N: a script named with format or record is refused, and Formation's scripts are not" {
+    : > "$COPY/mmry/hooks-handlers/save-record.sh"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"mmry/hooks-handlers: name: save-record.sh"* ]] || { echo "$output"; return 1; }
+    rm "$COPY/mmry/hooks-handlers/save-record.sh"
+    : > "$COPY/mmry/hooks-handlers/formation-report.sh"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N: an old option a database script accepts is refused" {
+    local f="$COPY/mmry/hooks-handlers/save-entry.sh"
+    awk '{ print } /--entry-id\)/ && !done { print "        --record-id)   ENTRY_ID=\"$2\"; shift 2 ;;"; done=1 }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    grep -q -- '--record-id)' "$f" || { echo "plant missing"; return 1; }
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"save-entry.sh option: name: --record-id"* ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N: an old option in a combined case label is refused" {
+    local f="$COPY/mmry/hooks-handlers/revise-database.sh"
+    sed 's/--fields|--add-fields)/--fields|--add-fields|--format-fields)/' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    grep -q -- '--format-fields)' "$f" || { echo "plant missing"; return 1; }
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"revise-database.sh option: name: --format-fields"* ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N: an old database client function is refused" {
+    printf '%s\n' 'mmry_create_record() {' '    _mmry_request POST "/api/databases/$1/entries" "$2"' '}' >> "$COPY/mmry/hooks-handlers/mmry-client.sh"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"mmry-client.sh function: name: mmry_create_record"* ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N: a Codex local server tool named with record is refused, and Formation's are not" {
+    local f="$COPY/mmry/hooks-handlers/mcp-server.sh"
+    awk '{ print } /^MMRY_MCP_TOOLS=/ { print "  {\"name\": \"memory_record\", \"title\": \"x\"}," }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"mcp-server.sh tool: name: memory_record"* ]] || { echo "$output"; return 1; }
+    cp "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh" "$f"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+# Rule N in the code (#32957 fix round 3). QA found RECORD_FIELDS_JSON in a usage comment, and the
+# feature's own test names and test arrays still said record; the check passed them because it read
+# only script names, options, client functions and Codex tools. Each plant below puts one back.
+_code_refused() { # file (relative to the copy), line to append, text the refusal must contain
+    printf '%s\n' "$2" >> "$COPY/$1"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 1 && "$output" == *"$1:"* && "$output" == *"$3"* ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N code: a usage placeholder named with record is refused (RECORD_FIELDS_JSON)" {
+    _code_refused mmry/hooks-handlers/mmry-client.sh \
+        '    # Usage: mmry_create_memory TIER CATEGORY [DATABASE_NAME] [RECORD_FIELDS_JSON] [ENTRY_NAME]' \
+        "identifier: RECORD_FIELDS_JSON"
+}
+
+@test "rule N code: a shell function named with record is refused" {
+    _code_refused mmry/hooks-handlers/save-entry.sh '_print_record() { :; }' "identifier: _print_record"
+}
+
+@test "rule N code: a variable named with format is refused, set or expanded" {
+    _code_refused mmry/hooks-handlers/query-entries.sh 'format_id="$1"' "identifier: format_id"
+}
+
+@test "rule N code: a generic local named record is refused in a database script, and allowed in a Formation one" {
+    _code_refused mmry/hooks-handlers/entry-history.sh '    local record' "identifier: record"
+    cp "$PLUGIN_ROOT/hooks-handlers/entry-history.sh" "$COPY/mmry/hooks-handlers/entry-history.sh"
+    printf '%s\n' '    local record' >> "$COPY/mmry/hooks-handlers/formation-report.sh"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N code: a test array named with record is refused (RECORD_HANDLERS)" {
+    _code_refused mmry/tests/structural/entry-surface.bats 'RECORD_HANDLERS=(save-entry.sh)' "identifier: RECORD_HANDLERS"
+}
+
+@test "rule N code: a database test named with record is refused, and a Foundation test is not" {
+    _code_refused mmry/tests/handlers/entry-handlers.bats '@test "query-entries: reports every record" {' "test name: @test \"query-entries: reports every record\""
+    cp "$PLUGIN_ROOT/tests/handlers/entry-handlers.bats" "$COPY/mmry/tests/handlers/entry-handlers.bats"
+    printf '%s\n' '@test "parts: the record line is kept" {' >> "$COPY/mmry/tests/handlers/foundation-parts.bats"
+    run bash "$CHECK" "$COPY"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
+@test "rule N code: a Formation script is still read for names, so a record name planted in it is refused" {
+    _code_refused mmry/hooks-handlers/formation-start.sh 'mmry_create_record_formation() { :; }' "identifier: mmry_create_record_formation"
 }
 
 @test "'record' outside the database is ordinary English and passes; 'record type' never does" {
@@ -136,7 +256,7 @@ SKILL="mmry/skills/memory-system/SKILL.md"
 }
 
 @test "a script's comment is not read; what it prints is" {
-    local rel="mmry/hooks-handlers/query-records.sh"
+    local rel="mmry/hooks-handlers/query-entries.sh"
     _passes "$rel" "# a comment about a record type is code, not copy"
     _refuses_then_passes "$rel" 'echo "No records yet."'
 }

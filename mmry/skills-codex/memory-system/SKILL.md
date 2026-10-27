@@ -370,8 +370,8 @@ operation a tool covers, it names the tool.
 MMRY AI markets this as **your AI database**: a database the assistant builds and fills in while
 the customer talks. One thing the customer tracks (expenses, sales leads, a migraine log) is **a
 database**, each item saved in it is **an entry**, and its named values are **fields**. Say those
-words to the customer. The scripts and flags below keep older names (`create-format.sh`,
-`--format-id`, `save-record.sh`, `--record-id`) because installed copies call them so; they are
+words to the customer. The scripts and flags below keep older names (`create-database.sh`,
+`--database-id`, `save-entry.sh`, `--entry-id`) because installed copies call them so; they are
 code, not words to repeat.
 
 Most saves are ordinary memories. Set up a database only when the customer is accumulating
@@ -379,27 +379,27 @@ examples of a recurring shape they will want to count, filter or compare later, 
 single fact. List what they have first and reuse it:
 
 ```bash
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/list-formats.sh"
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/list-formats.sh" --id 42
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/create-format.sh" --name "Expenses" \
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/list-databases.sh"
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/list-databases.sh" --id 42
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/create-database.sh" --name "Expenses" \
   --fields '[{"key":"amount","label":"Amount","type":"number"},{"key":"category","label":"Category","type":"text"}]' \
   --mode append --match-hints "expense, spent, paid"
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-record.sh" --format-id 42 \
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-entry.sh" --database-id 42 \
   --content "the customer's own words" --fields '{"amount":25,"category":"travel"}'
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/query-records.sh" --format-id 42 --filter category=travel
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/record-history.sh" --format-id 42 --record-id 9137
-bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/revise-format.sh" --id 42 --retire
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/query-entries.sh" --database-id 42 --filter category=travel
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/entry-history.sh" --database-id 42 --entry-id 9137
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/revise-database.sh" --id 42 --retire
 ```
 
-`--format-id` is the database's id and `--record-id` an entry's id. Name the fields from the
+`--database-id` is the database's id and `--entry-id` an entry's id. Name the fields from the
 customer's own words. `--mode keyed --identity-field <key>` is for a list of named things that
 each change on their own (leads, tasks); `append` is a log where every entry is new. Report the
-outcome `save-record.sh` prints: `structured.created` is a new entry, `structured.updated` changed
+outcome `save-entry.sh` prints: `structured.created` is a new entry, `structured.updated` changed
 one, and `text.degraded` means the words were kept but the fields were not. An update changes only
-the fields you send. `query-records.sh` answers how many, which ones and in what order from the
-values; `record-history.sh` lists what an entry used to hold, oldest first. Retiring stops a
+the fields you send. `query-entries.sh` answers how many, which ones and in what order from the
+values; `entry-history.sh` lists what an entry used to hold, oldest first. Retiring stops a
 database collecting and deletes nothing. The same databases and entries are in Claude Code,
-through the MMRY connector and at mmryai.com/records. These scripts have not been tried from a
+through the MMRY connector and at mmryai.com/databases. These scripts have not been tried from a
 live Codex session yet: if you run one, say so.
 
 ### Setting up

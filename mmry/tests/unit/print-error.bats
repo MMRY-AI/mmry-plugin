@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# format-error.bats — _mmry_format_error messaging by HTTP status. #30321
+# print-error.bats — _mmry_print_error messaging by HTTP status. #30321 (renamed from format-error by #32957)
 # The command scripts (save, search, list-groups, etc.) all surface failures via
-# _mmry_format_error, so a clear 401 message here reaches every memory command.
+# _mmry_print_error, so a clear 401 message here reaches every memory command.
 
 load '../helpers/test-helper'
 
@@ -15,7 +15,7 @@ setup() {
 @test "format-error: 401 warns invalid/expired credential and points to setup (#30321)" {
     export MMRY_HTTP_CODE="401"
     export MMRY_RESPONSE='{"error":"unauthorized"}'
-    run _mmry_format_error "save"
+    run _mmry_print_error "save"
     [[ "$output" == *"invalid or expired"* ]]
     [[ "$output" == *"Memories may not be saved or loaded"* ]]
     [[ "$output" == *"/mmry:setup"* ]]
@@ -25,7 +25,7 @@ setup() {
 @test "format-error: 402 credits-exhausted stays distinct and is not swallowed by 401" {
     export MMRY_HTTP_CODE="402"
     export MMRY_RESPONSE='{"error":"no credits"}'
-    run _mmry_format_error
+    run _mmry_print_error
     [[ "$output" == *"Credits exhausted"* ]]
     [[ "$output" != *"/mmry:setup"* ]]
 }
@@ -33,7 +33,7 @@ setup() {
 @test "format-error: other statuses keep the generic message with the server response" {
     export MMRY_HTTP_CODE="500"
     export MMRY_RESPONSE="server down"
-    run _mmry_format_error
+    run _mmry_print_error
     [[ "$output" == *"Error (HTTP 500)"* ]]
     [[ "$output" == *"server down"* ]]
 }

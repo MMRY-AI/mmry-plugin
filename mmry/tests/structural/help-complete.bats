@@ -233,7 +233,7 @@ _codex_missing() {
     [[ " $tools" != *" name "* ]] || { echo "parameter leaked: $tools"; return 1; }
     scripts="$(_codex_scripts "$root" | tr '\n' ' ')"
     [ "$(_codex_scripts "$root" | wc -l)" -ge 10 ] || { echo "only: $scripts"; return 1; }
-    for s in visibility.sh submit-feedback.sh mmry-setup.sh save-record.sh tools-check.sh; do
+    for s in visibility.sh submit-feedback.sh mmry-setup.sh save-entry.sh tools-check.sh; do
         [[ " $scripts" == *" $s "* ]] || { echo "missing $s in: $scripts"; return 1; }
     done
 }

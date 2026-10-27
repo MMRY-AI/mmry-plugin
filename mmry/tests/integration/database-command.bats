@@ -12,7 +12,7 @@
 load '../helpers/test-helper'
 
 URL="${MMRY_INTEGRATION_URL:-https://integration.mmryai.com}"
-PORTAL="See your databases and correct any entry yourself at https://mmryai.com/records"
+PORTAL="See your databases and correct any entry yourself at https://mmryai.com/databases"
 
 setup_file() {
     if [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]]; then
@@ -44,50 +44,50 @@ _ends_with_portal() { [[ "$(printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' 
     [[ "$status" -eq 0 ]] || fail "create failed: $output"
     [[ "$output" == *"Created the database ${name} with id "* ]] || fail "unexpected: $output"
     _ends_with_portal
-    _keep format_id "$(printf '%s' "$output" | grep -o 'with id [0-9]*' | head -1 | sed 's/with id //')"
+    _keep database_id "$(printf '%s' "$output" | grep -o 'with id [0-9]*' | head -1 | sed 's/with id //')"
     _keep format_name "$name"
     _db list
     [[ "$output" == *"$name"* ]] || fail "not listed: $output"
 }
 
 @test "database live: two entries added" {
-    local id; id="$(_need format_id)"
-    _db add --format-id "$id" --content "Migraine on Monday after red wine, a 7." --fields '{"severity":7,"trigger":"red wine"}'
+    local id; id="$(_need database_id)"
+    _db add --database-id "$id" --content "Migraine on Monday after red wine, a 7." --fields '{"severity":7,"trigger":"red wine"}'
     [[ "$status" -eq 0 && "$output" == *"Outcome: structured.created"* ]] || fail "first add: $output"
     _ends_with_portal
-    _db add --format-id "$id" --content "Mild one on Wednesday, a 3, poor sleep." --fields '{"severity":3,"trigger":"poor sleep"}'
+    _db add --database-id "$id" --content "Mild one on Wednesday, a 3, poor sleep." --fields '{"severity":3,"trigger":"poor sleep"}'
     [[ "$status" -eq 0 && "$output" == *"Outcome: structured.created"* ]] || fail "second add: $output"
 }
 
 @test "database live: found, by a field value" {
-    local id; id="$(_need format_id)"
-    _db find --format-id "$id"
+    local id; id="$(_need database_id)"
+    _db find --database-id "$id"
     [[ "$status" -eq 0 && "$output" == *"2 entries in "* ]] || fail "find all: $output"
-    _db find --format-id "$id" --filter severity=7
+    _db find --database-id "$id" --filter severity=7
     [[ "$status" -eq 0 && "$output" == *"1 entry in "* && "$output" == *"red wine"* ]] || fail "find severity=7: $output"
     _ends_with_portal
     _keep entry_id "$(printf '%s' "$output" | grep -o '^id [0-9]*' | head -1 | sed 's/id //')"
 }
 
 @test "database live: one corrected, by its id" {
-    local id entry; id="$(_need format_id)"; entry="$(_need entry_id)"
-    _db correct --format-id "$id" --record-id "$entry" --content "It was a 6, not a 7." --fields '{"severity":6}'
+    local id entry; id="$(_need database_id)"; entry="$(_need entry_id)"
+    _db correct --database-id "$id" --entry-id "$entry" --content "It was a 6, not a 7." --fields '{"severity":6}'
     [[ "$status" -eq 0 && "$output" == *"Outcome: structured.updated"* ]] || fail "correct: $output"
     _ends_with_portal
-    _db find --format-id "$id" --filter severity=6
+    _db find --database-id "$id" --filter severity=6
     [[ "$output" == *"1 entry in "* && "$output" == *"id ${entry}"* ]] || fail "the corrected value is not read back: $output"
 }
 
 @test "database live: its history shown, old value beside new" {
-    local id entry; id="$(_need format_id)"; entry="$(_need entry_id)"
-    _db history --format-id "$id" --record-id "$entry"
+    local id entry; id="$(_need database_id)"; entry="$(_need entry_id)"
+    _db history --database-id "$id" --entry-id "$entry"
     [[ "$status" -eq 0 ]] || fail "history: $output"
     [[ "$output" == *"was: 7"*"now: 6"* ]] || fail "the change from 7 to 6 is not in the history: $output"
     _ends_with_portal
 }
 
 @test "database live: retired, keeping its entries, and restored" {
-    local id name; id="$(_need format_id)"; name="$(_need format_name)"
+    local id name; id="$(_need database_id)"; name="$(_need format_name)"
     _db retire --id "$id"
     [[ "$status" -eq 0 && "$output" == *"It still holds 2 entries."* && "$output" == *"Retired."* ]] || fail "retire: $output"
     _ends_with_portal
@@ -101,6 +101,6 @@ _ends_with_portal() { [[ "$(printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' 
     _ends_with_portal
     _db list
     [[ "$output" == *"$name"* ]] || fail "the restored database is not listed: $output"
-    _db find --format-id "$id"
+    _db find --database-id "$id"
     [[ "$output" == *"2 entries in "* ]] || fail "entries were not kept through retire and restore: $output"
 }

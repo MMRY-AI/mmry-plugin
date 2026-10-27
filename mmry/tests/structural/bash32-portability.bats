@@ -226,7 +226,7 @@ _INERT_PINNED=(
     "structural/plugin-json.bats 5"
     "unit/auth-header.bats 1"
     "unit/config-loading.bats 13"
-    "unit/format-error.bats 5"
+    "unit/print-error.bats 5"
     "unit/hook-payload-read.bats 12"
     "unit/http-core.bats 1"
     "unit/lib-jq.bats 1"

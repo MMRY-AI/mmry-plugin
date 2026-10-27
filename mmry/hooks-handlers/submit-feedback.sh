@@ -33,6 +33,6 @@ if mmry_submit_feedback "$TYPE" "$TITLE" "$DESCRIPTION" \
     "$COMPONENT" "$REPRO_STEPS" "$ENVIRONMENT"; then
     echo "Feedback submitted."
 else
-    _mmry_format_error "feedback"
+    _mmry_print_error "feedback"
     exit 1
 fi

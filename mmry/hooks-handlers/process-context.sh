@@ -52,6 +52,6 @@ if mmry_process_context "$CONTEXT" "$HOOK_TYPE" "$WORKING_DIR" "$SESSION_ID" "$P
     # Bug #8 (#29950): print the server's short ack when available, otherwise fall back.
     echo "${MMRY_PROCESS_MESSAGE:-Context sent to MMRY AI for processing.}"
 else
-    _mmry_format_error "process"
+    _mmry_print_error "process"
     exit 1
 fi

@@ -50,7 +50,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:database history <database> <entry>` shows what an entry held before, and when it changed.
   - `/mmry:database retire <database>` stops a database collecting new entries. Nothing is deleted.
   - `/mmry:database restore <database>` starts a retired database collecting again.
-  - You can also see your databases and correct any entry yourself at https://mmryai.com/records.
+  - You can also see your databases and correct any entry yourself at https://mmryai.com/databases.
 
 ## Your AI database
 
@@ -63,7 +63,7 @@ Claude can keep a database for anything you track again and again, such as your 
 - **See an entry's history:** "Show me the history of the lunch entry." Claude lists every change, oldest first, with when it was made. Or: `/mmry:database history <database> <entry>`.
 - **Stop a database:** "Stop keeping my expenses for now." Nothing is deleted: every entry stays readable and in your export. Or: `/mmry:database retire <database>`.
 - **Start it again:** "Start keeping my expenses again." Or: `/mmry:database restore <database>`.
-- **See your databases:** `/mmry:database list` lists them, and you can see every entry and correct it yourself at https://mmryai.com/records.
+- **See your databases:** `/mmry:database list` lists them, and you can see every entry and correct it yourself at https://mmryai.com/databases.
 
 ## Things You Can Say
 

@@ -30,15 +30,15 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | `deactivate-memory.sh` | Deactivate a memory |
 | `search-memories.sh` | Search memories by keyword |
 | `list-groups.sh` | List your permission groups |
-| `list-formats.sh` | List the user's databases (their AI database) |
-| `create-format.sh` | Set up a new database |
-| `revise-format.sh` | Add a field to a database, rename it, retire it |
-| `rename-format.sh` | Rename a database, or change its description or the words that help choose it |
-| `retire-format.sh` | Retire a database (it stops collecting; nothing is deleted) |
-| `reinstate-format.sh` | Start a retired database collecting again |
-| `save-record.sh` | Save an entry in a database, or update one |
-| `query-records.sh` | Read entries, filtered on their FIELDS |
-| `record-history.sh` | What an entry used to hold, oldest change first |
+| `list-databases.sh` | List the user's databases (their AI database) |
+| `create-database.sh` | Set up a new database |
+| `revise-database.sh` | Add a field to a database, rename it, retire it |
+| `rename-database.sh` | Rename a database, or change its description or the words that help choose it |
+| `retire-database.sh` | Retire a database (it stops collecting; nothing is deleted) |
+| `reinstate-database.sh` | Start a retired database collecting again |
+| `save-entry.sh` | Save an entry in a database, or update one |
+| `query-entries.sh` | Read entries, filtered on their FIELDS |
+| `entry-history.sh` | What an entry used to hold, oldest change first |
 | `database.sh` | What `/mmry:database` runs: one subcommand, handed to the script above that does it |
 
 All scripts are in `${CLAUDE_PLUGIN_ROOT}/hooks-handlers/`. See the relevant sections below for usage examples.
@@ -61,7 +61,7 @@ mmry_get_active_sessions
 echo "$MMRY_RESPONSE"
 ```
 
-Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_formats`, `mmry_get_format`, `mmry_create_format`, `mmry_revise_format`, `mmry_rename_format`, `mmry_retire_format`, `mmry_reinstate_format`, `mmry_create_record`, `mmry_get_records`, `mmry_get_record_history`.
+Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_databases`, `mmry_get_database`, `mmry_create_database`, `mmry_revise_database`, `mmry_rename_database`, `mmry_retire_database`, `mmry_reinstate_database`, `mmry_save_entry`, `mmry_get_entries`, `mmry_get_entry_history`.
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
@@ -71,7 +71,7 @@ After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 builds and fills in while the user talks. One thing the user tracks (their migraine log, their
 expenses, their sales leads) is **a database**; each item saved in it is **an entry**; its named
 values are **fields**. Say those words to the user. The scripts, flags and tools keep older names
-(`create-format.sh`, `--format-id`, `save-record.sh`, `--record-id`, `mmry_record`) because
+(`create-database.sh`, `--database-id`, `save-entry.sh`, `--entry-id`, `mmry_entry_save`) because
 installed copies and connected assistants call them by those names; they are code, not words to
 repeat to the user.
 
@@ -89,14 +89,14 @@ other, and **the user's own words are always kept verbatim**. Removing one is a 
 
 **Do not set up a database for a single fact, a one-off note, or anything you would not expect a
 second example of.** Left unchecked a model sets up one per conversation and leaves the account
-full of databases holding one entry each. Run `list-formats.sh` first and reuse what is already
+full of databases holding one entry each. Run `list-databases.sh` first and reuse what is already
 there.
 
 ### Seeing what the user has
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh"
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-formats.sh" --id 42   # one database in full
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-databases.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/list-databases.sh" --id 42   # one database in full
 ```
 
 ### Setting one up
@@ -105,7 +105,7 @@ Design the fields from what the user actually said, using **their** words as the
 fine: an unrecognised field type is stored as text rather than refused.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-database.sh" \
   --name "Migraine log" \
   --description "Every migraine and what preceded it" \
   --fields '[{"key":"severity","label":"Severity","type":"number"},
@@ -116,7 +116,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/create-format.sh" \
 ```
 
 `--match-hints` are the words the user would actually write about one of these ("migraine,
-headache, aura"). They are shown by `list-formats.sh` so that **you** recognise, in a later
+headache, aura"). They are shown by `list-databases.sh` so that **you** recognise, in a later
 conversation, that what the user just said is another example for this database.
 
 **When a save becomes an entry.** A save becomes an entry when MMRY can tell which database it
@@ -129,7 +129,7 @@ with no supplied fields and no labelled lines.
 Naming the database and giving its fields is the reliable way, so when the user tells you
 something in their own words and it fits one of their databases, **you** read the values out of
 their words and save it as an entry naming the database (see the next section).
-Run `list-formats.sh` whenever what they say looks like a recurring shape, so you know which
+Run `list-databases.sh` whenever what they say looks like a recurring shape, so you know which
 databases they have.
 
 `--mode` decides what makes two entries the same one:
@@ -152,11 +152,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --tier Operational --category Fact --scope health \
   --topic "Migraine on Tuesday" \
   --content "Woke up with a migraine this afternoon, lasted until the evening." \
-  --record-type "Migraine log" \
-  --record-fields '{"severity":7,"triggers":["red wine","poor sleep"],"duration":"about five hours"}'
+  --database-name "Migraine log" \
+  --entry-fields '{"severity":7,"triggers":["red wine","poor sleep"],"duration":"about five hours"}'
 ```
 
-`--record-type` takes the database's name and `--record-fields` its field values.
+`--database-name` takes the database's name and `--entry-fields` its field values.
 
 **A save naming a database is classified by you, not by the server.** The ordinary save hands
 your context to the server's AI layer, which picks tier, category and scope and may extract
@@ -167,20 +167,20 @@ refuse.
 
 **A save that names a database the server cannot use keeps the words.** A database that does not
 exist, a field it does not declare, a value too long for its column: all of them cost the fields
-and keep the words. The script prints `RecordedAs:` (the database the entry went into, or none) so
+and keep the words. The script prints `SavedInDatabase:` (the database the entry went into, or none) so
 you can tell which happened. **Report what actually happened**: saying "saved in your migraine
 log" when it was stored as ordinary text is worse than saying nothing.
 
-**A refused entry save saves nothing.** If `--record-fields` is not one valid JSON object, the
+**A refused entry save saves nothing.** If `--entry-fields` is not one valid JSON object, the
 server refuses the whole request and the script exits 1. It prints the server's reason, which
 looks like this:
 
 ```
 Error (HTTP 400): {"error":"Request body is required.","detail":null}
-Nothing was saved. Check that --record-fields is one valid JSON object, then run the save again.
+Nothing was saved. Check that --entry-fields is one valid JSON object, then run the save again.
 ```
 
-There is no `NewMemoryID` and no `RecordedAs`, and the user's words are NOT stored. Fix the
+There is no `NewMemoryID` and no `SavedInDatabase`, and the user's words are NOT stored. Fix the
 fields and run the same save again, and tell the user it did not go through until it has.
 
 **As the request itself**, when saving the entry *is* what the user asked for. This one
@@ -188,13 +188,13 @@ fields and run the same save again, and tell the user it did not go through unti
 field:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-record.sh" \
-  --format-id 42 \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-entry.sh" \
+  --database-id 42 \
   --content "That task is finished now." \
   --fields '{"title":"Rewire the settings page","status":"done"}'
 ```
 
-`--format-id` is the database's id, from `list-formats.sh`. Read the outcome and report it:
+`--database-id` is the database's id, from `list-databases.sh`. Read the outcome and report it:
 `structured.created` is a new entry, `structured.updated` changed an existing one, and
 `text.degraded` means the words were saved and the fields were not.
 An update changes **only** the fields you send; anything you leave out keeps its current value,
@@ -208,20 +208,20 @@ one they have.
 
 ```bash
 # add a field: send the WHOLE field list, not just the new one
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-database.sh" --id 42 \
   --fields '[{"key":"severity","type":"number"},{"key":"triggers","type":"list","of":"text"}]'
 
 # change what it is called, what it is for, or the words that help you choose it
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --rename "Headache log"
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --match-hints "migraine, headache, aura"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-database.sh" --id 42 --rename "Headache log"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-database.sh" --id 42 --match-hints "migraine, headache, aura"
 
 # stop it collecting, or start again. Neither deletes anything.
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --retire
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-format.sh" --id 42 --reinstate
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-database.sh" --id 42 --retire
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/revise-database.sh" --id 42 --reinstate
 ```
 
 **`--fields` replaces the whole list rather than appending to it.** Read the database first with
-`list-formats.sh --id 42`, take the fields it reports, add yours, and send the lot. A field you
+`list-databases.sh --id 42`, take the fields it reports, add yours, and send the lot. A field you
 leave out is not deleted (the entries carrying it keep it and stay readable) but the new version
 stops collecting it, which is rarely what the user meant.
 
@@ -240,8 +240,8 @@ This is what the whole thing is for. Use it when the question depends on the **v
 than on the wording: how many, which ones, since when, sorted by what:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 --filter status=open
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-entries.sh" --database-id 42 --filter status=open
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-entries.sh" --database-id 42 \
   --filter severity=7 --order "createdDate desc" --page-size 20
 ```
 
@@ -259,13 +259,13 @@ database does not declare, comes back as an error naming the key rather than bei
 ### Correcting an entry
 
 An entry saved anywhere, here, through the connector, in the account area or over the REST API,
-is corrected from here the same way: find its id with `query-records.sh`, then send only what
-changes with `save-record.sh --record-id` (the entry's id). The words can be corrected too, with
+is corrected from here the same way: find its id with `query-entries.sh`, then send only what
+changes with `save-entry.sh --entry-id` (the entry's id). The words can be corrected too, with
 `--content`.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-records.sh" --format-id 42 --filter title="Rewire the settings page"
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-record.sh" --format-id 42 --record-id 9137 \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-entries.sh" --database-id 42 --filter title="Rewire the settings page"
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-entry.sh" --database-id 42 --entry-id 9137 \
   --content "Rewire the settings page. Done." --fields '{"status":"done"}'
 ```
 
@@ -279,7 +279,7 @@ ask how something got to where it is: when a task moved to done, what a dose was
 raised, whether they have already corrected this once.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/record-history.sh" --format-id 42 --record-id 9137
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/entry-history.sh" --database-id 42 --entry-id 9137
 ```
 
 Changes come back **oldest first**, each naming the field, what it was, what it became, when, and
@@ -298,9 +298,9 @@ would be the disclosure the sameness exists to prevent.
 ### One database, every surface
 
 The same databases and the same entries are reached from the MMRY connector (ChatGPT, Cursor,
-Claude Desktop and the user's other connected tools) through the `mmry_format_*`, `mmry_record` and `mmry_record_history` tools,
+Claude Desktop and the user's other connected tools) through the `mmry_database_*`, `mmry_entry_save` and `mmry_entry_history` tools,
 and over the REST API. **A customer can also correct an entry themselves**, without asking anyone,
-at `mmryai.com/records` in their account area. A database set up here is visible there, an entry
+at `mmryai.com/databases` in their account area. A database set up here is visible there, an entry
 saved there is readable here, and a correction made in any of them is immediately true in all of
 them: there is one entry and one update path, not a copy per client. Say so if the user asks:
 this is one account, not one client's private feature.

@@ -7,8 +7,8 @@ Usage: `/mmry:database create "what you want to keep track of"` | `/mmry:databas
 Your AI database is a set of databases your assistant keeps for you as you talk: every migraine
 and what preceded it, every expense, every job application. A **database** is one of those; each
 item in it is an **entry**; its named values are **fields**. Use these words with the customer.
-The script names and flags below (`--format-id`, `--record-id`) are internal names, kept as
-they are; never say them to the customer.
+The script names and flags below (`--database-id`, `--entry-id`) say the same thing; you need
+not read them out to the customer.
 
 **This command is a shortcut, not the only way.** Asking in plain words ("keep track of my
 migraines", "how many expenses over 50 this month?") does exactly the same, through the same
@@ -26,7 +26,7 @@ Take the subcommand and its words from `$ARGUMENTS`. If `$ARGUMENTS` is empty or
 subcommand below, do not guess: show the Usage line above and ask what they want to do.
 
 **Print what the script prints,** then say in one or two plain sentences what happened. Every
-successful run ends with the line naming `https://mmryai.com/records`, the account page where the
+successful run ends with the line naming `https://mmryai.com/databases`, the account page where the
 customer sees their databases and corrects any entry themselves: keep that line in your answer.
 On an error, pass the script's message through; do not report success.
 
@@ -70,8 +70,8 @@ Save a new entry. Run `list --id <database>` first unless you set it up in this 
 the field keys you send are the ones it declares. Read the values out of the customer's words.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" add --format-id <database> \
-    --content "<the customer's own words, verbatim>" --fields '{"severity":7}' [--record-name "<name>"]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" add --database-id <database> \
+    --content "<the customer's own words, verbatim>" --fields '{"severity":7}' [--entry-name "<name>"]
 ```
 
 Report the outcome the script prints, not the one you expected: `structured.created` is a new
@@ -83,7 +83,7 @@ were saved as an ordinary memory and the fields were not; say that plainly.
 Read the entries of a database, filtered on their fields. Filters are ANDed.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" find --format-id <database> \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" find --database-id <database> \
     [--filter <key>=<value>]... [--order "<key> desc"] [--page N] [--page-size N]
 ```
 
@@ -94,7 +94,7 @@ Change an entry already saved. Only the fields you send change; the rest keep th
 Tuesday after red wine, a 5"), not only the change; the earlier words stay in its history.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" correct --format-id <database> --record-id <entry> \
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" correct --database-id <database> --entry-id <entry> \
     --content "<the entry, as it should now read>" --fields '{"severity":5}'
 ```
 
@@ -103,7 +103,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" correct --format-id <dat
 What an entry held before, and when each value changed, oldest first.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" history --format-id <database> --record-id <entry>
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" history --database-id <database> --entry-id <entry>
 ```
 
 ### retire
@@ -126,7 +126,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" restore --id <database>
 ## Renaming And Changing Fields
 
 These are not subcommands; ask in plain words. To rename a database, change its description or
-the words that help choose it, run `rename-format.sh --id <database> --name "<new name>"`. To add a
-field, run `revise-format.sh --id <database> --fields '<the whole field list>'`: read the database
+the words that help choose it, run `rename-database.sh --id <database> --name "<new name>"`. To add a
+field, run `revise-database.sh --id <database> --fields '<the whole field list>'`: read the database
 first with `list --id`, because `--fields` replaces the list. Both are described in the memory
 skill.

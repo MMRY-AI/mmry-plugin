@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# record-surface.bats — the structured-record surface is PRESENT IN THIS REPOSITORY (#31460).
+# entry-surface.bats — the database and entry surface is PRESENT IN THIS REPOSITORY (#31460, renamed by #32957).
 #
 # WHY THIS FILE EXISTS, and it is not a formality. The whole of the structured-record plugin work
 # for v1.24 was written into src/Mnemo.Plugin inside the API repository, which is a fossil copy
@@ -15,18 +15,18 @@
 load '../helpers/test-helper'
 
 # The five entry points an assistant is told to run. Absence of any one of them is the defect.
-RECORD_HANDLERS=(
-    list-formats.sh
-    create-format.sh
-    revise-format.sh
-    save-record.sh
-    query-records.sh
-    record-history.sh
+ENTRY_HANDLERS=(
+    list-databases.sh
+    create-database.sh
+    revise-database.sh
+    save-entry.sh
+    query-entries.sh
+    entry-history.sh
 )
 
-@test "every structured-record handler exists in hooks-handlers/" {
+@test "every database and entry handler exists in hooks-handlers/" {
     local missing=""
-    for h in "${RECORD_HANDLERS[@]}"; do
+    for h in "${ENTRY_HANDLERS[@]}"; do
         [[ -f "$PLUGIN_ROOT/hooks-handlers/$h" ]] || missing+=" $h"
     done
     if [[ -n "$missing" ]]; then
@@ -34,8 +34,8 @@ RECORD_HANDLERS=(
     fi
 }
 
-@test "structured-record handlers are non-empty and run bash" {
-    for h in "${RECORD_HANDLERS[@]}"; do
+@test "database and entry handlers are non-empty and run bash" {
+    for h in "${ENTRY_HANDLERS[@]}"; do
         local f="$PLUGIN_ROOT/hooks-handlers/$h"
         [[ -s "$f" ]] || fail "$h is empty"
         local first
@@ -44,16 +44,16 @@ RECORD_HANDLERS=(
     done
 }
 
-@test "structured-record handlers are syntactically valid" {
-    for h in "${RECORD_HANDLERS[@]}"; do
+@test "database and entry handlers are syntactically valid" {
+    for h in "${ENTRY_HANDLERS[@]}"; do
         bash -n "$PLUGIN_ROOT/hooks-handlers/$h" || fail "$h does not parse"
     done
 }
 
-@test "structured-record handlers source THIS repo's client library, not the API repo's" {
+@test "database and entry handlers source THIS repo's client library, not the API repo's" {
     # The API repo's copy is named mnemo-client.sh. Importing that name here would source a file
     # that does not exist and every handler would die on its first line.
-    for h in "${RECORD_HANDLERS[@]}"; do
+    for h in "${ENTRY_HANDLERS[@]}"; do
         local f="$PLUGIN_ROOT/hooks-handlers/$h"
         grep -q 'hooks-handlers/mmry-client.sh' "$f" || fail "$h does not source mmry-client.sh"
         if grep -q 'mnemo-client.sh' "$f"; then
@@ -62,10 +62,10 @@ RECORD_HANDLERS=(
     done
 }
 
-@test "structured-record handlers call no mnemo_-prefixed function" {
+@test "database and entry handlers call no mnemo_-prefixed function" {
     # A straight copy from the API repo leaves mnemo_create_format and friends behind. They are
     # undefined here, and under set -e the handler dies with 'command not found'.
-    for h in "${RECORD_HANDLERS[@]}"; do
+    for h in "${ENTRY_HANDLERS[@]}"; do
         local f="$PLUGIN_ROOT/hooks-handlers/$h"
         if grep -qE '\bmnemo_|MNEMO_' "$f"; then
             fail "$h still refers to the API repo's mnemo_ / MNEMO_ names"
@@ -73,76 +73,76 @@ RECORD_HANDLERS=(
     done
 }
 
-@test "client library defines every structured-record function" {
+@test "client library defines every database and entry function" {
     local lib="$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
     local missing=""
-    for fn in mmry_list_formats mmry_get_format mmry_create_format mmry_revise_format \
-              mmry_rename_format mmry_retire_format mmry_reinstate_format \
-              mmry_create_record mmry_get_records mmry_get_record_history \
-              _mmry_json_string _mmry_format_name; do
+    for fn in mmry_list_databases mmry_get_database mmry_create_database mmry_revise_database \
+              mmry_rename_database mmry_retire_database mmry_reinstate_database \
+              mmry_save_entry mmry_get_entries mmry_get_entry_history \
+              _mmry_json_string _mmry_database_name; do
         grep -q "^${fn}() {" "$lib" || missing+=" $fn"
     done
     [[ -z "$missing" ]] || fail "mmry-client.sh is missing:${missing}"
 }
 
-@test "client library reaches the data-format routes" {
+@test "client library reaches the database routes" {
     local lib="$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
-    grep -q '"/api/data-formats"' "$lib" || fail "no POST/GET /api/data-formats"
-    grep -q '/api/data-formats/\${id}/versions' "$lib" || fail "no revise route"
-    grep -q '/api/data-formats/\${format_id}/entries' "$lib" || fail "no entries route"
+    grep -q '"/api/databases"' "$lib" || fail "no POST/GET /api/databases"
+    grep -q '/api/databases/\${id}/versions' "$lib" || fail "no revise route"
+    grep -q '/api/databases/\${database_id}/entries' "$lib" || fail "no entries route"
 }
 
-@test "save-memory.sh accepts the three record flags" {
+@test "save-memory.sh accepts the three entry flags" {
     local f="$PLUGIN_ROOT/hooks-handlers/save-memory.sh"
-    for flag in --record-type --record-fields --record-name; do
+    for flag in --database-name --entry-fields --entry-name; do
         grep -q -- "$flag)" "$f" || fail "save-memory.sh does not parse $flag"
     done
 }
 
-@test "save-memory.sh reports what was actually recorded" {
-    # The RecordedAs line is the honesty mechanism: a save that named a type may still have been
+@test "save-memory.sh reports what was actually saved" {
+    # The SavedInDatabase line is the honesty mechanism: a save that named a type may still have been
     # stored as plain text, and the caller must be able to tell. Both branches must be present -
     # a script that only ever prints the happy one is the lie this line exists to prevent.
     local f="$PLUGIN_ROOT/hooks-handlers/save-memory.sh"
-    grep -q 'RecordedAs: \${recorded}' "$f" || fail "no RecordedAs line for a stored record"
-    grep -q 'RecordedAs: (none' "$f" || fail "no RecordedAs line for a degraded save"
+    grep -q 'SavedInDatabase: \${saved_in}' "$f" || fail "no SavedInDatabase line for a stored entry"
+    grep -q 'SavedInDatabase: (none' "$f" || fail "no SavedInDatabase line for a degraded save"
 }
 
-@test "SKILL.md documents the structured-record surface" {
+@test "SKILL.md documents the database and entry surface" {
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     grep -q '## Your AI Database' "$skill" || fail "SKILL.md has no AI database section (#32457, DD-150)"
     local missing=""
-    for h in "${RECORD_HANDLERS[@]}"; do
+    for h in "${ENTRY_HANDLERS[@]}"; do
         grep -q "$h" "$skill" || missing+=" $h"
     done
     [[ -z "$missing" ]] || fail "SKILL.md never mentions:${missing}"
-    grep -q -- '--record-type' "$skill" || fail "SKILL.md never shows a routed save"
-    grep -q 'RecordedAs' "$skill" || fail "SKILL.md never tells the assistant to read RecordedAs"
+    grep -q -- '--database-name' "$skill" || fail "SKILL.md never shows a routed save"
+    grep -q 'SavedInDatabase' "$skill" || fail "SKILL.md never tells the assistant to read SavedInDatabase"
 }
 
-@test "SKILL.md reaches records through the handlers, with no server route table (#32272)" {
+@test "SKILL.md reaches entries through the handlers, with no server route table (#32272)" {
     # The route table this test used to require was removed by #32272 (DD-140 in the mmry
     # repository): the server's route list is an internal mechanic, and the assistant reaches
     # every record operation through the handlers the test above already requires.
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     ! grep -q '/api/' "$skill" || fail "SKILL.md names a server route"
-    grep -q 'list-formats.sh' "$skill" || fail "SKILL.md never names list-formats.sh"
+    grep -q 'list-databases.sh' "$skill" || fail "SKILL.md never names list-databases.sh"
 }
 
-@test "client library reaches the record history route (#31827)" {
-    grep -q '/api/data-formats/\$1/entries/\$2/history' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh" \
+@test "client library reaches the entry history route (#31827)" {
+    grep -q '/api/databases/\$1/entries/\$2/history' "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh" \
         || fail "mmry-client.sh has no record history route"
 }
 
-@test "SKILL.md documents record history and correction (#31827)" {
+@test "SKILL.md documents entry history and correction (#31827)" {
     local skill="$PLUGIN_ROOT/skills/memory-system/SKILL.md"
     grep -q '### What an entry used to hold' "$skill" || fail "no 'What an entry used to hold' section"
     grep -q '### Correcting an entry' "$skill" || fail "no 'Correcting an entry' section"
-    grep -q 'mmryai.com/records' "$skill" || fail "SKILL.md never tells the assistant about mmryai.com/records"
-    grep -q 'mmry_record_history' "$skill" || fail "'One account, every surface' omits the connector's history tool"
+    grep -q 'mmryai.com/databases' "$skill" || fail "SKILL.md never tells the assistant about mmryai.com/databases"
+    grep -q 'mmry_entry_history' "$skill" || fail "'One account, every surface' omits the connector's history tool"
 }
 
-@test "SKILL.md states when a save becomes a record (#32002)" {
+@test "SKILL.md states when a save becomes an entry (#32002)" {
     # Integration, 2026-10-10 (#32002): a save becomes a record when MMRY can tell which type it
     # belongs to AND has values for that type's fields. The skill must say both halves, and tell
     # the assistant that naming the type and giving its fields is the reliable path.
