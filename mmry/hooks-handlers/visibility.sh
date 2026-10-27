@@ -40,14 +40,14 @@ show_current() {
             echo "Current default: ${vis}"
         fi
     else
-        _mmry_format_error "read default visibility"
+        _mmry_print_error "read default visibility"
         exit 1
     fi
 }
 
 list_groups_for_choice() {
     if ! mmry_get_my_groups; then
-        _mmry_format_error "list groups"
+        _mmry_print_error "list groups"
         exit 1
     fi
     local count
@@ -67,7 +67,7 @@ resolve_group_id_by_name() {
     # Prints the group id for an exact (case-insensitive) name match, else empty.
     local wanted="$1"
     if ! mmry_get_my_groups; then
-        _mmry_format_error "list groups"
+        _mmry_print_error "list groups"
         exit 1
     fi
     printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg n "$wanted" \
@@ -88,7 +88,7 @@ case "$(printf '%s' "$MODE" | tr '[:upper:]' '[:lower:]')" in
                 echo "Default set to Global. New memories are shared with your organization."
             fi
         else
-            _mmry_format_error "set default visibility"
+            _mmry_print_error "set default visibility"
             exit 1
         fi
         ;;
@@ -102,7 +102,7 @@ case "$(printf '%s' "$MODE" | tr '[:upper:]' '[:lower:]')" in
             # Distinguish "you have no groups" from "that name is not one of yours",
             # otherwise a zero-group user gets a contradictory message.
             if ! mmry_get_my_groups; then
-                _mmry_format_error "list groups"
+                _mmry_print_error "list groups"
                 exit 1
             fi
             if [[ "$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length')" -eq 0 ]]; then
@@ -118,7 +118,7 @@ case "$(printf '%s' "$MODE" | tr '[:upper:]' '[:lower:]')" in
         if mmry_set_default_visibility "Group" "$gid"; then
             echo "Default set to the ${GROUP_NAME} group. New memories are shared with that group."
         else
-            _mmry_format_error "set default visibility"
+            _mmry_print_error "set default visibility"
             exit 1
         fi
         ;;

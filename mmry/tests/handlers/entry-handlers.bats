@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# record-handlers.bats — drive the structured-record handlers against the mock API (#31460).
+# entry-handlers.bats — drive the database and entry handlers against the mock API (#31460, renamed by #32957).
 #
 # These exercise the handlers the way an assistant runs them: arguments in, request out, output
 # read back. The mock curl logs every request to $TEST_TMPDIR/curl-log.txt, so the assertions can
@@ -19,19 +19,19 @@ setup() {
     LOG="$TEST_TMPDIR/curl-log.txt"
 }
 
-# --- list-formats ------------------------------------------------------------
+# --- list-databases ------------------------------------------------------------
 
-@test "list-formats: reads GET /api/data-formats and names each type" {
-    run bash "$HANDLERS/list-formats.sh"
+@test "list-databases: reads GET /api/databases and names each type" {
+    run bash "$HANDLERS/list-databases.sh"
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"2 database(s)"* ]] || return 1
     [[ "$output" == *"Migraine log"* ]] || return 1
     [[ "$output" == *"Expenses"* ]] || return 1
-    grep -q "GET http://localhost:5291/api/data-formats" "$LOG"
+    grep -q "GET http://localhost:5291/api/databases" "$LOG"
 }
 
-@test "list-formats: a type with no match hints says so, and says when a save becomes a record" {
-    run bash "$HANDLERS/list-formats.sh"
+@test "list-databases: a type with no match hints says so, and says when a save becomes a record" {
+    run bash "$HANDLERS/list-databases.sh"
     [[ "$output" == *"words that help choose it: (none)"* ]] || return 1
     [[ "$output" == *"a save becomes an entry when it names this database and has values for its fields"* ]] || return 1
     # A type with hints says it can also be chosen by its words; a type with none must not.
@@ -40,208 +40,208 @@ setup() {
     [[ "$output" != *"recognised by"* ]] || return 1
 }
 
-@test "list-formats: --id reads one type and lists its fields" {
-    run bash "$HANDLERS/list-formats.sh" --id 42
+@test "list-databases: --id reads one type and lists its fields" {
+    run bash "$HANDLERS/list-databases.sh" --id 42
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"Database: Migraine log"* ]] || return 1
     [[ "$output" == *"severity (number)"* ]] || return 1
     [[ "$output" == *"triggers (list)"* ]] || return 1
-    grep -q "GET http://localhost:5291/api/data-formats/42" "$LOG"
+    grep -q "GET http://localhost:5291/api/databases/42" "$LOG"
 }
 
-@test "list-formats: --include-retired is forwarded to the route" {
-    run bash "$HANDLERS/list-formats.sh" --include-retired
+@test "list-databases: --include-retired is forwarded to the route" {
+    run bash "$HANDLERS/list-databases.sh" --include-retired
     [[ "$status" -eq 0 ]] || return 1
     grep -q "includeRetired=true" "$LOG"
 }
 
-@test "list-formats: rejects an unknown argument" {
-    run bash "$HANDLERS/list-formats.sh" --nonsense
+@test "list-databases: rejects an unknown argument" {
+    run bash "$HANDLERS/list-databases.sh" --nonsense
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"Unknown argument"* ]] || return 1
 }
 
-# --- create-format -----------------------------------------------------------
+# --- create-database -----------------------------------------------------------
 
-@test "create-format: requires --name and --fields" {
-    run bash "$HANDLERS/create-format.sh" --name "Only a name"
+@test "create-database: requires --name and --fields" {
+    run bash "$HANDLERS/create-database.sh" --name "Only a name"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--name and --fields are required"* ]] || return 1
 }
 
-@test "create-format: posts the field schema as a JSON STRING, not a nested array" {
+@test "create-database: posts the field schema as a JSON STRING, not a nested array" {
     # fieldSchema crosses the wire as a string containing JSON. Sending it as a nested array is
     # the mistake _mmry_json_string exists to prevent, and the server rejects it.
-    run bash "$HANDLERS/create-format.sh" --name "Migraine log" \
+    run bash "$HANDLERS/create-database.sh" --name "Migraine log" \
         --fields '[{"key":"severity","type":"number"}]' --match-hints "migraine, aura"
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"Created the database Migraine log with id 42."* ]] || return 1
-    grep -q 'POST http://localhost:5291/api/data-formats' "$LOG"
+    grep -q 'POST http://localhost:5291/api/databases' "$LOG"
     grep -q '"fieldSchema":"\[{\\"key\\":\\"severity\\"' "$LOG"
     grep -q '"matchHints":"migraine, aura"' "$LOG"
 }
 
-@test "create-format: 'global' becomes Global and 'private' becomes Private" {
-    run bash "$HANDLERS/create-format.sh" --name X --fields '[]' --visibility global
+@test "create-database: 'global' becomes Global and 'private' becomes Private" {
+    run bash "$HANDLERS/create-database.sh" --name X --fields '[]' --visibility global
     [[ "$status" -eq 0 ]] || return 1
     grep -q '"visibility":"Global"' "$LOG"
 }
 
-@test "create-format: an unrecognised visibility is refused, never silently made private" {
-    run bash "$HANDLERS/create-format.sh" --name X --fields '[]' --visibility everybody-ish
+@test "create-database: an unrecognised visibility is refused, never silently made private" {
+    run bash "$HANDLERS/create-database.sh" --name X --fields '[]' --visibility everybody-ish
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--visibility is 'private' or 'global'"* ]] || return 1
-    [[ ! -f "$LOG" ]] || ! grep -q "POST .*api/data-formats" "$LOG"
+    [[ ! -f "$LOG" ]] || ! grep -q "POST .*api/databases" "$LOG"
 }
 
-@test "create-format: defaults to append mode and Private visibility" {
-    run bash "$HANDLERS/create-format.sh" --name X --fields '[]'
+@test "create-database: defaults to append mode and Private visibility" {
+    run bash "$HANDLERS/create-database.sh" --name X --fields '[]'
     [[ "$status" -eq 0 ]] || return 1
     grep -q '"entryKeyMode":"append"' "$LOG"
     grep -q '"visibility":"Private"' "$LOG"
 }
 
-# --- revise-format -----------------------------------------------------------
+# --- revise-database -----------------------------------------------------------
 
-@test "revise-format: --fields publishes a NEW VERSION and says nothing was lost" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --fields '[{"key":"severity","type":"number"}]'
+@test "revise-database: --fields publishes a NEW VERSION and says nothing was lost" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --fields '[{"key":"severity","type":"number"}]'
     [[ "$status" -eq 0 ]] || return 1
-    grep -q "POST http://localhost:5291/api/data-formats/42/versions" "$LOG"
+    grep -q "POST http://localhost:5291/api/databases/42/versions" "$LOG"
     [[ "$output" == *"Database: Migraine log (id 42, version 2)"* ]] || return 1
     [[ "$output" == *"still readable"* ]] || return 1
 }
 
-@test "revise-format: --rename goes to PUT, not to a new version" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --rename "Headache log"
+@test "revise-database: --rename goes to PUT, not to a new version" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --rename "Headache log"
     [[ "$status" -eq 0 ]] || return 1
-    grep -q "PUT http://localhost:5291/api/data-formats/42" "$LOG"
+    grep -q "PUT http://localhost:5291/api/databases/42" "$LOG"
     ! grep -q "/versions" "$LOG" || return 1
     [[ "$output" == *"Headache log"* ]] || return 1
 }
 
-@test "revise-format: --retire reports the records it still holds" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --retire
+@test "revise-database: --retire reports the records it still holds" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --retire
     [[ "$status" -eq 0 ]] || return 1
-    grep -q "POST http://localhost:5291/api/data-formats/42/retire" "$LOG"
+    grep -q "POST http://localhost:5291/api/databases/42/retire" "$LOG"
     [[ "$output" == *"It still holds 41 entries."* ]] || return 1
     [[ "$output" == *"stops collecting new ones"* ]] || return 1
 }
 
-@test "revise-format: --reinstate calls reinstate" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --reinstate
+@test "revise-database: --reinstate calls reinstate" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --reinstate
     [[ "$status" -eq 0 ]] || return 1
-    grep -q "POST http://localhost:5291/api/data-formats/42/reinstate" "$LOG"
+    grep -q "POST http://localhost:5291/api/databases/42/reinstate" "$LOG"
     [[ "$output" == *"Collecting again."* ]] || return 1
 }
 
-@test "revise-format: --retire and --reinstate together are refused" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --retire --reinstate
+@test "revise-database: --retire and --reinstate together are refused" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --retire --reinstate
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"opposites"* ]] || return 1
 }
 
-@test "revise-format: --retire with a field change is refused rather than half-applied" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --retire --rename "Nope"
+@test "revise-database: --retire with a field change is refused rather than half-applied" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --retire --rename "Nope"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"take nothing else"* ]] || return 1
 }
 
-@test "revise-format: requires --id" {
-    run bash "$HANDLERS/revise-format.sh" --rename "Headache log"
+@test "revise-database: requires --id" {
+    run bash "$HANDLERS/revise-database.sh" --rename "Headache log"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--id is required"* ]] || return 1
 }
 
-@test "revise-format: asking for nothing is an error, not a silent success" {
-    run bash "$HANDLERS/revise-format.sh" --id 42
+@test "revise-database: asking for nothing is an error, not a silent success" {
+    run bash "$HANDLERS/revise-database.sh" --id 42
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"nothing to change"* ]] || return 1
 }
 
-# --- save-record -------------------------------------------------------------
+# --- save-entry -------------------------------------------------------------
 
-@test "save-record: requires --format-id and --content" {
-    run bash "$HANDLERS/save-record.sh" --format-id 42
+@test "save-entry: requires --database-id and --content" {
+    run bash "$HANDLERS/save-entry.sh" --database-id 42
     [[ "$status" -ne 0 ]] || return 1
-    [[ "$output" == *"--format-id and --content are required"* ]] || return 1
+    [[ "$output" == *"--database-id and --content are required"* ]] || return 1
 }
 
-@test "save-record: posts to the entries route and reports the outcome" {
-    run bash "$HANDLERS/save-record.sh" --format-id 42 \
+@test "save-entry: posts to the entries route and reports the outcome" {
+    run bash "$HANDLERS/save-entry.sh" --database-id 42 \
         --content "Migraine on Tuesday" --fields '{"severity":7}'
     [[ "$status" -eq 0 ]] || return 1
-    grep -q "POST http://localhost:5291/api/data-formats/42/entries" "$LOG"
+    grep -q "POST http://localhost:5291/api/databases/42/entries" "$LOG"
     [[ "$output" == *"Outcome: structured.created  (memory 99)"* ]] || return 1
 }
 
-@test "save-record: the fields object crosses the wire unescaped" {
-    run bash "$HANDLERS/save-record.sh" --format-id 42 --content "x" --fields '{"severity":7}'
+@test "save-entry: the fields object crosses the wire unescaped" {
+    run bash "$HANDLERS/save-entry.sh" --database-id 42 --content "x" --fields '{"severity":7}'
     grep -q '"fields":{"severity":7}' "$LOG"
 }
 
-@test "save-record: a degraded write says the fields were NOT stored" {
+@test "save-entry: a degraded write says the fields were NOT stored" {
     # The one outcome that must never be reported as a record. If this line is lost, the handler
     # tells the user their symptom log has an entry it does not have.
     export MOCK_CURL_HTTP_CODE=201
     export MOCK_CURL_RESPONSE='{"outcome":"text.degraded","memoryId":99,"detail":"no field named severty"}'
-    run bash "$HANDLERS/save-record.sh" --format-id 42 --content "x" --fields '{"severty":7}'
+    run bash "$HANDLERS/save-entry.sh" --database-id 42 --content "x" --fields '{"severty":7}'
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"text.degraded"* ]] || return 1
     [[ "$output" == *"The words were saved; the fields were NOT."* ]] || return 1
     [[ "$output" == *"no field named severty"* ]] || return 1
 }
 
-@test "save-record: a 400 from the route is an error, not a shrug" {
+@test "save-entry: a 400 from the route is an error, not a shrug" {
     export MOCK_CURL_HTTP_CODE=400
     export MOCK_CURL_RESPONSE='{"error":"Unknown field: severty"}'
-    run bash "$HANDLERS/save-record.sh" --format-id 42 --content "x" --fields '{"severty":7}'
+    run bash "$HANDLERS/save-entry.sh" --database-id 42 --content "x" --fields '{"severty":7}'
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"severty"* ]] || return 1
 }
 
-# --- query-records -----------------------------------------------------------
+# --- query-entries -----------------------------------------------------------
 
-@test "query-records: requires --format-id" {
-    run bash "$HANDLERS/query-records.sh" --filter status=open
+@test "query-entries: requires --database-id" {
+    run bash "$HANDLERS/query-entries.sh" --filter status=open
     [[ "$status" -ne 0 ]] || return 1
-    [[ "$output" == *"--format-id is required"* ]] || return 1
+    [[ "$output" == *"--database-id is required"* ]] || return 1
 }
 
-@test "query-records: reports the total and every field of every record" {
-    run bash "$HANDLERS/query-records.sh" --format-id 42
+@test "query-entries: reports the total and every field of every record" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"2 entries in Migraine log:"* ]] || return 1
     [[ "$output" == *"severity: 7"* ]] || return 1
     [[ "$output" == *"triggers: red wine"* ]] || return 1
 }
 
-@test "query-records: a field with no value reads (blank), not an empty line" {
-    run bash "$HANDLERS/query-records.sh" --format-id 42
+@test "query-entries: a field with no value reads (blank), not an empty line" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$output" == *"triggers: (blank)"* ]] || return 1
 }
 
-@test "query-records: filters become field.<key>= pairs, ANDed" {
-    run bash "$HANDLERS/query-records.sh" --format-id 42 --filter status=open --filter severity=7
+@test "query-entries: filters become field.<key>= pairs, ANDed" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --filter status=open --filter severity=7
     [[ "$status" -eq 0 ]] || return 1
     grep -q "field.status=open&field.severity=7" "$LOG"
 }
 
-@test "query-records: a filter value is URL-encoded rather than breaking the query" {
-    run bash "$HANDLERS/query-records.sh" --format-id 42 --filter "trigger=red wine"
+@test "query-entries: a filter value is URL-encoded rather than breaking the query" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --filter "trigger=red wine"
     [[ "$status" -eq 0 ]] || return 1
     grep -q "field.trigger=red%20wine" "$LOG"
 }
 
-@test "query-records: order, page and page size are forwarded" {
-    run bash "$HANDLERS/query-records.sh" --format-id 42 --order "createdDate desc" --page 2 --page-size 20
+@test "query-entries: order, page and page size are forwarded" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --order "createdDate desc" --page 2 --page-size 20
     [[ "$status" -eq 0 ]] || return 1
     grep -q "order=createdDate%20desc" "$LOG"
     grep -q "page=2" "$LOG"
     grep -q "pageSize=20" "$LOG"
 }
 
-@test "query-records: --filter without an = is refused before any request" {
-    run bash "$HANDLERS/query-records.sh" --format-id 42 --filter status
+@test "query-entries: --filter without an = is refused before any request" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --filter status
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--filter takes key=value"* ]] || return 1
 }
@@ -254,11 +254,11 @@ setup() {
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope health \
         --topic "Migraine on Tuesday" --content "Woke up with a migraine." \
-        --record-type "Migraine log" --record-fields '{"severity":7}'
+        --database-name "Migraine log" --entry-fields '{"severity":7}'
     [[ "$status" -eq 0 ]] || return 1
     grep -q "POST http://localhost:5291/api/memories " "$LOG"
     ! grep -q "/api/memories/process" "$LOG" || return 1
-    grep -q '"structured":{"formatName":"Migraine log","fields":{"severity":7}}' "$LOG"
+    grep -q '"structured":{"databaseName":"Migraine log","fields":{"severity":7}}' "$LOG"
 }
 
 @test "save-memory: a routed save with no format in the response says so plainly" {
@@ -266,37 +266,37 @@ setup() {
     # stored, the structure was not. Reporting "recorded in your migraine log" here is the lie.
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope health \
-        --topic "T" --content "C" --record-type "Migraine log"
+        --topic "T" --content "C" --database-name "Migraine log"
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"NewMemoryID: 99"* ]] || return 1
-    [[ "$output" == *"RecordedAs: (none - saved as ordinary text, the structure was not stored)"* ]] || return 1
+    [[ "$output" == *"SavedInDatabase: (none - saved as ordinary text, the structure was not stored)"* ]] || return 1
 }
 
 @test "save-memory: a routed save names the format the SERVER stored" {
     export MOCK_CURL_HTTP_CODE=201
-    export MOCK_CURL_RESPONSE='{"id":99,"format":{"rootId":42,"name":"Migraine log"}}'
+    export MOCK_CURL_RESPONSE='{"id":99,"database":{"rootId":42,"name":"Migraine log"}}'
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope health \
-        --topic "T" --content "C" --record-type "Migraine log"
+        --topic "T" --content "C" --database-name "Migraine log"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"RecordedAs: Migraine log"* ]] || return 1
+    [[ "$output" == *"SavedInDatabase: Migraine log"* ]] || return 1
 }
 
 @test "save-memory: a name inside the user's own content is not read as a format" {
     # The customer's content can contain anything, including a JSON snippet with a name key.
     # Reading the whole body for "name" would report a format that was never stored.
     export MOCK_CURL_HTTP_CODE=201
-    export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Format\"}","format":null}'
+    export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Database\"}","database":null}'
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope health \
-        --topic "T" --content "C" --record-type "Migraine log"
+        --topic "T" --content "C" --database-name "Migraine log"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" != *"Totally A Format"* ]] || return 1
-    [[ "$output" == *"RecordedAs: (none"* ]] || return 1
+    [[ "$output" != *"Totally A Database"* ]] || return 1
+    [[ "$output" == *"SavedInDatabase: (none"* ]] || return 1
 }
 
 @test "save-memory: a record flag without the classification is refused, naming what is missing" {
-    run bash "$HANDLERS/save-memory.sh" --context "anything" --record-type "Migraine log"
+    run bash "$HANDLERS/save-memory.sh" --context "anything" --database-name "Migraine log"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--tier"* ]] || return 1
     [[ "$output" == *"--content"* ]] || return 1
@@ -306,13 +306,13 @@ setup() {
     run bash "$HANDLERS/save-memory.sh" --context "Remember that we use UPC as the identifier."
     [[ "$status" -eq 0 ]] || return 1
     grep -q "/api/memories/process" "$LOG"
-    [[ "$output" != *"RecordedAs"* ]] || return 1
+    [[ "$output" != *"SavedInDatabase"* ]] || return 1
 }
 
-@test "save-memory: --record-name rides along as the entry key" {
+@test "save-memory: --entry-name rides along as the entry key" {
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope work \
-        --topic "T" --content "C" --record-type "Tasks" --record-name "Rewire the settings page"
+        --topic "T" --content "C" --database-name "Tasks" --entry-name "Rewire the settings page"
     [[ "$status" -eq 0 ]] || return 1
     grep -q '"entryKey":"Rewire the settings page"' "$LOG"
 }
@@ -341,19 +341,19 @@ _mmry_no_jq() {
 
 @test "save-memory (no jq): names the format the server stored, read from the format block" {
     export MOCK_CURL_HTTP_CODE=201
-    export MOCK_CURL_RESPONSE='{"id":99,"content":"C","format":{"name":"Migraine log","rootId":42}}'
-    run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --record-type "Migraine log"
+    export MOCK_CURL_RESPONSE='{"id":99,"content":"C","database":{"name":"Migraine log","rootId":42}}'
+    run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --database-name "Migraine log"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"RecordedAs: Migraine log"* ]] || return 1
+    [[ "$output" == *"SavedInDatabase: Migraine log"* ]] || return 1
 }
 
 @test "save-memory (no jq): a name inside the user's own content is not read as a format" {
     export MOCK_CURL_HTTP_CODE=201
-    export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Format\"}","format":null}'
-    run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --record-type "Migraine log"
+    export MOCK_CURL_RESPONSE='{"id":99,"content":"they said {\"name\": \"Totally A Database\"}","database":null}'
+    run _mmry_no_jq bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope health         --topic "T" --content "C" --database-name "Migraine log"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" != *"Totally A Format"* ]] || return 1
-    [[ "$output" == *"RecordedAs: (none"* ]] || return 1
+    [[ "$output" != *"Totally A Database"* ]] || return 1
+    [[ "$output" == *"SavedInDatabase: (none"* ]] || return 1
 }
 
 @test "save-memory (no jq): a top-level name beside a null format is not read as the format" {
@@ -364,32 +364,32 @@ _mmry_no_jq() {
     # and that is what a whole-body grep reads and reports as a stored format when nothing was
     # stored at all. Without this test the scoping is asserted by comment only.
     export MOCK_CURL_HTTP_CODE=201
-    export MOCK_CURL_RESPONSE='{"id":99,"name":"Totally A Format","content":"C","format":null}'
+    export MOCK_CURL_RESPONSE='{"id":99,"name":"Totally A Database","content":"C","database":null}'
     run _mmry_no_jq bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope health \
-        --topic "T" --content "C" --record-type "Migraine log"
+        --topic "T" --content "C" --database-name "Migraine log"
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" != *"Totally A Format"* ]] || return 1
-    [[ "$output" == *"RecordedAs: (none"* ]] || return 1
+    [[ "$output" != *"Totally A Database"* ]] || return 1
+    [[ "$output" == *"SavedInDatabase: (none"* ]] || return 1
 }
 
-# --- record-history (#31384, ported by #31827) --------------------------------
+# --- entry-history (#31384, ported by #31827) --------------------------------
 
-@test "record-history: requires --format-id and --record-id" {
-    run bash "$HANDLERS/record-history.sh" --format-id 42
+@test "entry-history: requires --database-id and --entry-id" {
+    run bash "$HANDLERS/entry-history.sh" --database-id 42
     [[ "$status" -ne 0 ]] || return 1
-    [[ "$output" == *"--format-id and --record-id are both required"* ]] || return 1
+    [[ "$output" == *"--database-id and --entry-id are both required"* ]] || return 1
     [[ ! -s "$LOG" ]] || ! grep -q "history" "$LOG"
 }
 
-@test "record-history: reads the history route for that record" {
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+@test "entry-history: reads the history route for that record" {
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
     [[ "$status" -eq 0 ]] || return 1
-    grep -q "GET http://localhost:5291/api/data-formats/42/entries/9137/history" "$LOG"
+    grep -q "GET http://localhost:5291/api/databases/42/entries/9137/history" "$LOG"
 }
 
-@test "record-history: prints the trail oldest first, old beside new, creation values included" {
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+@test "entry-history: prints the trail oldest first, old beside new, creation values included" {
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"was: -  now: open"* ]] || return 1
     [[ "$output" == *"was: open  now: in progress"* ]] || return 1
@@ -399,47 +399,47 @@ _mmry_no_jq() {
     [[ -n "$first" && -n "$second" && "$first" -lt "$second" ]] || return 1
 }
 
-@test "record-history: a reserved key is shown by its plain-English label, not its sentinel" {
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+@test "entry-history: a reserved key is shown by its plain-English label, not its sentinel" {
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
     [[ "$output" == *"The memory itself"* ]] || return 1
     [[ "$output" != *"~content~"* ]] || return 1
 }
 
-@test "record-history: names who changed it when the server says" {
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+@test "entry-history: names who changed it when the server says" {
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
     [[ "$output" == *"by Probe User"* ]] || return 1
 }
 
-@test "record-history: a record with no changes says so instead of printing nothing" {
+@test "entry-history: a record with no changes says so instead of printing nothing" {
     export MOCK_CURL_HTTP_CODE=200
     export MOCK_CURL_RESPONSE='{"entryId":9137,"changes":0,"history":[]}'
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 9137
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 9137
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"Nothing has changed since this entry was saved."* ]] || return 1
 }
 
-@test "record-history: a not-found is an error carrying the 404, with no claim it exists" {
+@test "entry-history: a not-found is an error carrying the 404, with no claim it exists" {
     export MOCK_CURL_HTTP_CODE=404
     export MOCK_CURL_RESPONSE='{"error":"Not found"}'
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id 2000000000
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 2000000000
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"404"* ]] || return 1
     [[ "$output" != *"cannot see"* ]] || return 1
 }
 
-@test "record-history: an id that is not a whole number is refused before any request" {
-    run bash "$HANDLERS/record-history.sh" --format-id 42 --record-id "../../memories"
+@test "entry-history: an id that is not a whole number is refused before any request" {
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id "../../memories"
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"positive whole number"* ]] || return 1
-    ! grep -q "data-formats" "$LOG" 2>/dev/null || return 1
+    ! grep -q "databases" "$LOG" 2>/dev/null || return 1
 }
 
 # --- correcting a record made elsewhere (#31827 requirement 2) ----------------
 
-@test "save-record: --record-id sends the id so the record is UPDATED, and reports the update" {
+@test "save-entry: --entry-id sends the id so the record is UPDATED, and reports the update" {
     export MOCK_CURL_HTTP_CODE=200
     export MOCK_CURL_RESPONSE='{"outcome":"structured.updated","memoryId":99,"entryId":9137}'
-    run bash "$HANDLERS/save-record.sh" --format-id 42 --record-id 9137 \
+    run bash "$HANDLERS/save-entry.sh" --database-id 42 --entry-id 9137 \
         --content "Done." --fields '{"status":"done"}'
     [[ "$status" -eq 0 ]] || return 1
     grep -q '"entryId":9137' "$LOG"
@@ -450,22 +450,22 @@ _mmry_no_jq() {
 
 @test "save-memory: a routed save still sends the agent name, beside the structured block" {
     # The record block was added AFTER the agent name (#30320) in mmry_create_memory, so no shipped
-    # caller's positional arguments moved. If they had, the agent name would land in formatName.
+    # caller's positional arguments moved. If they had, the agent name would land in databaseName.
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope finance \
         --topic "Lunch" --content "Spent 40 dollars on lunch." \
         --agent-name "Records Probe" \
-        --record-type "Expenses" --record-fields '{"amount":40}'
+        --database-name "Expenses" --entry-fields '{"amount":40}'
     [[ "$status" -eq 0 ]] || return 1
     grep -q '"agentName":"Records Probe"' "$LOG"
-    grep -q '"structured":{"formatName":"Expenses","fields":{"amount":40}}' "$LOG"
+    grep -q '"structured":{"databaseName":"Expenses","fields":{"amount":40}}' "$LOG"
 }
 
 @test "save-memory: a routed save refuses a malformed --supersedes like the ordinary save does" {
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope finance \
         --topic "Lunch" --content "x" --supersedes "abc" \
-        --record-type "Expenses" --record-fields '{"amount":40}'
+        --database-name "Expenses" --entry-fields '{"amount":40}'
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--supersedes takes the id"* ]] || return 1
     ! grep -q "/api/memories" "$LOG" 2>/dev/null || return 1
@@ -475,15 +475,15 @@ _mmry_no_jq() {
     run bash "$HANDLERS/save-memory.sh" \
         --tier Operational --category Fact --scope finance \
         --topic "Lunch" --content "x" --supersedes 123 \
-        --record-type "Expenses" --record-fields '{"amount":40}'
+        --database-name "Expenses" --entry-fields '{"amount":40}'
     [[ "$status" -eq 0 ]] || return 1
     grep -q '"supersedesId":123' "$LOG"
 }
 
-@test "query-records: shows the words each record was saved from, not a topic the route never sends" {
-    # Read from Integration (#31827): entries carry note, entryKey and recordedAt. The first port
+@test "query-entries: shows the words each record was saved from, not a topic the route never sends" {
+    # Read from Integration (#31827): entries carry note, entryKey and savedAt. The first port
     # printed .topic, which is absent, so every record read "(no topic)" and its words were lost.
-    run bash "$HANDLERS/query-records.sh" --format-id 42
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"words: Migraine on Tuesday after red wine."* ]] || return 1
     [[ "$output" == *"id 1 | saved 2026-10-07T09:00:00"* ]] || return 1
@@ -492,8 +492,8 @@ _mmry_no_jq() {
 
 # --- #32002: what the messages say a save does ---------------------------------
 
-@test "revise-format: --match-hints says the words help choose the type, never that a save is filed by them (#32002)" {
-    run bash "$HANDLERS/revise-format.sh" --id 42 --match-hints "migraine, headache"
+@test "revise-database: --match-hints says the words help choose the type, never that a save is filed by them (#32002)" {
+    run bash "$HANDLERS/revise-database.sh" --id 42 --match-hints "migraine, headache"
     [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"Those words now help the assistant choose this database. A save becomes an entry when MMRY can tell which database it belongs to, by its name or by these words, and has values for its fields, supplied or as labelled lines such as \"Amount: 25\". Otherwise it stays an ordinary memory."* ]] || return 1
     [[ "$output" != *"recognised"* ]] || return 1
@@ -505,12 +505,12 @@ _mmry_no_jq() {
     # The REAL body: GlobalExceptionHandler answers a malformed request body with this envelope
     # (seen live on Integration, 2026-10-10), not plain text.
     export MOCK_CURL_RESPONSE='{"error":"Request body is required.","detail":null}'
-    run bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope finance         --topic "Lunch" --content "Spent 40 dollars on lunch."         --record-type "Expenses" --record-fields '{"amount":'
+    run bash "$HANDLERS/save-memory.sh"         --tier Operational --category Fact --scope finance         --topic "Lunch" --content "Spent 40 dollars on lunch."         --database-name "Expenses" --entry-fields '{"amount":'
     [[ "$status" -eq 1 ]] || return 1
     [[ "$output" == *'Error (HTTP 400): {"error":"Request body is required.","detail":null}'* ]] || return 1
     [[ "$output" == *"Nothing was saved."* ]] || return 1
     [[ "$output" != *"NewMemoryID"* ]] || return 1
-    [[ "$output" != *"RecordedAs"* ]] || return 1
+    [[ "$output" != *"SavedInDatabase"* ]] || return 1
     # The malformed fields really left the machine as sent, and exactly one save was attempted.
     grep -qF '"fields":{"amount":' "$LOG"
     [[ "$(grep -c 'POST http://localhost:5291/api/memories' "$LOG")" -eq 1 ]]
@@ -525,12 +525,12 @@ _mmry_no_jq() {
 }
 
 @test "no plugin message or guidance contradicts when a save becomes a record (#32002)" {
-    # The rule (MemoryFormatRouter): a save becomes a record when MMRY can tell which type it
+    # The rule (MemoryDatabaseRouter): a save becomes a record when MMRY can tell which type it
     # belongs to (named, or chosen by hint words) AND has values for that type's fields (supplied,
     # or labelled lines). Neither "the hints alone file a save" nor "a plain save never becomes a
     # record" is true.
     local f
-    for f in hooks-handlers/revise-format.sh hooks-handlers/list-formats.sh hooks-handlers/create-format.sh \
+    for f in hooks-handlers/revise-database.sh hooks-handlers/list-databases.sh hooks-handlers/create-database.sh \
              hooks-handlers/mmry-client.sh hooks-handlers/save-memory.sh skills/memory-system/SKILL.md; do
         if grep -qiE 'recognised as belonging|recognised by|what the router|will be recognised|saves stop being recognised|never cost the save|must be named explicitly|never becomes a|never turn|nothing files a plain save|only when it names|only when the save names|does not route a plain save' "$PLUGIN_ROOT/$f"; then
             fail "$f still carries a claim that contradicts when a save becomes a record"
@@ -538,4 +538,50 @@ _mmry_no_jq() {
     done
     # And the SKILL states the rule in both halves.
     grep -q "belongs to \*\*and\*\* has values for that database's fields" "$PLUGIN_ROOT/skills/memory-system/SKILL.md"
+}
+
+# --- the old names are gone (#32957, DD-164) ----------------------------------------------------
+# "The old names don't need to work. Get rid of them." (Eric, 2026-10-27.) Each script refuses the
+# option it used to take, before any request leaves the machine, and the old scripts do not exist.
+
+@test "old names: each retired option is refused by the script that used to take it, before any request" {
+    local spec
+    for spec in \
+        "save-entry.sh --format-id 42 --content x" \
+        "save-entry.sh --database-id 42 --content x --record-id 9" \
+        "save-entry.sh --database-id 42 --content x --record-name n" \
+        "query-entries.sh --format-id 42" \
+        "entry-history.sh --format-id 42 --entry-id 9" \
+        "entry-history.sh --database-id 42 --record-id 9" \
+        "save-memory.sh --topic t --content c --record-type Expenses" \
+        "save-memory.sh --topic t --content c --record-fields {}" \
+        "save-memory.sh --topic t --content c --record-name n"; do
+        : > "$LOG"
+        # shellcheck disable=SC2086
+        run bash "$HANDLERS/"$spec
+        [[ "$status" -ne 0 ]] || { echo "accepted: $spec"; return 1; }
+        [[ "$output" == *"Unknown argument"* ]] || { echo "not refused by name: $spec: $output"; return 1; }
+        [[ ! -s "$LOG" ]] || { echo "a request left the machine for: $spec"; cat "$LOG"; return 1; }
+    done
+}
+
+@test "old names: none of the nine retired scripts is installed" {
+    local s
+    for s in create-format list-formats revise-format rename-format retire-format reinstate-format \
+             save-record query-records record-history; do
+        [[ ! -e "$HANDLERS/$s.sh" ]] || { echo "still installed: $s.sh"; return 1; }
+    done
+}
+
+@test "new names: save-entry, query-entries and entry-history take the new options and reach the renamed routes" {
+    run bash "$HANDLERS/save-entry.sh" --database-id 42 --content "Migraine on Tuesday" --entry-id 7 --entry-name tue
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "POST http://localhost:5291/api/databases/42/entries" "$LOG" || { cat "$LOG"; return 1; }
+    grep -q '"entryId":7' "$LOG" || { cat "$LOG"; return 1; }
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"in Migraine log"* ]] || { echo "$output"; return 1; }
+    run bash "$HANDLERS/entry-history.sh" --database-id 42 --entry-id 7
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "GET http://localhost:5291/api/databases/42/entries/7/history" "$LOG" || { cat "$LOG"; return 1; }
 }

@@ -82,12 +82,12 @@ if [[ -z "$display_name" ]]; then
     [[ -n "$display_name" ]] && name_was_captured=1
 fi
 started=""
-if mmry_create_formation "$objective" "$session_id" "$task_id" "$display_name"; then
+if mmry_create_databaseion "$objective" "$session_id" "$task_id" "$display_name"; then
     started=1
 elif [[ "${MMRY_HTTP_CODE:-0}" == "400" && -n "$name_was_captured" ]]; then
     # A captured name must never cost the formation; a refusal writes nothing, so try once without.
     display_name=""
-    mmry_create_formation "$objective" "$session_id" "$task_id" "" && started=1
+    mmry_create_databaseion "$objective" "$session_id" "$task_id" "" && started=1
 fi
 if [[ -z "$started" ]]; then
     code="${MMRY_HTTP_CODE:-0}"

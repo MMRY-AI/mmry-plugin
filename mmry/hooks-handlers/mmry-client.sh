@@ -876,9 +876,9 @@ _mmry_request() {
     fi
 }
 
-_mmry_format_error() {
+_mmry_print_error() {
     # Format an API error for display. Handles 402 (credits exhausted) specially.
-    # Usage: _mmry_format_error [context]
+    # Usage: _mmry_print_error [context]
     #   context: optional label like "save" or "search"
     local context="${1:-request}"
     if [[ "$MMRY_HTTP_CODE" == "402" ]]; then
@@ -930,24 +930,24 @@ _mmry_json_string() {
     printf '"%s"' "$(_mmry_json_escape "$1")"
 }
 
-_mmry_format_name() {
-    # THE NAME OUT OF THE format BLOCK, AND NOT OUT OF THE WHOLE BODY.
+_mmry_database_name() {
+    # THE NAME OUT OF THE database BLOCK, AND NOT OUT OF THE WHOLE BODY.
     #
     # A whole-body grep for "name" reads the CUSTOMER'S OWN content: saving a JSON snippet that
-    # happens to contain a name key would produce a RecordedAs line naming something that was
-    # never a format, which is the exact lie the RecordedAs line exists to prevent (#31460 QA
+    # happens to contain a name key would produce a SavedInDatabase line naming something that was
+    # never a database, which is the exact lie the SavedInDatabase line exists to prevent (#31460 QA
     # round three, also-fix 5).
     #
-    # So the search is SCOPED to the format object first. "format": inside the customer's content
-    # is escaped by the encoder as \"format\", so the unescaped key this cuts on is the real one.
+    # So the search is SCOPED to the database object first. "database": inside the customer's content
+    # is escaped by the encoder as \"database\", so the unescaped key this cuts on is the real one.
     # A missing block, an explicit null and a block with no name all answer nothing, which is what
     # the caller reports as "saved as ordinary text".
     #
-    # This is the jq-less fallback. Where MMRY_JQ is resolved, callers read .format.name directly.
+    # This is the jq-less fallback. Where MMRY_JQ is resolved, callers read .database.name directly.
     local json="$1" tail block
 
-    tail="${json#*\"format\":}"
-    [[ "$tail" == "$json" ]] && return 0          # no format key at all
+    tail="${json#*\"database\":}"
+    [[ "$tail" == "$json" ]] && return 0          # no database key at all
     tail="${tail#"${tail%%[![:space:]]*}"}"       # leading whitespace
     [[ "${tail:0:1}" != "{" ]] && return 0        # null, or not an object
 
@@ -998,11 +998,11 @@ _mmry_build_json() {
 # ============================================================================
 
 mmry_create_memory() {
-    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID] [AGENT_NAME] [RECORD_TYPE] [RECORD_FIELDS_JSON] [RECORD_NAME]
+    # Usage: mmry_create_memory TIER CATEGORY SCOPE TOPIC CONTENT [SOURCE] [TASK_ID] [WORKING_DIR] [PROJECT_ID] [SESSION_ID] [VISIBILITY] [PERMISSION_GROUP_ID] [SUPERSEDES_ID] [AGENT_NAME] [DATABASE_NAME] [RECORD_FIELDS_JSON] [ENTRY_NAME]
     #
     # THE LAST THREE ARE THE STRUCTURED BLOCK (#31460, ported by #31827) and every one of them is
     # optional. They come AFTER the agent name (#30320) so no shipped caller's positions move. They
-    # are a DECORATION on the save and can never refuse it: a record type that does not exist, a
+    # are a DECORATION on the save and can never refuse it: a database that does not exist, a
     # field the type does not declare, a value too wide for its column all cost the structure and
     # keep the words. So a caller that passes them wrongly still saves the user's memory, which
     # is what makes them safe to pass from an automatic path.
@@ -1012,18 +1012,18 @@ mmry_create_memory() {
     local permission_group_id="${12:-}" supersedes_id="${13:-}"
     # #30320: the creating agent's name. Empty is omitted from the body, as every field here is.
     local agent_name="${14:-}"
-    local record_type="${15:-}" record_fields="${16:-}" record_name="${17:-}"
+    local database_name="${15:-}" entry_fields="${16:-}" entry_name="${17:-}"
 
     # Built separately and injected raw, because "fields" is an OBJECT keyed by the customer's
     # own field keys - invented by their assistant, different on every account - and there is no
     # fixed shape to build it from. _mmry_build_json's # prefix emits a value unquoted, which is
     # exactly what a nested JSON object needs.
     local structured=""
-    if [[ -n "$record_type" || -n "$record_fields" || -n "$record_name" ]]; then
+    if [[ -n "$database_name" || -n "$entry_fields" || -n "$entry_name" ]]; then
         structured="$(_mmry_build_json \
-            "formatName" "$record_type" \
-            "entryKey" "$record_name" \
-            "#fields" "$record_fields")"
+            "databaseName" "$database_name" \
+            "entryKey" "$entry_name" \
+            "#fields" "$entry_fields")"
     fi
 
     local body
@@ -1049,9 +1049,9 @@ mmry_create_memory() {
 
 
 # ============================================================================
-# 6b. STRUCTURED RECORD TYPES (#31460)
+# 6b. DATABASES (#31460)
 #
-# WHY THESE EXIST AT ALL. A structured record type is a shape the user's assistant designs for
+# WHY THESE EXIST AT ALL. A database is a shape the user's assistant designs for
 # them - every migraine and what preceded it, every expense, every job application - so that
 # "how many of these had X" becomes an answer rather than a guess. Until #31460 the whole
 # capability was reachable from the MMRY connector (ChatGPT, Cursor, Claude Desktop, Codex) and
@@ -1064,31 +1064,31 @@ mmry_create_memory() {
 # written all live in the procedures and are reached by calling them.
 # ============================================================================
 
-mmry_list_formats() {
-    # Usage: mmry_list_formats [INCLUDE_RETIRED]
-    # One row per record type - never per version - with how many records it holds.
+mmry_list_databases() {
+    # Usage: mmry_list_databases [INCLUDE_RETIRED]
+    # One row per database - never per version - with how many entries it holds.
     local include_retired="${1:-}"
-    local path="/api/data-formats"
+    local path="/api/databases"
     [[ -n "$include_retired" ]] && path+="?includeRetired=${include_retired}" || true
     _mmry_request GET "$path"
 }
 
-mmry_get_format() {
-    # Usage: mmry_get_format ID
-    # One record type in full, by ANY of its version ids, with every field the chain has ever
+mmry_get_database() {
+    # Usage: mmry_get_database ID
+    # One database in full, by ANY of its version ids, with every field the chain has ever
     # declared and which of them it has stopped collecting.
-    _mmry_request GET "/api/data-formats/$1"
+    _mmry_request GET "/api/databases/$1"
 }
 
-mmry_create_format() {
-    # Usage: mmry_create_format NAME FIELDS_JSON [DESCRIPTION] [ENTRY_KEY_MODE] [IDENTITY_FIELD] [MATCH_HINTS] [VISIBILITY] [PERMISSION_GROUP_ID]
+mmry_create_database() {
+    # Usage: mmry_create_database NAME FIELDS_JSON [DESCRIPTION] [ENTRY_KEY_MODE] [IDENTITY_FIELD] [MATCH_HINTS] [VISIBILITY] [PERMISSION_GROUP_ID]
     #
     # FIELDS_JSON is a JSON ARRAY of field definitions and is passed through raw:
     #   [{"key":"severity","label":"Severity","type":"number"},
     #    {"key":"triggers","label":"Triggers","type":"list","of":"text"}]
     #
     # MATCH_HINTS are the user's own words for an example of this type. They are shown to the
-    # assistant so it recognises a later example. The server also files a save as a record of the
+    # assistant so it recognises a later example. The server also files a save as an entry of the
     # type when its words contain them AND the save has values for the type's fields (supplied, or
     # labelled lines); without values it stays an ordinary memory. Naming the type and giving
     # its fields is the reliable way.
@@ -1106,13 +1106,13 @@ mmry_create_format() {
         "visibility" "$visibility" \
         "#permissionGroupId" "$group_id")"
 
-    _mmry_request POST "/api/data-formats" "$body"
+    _mmry_request POST "/api/databases" "$body"
 }
 
-mmry_revise_format() {
-    # Usage: mmry_revise_format ID FIELDS_JSON [NAME] [DESCRIPTION] [MATCH_HINTS]
-    # A NEW VERSION, not an edit: everything already recorded stays where it is and stays
-    # readable, and the older records simply have no value for a new field.
+mmry_revise_database() {
+    # Usage: mmry_revise_database ID FIELDS_JSON [NAME] [DESCRIPTION] [MATCH_HINTS]
+    # A NEW VERSION, not an edit: everything already saved stays where it is and stays
+    # readable, and the older entries simply have no value for a new field.
     local id="$1" fields="$2" name="${3:-}" description="${4:-}" hints="${5:-}"
 
     local body
@@ -1122,45 +1122,45 @@ mmry_revise_format() {
         "description" "$description" \
         "matchHints" "$hints")"
 
-    _mmry_request POST "/api/data-formats/${id}/versions" "$body"
+    _mmry_request POST "/api/databases/${id}/versions" "$body"
 }
 
-mmry_rename_format() {
-    # Usage: mmry_rename_format ID [NAME] [DESCRIPTION] [MATCH_HINTS]
+mmry_rename_database() {
+    # Usage: mmry_rename_database ID [NAME] [DESCRIPTION] [MATCH_HINTS]
     # Changes what a type is CALLED, what it is for, or the words that help the assistant choose it.
-    # Touches no field and no record. Omitted values are left alone rather than cleared.
+    # Touches no field and no entry. Omitted values are left alone rather than cleared.
     local body
     body="$(_mmry_build_json \
         "name" "${2:-}" \
         "description" "${3:-}" \
         "matchHints" "${4:-}")"
-    _mmry_request PUT "/api/data-formats/$1" "$body"
+    _mmry_request PUT "/api/databases/$1" "$body"
 }
 
-mmry_retire_format() {
-    # Usage: mmry_retire_format ID
-    # NOTHING IS DELETED. Every record it holds stays an ordinary memory, stays searchable and
+mmry_retire_database() {
+    # Usage: mmry_retire_database ID
+    # NOTHING IS DELETED. Every entry it holds stays an ordinary memory, stays searchable and
     # stays in the user's export; the response says how many it still holds.
-    _mmry_request POST "/api/data-formats/$1/retire"
+    _mmry_request POST "/api/databases/$1/retire"
 }
 
-mmry_reinstate_format() {
-    # Usage: mmry_reinstate_format ID
-    _mmry_request POST "/api/data-formats/$1/reinstate"
+mmry_reinstate_database() {
+    # Usage: mmry_reinstate_database ID
+    _mmry_request POST "/api/databases/$1/reinstate"
 }
 
-mmry_create_record() {
-    # Usage: mmry_create_record FORMAT_ID CONTENT [FIELDS_JSON] [TOPIC] [SCOPE] [RECORD_ID] [RECORD_NAME]
+mmry_save_entry() {
+    # Usage: mmry_save_entry DATABASE_ID CONTENT [FIELDS_JSON] [TOPIC] [SCOPE] [ENTRY_ID] [ENTRY_NAME]
     #
     # WHETHER THIS CREATES OR UPDATES IS NOT THE CALLER'S CHOICE and depends on what is already
-    # stored, so read the outcome in the response: "structured.created" is a new record,
+    # stored, so read the outcome in the response: "structured.created" is a new entry,
     # "structured.updated" changed an existing one, and "text.degraded" means the words were saved
     # as an ordinary memory and the fields could not be stored.
     #
-    # UNLIKE A SAVE, THIS ROUTE REFUSES. Here writing the record IS the request, so a field the
+    # UNLIKE A SAVE, THIS ROUTE REFUSES. Here writing the entry IS the request, so a field the
     # type does not declare is a 400 naming the field rather than a silent fallback.
-    local format_id="$1" content="$2" fields="${3:-}" topic="${4:-}"
-    local scope="${5:-}" record_id="${6:-}" record_name="${7:-}"
+    local database_id="$1" content="$2" fields="${3:-}" topic="${4:-}"
+    local scope="${5:-}" entry_id="${6:-}" entry_name="${7:-}"
 
     local body
     body="$(_mmry_build_json \
@@ -1168,19 +1168,19 @@ mmry_create_record() {
         "#fields" "$fields" \
         "topic" "$topic" \
         "scope" "$scope" \
-        "#entryId" "$record_id" \
-        "entryKey" "$record_name")"
+        "#entryId" "$entry_id" \
+        "entryKey" "$entry_name")"
 
-    _mmry_request POST "/api/data-formats/${format_id}/entries" "$body"
+    _mmry_request POST "/api/databases/${database_id}/entries" "$body"
 }
 
-mmry_get_records() {
-    # Usage: mmry_get_records FORMAT_ID [FILTER_QUERY] [ORDER] [PAGE] [PAGE_SIZE]
+mmry_get_entries() {
+    # Usage: mmry_get_entries DATABASE_ID [FILTER_QUERY] [ORDER] [PAGE] [PAGE_SIZE]
     #
     # FILTER_QUERY is already-encoded "field.<key>=<value>" pairs joined by &, which is the shape
     # the route takes: the keys are the CUSTOMER'S OWN field keys, unknown here and unknowable at
     # any layer above the account. Filters are ANDed and span EVERY VERSION of the type.
-    local format_id="$1" filters="${2:-}" order="${3:-}" page="${4:-}" page_size="${5:-}"
+    local database_id="$1" filters="${2:-}" order="${3:-}" page="${4:-}" page_size="${5:-}"
 
     local query=""
     [[ -n "$filters" ]] && query+="${filters}&" || true
@@ -1189,27 +1189,27 @@ mmry_get_records() {
     [[ -n "$page_size" ]] && query+="pageSize=${page_size}&" || true
     query="${query%&}"
 
-    local path="/api/data-formats/${format_id}/entries"
+    local path="/api/databases/${database_id}/entries"
     [[ -n "$query" ]] && path+="?${query}" || true
 
     _mmry_request GET "$path"
 }
 
-mmry_get_record_history() {
-    # Usage: mmry_get_record_history FORMAT_ID RECORD_ID
+mmry_get_entry_history() {
+    # Usage: mmry_get_entry_history DATABASE_ID ENTRY_ID
     #
-    # What a record USED TO hold, and when each value changed (#31384, ported by #31827). Changes
+    # What an entry USED TO hold, and when each value changed (#31384, ported by #31827). Changes
     # come back oldest first, each naming the field, what it was, what it became and who changed
-    # it, and the first ones are the values the record was created with.
+    # it, and the first ones are the values the entry was created with.
     #
     # EIGHT NAMES IN THE LIST ARE NOT FIELDS but reserved keys, each carrying a plain-English
     # label: the memory's own words, its topic, who can see it, its category, how long it lasts,
-    # its record name, the retired record it replaces, and the moment it was retired. The first
+    # its entry name, the retired entry it replaces, and the moment it was retired. The first
     # two the customer can correct directly ('~content~' is the memory's own words and '~topic~'
     # is its topic).
     #
-    # A record on another account and a record that does not exist answer identically.
-    _mmry_request GET "/api/data-formats/$1/entries/$2/history"
+    # An entry on another account and an entry that does not exist answer identically.
+    _mmry_request GET "/api/databases/$1/entries/$2/history"
 }
 
 mmry_get_memories() {
@@ -1349,8 +1349,8 @@ mmry_leave_formation() {
 # plugin user could only ever join a formation that something else had created, and nothing they
 # have could create one. Requirement 2 of #31104 asks for a message to reach another session with no
 # manual step, and calling the API by hand to start the formation is a manual step.
-mmry_create_formation() {
-    # Usage: mmry_create_formation "objective" SESSION_ID [TASK_ID] [DISPLAY_NAME]
+mmry_create_databaseion() {
+    # Usage: mmry_create_databaseion "objective" SESSION_ID [TASK_ID] [DISPLAY_NAME]
     # #31410: the lead's readable name, omitted entirely when empty.
     local objective="$1" session_id="$2" task_id="${3:-}" display_name="${4:-}"
     local body

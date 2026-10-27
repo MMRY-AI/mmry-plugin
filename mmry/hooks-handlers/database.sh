@@ -7,17 +7,17 @@
 # sees and corrects their entries themselves. Doing that in one place means every subcommand links
 # to the portal, and a test can check each subcommand reaches the right script.
 #
-#   create   create-format.sh     set up a database
-#   list     list-formats.sh      the databases, or one in full with --id
-#   add      save-record.sh       save a new entry
-#   find     query-records.sh     read entries, filtered on their fields
-#   correct  save-record.sh       change an entry already saved (needs --record-id)
-#   history  record-history.sh    what an entry held before, and when it changed
-#   retire   retire-format.sh     stop a database collecting; nothing is deleted
-#   restore  reinstate-format.sh  start a retired database collecting again
+#   create   create-database.sh     set up a database
+#   list     list-databases.sh      the databases, or one in full with --id
+#   add      save-entry.sh          save a new entry
+#   find     query-entries.sh       read entries, filtered on their fields
+#   correct  save-entry.sh          change an entry already saved (needs --entry-id)
+#   history  entry-history.sh       what an entry held before, and when it changed
+#   retire   retire-database.sh     stop a database collecting; nothing is deleted
+#   restore  reinstate-database.sh  start a retired database collecting again
 #
-# The scripts keep their internal names (DD-150): a database is a "format" and an entry a
-# "record" in code, and the flags (--format-id, --record-id) are unchanged.
+# The scripts, their options and the client functions are named for databases and entries too
+# (#32957, DD-164 in the mmry repository): --database-id names a database, --entry-id an entry.
 #
 # Usage: bash database.sh <subcommand> [the arguments of that subcommand's script]
 
@@ -48,28 +48,28 @@ has_flag() {
 }
 
 case "$SUB" in
-    create)  SCRIPT="create-format.sh" ;;
-    list)    SCRIPT="list-formats.sh" ;;
+    create)  SCRIPT="create-database.sh" ;;
+    list)    SCRIPT="list-databases.sh" ;;
     add)
         # Adding is a new entry. Naming an existing one is a correction, and the two are kept
         # apart so "add" never quietly changes something the customer already saved.
-        if has_flag --record-id "$@"; then
-            echo "Error: add saves a new entry. To change one already saved, use correct with --record-id." >&2
+        if has_flag --entry-id "$@"; then
+            echo "Error: add saves a new entry. To change one already saved, use correct with --entry-id." >&2
             exit 1
         fi
-        SCRIPT="save-record.sh" ;;
-    find)    SCRIPT="query-records.sh" ;;
+        SCRIPT="save-entry.sh" ;;
+    find)    SCRIPT="query-entries.sh" ;;
     correct)
         # A correction names the entry by id: the one way of naming an entry that cannot pick the
         # wrong one. Without it the server might create a new entry instead.
-        if ! has_flag --record-id "$@"; then
-            echo "Error: correct needs --record-id, the entry's id. Find it with find." >&2
+        if ! has_flag --entry-id "$@"; then
+            echo "Error: correct needs --entry-id, the entry's id. Find it with find." >&2
             exit 1
         fi
-        SCRIPT="save-record.sh" ;;
-    history) SCRIPT="record-history.sh" ;;
-    retire)  SCRIPT="retire-format.sh" ;;
-    restore) SCRIPT="reinstate-format.sh" ;;
+        SCRIPT="save-entry.sh" ;;
+    history) SCRIPT="entry-history.sh" ;;
+    retire)  SCRIPT="retire-database.sh" ;;
+    restore) SCRIPT="reinstate-database.sh" ;;
     *)
         echo "Error: unknown subcommand '$SUB'." >&2
         usage

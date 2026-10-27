@@ -23,6 +23,6 @@ if mmry_get_my_groups; then
         printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.[] | "  ID: \(.id)  Name: \(.groupName)"'
     fi
 else
-    _mmry_format_error "list groups"
+    _mmry_print_error "list groups"
     exit 1
 fi

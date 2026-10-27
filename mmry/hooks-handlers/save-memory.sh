@@ -7,12 +7,12 @@
 # The ordinary path hands the words to the server's AI layer, which decides tier, category and
 # scope and may extract SEVERAL memories from one context - there is no single memory for a set
 # of fields to belong to, and /api/memories/process carries no structured block. So when
-# --record-type, --record-fields or --record-name is given, this writes ONE memory directly
+# --database-name, --entry-fields or --entry-name is given, this writes ONE memory directly
 # through POST /api/memories with the structure attached, and the classification has to come
 # from the caller: --tier, --category, --scope, --topic and --content are then all required.
 #
 # Usage: bash save-memory.sh --tier T --category C --scope S --topic T --content C \
-#            --record-type "Migraine log" --record-fields '{"severity":7}' [--record-name NAME]
+#            --database-name "Migraine log" --entry-fields '{"severity":7}' [--entry-name NAME]
 
 set -euo pipefail
 
@@ -31,7 +31,7 @@ VISIBILITY="" PERMISSION_GROUP_ID="" SUPERSEDES=""
 SUPERSEDES_GIVEN="" PERMISSION_GROUP_ID_GIVEN=""
 
 # The structured block (#31460). All three optional, and none of them can cost the save.
-RECORD_TYPE="" RECORD_FIELDS="" RECORD_NAME=""
+DATABASE_NAME="" ENTRY_FIELDS="" ENTRY_NAME=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -56,22 +56,22 @@ while [[ $# -gt 0 ]]; do
         --supersedes)
             [[ $# -ge 2 ]] || { echo "Error: --supersedes needs the id of the memory being replaced." >&2; exit 1; }
             SUPERSEDES="$2"; SUPERSEDES_GIVEN=1; shift 2 ;;
-        # The name of one of the user's structured record types, from list-formats.sh, when this
+        # The name of one of the user's databases, from list-databases.sh, when this
         # save is an example of it. Naming one that does not exist costs the structure, never
         # the words.
-        --record-type)   RECORD_TYPE="$2"; shift 2 ;;
+        --database-name)   DATABASE_NAME="$2"; shift 2 ;;
         # The field values read out of the user's own words, as a JSON object keyed by that
         # type's field keys: {"severity":7,"triggers":["red wine","poor sleep"]}
-        --record-fields) RECORD_FIELDS="$2"; shift 2 ;;
-        # What names this record within its type, for a type whose records are named things that
-        # each change on their own. Saving the same name twice UPDATES that record.
-        --record-name)   RECORD_NAME="$2"; shift 2 ;;
+        --entry-fields) ENTRY_FIELDS="$2"; shift 2 ;;
+        # What names this entry within its type, for a type whose entries are named things that
+        # each change on their own. Saving the same name twice UPDATES that entry.
+        --entry-name)   ENTRY_NAME="$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
 
 # Default session_id from env when not passed explicitly. The API resolves
-# WorkingDirectory server-side from the registered session record when a
+# WorkingDirectory server-side from the registered session entry when a
 # session_id is sent.
 if [[ -z "$SESSION_ID" ]]; then
     SESSION_ID="${CLAUDE_SESSION_ID:-}"
@@ -111,7 +111,7 @@ AGENT_NAME="$(mmry_resolve_agent_name "$AGENT_NAME")"
 # ---------------------------------------------------------------------------
 # THE STRUCTURED ROUTE (#31460)
 # ---------------------------------------------------------------------------
-if [[ -n "$RECORD_TYPE" || -n "$RECORD_FIELDS" || -n "$RECORD_NAME" ]]; then
+if [[ -n "$DATABASE_NAME" || -n "$ENTRY_FIELDS" || -n "$ENTRY_NAME" ]]; then
     missing=""
     [[ -z "$TIER" ]] && missing+=" --tier"
     [[ -z "$CATEGORY" ]] && missing+=" --category"
@@ -127,7 +127,7 @@ if [[ -n "$RECORD_TYPE" || -n "$RECORD_FIELDS" || -n "$RECORD_NAME" ]]; then
     if mmry_create_memory "$TIER" "$CATEGORY" "$SCOPE" "$TOPIC" "$CONTENT" \
         "$SOURCE" "$TASK_ID" "$WORKING_DIR" "$PROJECT_ID" "$SESSION_ID" \
         "$VISIBILITY" "$PERMISSION_GROUP_ID" "$SUPERSEDES" "$AGENT_NAME" \
-        "$RECORD_TYPE" "$RECORD_FIELDS" "$RECORD_NAME"; then
+        "$DATABASE_NAME" "$ENTRY_FIELDS" "$ENTRY_NAME"; then
 
         if [[ -n "${MMRY_JQ:-}" ]]; then
             new_id="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.id // empty')"
@@ -136,32 +136,32 @@ if [[ -n "$RECORD_TYPE" || -n "$RECORD_FIELDS" || -n "$RECORD_NAME" ]]; then
         fi
         echo "NewMemoryID: ${new_id}"
 
-        # WHAT ACTUALLY HAPPENED, REPORTED RATHER THAN ASSUMED. A save that named a record type
+        # WHAT ACTUALLY HAPPENED, REPORTED RATHER THAN ASSUMED. A save that named a database
         # may still have been stored as ordinary text - an unknown type, a field the type does
         # not declare, a value too wide for its column - and the caller has to be able to tell,
-        # because telling the user "recorded in your migraine log" when it was not is worse than
-        # saying nothing. The response carries the format block only when the structure was
+        # because telling the user "saved in your migraine log" when it was not is worse than
+        # saying nothing. The response carries the database block only when the structure was
         # really stored.
         if [[ -n "${MMRY_JQ:-}" ]]; then
-            recorded="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.format.name // empty')"
+            saved_in="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.database.name // empty')"
         else
-            # Scoped to the format block. Grepping the whole body for "name" would read the
+            # Scoped to the database block. Grepping the whole body for "name" would read the
             # customer's own content (#31460 QA round three, also-fix 5).
-            recorded="$(_mmry_format_name "$MMRY_RESPONSE")"
+            saved_in="$(_mmry_database_name "$MMRY_RESPONSE")"
         fi
 
-        if [[ -n "$recorded" ]]; then
-            echo "RecordedAs: ${recorded}"
+        if [[ -n "$saved_in" ]]; then
+            echo "SavedInDatabase: ${saved_in}"
         else
-            echo "RecordedAs: (none - saved as ordinary text, the structure was not stored)"
+            echo "SavedInDatabase: (none - saved as ordinary text, the structure was not stored)"
         fi
         exit 0
     else
-        _mmry_format_error "save"
-        # A REFUSED RECORD SAVE STORES NOTHING (#32002). Said here, beside the server's own words,
+        _mmry_print_error "save"
+        # A REFUSED ENTRY SAVE STORES NOTHING (#32002). Said here, beside the server's own words,
         # so the assistant does not report a save that did not happen. The SKILL describes it too.
         if [[ "$MMRY_HTTP_CODE" == "400" ]]; then
-            echo "Nothing was saved. Check that --record-fields is one valid JSON object, then run the save again." >&2
+            echo "Nothing was saved. Check that --entry-fields is one valid JSON object, then run the save again." >&2
         fi
         exit 1
     fi
@@ -210,7 +210,7 @@ else
         # The API refused the replacement and saved nothing; its message says why and what to do.
         echo "MMRY AI: ${MMRY_PROCESS_MESSAGE}" >&2
     else
-        _mmry_format_error "save"
+        _mmry_print_error "save"
     fi
     exit 1
 fi

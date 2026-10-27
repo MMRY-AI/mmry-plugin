@@ -17,6 +17,6 @@ fi
 if mmry_deactivate_memory "$ID"; then
     echo "Memory deactivated."
 else
-    _mmry_format_error
+    _mmry_print_error
     exit 1
 fi

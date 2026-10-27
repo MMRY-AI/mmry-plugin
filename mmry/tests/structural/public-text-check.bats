@@ -317,10 +317,10 @@ _refuses_then_passes() {
 # handlers, three client functions and two tools #32640 removed. Removing an explanation must not
 # remove a step the assistant performs.
 CLAUDE_STEPS="save-memory.sh search-memories.sh deactivate-memory.sh
-list-groups.sh visibility.sh make-private.sh list-formats.sh create-format.sh
-revise-format.sh save-record.sh query-records.sh record-history.sh mmry-client.sh
+list-groups.sh visibility.sh make-private.sh list-databases.sh create-database.sh
+revise-database.sh save-entry.sh query-entries.sh entry-history.sh mmry-client.sh
 mmry_get_memories --ids --supersedes
---record-type --record-fields --visibility --permission-group-id"
+--database-name --entry-fields --visibility --permission-group-id"
 CODEX_STEPS="list-groups.sh visibility.sh make-private.sh formation-list.sh formation-claim.sh
 submit-feedback.sh mmry-setup.sh memory_save memory_search
 memory_retire memory_load formation_join formation_say formation_progress formation_roster

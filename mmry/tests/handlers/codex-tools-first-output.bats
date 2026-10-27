@@ -265,7 +265,7 @@ _codex_handler() {
     out="$(env -u MMRY_API_KEY -u MMRY_API_URL -u MMRY_AUTH_METHOD MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash -c '
         source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1 || exit 9
         MMRY_HTTP_CODE=000 MMRY_RESPONSE="curl failed"
-        _mmry_format_error save' _ "$PLUGIN_ROOT" 2>&1)"
+        _mmry_print_error save' _ "$PLUGIN_ROOT" 2>&1)"
     [[ "$out" == *"request_permissions"* ]] || { echo "$out"; return 1; }
     [[ "$out" == *"do not ask for access: call the"* ]] || { echo "$out"; return 1; }
     # The tools come before the request, so the model reads them first.
@@ -285,7 +285,7 @@ _codex_handler() {
     out="$(env -u MMRY_API_KEY -u MMRY_API_URL -u MMRY_AUTH_METHOD MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash -c '
         source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1 || exit 9
         MMRY_HTTP_CODE=000 MMRY_RESPONSE="curl failed"
-        _mmry_format_error save' _ "$PLUGIN_ROOT" 2>&1)"
+        _mmry_print_error save' _ "$PLUGIN_ROOT" 2>&1)"
     [[ "$out" == *"do not ask for access: call the"* ]] || { echo "$out"; return 1; }
     while IFS= read -r t; do
         [[ "$out" == *"$t"* ]] || missing="${missing} ${t}"
