@@ -44,8 +44,9 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
     local page="$PLUGIN_ROOT/commands/database.md"
     grep -q "https://mmryai.com/records" "$page"
     grep -q "keep that line in your answer" "$page"
-    # DD-150: the customer's words. "record type" and "format" appear only as the internal names.
+    # DD-150: the customer's words. DD-164 (#32957): the names too, so no retired script or option.
     ! grep -qiE 'record type' "$page"
+    ! grep -qE 'create-format|list-formats|revise-format|save-record|query-records|record-history|--format-id|--record-(id|type|name|fields)' "$page"
     grep -q "Asking in plain words" "$page"
 }
 
