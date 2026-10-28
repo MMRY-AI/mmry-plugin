@@ -21,7 +21,7 @@
 
 # Prints the pids to end, one per line.
 _mmry_detached_holders() {
-    local dir="$1" me="$2" snap pid ppid rest p hops kv found
+    local dir="$1" me="$2" snap pid ppid rest p hops kv found anc
     local -a PP=() CMD=()
     local via_proc=0
     # Linux: ps for the pid list, /proc for the environment. Git Bash: its own ps (no -o), /proc as
@@ -36,25 +36,30 @@ _mmry_detached_holders() {
         [[ "$pid" =~ ^[0-9]+$ && "$ppid" =~ ^[0-9]+$ ]] || continue
         PP[pid]="$ppid"; CMD[pid]="$rest"
     done <<<"$snap"
+    # The test shell and everything above it (bats-exec-test, bats-exec-file, the runner).
+    anc=" "
+    p="$me"; hops=0
+    while [[ -n "$p" && "$p" != 0 && "$p" != 1 && $hops -lt 64 ]]; do
+        anc+="$p "; p="${PP[p]:-}"; hops=$(( hops + 1 ))
+    done
     for pid in "${!PP[@]}"; do
-        [[ "$pid" == "$me" ]] && continue
-        # Spare the test shell's descendants (what the test itself is still running) and its
-        # ancestors (the runner).
-        p="$pid"; hops=0
+        [[ "$anc" == *" $pid "* ]] && continue
+        # Only a process that has been cut loose from the test is a stray. Anything whose parent chain
+        # reaches the test shell or one of its ancestors is still part of the run (a child the test is
+        # waiting on, or the pipe helper bats itself keeps beside the test), and ending it would hang or
+        # corrupt the run rather than clean it. A detached worker's parent has exited, so its chain
+        # reaches init instead.
+        p="${PP[pid]:-}"; hops=0
         while [[ -n "$p" && "$p" != 0 && "$p" != 1 && $hops -lt 64 ]]; do
-            [[ "$p" == "$me" ]] && continue 2
-            p="${PP[p]:-}"; hops=$(( hops + 1 ))
-        done
-        p="$me"; hops=0
-        while [[ -n "$p" && "$p" != 0 && "$p" != 1 && $hops -lt 64 ]]; do
-            [[ "$p" == "$pid" ]] && continue 2
+            [[ "$anc" == *" $p "* ]] && continue 2
             p="${PP[p]:-}"; hops=$(( hops + 1 ))
         done
         found=0
         if (( via_proc == 1 )); then
-            while IFS= read -r -d '' kv; do [[ "$kv" == *"$dir"* ]] && { found=1; break; }; done < "/proc/$pid/environ" 2>/dev/null || true
+            [[ -r "/proc/$pid/environ" ]] || continue
+            { while IFS= read -r -d '' kv; do [[ "$kv" == *"$dir"* ]] && { found=1; break; }; done < "/proc/$pid/environ"; } 2>/dev/null || true
             if (( found == 0 )); then
-                while IFS= read -r -d '' kv; do [[ "$kv" == *"$dir"* ]] && { found=1; break; }; done < "/proc/$pid/cmdline" 2>/dev/null || true
+                { while IFS= read -r -d '' kv; do [[ "$kv" == *"$dir"* ]] && { found=1; break; }; done < "/proc/$pid/cmdline"; } 2>/dev/null || true
             fi
         else
             [[ "${CMD[pid]}" == *"$dir"* ]] && found=1
