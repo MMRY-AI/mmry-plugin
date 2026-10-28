@@ -708,7 +708,11 @@ _shipped_cap() {
     printf '2\n' > "${SVC}/delay-sent"
     local starts=0 dead=2 before=0 asked k=0 bound
     # At most 7 starts (one question each); fewer when more fit. A start that asks nothing ends it.
-    while (( dead > 0 && starts < 7 && (starts == 0 || k > 0) && (k == 0 || starts <= (7 + k - 1) / k) )); do
+    # The stops are separate statements: bash 3.2 (stock macOS) evaluates both sides of || and && inside
+    # one arithmetic expression, so "k == 0 || ... / k" divided by zero there before the first start (#31406).
+    while (( dead > 0 && starts < 7 )); do
+        (( starts == 0 || k > 0 )) || break
+        if (( k > 0 )); then (( starts <= (7 + k - 1) / k )) || break; fi
         _session_start "$ME"; starts=$(( starts + 1 ))
         _started || { echo "start ${starts} failed: status $status, output [$output]"; return 1; }
         asked="$(_asked)"
