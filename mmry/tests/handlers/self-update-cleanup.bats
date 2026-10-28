@@ -217,7 +217,7 @@ _run_update() {
     [ ! -e "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
     [ ! -e "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
     [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "$output"
-    [[ "$(cat "$INSTALL_ROOT/.last-release-cleanup")" == "9.9.9" ]]
+    [[ "$(cat "$INSTALL_ROOT/.last-release-cleanup")" == "9.9.9" ]] || return 1
     # What the release lists is never removed, even when the install has no copy of a listed file.
     [ -f "$INSTALL_ROOT/hooks-handlers/self-update.sh" ]
     [ -f "$INSTALL_ROOT/hooks-handlers/lib-jq.sh" ]
@@ -256,8 +256,8 @@ _run_update() {
     [ ! -e "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
     [[ "$output" == *"MMRY AI plugin updated: 0.0.1 -> 9.9.9"* ]] || fail "$output"
     [[ "$output" != *"command not found"* ]] || fail "$output"
-    [[ "$(cat "$INSTALL_ROOT/.last-self-update")" == "9.9.9" ]]
-    [[ "$(cat "$STATE_DIR/.last-self-update")" == "9.9.9" ]]
+    [[ "$(cat "$INSTALL_ROOT/.last-self-update")" == "9.9.9" ]] || return 1
+    [[ "$(cat "$STATE_DIR/.last-self-update")" == "9.9.9" ]] || return 1
     # The old script's temporary files were cleaned up.
     local leftovers
     leftovers="$(ls -A "$TMPDIR" | grep -E '^mmry-(update|prune)-' || true)"
