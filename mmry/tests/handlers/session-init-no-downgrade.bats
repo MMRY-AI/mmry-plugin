@@ -347,15 +347,16 @@ _query_entries_from_installed() {
     _session_init "$new" -u MMRY_HOST
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$(cat "$STATE_DIR/.last-release-mirror")" == "$NEW_VERSION" ]] || fail "precondition: not mirrored: $output"
-    # What an older copy leaves outside the two folders that used to be watched.
+    # What an older copy leaves ONLY outside the two folders that used to be watched, so nothing
+    # in hooks-handlers/ or setup/ can start the refresh instead.
     printf 'old\n' > "$STATE_DIR/commands/list-formats.md"
-    mkdir -p "$STATE_DIR/hooks-handlers/old"
-    printf 'old\n' > "$STATE_DIR/hooks-handlers/old/stale.sh"
+    mkdir -p "$STATE_DIR/commands/old"
+    printf 'old\n' > "$STATE_DIR/commands/old/list-records.md"
 
     _session_init "$new" -u MMRY_HOST
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     local f
-    for f in commands/list-formats.md hooks-handlers/old/stale.sh; do
+    for f in commands/list-formats.md commands/old/list-records.md; do
         [ ! -e "$STATE_DIR/$f" ] || fail "$f survived: the refresh did not run: $output"
         [[ "$output" == *"removed $f from $STATE_DIR (not in release $NEW_VERSION)"* ]] || fail "$output"
     done
