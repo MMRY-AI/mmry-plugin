@@ -23,11 +23,15 @@
 _mmry_detached_holders() {
     local dir="$1" me="$2" snap pid ppid rest p hops kv found anc
     local -a PP=() CMD=()
-    local via_proc=0
+    local via_proc=0 hits=" " f
     # Linux: ps for the pid list, /proc for the environment. Git Bash: its own ps (no -o), /proc as
     # well. macOS: no /proc, so ps -Eww carries the environment on each line.
     if [[ -r /proc/self/environ ]]; then
         via_proc=1
+        # One grep reads every process's environment and command line; a bash loop doing the same, one
+        # process at a time, cost ~1 s a test and doubled the suite's time on the runner.
+        while IFS= read -r f; do f="${f#/proc/}"; hits+="${f%%/*} "; done < <(grep -laF -- "$dir" /proc/[0-9]*/environ /proc/[0-9]*/cmdline 2>/dev/null)
+        [[ "$hits" != " " ]] || return 0
         snap="$(ps -eo pid=,ppid= 2>/dev/null || ps 2>/dev/null)" || return 0
     else
         snap="$(ps -Eww -axo pid=,ppid=,command= 2>/dev/null)" || return 0
@@ -56,11 +60,7 @@ _mmry_detached_holders() {
         done
         found=0
         if (( via_proc == 1 )); then
-            [[ -r "/proc/$pid/environ" ]] || continue
-            { while IFS= read -r -d '' kv; do [[ "$kv" == *"$dir"* ]] && { found=1; break; }; done < "/proc/$pid/environ"; } 2>/dev/null || true
-            if (( found == 0 )); then
-                { while IFS= read -r -d '' kv; do [[ "$kv" == *"$dir"* ]] && { found=1; break; }; done < "/proc/$pid/cmdline"; } 2>/dev/null || true
-            fi
+            [[ "$hits" == *" $pid "* ]] && found=1
         else
             [[ "${CMD[pid]}" == *"$dir"* ]] && found=1
         fi
@@ -86,9 +86,20 @@ mmry_reap_detached() {
     return 0
 }
 
+
 # The teardown every suite shares: reap, then remove. One retry, because a process that was between its
 # last write and its exit when the reap returned can still land a file during the first rm.
+#
+# Git Bash starts a process slowly (about half a second for the scan), so there the reap runs only when
+# the first rm left the folder behind, which is exactly the failure being prevented. Linux and macOS
+# reap every time (MMRY_TEST_REAP_ALWAYS=1 makes Git Bash do so too; reap-detached.bats sets it): a few milliseconds there, and it is what keeps a worker from outliving its test.
 mmry_teardown_tmp() {
+    case "${MMRY_TEST_REAP_ALWAYS:+always}$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            rm -rf "$1" 2>/dev/null
+            [[ ! -e "$1" ]] && return 0
+            ;;
+    esac
     mmry_reap_detached "$1"
     rm -rf "$1" 2>/dev/null || { sleep 1; rm -rf "$1"; }
 }

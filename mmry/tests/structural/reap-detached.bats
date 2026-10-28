@@ -8,6 +8,8 @@
 
 load '../helpers/test-helper'
 
+setup() { export MMRY_TEST_REAP_ALWAYS=1; }
+
 # A writer that is NOT a descendant of this shell: the outer shell exits at once, so the inner one is
 # reparented, exactly as a detached hook worker is. It stops itself after 25 s so a broken reap cannot leave it for good. It carries the folder in its environment (TMPDIR).
 _detached_writer() {   # $1 = folder it writes into, prints its pid
