@@ -10,6 +10,11 @@
 #
 # Defines functions only. The caller must define log(), which takes one message, and must run with
 # its own error handling: every function here reports failure by its return status.
+#
+# set -euo pipefail is the repository convention for every script in this directory
+# (structural/file-integrity.bats). Both callers already run under it, so sourcing this changes
+# nothing for them.
+set -euo pipefail
 
 # Scratch space for the removal step, made only when it is needed.
 _su_scratch=""
