@@ -121,6 +121,7 @@ _updatable_plugin() {
     cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$root/hooks-handlers/"
     cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$root/hooks-handlers/"
     cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$root/hooks-handlers/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$root/hooks-handlers/"
     printf '%s' '{ "name": "mmry", "version": "0.0.1" }' > "$root/.claude-plugin/plugin.json"
 }
 

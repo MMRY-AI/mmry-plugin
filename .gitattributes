@@ -39,3 +39,8 @@
 # command for every platform and Windows finds mmry-mcp.cmd from the same name. A CRLF checkout would
 # make its first line ask for an interpreter called "sh\r".
 mmry/mcp/mmry-mcp text eol=lf
+
+# The list of files a release ships (#32957 fix round 4). self-update.sh reads its first line as a
+# header; a CRLF checkout would end every path with a carriage return. self-update strips it, but
+# the file is generated and compared byte for byte by scripts/build-release-files.sh --check.
+mmry/release-files.txt text eol=lf

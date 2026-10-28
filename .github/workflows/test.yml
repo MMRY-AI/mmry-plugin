@@ -72,6 +72,14 @@ jobs:
           git fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
           bash scripts/check-rename-damage.sh --base origin/develop
 
+      # #32957 fix round 4: self-update removes from customer machines every plugin file that
+      # mmry/release-files.txt does not name, so the list must match the tree exactly. Its own
+      # step so a stale list is named in the job summary. The suite runs it again in
+      # structural/release-files.bats.
+      - name: Check the release file list matches the tree
+        shell: /bin/bash -e {0}
+        run: bash scripts/build-release-files.sh --check
+
       - name: Run offline tests (structural + unit + handlers)
         # /bin/bash explicitly, so the step's own shell is the stock one on macOS too.
         shell: /bin/bash -e {0}
