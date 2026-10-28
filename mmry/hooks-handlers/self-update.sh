@@ -128,7 +128,12 @@ log() {
 # the update still installs and nothing is removed (_su_removals_available says so).
 _su_scratch=""
 # shellcheck source=/dev/null
-source "$(cd "$(dirname "$0")" && pwd)/lib-release-files.sh" 2>/dev/null || true
+# Checked for first: stock macOS bash 3.2 ends the script on a source of a missing file, whatever
+# follows it (seen in CI on 387be89), so `|| true` alone is not a fallback there.
+_su_lib="$(cd "$(dirname "$0")" && pwd)/lib-release-files.sh"
+if [[ -f "$_su_lib" && -r "$_su_lib" ]]; then
+    source "$_su_lib" 2>/dev/null || true
+fi
 _su_removals_available() {
     declare -F _su_load_list >/dev/null 2>&1 && declare -F _su_prune >/dev/null 2>&1 \
         && declare -F _su_scratch_dir >/dev/null 2>&1 && declare -F _su_json_version >/dev/null 2>&1

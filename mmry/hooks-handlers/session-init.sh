@@ -153,7 +153,9 @@ _mmry_inst_json_ver=""
 _mmry_have_lib=0
 _su_scratch=""
 # shellcheck source=/dev/null
-if source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-release-files.sh" 2>/dev/null \
+# Checked for first: stock macOS bash 3.2 ends the script on a source of a missing file.
+_mmry_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-release-files.sh"
+if [[ -f "$_mmry_lib" && -r "$_mmry_lib" ]] && source "$_mmry_lib" 2>/dev/null \
         && declare -F _su_version_newer >/dev/null 2>&1; then
     _mmry_have_lib=1
     _mmry_root_ver="$(_su_json_version "$P/.claude-plugin/plugin.json" || true)"
