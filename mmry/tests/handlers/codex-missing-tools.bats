@@ -48,7 +48,7 @@ teardown() {
         wait "${SERVER_JOB:-}" 2>/dev/null || true
     fi
     for p in $LIVE_PIDS; do kill "$p" 2>/dev/null || true; done
-    rm -rf "$TEST_TMPDIR"
+    mmry_teardown_tmp "$TEST_TMPDIR"
 }
 
 # A process that is alive for the length of a test, standing in for a running server.
