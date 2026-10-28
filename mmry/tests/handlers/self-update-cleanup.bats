@@ -27,6 +27,7 @@ _updatable_plugin() {
     cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$root/hooks-handlers/"
     cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$root/hooks-handlers/"
     cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$root/hooks-handlers/"
+    cp "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$root/hooks-handlers/"
     printf '%s' '{ "name": "mmry", "version": "0.0.1" }' > "$root/.claude-plugin/plugin.json"
 }
 
@@ -38,7 +39,8 @@ _release() {
     rm -rf "$TEST_TMPDIR/remote" "$TEST_TMPDIR/remote.tar.gz"
     mkdir -p "$rel/hooks-handlers" "$rel/.claude-plugin" "$rel/commands"
     cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" \
-       "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$rel/hooks-handlers/"
+       "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" \
+       "$rel/hooks-handlers/"
     printf 'new\n' > "$rel/hooks-handlers/save-entry.sh"
     printf 'new\n' > "$rel/commands/database.md"
     printf 'readme\n' > "$rel/README.md"
@@ -159,6 +161,24 @@ _run_update() {
     [ -f "$INSTALL_ROOT/hooks-handlers/save-entry.sh" ]
 }
 
+@test "32957 control: a release without the removal library installs and removes nothing (#32957 fix round 4b)" {
+    # The list reader and the removal step moved to lib-release-files.sh. A partial release without
+    # it must still install, and must not remove anything.
+    _release 9.9.9 good
+    rm -f "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/hooks-handlers/lib-release-files.sh"
+    ( cd "$TEST_TMPDIR/remote" && tar -czf "$TEST_TMPDIR/remote.tar.gz" mmry-plugin-master )
+    _old_install
+    rm -f "$INSTALL_ROOT/hooks-handlers/lib-release-files.sh"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
+    [[ "$output" == *"removal code (lib-release-files.sh) could not be loaded; removing nothing"* ]] || fail "$output"
+    [[ "$output" == *"MMRY AI plugin updated: 0.0.1 -> 9.9.9"* ]] || fail "$output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-entry.sh" ]
+}
+
 @test "32957 control: a file list that is not one removes nothing" {
     _release 9.9.9 garbage
     _old_install
@@ -249,6 +269,8 @@ _run_update() {
     _release 9.9.9 good
     _old_install
     cp "$PLUGIN_ROOT/tests/fixtures/self-update-2.15.2.sh" "$INSTALL_ROOT/hooks-handlers/self-update.sh"
+    # 2.15.2 shipped no lib-release-files.sh; the release being installed brings it.
+    rm -f "$INSTALL_ROOT/hooks-handlers/lib-release-files.sh"
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"

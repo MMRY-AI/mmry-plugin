@@ -46,6 +46,7 @@ hooks-handlers/lib-foundation-switch.sh
 hooks-handlers/lib-hookread.sh
 hooks-handlers/lib-host.sh
 hooks-handlers/lib-jq.sh
+hooks-handlers/lib-release-files.sh
 hooks-handlers/lib-tool-server.sh
 hooks-handlers/list-databases.sh
 hooks-handlers/list-groups.sh
@@ -94,6 +95,7 @@ tests/e2e/setup-unreachable.bats
 tests/e2e/setup_suite.bash
 tests/fixtures/formation-render-2.9.1.jq
 tests/fixtures/self-update-2.15.2.sh
+tests/fixtures/session-init-2.15.2.sh
 tests/handlers/agent-name.bats
 tests/handlers/codex-formation-lead.bats
 tests/handlers/codex-foundation-parts.bats
@@ -126,6 +128,7 @@ tests/handlers/save-supersede.bats
 tests/handlers/search-memories.bats
 tests/handlers/self-update-cleanup.bats
 tests/handlers/self-update.bats
+tests/handlers/session-init-no-downgrade.bats
 tests/handlers/session-start-macos.bats
 tests/handlers/session-start-reload.bats
 tests/handlers/session-start.bats

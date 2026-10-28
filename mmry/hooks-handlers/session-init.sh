@@ -119,48 +119,169 @@ if [[ "$(mmry_host)" == "codex" ]]; then
     fi
 fi
 
-# Copy current handler and setup scripts (all platforms)
-cp "$P"/hooks-handlers/*.sh "${MMRY_STATE_DIR}/hooks-handlers/"
-# No .cmd is staged here, and none needs to be. The Windows launcher, codex-hook.cmd, is back since
-# #31245 QA round 8 and is named by every commandWindows entry in hooks/codex-hooks.json, but it is
-# run from the PLUGIN ROOT, beside the codex-hook.sh it starts, exactly as the Unix registrations
-# run codex-hook.sh from there. Nothing reaches it through this state directory.
-# NOT THE CLAUDE CODE INSTALLERS (#31245 QA). install.sh, install.ps1 and install.bat install MMRY
-# for Claude Code: they create ~/.claude and rewrite its settings, and none refuses on Codex the way
-# the uninstallers do. Nothing tells a Codex customer to run them, so they are not put in the Codex
-# home at all, and copies an earlier version put there are removed. Claude Code is unchanged.
-for _mmry_setup_file in "$P"/setup/*.sh "$P"/setup/*.bat "$P"/setup/*.ps1; do
-    [[ -f "$_mmry_setup_file" ]] || continue
-    case "$(basename "$_mmry_setup_file")" in
-        install.sh|install.ps1|install.bat)
-            [[ "$(mmry_host)" == "codex" ]] && continue ;;
-    esac
-    cp "$_mmry_setup_file" "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
-done
-if [[ "$(mmry_host)" == "codex" ]]; then
-    rm -f "${MMRY_STATE_DIR}/setup/install.sh" "${MMRY_STATE_DIR}/setup/install.ps1" \
-          "${MMRY_STATE_DIR}/setup/install.bat" 2>/dev/null || true
+# NEVER PUT AN OLDER RELEASE OVER A NEWER ONE, AND REMOVE WHAT THIS RELEASE DOES NOT SHIP
+# (#32957 fix round 4b).
+#
+# The copy below used to run on every session start with no version check and no deletion. Claude
+# Code keeps a session on the plugin cache folder it started from, so a session still running an
+# older release, starting or clearing after an update, copied its old handlers over the newer
+# installed copy. Measured on a real machine on 2026-10-28: an older mmry-client.sh, without
+# mmry_get_entries, beside the newer query-entries.sh, which then failed with "command not found".
+#
+# So the copy now happens only when this session's release (its .claude-plugin/plugin.json) is the
+# same as or newer than the installed copy's. Versions are compared numerically, field by field,
+# with any -suffix or +suffix ignored (lib-release-files.sh, taken from the unmerged #31245 fix).
+# The installed copy's version is its own .claude-plugin/plugin.json, which self-update.sh and this
+# script write, or failing that the .last-self-update self-update.sh writes beside it. When either
+# version cannot be read the copy goes ahead as it always did, and that is said on stderr.
+#
+# An equal version copies on purpose: it is what repairs an installed copy that an older session,
+# running a session-init.sh from before this check, has already overwritten.
+#
+# When it copies, it also removes from the installed copy every file in a folder the release ships
+# that this release's release-files.txt does not list, by self-update.sh's rules and code
+# (lib-release-files.sh): the credential, dot files, logs, run-time state and anything outside the
+# shipped folders are kept, and with no readable list nothing is removed. A git checkout is never
+# used to remove anything, because a developer's new handler is in no list yet.
+log() {
+    echo "mmry session-init: $*" >&2
+}
+_mmry_install=1
+_mmry_root_ver=""
+_mmry_inst_ver=""
+_mmry_inst_json_ver=""
+_mmry_have_lib=0
+_su_scratch=""
+# shellcheck source=/dev/null
+if source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-release-files.sh" 2>/dev/null \
+        && declare -F _su_version_newer >/dev/null 2>&1; then
+    _mmry_have_lib=1
+    _mmry_root_ver="$(_su_json_version "$P/.claude-plugin/plugin.json" || true)"
+    _mmry_inst_json_ver="$(_su_json_version "${MMRY_STATE_DIR}/.claude-plugin/plugin.json" || true)"
+    _mmry_inst_ver="$_mmry_inst_json_ver"
+    if [[ -z "$_mmry_inst_ver" && -f "${MMRY_STATE_DIR}/.last-self-update" ]]; then
+        IFS= read -r _mmry_inst_ver < "${MMRY_STATE_DIR}/.last-self-update" 2>/dev/null || true
+        _mmry_inst_ver="${_mmry_inst_ver//[[:space:]]/}"
+    fi
+    if [[ -z "$_mmry_root_ver" ]]; then
+        log "this session's release at ${P} has no readable version; installing it as before"
+    elif [[ -z "$_mmry_inst_ver" ]]; then
+        for _mmry_f in "${MMRY_STATE_DIR}"/hooks-handlers/*.sh; do
+            if [[ -f "$_mmry_f" ]]; then
+                log "the installed copy at ${MMRY_STATE_DIR} has no readable version; installing ${_mmry_root_ver} over it as before"
+                break
+            fi
+        done
+    else
+        _mmry_cmp=0
+        _su_version_newer "$_mmry_inst_ver" "$_mmry_root_ver" || _mmry_cmp=$?
+        if (( _mmry_cmp == 0 )); then
+            _mmry_install=0
+            log "the installed copy at ${MMRY_STATE_DIR} is ${_mmry_inst_ver}, newer than this session's ${_mmry_root_ver}; leaving it as it is"
+        elif (( _mmry_cmp == 2 )); then
+            log "cannot compare the installed version '${_mmry_inst_ver}' with this session's '${_mmry_root_ver}'; installing as before"
+        fi
+    fi
+else
+    log "lib-release-files.sh could not be loaded; installing without the version check, removing nothing"
 fi
 
-# THE BUNDLED jq, BESIDE THE INSTALLED HANDLERS, ON CODEX (#31245 QA round 8).
-#
-# The skill sends the model to run handlers from this state directory (join, save, search), and
-# lib-jq.sh looks for the bundled jq at ../vendor/jq beside whichever copy is running, or at
-# ${CLAUDE_PLUGIN_ROOT}/vendor/jq. Codex exports that variable to hook processes only, not to the
-# commands the model runs, so on Codex the lookup landed on a vendor directory nobody had copied.
-# On a machine with a jq on PATH nobody noticed. On a stock Windows machine there is none, so
-# every handler the model ran failed to read the credential: measured live, a Codex session asked
-# to join a formation got "Could not join formation 35 (HTTP 000)" while its own hooks, which run
-# from the plugin root where vendor/jq does exist, loaded memories normally.
-#
-# Copied only when the checksum list differs, so once per plugin version rather than per session.
-# Codex only: on Claude Code the model's commands carry CLAUDE_PLUGIN_ROOT and resolve the plugin's
-# own copy, and test case 4 forbids changing what this file does there.
-if [[ "$(mmry_host)" == "codex" && -f "$P/vendor/jq/CHECKSUMS.txt" ]]; then
-    if ! cmp -s "$P/vendor/jq/CHECKSUMS.txt" "${MMRY_STATE_DIR}/vendor/jq/CHECKSUMS.txt" 2>/dev/null; then
-        mkdir -p "${MMRY_STATE_DIR}/vendor/jq" 2>/dev/null \
-            && cp "$P"/vendor/jq/* "${MMRY_STATE_DIR}/vendor/jq/" 2>/dev/null \
-            && chmod +x "${MMRY_STATE_DIR}"/vendor/jq/jq-* 2>/dev/null || true
+# Remove from the installed copy what this release does not ship. Cheap when there is nothing to
+# do: once a version has been mirrored (.last-release-mirror), the full comparison runs again only
+# when a handler or setup file appears that this release does not have, which is what an older
+# session's copy leaves.
+_mmry_mirror() {
+    local list="$P/release-files.txt" marker="${MMRY_STATE_DIR}/.last-release-mirror"
+    local done_ver="" f="" rel="" stale=0
+    (( _mmry_have_lib == 1 )) && [[ -n "$_mmry_root_ver" ]] || return 0
+    if [[ -e "$P/.git" || -e "$P/../.git" ]]; then
+        return 0
+    fi
+    if [[ -f "$marker" ]]; then
+        IFS= read -r done_ver < "$marker" 2>/dev/null || true
+        done_ver="${done_ver%$'\r'}"
+    fi
+    if [[ -n "$done_ver" && "$done_ver" == "$_mmry_root_ver" ]]; then
+        for f in "${MMRY_STATE_DIR}"/hooks-handlers/* "${MMRY_STATE_DIR}"/setup/*; do
+            [[ -f "$f" ]] || continue
+            case "${f##*/}" in mmry-config*.json|*.log) continue ;; esac
+            rel="${f#"${MMRY_STATE_DIR}"/}"
+            if [[ ! -e "$P/$rel" ]]; then
+                stale=1
+                break
+            fi
+        done
+        (( stale == 1 )) || return 0
+    fi
+    if ! { _su_scratch_dir && _su_load_list "$list" "${_su_scratch}/list"; }; then
+        log "could not read this release's file list (${_SU_LIST_PROBLEM:-no scratch space}); removing nothing from ${MMRY_STATE_DIR}"
+        return 0
+    fi
+    if [[ "$_SU_LIST_VERSION" != "$_mmry_root_ver" ]]; then
+        log "this release's file list is for '${_SU_LIST_VERSION}' but its plugin.json says '${_mmry_root_ver}'; removing nothing from ${MMRY_STATE_DIR}"
+        return 0
+    fi
+    if _su_prune "${_su_scratch}/list" "${MMRY_STATE_DIR}" "$_mmry_root_ver"; then
+        printf '%s\n' "$_mmry_root_ver" > "$marker" 2>/dev/null || true
+    fi
+    return 0
+}
+
+if (( _mmry_install == 1 )); then
+    # Copy current handler and setup scripts (all platforms)
+    cp "$P"/hooks-handlers/*.sh "${MMRY_STATE_DIR}/hooks-handlers/"
+    # No .cmd is staged here, and none needs to be. The Windows launcher, codex-hook.cmd, is back since
+    # #31245 QA round 8 and is named by every commandWindows entry in hooks/codex-hooks.json, but it is
+    # run from the PLUGIN ROOT, beside the codex-hook.sh it starts, exactly as the Unix registrations
+    # run codex-hook.sh from there. Nothing reaches it through this state directory.
+    # NOT THE CLAUDE CODE INSTALLERS (#31245 QA). install.sh, install.ps1 and install.bat install MMRY
+    # for Claude Code: they create ~/.claude and rewrite its settings, and none refuses on Codex the way
+    # the uninstallers do. Nothing tells a Codex customer to run them, so they are not put in the Codex
+    # home at all, and copies an earlier version put there are removed. Claude Code is unchanged.
+    for _mmry_setup_file in "$P"/setup/*.sh "$P"/setup/*.bat "$P"/setup/*.ps1; do
+        [[ -f "$_mmry_setup_file" ]] || continue
+        case "$(basename "$_mmry_setup_file")" in
+            install.sh|install.ps1|install.bat)
+                [[ "$(mmry_host)" == "codex" ]] && continue ;;
+        esac
+        cp "$_mmry_setup_file" "${MMRY_STATE_DIR}/setup/" 2>/dev/null || true
+    done
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        rm -f "${MMRY_STATE_DIR}/setup/install.sh" "${MMRY_STATE_DIR}/setup/install.ps1" \
+              "${MMRY_STATE_DIR}/setup/install.bat" 2>/dev/null || true
+    fi
+
+    # THE BUNDLED jq, BESIDE THE INSTALLED HANDLERS, ON CODEX (#31245 QA round 8).
+    #
+    # The skill sends the model to run handlers from this state directory (join, save, search), and
+    # lib-jq.sh looks for the bundled jq at ../vendor/jq beside whichever copy is running, or at
+    # ${CLAUDE_PLUGIN_ROOT}/vendor/jq. Codex exports that variable to hook processes only, not to the
+    # commands the model runs, so on Codex the lookup landed on a vendor directory nobody had copied.
+    # On a machine with a jq on PATH nobody noticed. On a stock Windows machine there is none, so
+    # every handler the model ran failed to read the credential: measured live, a Codex session asked
+    # to join a formation got "Could not join formation 35 (HTTP 000)" while its own hooks, which run
+    # from the plugin root where vendor/jq does exist, loaded memories normally.
+    #
+    # Copied only when the checksum list differs, so once per plugin version rather than per session.
+    # Codex only: on Claude Code the model's commands carry CLAUDE_PLUGIN_ROOT and resolve the plugin's
+    # own copy, and test case 4 forbids changing what this file does there.
+    if [[ "$(mmry_host)" == "codex" && -f "$P/vendor/jq/CHECKSUMS.txt" ]]; then
+        if ! cmp -s "$P/vendor/jq/CHECKSUMS.txt" "${MMRY_STATE_DIR}/vendor/jq/CHECKSUMS.txt" 2>/dev/null; then
+            mkdir -p "${MMRY_STATE_DIR}/vendor/jq" 2>/dev/null \
+                && cp "$P"/vendor/jq/* "${MMRY_STATE_DIR}/vendor/jq/" 2>/dev/null \
+                && chmod +x "${MMRY_STATE_DIR}"/vendor/jq/jq-* 2>/dev/null || true
+        fi
+    fi
+
+    # Record the version now installed, so a later older session can tell it is older.
+    if [[ -n "$_mmry_root_ver" && "$_mmry_root_ver" != "$_mmry_inst_json_ver" ]]; then
+        { mkdir -p "${MMRY_STATE_DIR}/.claude-plugin" \
+            && cp "$P/.claude-plugin/plugin.json" "${MMRY_STATE_DIR}/.claude-plugin/plugin.json"; } 2>/dev/null || true
+    fi
+
+    _mmry_mirror || true
+    if [[ -n "$_su_scratch" ]]; then
+        rm -rf "$_su_scratch" 2>/dev/null || true
     fi
 fi
 
