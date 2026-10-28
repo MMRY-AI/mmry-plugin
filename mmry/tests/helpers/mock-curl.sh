@@ -207,8 +207,7 @@ case "$URL" in
         else
             HTTP_CODE="200"
             # Tests can vary the stored default with MOCK_DEFAULT_VISIBILITY_BODY.
-            _dvb_default='{"visibility":"Global","permissionGroupID":null}'
-            RESPONSE_BODY="${MOCK_DEFAULT_VISIBILITY_BODY:-$_dvb_default}"
+            RESPONSE_BODY="${MOCK_DEFAULT_VISIBILITY_BODY:-{\"visibility\":\"Global\",\"permissionGroupID\":null\}}"
         fi
         ;;
     */api/sessions/active)
