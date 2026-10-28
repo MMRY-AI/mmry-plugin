@@ -41,6 +41,10 @@ copy() {
 
 run_spec() { ( cd "$1/mmry/tests" && PLUGIN_ROOT="$1/mmry" ./libs/bats-core/bin/bats "integration/$2" ) > "$3" 2>&1; }
 
+# MMRY_MUT_KEEP=<dir> keeps every run's full bats output there, as evidence (it holds no credential:
+# the specs print memory ids, topics and the context the session was handed, never a key).
+keep() { [[ -n "${MMRY_MUT_KEEP:-}" ]] && mkdir -p "$MMRY_MUT_KEEP" && cp "$1" "$MMRY_MUT_KEEP/$2.out"; return 0; }
+
 declare -a SPECS=() NAMES=() DESCS=() FILES=() OLDS=() NEWS=()
 # add <spec> <name> <description> <file> <old text> <new text>
 add() { SPECS+=("$1"); NAMES+=("$2"); DESCS+=("$3"); FILES+=("$4"); OLDS+=("$5"); NEWS+=("$6"); }
@@ -69,7 +73,8 @@ refused=0; survived=0; bad=0
 for spec in "${selected[@]}"; do
     echo "== ${spec}"
     copy "$WORK/base"
-    if run_spec "$WORK/base" "$spec" "$WORK/base.out"; then
+    run_spec "$WORK/base" "$spec" "$WORK/base.out"; rc=$?; keep "$WORK/base.out" "${spec%.bats}-baseline"
+    if (( rc == 0 )); then
         echo "GREEN     baseline: untouched plugin, $(grep -c '^ok' "$WORK/base.out") of $(grep -c '^\(not \)\{0,1\}ok' "$WORK/base.out") checks pass"
         grep '^ok' "$WORK/base.out" | sed 's/^/          /'
     else
@@ -83,7 +88,8 @@ for spec in "${selected[@]}"; do
         if ! _rep "$WORK/m/mmry/${FILES[$i]}" "${OLDS[$i]}" "${NEWS[$i]}"; then
             echo "ABORT: mutation ${NAMES[$i]} found nothing to change in ${FILES[$i]}"; exit 3
         fi
-        if run_spec "$WORK/m" "$spec" "$WORK/m.out"; then
+        run_spec "$WORK/m" "$spec" "$WORK/m.out"; rc=$?; keep "$WORK/m.out" "${spec%.bats}-${NAMES[$i]}"
+        if (( rc == 0 )); then
             echo "SURVIVED  ${NAMES[$i]}: ${DESCS[$i]}"; survived=$(( survived + 1 ))
         else
             echo "RED       ${NAMES[$i]}: ${DESCS[$i]} -- $(grep -c '^not ok' "$WORK/m.out") of $(grep -c '^\(not \)\{0,1\}ok' "$WORK/m.out") checks fail"

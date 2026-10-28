@@ -93,7 +93,13 @@ _delivered_file() {
     run "$LIVE_JQ" -r '.hookSpecificOutput.hookEventName // empty' "$(_s)/hook.out"
     assert_output "SessionStart"
     run _context
-    assert_output --regexp '^MMRY AI loaded [0-9]+ memories\. Read them now: '
+    # Anchored, and no warning: a clean new session is told only that its memories loaded. A
+    # "WARNING FROM MMRY AI" ahead of it (Foundation not stored, payload unreadable) is a failure.
+    assert_output --regexp '^MMRY AI loaded [0-9]+ memories\. Read them now: ' || {
+        echo "hook stderr: $(tail -5 "$(_s)/hook.err")"
+        return 1
+    }
+    refute_output --partial 'WARNING FROM MMRY AI'
 }
 
 @test "J-011 claude-code: the session gets exactly the account's startup memories" {

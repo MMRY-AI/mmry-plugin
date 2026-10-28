@@ -174,11 +174,14 @@ _delivered_file() {
 
 @test "J-011 codex: a real Codex conversation is handed MMRY's context saying memories loaded" {
     run _context
+    # Anchored, and no warning: a clean new conversation is told only that its memories loaded. A
+    # "WARNING FROM MMRY AI" ahead of it (Foundation not stored, payload unreadable) is a failure.
     assert_output --regexp '^MMRY AI loaded [0-9]+ memories\. Read them now: ' || {
         echo "developer messages from MMRY in the conversation: $(cat "$(_s)/delivered.txt")"
         echo "codex exec exit $(cat "$(_s)/exec.rc"); last stderr: $(tail -5 "$(_s)/exec.err")"
         return 1
     }
+    refute_output --partial 'WARNING FROM MMRY AI'
 }
 
 @test "J-011 codex: the conversation gets exactly the account's startup memories" {
