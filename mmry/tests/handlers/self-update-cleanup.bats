@@ -57,6 +57,24 @@ _release() {
             } > "$TEST_TMPDIR/list.tmp"
             mv "$TEST_TMPDIR/list.tmp" "$rel/release-files.txt"
             ;;
+        unsafe|nocore)
+            # A good list, plus an entry that climbs out of the plugin folder (unsafe), or without
+            # the three core entries self-update trusts a list by (nocore) (#33033).
+            {
+                printf '# mmry release files %s\n' "$version"
+                {
+                    ( cd "$rel" && find . -type f | sed 's|^\./||' )
+                    printf '%s\n' release-files.txt
+                    [[ "$list" == "unsafe" ]] && printf '%s\n' '../x'
+                } | LC_ALL=C sort -u \
+                  | if [[ "$list" == "nocore" ]]; then
+                        grep -Fvx -e release-files.txt -e hooks-handlers/self-update.sh -e .claude-plugin/plugin.json
+                    else
+                        cat
+                    fi
+            } > "$TEST_TMPDIR/list.tmp"
+            mv "$TEST_TMPDIR/list.tmp" "$rel/release-files.txt"
+            ;;
         garbage)
             printf 'this is not a release file list\nhooks-handlers/self-update.sh\n' > "$rel/release-files.txt"
             ;;
@@ -306,4 +324,134 @@ _run_update() {
     done
     # The code is one brace group, and it ends in exit.
     [[ "$(tail -n 2 "$script")" == $'exit 0\n}' ]] || fail "self-update.sh does not end in 'exit 0' and '}'"
+}
+
+# ── #33033: every refusal proven by a test that fails when the refusal is removed ──
+
+@test "33033 refusal: a file list entry ../x is refused, nothing is removed, and the parent folder is untouched" {
+    _release 9.9.9 unsafe
+    _old_install
+    # Beside the plugin root and beside the installed copy: what '../' would reach.
+    printf 'mine\n' > "$TEST_TMPDIR/cache/planted.txt"
+    printf 'mine\n' > "$HOME/.claude/planted.txt"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"names an unsafe or empty path: '../x'"*"removing nothing"* ]] || fail "the refusal was not said: $output"
+    [[ "$output" != *"removed "* ]] || fail "something was removed: $output"
+    [ -f "$TEST_TMPDIR/cache/planted.txt" ] || fail "the file beside the plugin root was removed: $output"
+    [ -f "$HOME/.claude/planted.txt" ] || fail "the file beside the installed copy was removed: $output"
+    # Nothing at all was removed, which is what a refused list means.
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "a refused list still removed save-record.sh: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "a refused list still removed save-record.sh: $output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a refused list was recorded as done"
+    # The update itself still went in.
+    [[ "$output" == *"MMRY AI plugin updated: 0.0.1 -> 9.9.9"* ]] || fail "$output"
+}
+
+@test "33033 refusal: a file list without the core entries removes nothing" {
+    _release 9.9.9 nocore
+    _old_install
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"does not name the release's own core files"*"removing nothing"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "an untrusted list removed save-record.sh: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "an untrusted list removed save-record.sh: $output"
+}
+
+@test "33033 refusal: an installed list for another version is refused at the reconcile" {
+    # No download: the installed version is the remote one, so only the once-per-version pass runs.
+    _release 9.9.9 good
+    _old_install
+    sed '1s/.*/# mmry release files 9.9.8/' "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" \
+        > "$INSTALL_ROOT/release-files.txt"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$INSTALL_ROOT/.claude-plugin/plugin.json"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"the installed file list is for '9.9.8' but plugin.json says '9.9.9'; removing nothing"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "precondition: an update ran: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a refused list was recorded as done"
+}
+
+@test "33033 fix: a name holding a line break is one name, and no fragment of it is removed" {
+    _release 9.9.9 good
+    _old_install
+    local odd=$'hooks-handlers/stale\nmy-notes.txt'
+    printf 'x\n' > "$INSTALL_ROOT/$odd" || fail "this file system cannot hold a line break in a name"
+    [ -f "$INSTALL_ROOT/$odd" ] || fail "precondition: the name with a line break was not created"
+    # The fragment after the line break, as a real unlisted file at the top of the install folder,
+    # which the removal step must never touch.
+    printf 'mine\n' > "$INSTALL_ROOT/my-notes.txt"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [ -f "$INSTALL_ROOT/my-notes.txt" ] || fail "a fragment of a name removed a top-level file: $output"
+    [ ! -e "$INSTALL_ROOT/$odd" ] || fail "the unlisted file with a line break in its name survived: $output"
+    # Printed once, on one line, with the line break shown rather than written.
+    local line one=""
+    while IFS= read -r line; do
+        [[ "$line" == *"removed "*"hooks-handlers/stale"*"my-notes.txt"*" from $INSTALL_ROOT (not in release 9.9.9; its name holds a line break)"* ]] && one=1
+    done <<< "$output"
+    [[ -n "$one" ]] || fail "the removal was not printed as one name on one line: $output"
+    # No fragment is reported as if it were a file of its own.
+    while IFS= read -r line; do
+        [[ "$line" != *"removed my-notes.txt"* ]] || fail "a fragment was reported removed: $output"
+        [[ "$line" != *"removed hooks-handlers/stale from"* ]] || fail "a fragment was reported removed: $output"
+    done <<< "$output"
+    # And the ordinary removals still happen.
+    [ ! -e "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+}
+
+@test "33033 fix: a symbolic link in place of the installed folder is refused, and where it points is untouched" {
+    _release 9.9.9 good
+    _old_install
+    local elsewhere="$TEST_TMPDIR/elsewhere"
+    mkdir -p "$elsewhere/hooks-handlers"
+    printf 'mine\n' > "$elsewhere/hooks-handlers/save-record.sh"
+    rm -rf "$STATE_DIR"
+    # Git Bash copies instead of linking unless asked for a native link; Linux and macOS ignore MSYS.
+    MSYS=winsymlinks:nativestrict ln -s "$elsewhere" "$STATE_DIR"
+    [ -L "$STATE_DIR" ] || fail "precondition: $STATE_DIR is not a symbolic link"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"refusing to remove anything from '$STATE_DIR': it is a symbolic link"* ]] || fail "$output"
+    [ -f "$elsewhere/hooks-handlers/save-record.sh" ] || fail "removed a file through the link: $output"
+    # The real plugin root is still cleaned.
+    [ ! -e "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+}
+
+@test "33033 fix: sourcing the library leaves the calling script's shell options as they were" {
+    local probe="$TEST_TMPDIR/probe.sh"
+    cat > "$probe" <<'PROBE'
+#!/usr/bin/env bash
+# No strict mode here, on purpose: the library must not turn it on.
+before="$- $(set -o | grep -E '^(errexit|nounset|pipefail)[[:space:]]' | tr -s ' \t' ' ' | tr '\n' ';') $(shopt -p | tr '\n' ';')"
+log() { :; }
+source "$1"
+after="$- $(set -o | grep -E '^(errexit|nounset|pipefail)[[:space:]]' | tr -s ' \t' ' ' | tr '\n' ';') $(shopt -p | tr '\n' ';')"
+if [[ "$before" != "$after" ]]; then
+    printf 'CHANGED\nbefore: %s\nafter:  %s\n' "$before" "$after"
+    exit 1
+fi
+# Still a script without strict mode: an unset variable and a failing command do not end it.
+: "$this_is_unset"
+false
+printf 'UNCHANGED\n'
+# And the library works there: a good list loads.
+mkdir -p "$TMPDIR/lst"
+printf '%s\n' '# mmry release files 1.0.0' release-files.txt hooks-handlers/self-update.sh \
+    .claude-plugin/plugin.json > "$TMPDIR/lst/release-files.txt"
+_su_load_list "$TMPDIR/lst/release-files.txt" "$TMPDIR/lst/out" && printf 'LOADED %s\n' "$_SU_LIST_VERSION"
+PROBE
+    run bash "$probe" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"UNCHANGED"* ]] || fail "$output"
+    [[ "$output" == *"LOADED 1.0.0"* ]] || fail "$output"
 }
