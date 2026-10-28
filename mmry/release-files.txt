@@ -141,6 +141,7 @@ tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
+tests/helpers/reap-detached.bash
 tests/helpers/test-helper.bash
 tests/integration/api-health.bats
 tests/integration/database-command.bats
@@ -213,6 +214,7 @@ tests/structural/macos-hook-payload.bats
 tests/structural/marketplace-sync.bats
 tests/structural/plugin-json.bats
 tests/structural/public-text-check.bats
+tests/structural/reap-detached.bats
 tests/structural/release-files.bats
 tests/structural/run-codex-mutations.sh
 tests/structural/search-command.bats
