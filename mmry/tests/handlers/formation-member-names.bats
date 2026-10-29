@@ -77,6 +77,7 @@ FAKECURL
 
 teardown() {
     bash "$HH/formation-state.sh" clear "$SID" >/dev/null 2>&1 || true
+    mmry_measure_teardown "$TEST_TMPDIR"
     rm -rf "$TEST_TMPDIR"
 }
 

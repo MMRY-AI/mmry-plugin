@@ -48,6 +48,7 @@ teardown() {
         wait "${SERVER_JOB:-}" 2>/dev/null || true
     fi
     for p in $LIVE_PIDS; do kill "$p" 2>/dev/null || true; done
+    mmry_measure_teardown "$TEST_TMPDIR"
     rm -rf "$TEST_TMPDIR"
 }
 

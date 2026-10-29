@@ -6,9 +6,9 @@ name: Plugin Tests
 # is no Mac here" written into its own tests while a Mac runner sat unused in this file.
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, '33079/**']
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, '33079/**']
 
 jobs:
   offline-tests:
@@ -16,6 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        rep: [1, 2, 3, 4, 5, 6]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout with submodules
@@ -88,6 +89,13 @@ jobs:
           chmod +x run-tests.sh
           chmod +x libs/bats-core/bin/bats
           ./run-tests.sh offline
+
+      - name: Measurement log (33079, branch-only)
+        if: always()
+        shell: /bin/bash {0}
+        run: |
+          echo "== leftovers"; cat /tmp/mmry-measure/leftovers.log 2>/dev/null || echo none
+          echo "== cksum"; cat /tmp/mmry-measure/cksum.log 2>/dev/null | head -400 || true
 
   integration-tests:
     runs-on: ubuntu-latest
