@@ -456,10 +456,11 @@ PROBE
     [[ "$output" == *"LOADED 1.0.0"* ]] || fail "$output"
 }
 
-# The two refusals at the top of _su_prune, called directly (#33033 fix round 5). Neither can be
-# reached through self-update.sh or session-init.sh today, which hand it only the plugin root or the
-# host's state folder, so these source the real library and call the real function with the targets
-# the refusals exist for. HOME and TMPDIR are the suite's own; curl is a mock that records any call.
+# The two refusals at the top of _su_prune, called directly (#33033 fix round 5). Both can be reached
+# through self-update.sh (a plugin root that is HOME; an installed copy without hooks-handlers); a
+# direct call names the target exactly, so these source the real library and call the real function
+# with the targets the refusals exist for. HOME and TMPDIR are the suite's own; curl is a mock that
+# records any call.
 _prune_probe() {
     PRUNE_PROBE="$TEST_TMPDIR/prune-probe.sh"
     cat > "$PRUNE_PROBE" <<'PROBE'
@@ -540,4 +541,196 @@ _assert_refused() {
     [ -f "$filed/commands/my-notes.md" ] || fail "a file in the folder whose hooks-handlers is a file was removed"
     [ -f "$filed/hooks-handlers" ] || fail "the hooks-handlers file was removed"
     [ ! -e "$missing" ] || fail "the missing folder was created"
+}
+
+# ---------------------------------------------------------------------------------------------
+# Each list refusal on its own, and the compare fail-closed refusal (#33033 fix round 6).
+# A probe sources the real library, loads list $2 with _su_load_list and, only if it loads, prunes
+# plugin folder $3 with _su_prune. The folder holds an unlisted file, hooks-handlers/stray-old.sh,
+# which any prune that goes ahead removes. So with a refusal taken out, the file is removed and the
+# refusal is not said. HOME and TMPDIR are the suite's own; nothing here touches a real install.
+# ---------------------------------------------------------------------------------------------
+
+# The complete, trusted list for the probe plugin.
+PROBE_GOOD_ENTRIES=(release-files.txt hooks-handlers/self-update.sh .claude-plugin/plugin.json hooks-handlers/save-entry.sh)
+
+_list_probe() {
+    LIST_PROBE="$TEST_TMPDIR/list-probe.sh"
+    cat > "$LIST_PROBE" <<'PROBE'
+#!/usr/bin/env bash
+# $1 library, $2 list, $3 plugin folder.
+log() { printf 'LOG: %s\n' "$1"; }
+source "$1"
+if _su_load_list "$2" "$TMPDIR/probe-list.out"; then
+    printf 'LIST LOADED %s\n' "$_SU_LIST_VERSION"
+    _su_prune "$TMPDIR/probe-list.out" "$3" 9.9.9
+    printf 'RC=%s\n' "$?"
+else
+    printf 'LIST REFUSED: %s\n' "$_SU_LIST_PROBLEM"
+fi
+PROBE
+    PROBE_PLUGIN="$TEST_TMPDIR/probe-plugin"
+    rm -rf "$PROBE_PLUGIN"
+    mkdir -p "$PROBE_PLUGIN/hooks-handlers" "$PROBE_PLUGIN/.claude-plugin"
+    printf 'listed\n' > "$PROBE_PLUGIN/hooks-handlers/self-update.sh"
+    printf 'listed\n' > "$PROBE_PLUGIN/hooks-handlers/save-entry.sh"
+    printf 'old\n' > "$PROBE_PLUGIN/hooks-handlers/stray-old.sh"
+    printf '{}\n' > "$PROBE_PLUGIN/.claude-plugin/plugin.json"
+    printf 'listed\n' > "$PROBE_PLUGIN/release-files.txt"
+}
+
+# Writes $TEST_TMPDIR/probe-list.txt: the header, then one line per argument.
+_probe_list() {
+    PROBE_LIST="$TEST_TMPDIR/probe-list.txt"
+    { printf '# mmry release files 9.9.9\n'; printf '%s\n' "$@"; } > "$PROBE_LIST"
+}
+
+_run_list_probe() {
+    run env HOME="$HOME" TMPDIR="$TMPDIR" PATH="${PROBE_PATH:-$PATH}" \
+        bash "$LIST_PROBE" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$PROBE_LIST" "$PROBE_PLUGIN"
+}
+
+# Fails unless nothing in the probe plugin was removed.
+_assert_probe_untouched() {
+    [ -f "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "the unlisted file was removed: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/self-update.sh" ] || fail "a listed file was removed: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/save-entry.sh" ] || fail "a listed file was removed: $output"
+    [[ "$output" != *"removed "* ]] || fail "something was removed: $output"
+}
+
+# Runs the probe on the good list plus entry $1, and fails unless that list was refused as unsafe
+# for that entry and nothing was removed.
+_assert_unsafe_refused() {
+    local entry="$1"
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}" "$entry"
+    _run_list_probe
+    [[ "$output" == *"LIST REFUSED: "*"names an unsafe or empty path: '${entry}'"* ]] \
+        || fail "the entry '${entry}' was not refused as unsafe: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list naming '${entry}' was loaded: $output"
+    _assert_probe_untouched
+}
+
+# Runs the probe on the good list without entry $1, and fails unless that list was refused as
+# untrusted and nothing was removed.
+_assert_core_refused() {
+    local missing="$1" e entries=()
+    for e in "${PROBE_GOOD_ENTRIES[@]}"; do [[ "$e" == "$missing" ]] || entries+=("$e"); done
+    [[ "${#entries[@]}" -eq 3 ]] || fail "precondition: '$missing' is not one of the good entries"
+    _list_probe
+    _probe_list "${entries[@]}"
+    _run_list_probe
+    [[ "$output" == *"LIST REFUSED: "*"does not name the release's own core files"* ]] \
+        || fail "a list without only '${missing}' was not refused as untrusted: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list without '${missing}' was loaded: $output"
+    _assert_probe_untouched
+}
+
+# The control the refusals below are measured against: the good list loads and the prune removes
+# exactly the unlisted file. Without it, "nothing removed" could mean the probe never prunes.
+@test "33033 control: the probe's good list loads and its prune removes only the unlisted file" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "$output"
+    [[ "$output" == *"RC=0"* ]] || fail "$output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "the unlisted file survived a good prune: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/self-update.sh" ] || fail "$output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/save-entry.sh" ] || fail "$output"
+}
+
+# One list per unsafe pattern; each entry matches that pattern and no other alternative.
+@test "33033 refusal unsafe '': an empty entry is refused and nothing is removed" {
+    _assert_unsafe_refused ""
+}
+@test "33033 refusal unsafe '/*': an absolute entry is refused and nothing is removed" {
+    _assert_unsafe_refused "/abs/x"
+}
+@test "33033 refusal unsafe backslash: an entry holding a backslash is refused and nothing is removed" {
+    _assert_unsafe_refused 'hooks-handlers\x'
+}
+@test "33033 refusal unsafe '.': an entry '.' is refused and nothing is removed" {
+    _assert_unsafe_refused "."
+}
+@test "33033 refusal unsafe '..': an entry '..' is refused and nothing is removed" {
+    _assert_unsafe_refused ".."
+}
+@test "33033 refusal unsafe './*': an entry './x' is refused and nothing is removed" {
+    _assert_unsafe_refused "./x"
+}
+@test "33033 refusal unsafe '../*': an entry '../x' is refused and nothing is removed" {
+    _assert_unsafe_refused "../x"
+}
+@test "33033 refusal unsafe '*/./*': an entry 'a/./b' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/./b"
+}
+@test "33033 refusal unsafe '*/../*': an entry 'a/../b' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/../b"
+}
+@test "33033 refusal unsafe '*/.': an entry 'a/.' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/."
+}
+@test "33033 refusal unsafe '*/..': an entry 'a/..' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/.."
+}
+@test "33033 refusal unsafe '*//*': an entry 'a//b' is refused and nothing is removed" {
+    _assert_unsafe_refused "a//b"
+}
+
+# One list per core entry, each missing only that entry.
+@test "33033 refusal core: a list missing only release-files.txt is refused and nothing is removed" {
+    _assert_core_refused release-files.txt
+}
+@test "33033 refusal core: a list missing only hooks-handlers/self-update.sh is refused and nothing is removed" {
+    _assert_core_refused hooks-handlers/self-update.sh
+}
+@test "33033 refusal core: a list missing only .claude-plugin/plugin.json is refused and nothing is removed" {
+    _assert_core_refused .claude-plugin/plugin.json
+}
+
+# The compare fail-closed refusal in _su_prune: a sort or comm that fails is never trusted. The mock
+# lives in a folder put first on PATH for the probe alone.
+_compare_mock_bin() {
+    COMPARE_MOCK_BIN="$TEST_TMPDIR/compare-mock-bin"
+    mkdir -p "$COMPARE_MOCK_BIN"
+    PROBE_PATH="$COMPARE_MOCK_BIN:$PATH"
+}
+
+# Fails unless the prune refused at the compare, returned 1 and removed nothing.
+_assert_compare_refused() {
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the good list did not load: $output"
+    [[ "$output" == *"could not compare ${PROBE_PLUGIN} with the release's file list; removing nothing"* ]] \
+        || fail "the failed compare was not refused: $output"
+    [[ "$output" == *"RC=1"* ]] || fail "the failed compare did not return 1: $output"
+    _assert_probe_untouched
+}
+
+@test "33033 refusal compare: a comm that fails, printing every file it was given, removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    # Called as: comm -23 FOUND LIST. Prints every found file, as comm on unsorted input might
+    # report them, then fails.
+    printf '#!/usr/bin/env bash\ncat "$2"\nexit 1\n' > "$COMPARE_MOCK_BIN/comm"
+    chmod +x "$COMPARE_MOCK_BIN/comm"
+    _run_list_probe
+    _assert_compare_refused
+}
+
+@test "33033 refusal compare: a sort that fails on the found-file list removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    local real_sort
+    real_sort="$(command -v sort)"
+    # Fails only for the found-file list. Every other sort (the list itself, the shipped folders)
+    # is the real one, so the list still loads.
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'for a in "$@"; do case "$a" in */found) exit 1 ;; esac; done\n'
+        printf 'exec "%s" "$@"\n' "$real_sort"
+    } > "$COMPARE_MOCK_BIN/sort"
+    chmod +x "$COMPARE_MOCK_BIN/sort"
+    _run_list_probe
+    _assert_compare_refused
 }
