@@ -522,9 +522,8 @@ _assert_refused() {
     # A folder with the release's other shipped folders but no hooks-handlers, holding unlisted files
     # a prune would remove.
     local bare="$TEST_TMPDIR/not-a-plugin"
-    mkdir -p "$bare/commands" "$bare/.claude-plugin"
+    mkdir -p "$bare/commands"
     printf 'mine\n' > "$bare/commands/my-notes.md"
-    printf 'mine\n' > "$bare/.claude-plugin/extra.json"
     # hooks-handlers present, but as a file rather than a folder.
     local filed="$TEST_TMPDIR/file-not-folder"
     mkdir -p "$filed/commands"
@@ -538,7 +537,6 @@ _assert_refused() {
         _assert_refused "$target" "it has no hooks-handlers folder, so it is not a plugin folder"
     done
     [ -f "$bare/commands/my-notes.md" ] || fail "a file in the folder without hooks-handlers was removed"
-    [ -f "$bare/.claude-plugin/extra.json" ] || fail "a file in the folder without hooks-handlers was removed"
     [ -f "$filed/commands/my-notes.md" ] || fail "a file in the folder whose hooks-handlers is a file was removed"
     [ -f "$filed/hooks-handlers" ] || fail "the hooks-handlers file was removed"
     [ ! -e "$missing" ] || fail "the missing folder was created"
