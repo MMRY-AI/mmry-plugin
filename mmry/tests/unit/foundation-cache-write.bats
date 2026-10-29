@@ -239,9 +239,6 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
 }
 
 @test "write_foundation_cache: what this writes is accepted by the reader, so the pair is not merely self-consistent" {
-# MUTATION (#33079): a stray background writer the test never ends.    printf '#!/usr/bin/env bash
-while :; do : > "$TMPDIR/stray-writer.out"; sleep 0.05; done
-' > "$TEST_TMPDIR/stray-writer.sh"    bash "$TEST_TMPDIR/stray-writer.sh" </dev/null >/dev/null 2>&1 &
     mmry_write_foundation_cache "$(_resp)" "$CACHE"
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
