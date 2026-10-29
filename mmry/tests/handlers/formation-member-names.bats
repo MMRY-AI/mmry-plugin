@@ -77,7 +77,7 @@ FAKECURL
 
 teardown() {
     bash "$HH/formation-state.sh" clear "$SID" >/dev/null 2>&1 || true
-    rm -rf "$TEST_TMPDIR"
+    mmry_teardown_tmp "$TEST_TMPDIR"
 }
 
 # A JSON \uXXXX escape, made at run time. \134 is a backslash; writing the escape out literally in
