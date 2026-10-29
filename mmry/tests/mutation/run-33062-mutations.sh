@@ -41,7 +41,7 @@ m_start_holds_output() { _rep "$1/$START" '    exec >/dev/null
 m_stdin_lost() { _rep "$1/$INIT" 'session-start.sh" <&0 &' 'session-start.sh" &'; }
 m_stderr_held() { _rep "$1/$HOOK" '"$@" 2>"$_mmry_errlog")' '"$@")'; }
 m_no_notice() { _rep "$1/$HOOK" 'if (( _mmry_rc > 128 )); then' 'if false; then'; }
-m_no_budget() { _rep "$1/$HOOK" "read -r -d '' -t \"\$_mmry_budget\" _mmry_out" "read -r -d '' _mmry_out"; }
+m_no_budget() { _rep "$1/$HOOK" 'read -r -d "" -t "$_mmry_left" _mmry_out' 'read -r -d "" _mmry_out'; }
 # The measured time check itself: a budget past the limit and a start that needs 35 s before it
 # delivers. Only the elapsed-time assertion can catch this; the memories do arrive.
 m_budget_past_limit() {

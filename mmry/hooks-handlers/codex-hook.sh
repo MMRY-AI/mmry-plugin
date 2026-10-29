@@ -116,10 +116,13 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 # are ready. And the wait has a budget: if the output is not complete within it, this prints a
 # notice instead, so the person is told the memories were not loaded rather than told nothing.
 #
-# THE BUDGET IS BELOW THE LIMIT, NOT AT IT. The limit runs from when Codex starts the hook, and on
-# Windows a few seconds of it are spent before this line (cmd.exe, finding Git's bash, starting it:
-# 3.3 s measured on the machine above). 20 s here leaves that, and the notice, room. A test may
-# shorten it with MMRY_CODEX_START_BUDGET (whole seconds, 1 to 25); anything else means 20.
+# THE BUDGET IS BELOW THE LIMIT, NOT AT IT, AND IT IS COUNTED FROM THIS SHELL'S START. The limit runs
+# from when Codex starts the hook. On Windows a few seconds of it are spent before this shell exists
+# (cmd.exe, finding Git's bash, starting it: 3.3 s measured on the machine above), and under load
+# the lines above this one, which source a library and start a few processes, took several seconds
+# more. So the wait is what is left of 20 s since this shell started (bash's SECONDS, which bash 3.2
+# has too), never less than 1. A test may shorten the 20 with MMRY_CODEX_START_BUDGET (whole
+# seconds, 1 to 25); anything else means 20.
 #
 # THE HANDLER'S STDERR GOES TO A FILE, NOT TO CODEX. Its housekeeping runs on after this hook exits,
 # and a process still holding the hook's stderr would keep Codex waiting for it exactly as one
@@ -132,11 +135,15 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     if ! [[ "$_mmry_budget" =~ ^[0-9]+$ ]] || (( _mmry_budget < 1 || _mmry_budget > 25 )); then
         _mmry_budget=20
     fi
+    _mmry_left=$(( _mmry_budget - SECONDS ))
+    (( _mmry_left >= 1 )) || _mmry_left=1
     _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
     _mmry_out=""
     _mmry_rc=0
     set +e
-    IFS= read -r -d '' -t "$_mmry_budget" _mmry_out < <(bash "$TARGET" "$@" 2>"$_mmry_errlog")
+    # Inside eval because process substitution is bash syntax and this whole file must still PARSE
+    # under dash (codex-hook.bats, "the re-exec guard is POSIX"); only bash ever runs this line.
+    eval 'IFS= read -r -d "" -t "$_mmry_left" _mmry_out < <(bash "$TARGET" "$@" 2>"$_mmry_errlog")'
     _mmry_rc=$?
     set -e
     if (( _mmry_rc > 128 )); then

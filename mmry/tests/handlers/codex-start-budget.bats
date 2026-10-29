@@ -16,8 +16,8 @@
 #     were not loaded, inside the limit, instead of starting silently without them (R2);
 #   - Claude Code's session start is untouched: it still finishes all of that before it returns (R3).
 #
-# Elapsed time is measured with EPOCHREALTIME where the shell has it and perl otherwise (the stock
-# macOS bash 3.2 has no EPOCHREALTIME; macOS and Linux both ship perl).
+# Elapsed time is measured with perl's Time::HiRes, which macOS, Linux and Git for Windows all ship;
+# the stock macOS bash 3.2 has no sub-second clock of its own.
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
@@ -44,10 +44,7 @@ teardown() {
     mmry_teardown_tmp "$TEST_TMPDIR"
 }
 
-_now() {
-    if [[ -n "${EPOCHREALTIME:-}" ]]; then printf '%s' "${EPOCHREALTIME/,/.}"
-    else perl -MTime::HiRes=time -e 'printf "%.3f", time'; fi
-}
+_now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
 
 # _wait_for FILE SECONDS - true once FILE exists.
 _wait_for() {
