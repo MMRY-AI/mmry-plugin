@@ -60,10 +60,12 @@ _mmry_td_scan() {
             [[ "$seen" == *" $pid "* || "$anc" == *" $pid "* ]] && continue
             seen+="$pid "
             [[ -r "/proc/$pid/stat" ]] || continue
-            s="$(<"/proc/$pid/stat")" || continue
+            s="$( { IFS= read -r s < "/proc/$pid/stat"; printf '%s' "$s"; } 2>/dev/null )"
+            [[ -n "$s" ]] || continue
             s="${s##*) }"
             [[ "${s:0:1}" == "Z" ]] && continue
-            cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)"
+            # The braces keep the redirect's own error quiet: the process may be gone by now.
+            cmd="$( { tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null )"
             [[ -n "$cmd" ]] || continue
             printf '%s\t%s\n' "$pid" "${cmd:0:200}" >> "$out"
         done < "$out.hits"
