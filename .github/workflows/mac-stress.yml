@@ -8,29 +8,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [1, 2, 3, 4, 5, 6, 7, 8]
+        leg: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Pin bash to the stock /bin/bash
-        run: |
-          mkdir -p "$HOME/stockbash"
-          ln -sf /bin/bash "$HOME/stockbash/bash"
-          ln -sf /bin/sh   "$HOME/stockbash/sh"
-          echo "$HOME/stockbash" >> "$GITHUB_PATH"
-      - name: Test 62 alone, traced; on a kill show where it died and what the system says
+      - name: The Codex docs test body as a plain script, traced
         shell: /bin/bash {0}
         run: |
-          cd mmry/tests; chmod +x libs/bats-core/bin/bats
-          ./libs/bats-core/bin/bats --trace --filter "no customer surface promises" structural/codex-docs-and-eol.bats > /tmp/o 2> /tmp/e; rc=$?
-          echo "rc=$rc"
-          if grep -q "Killed: 9" /tmp/e /tmp/o; then
-            echo "=== KILLED: last 60 trace lines"; tail -60 /tmp/e | cut -c1-240
-            echo "=== trace lines total: $(wc -l < /tmp/e)"
-            echo "=== kernel log"; sudo log show --last 10m --info --predicate 'eventMessage CONTAINS[c] "kill" OR eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus"' 2>&1 | grep -v "^Filtering\|^Timestamp" | tail -40 | cut -c1-300
-            echo "=== memory"; vm_stat | head -6; memory_pressure 2>&1 | tail -5
-            echo "=== ps"; ps -Ao pid,ppid,pcpu,pmem,rss,command | sort -k4 -nr | head -8 | cut -c1-160
+          cd mmry/tests
+          awk '/^@test "docs: no customer surface promises/{f=1; print "body() {"; next} f&&/^}/{print "}"; exit} f{print}' structural/codex-docs-and-eol.bats > /tmp/body.sh
+          wc -l /tmp/body.sh
+          cat > /tmp/run.sh <<'EOS'
+          PLUGIN_ROOT="$1"; REPO_ROOT="$(cd "$PLUGIN_ROOT/.." && pwd)"
+          skip() { echo "SKIP $*"; }
+          source /tmp/body.sh
+          exec 9>/tmp/trace.log
+          BASH_XTRACEFD=9
+          PS4='+L${LINENO}:'
+          set -x
+          body
+          rc=$?
+          set +x
+          echo "BODY rc=$rc"
+          EOS
+          sed -i 's/^          //' /tmp/run.sh
+          : > /tmp/trace.log
+          /bin/bash /tmp/run.sh "$PWD/.." > /tmp/out.txt 2>&1; rc=$?
+          echo "script rc=$rc"; tail -3 /tmp/out.txt | cut -c1-200
+          if [ $rc -ne 0 ] && [ $rc -ne 1 ]; then
+            echo "=== DIED (rc $rc). trace lines: $(wc -l < /tmp/trace.log). Last 40:"; tail -40 /tmp/trace.log | cut -c1-220
+            echo "=== find output size:"; find "$PWD/.." \( -name .git -o -name tests -o -name vendor -o -name node_modules -o -name superpowers -o -name evidence \) -prune -o -type f \( -name '*.md' -o -name '*.json' \) -print | xargs ls -l | sort -k5 -nr | head -5
           else
-            echo "not killed on this machine"; tail -3 /tmp/o
+            echo "=== survived; trace lines: $(wc -l < /tmp/trace.log)"
           fi
