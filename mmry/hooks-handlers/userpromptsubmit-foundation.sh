@@ -1079,6 +1079,14 @@ _mmry_fnd_prepared_path() {
             fi
         fi
         if _mmry_fnd_claim; then
+            # THE CLAIM IS TAKEN AFTER THE SERVE ABOVE WAS TRIED, and a part that lands late can find the
+            # claim it takes over is a finished preparation's: the firing that held it prepared and
+            # stored the copy and exited between this part's serve and its claim, so the holder reads
+            # as dead and the claim as stale. Preparing again then costs a second cksum for a copy that
+            # is already there (#33079, measured: the in-time suite counts one, and a loaded runner saw two in about
+            # one run in 240; the second cksum was a waiting part taking over part 1's finished claim 0.3 s after part 1 stored the copy). Serve once more now that the claim is ours; only a part that still has
+            # nothing to serve prepares.
+            if _mmry_fnd_serve_prepared; then _FND_ROUTE=done; return 0; fi
             _mmry_fnd_prepare
             return 0
         fi
