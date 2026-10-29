@@ -495,3 +495,44 @@ _assert_session_removed_nothing() {
     rc=0; _su_version_newer 2.9.0 2.010.0 2>/dev/null || rc=$?; [[ "$rc" -eq 1 ]] || fail "2.9.0 newer than 2.010.0 (rc $rc)"
     rc=0; _su_version_newer 2.08.0 2.7.0 2>/dev/null || rc=$?;  [[ "$rc" -eq 0 ]] || fail "2.08.0 not newer than 2.7.0 (rc $rc)"
 }
+
+# session-init.sh, the installed version: with no plugin.json in the installed copy, the
+# .last-self-update self-update writes beside it is the installed version. Without that fallback
+# the installed copy has no version, so an older session installs over it and mirrors its own
+# older list against it.
+@test "33033 refusal: an installed copy known only by its .last-self-update is still newer than an older session" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    rm -f "$STATE_DIR/.claude-plugin/plugin.json"
+    [[ "$(cat "$STATE_DIR/.last-self-update")" == "$NEW_VERSION" ]] || fail "precondition: sentinel"
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is $NEW_VERSION, newer than this session's $OLD_VERSION; leaving it as it is"* ]] \
+        || fail "the older session was not refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "the older session overwrote mmry-client.sh: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
+    [[ "$output" != *"removed "* ]] || fail "the older session removed files: $output"
+}
+
+# The same check, the other way: the installed plugin.json, when there is one, is the installed
+# version, and an older .last-self-update beside it (left by an earlier self-update, before a
+# session installed a newer release) does not make the copy look older than it is.
+@test "33033 refusal: the installed plugin.json outranks an older .last-self-update beside it" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    printf '%s\n' "$OLD_VERSION" > "$STATE_DIR/.last-self-update"
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is $NEW_VERSION, newer than this session's $OLD_VERSION; leaving it as it is"* ]] \
+        || fail "the older session was not refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "the older session overwrote mmry-client.sh: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
+}
