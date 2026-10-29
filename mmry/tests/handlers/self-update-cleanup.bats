@@ -839,3 +839,68 @@ PROBE
     [ -f "$bad_tmp" ] || fail "the unusable TMPDIR was changed"
     [[ -z "$(ls -A "$TMPDIR" | grep -E '^mmry-prune-' || true)" ]] || fail "scratch space was made in the suite's TMPDIR"
 }
+
+# ---------------------------------------------------------------------------------------------
+# #33033 fix round 8: the three refusals QA round 4 found unproven (n56, n03, n13).
+# ---------------------------------------------------------------------------------------------
+
+# The reconcile's own stop after a list that will not load (self-update.sh, the return 0 after
+# "could not read the installed release's file list"). This list is sorted, has a good header and
+# the installed version, so it fails only at the core-entry check, after _su_load_list has set the
+# version and written its lines. Without the return, the reconcile goes on with those lines, the
+# version matches, and the prune removes the running self-update.sh and the old script.
+@test "33033 refusal reconcile: an installed list that fails after a good header stops the reconcile, and nothing is removed" {
+    _release 9.9.9 good
+    _old_install
+    grep -Fvx hooks-handlers/self-update.sh "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" \
+        > "$INSTALL_ROOT/release-files.txt"
+    [[ "$(head -n 1 "$INSTALL_ROOT/release-files.txt")" == "# mmry release files 9.9.9" ]] || fail "precondition: header"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$INSTALL_ROOT/.claude-plugin/plugin.json"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "precondition: an update ran: $output"
+    [[ "$output" == *"could not read the installed release's file list ("*"does not name the release's own core files"*"); removing nothing"* ]] \
+        || fail "the untrusted installed list was not refused: $output"
+    [[ "$output" != *"removed "* ]] || fail "the reconcile went on past its refusal and removed files: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/self-update.sh" ] || fail "the running self-update.sh was removed: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "a refused list removed save-record.sh: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "a refused list removed save-record.sh from $STATE_DIR: $output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a refused list was recorded as done"
+}
+
+# The empty-version case of the header refusal (lib-release-files.sh, the "?*" in
+# "# mmry release files "?*). A header with nothing after "files " names no version. A caller whose
+# plugin.json has no version reads "" too, and "" equals "", so only this refusal stands between
+# such a list and a prune. The bare header without the trailing space is refused as well.
+@test "33033 refusal header: a header that names no version is not a release file list, and nothing is removed" {
+    local header
+    for header in "# mmry release files " "# mmry release files"; do
+        _list_probe
+        PROBE_LIST="$TEST_TMPDIR/probe-list.txt"
+        { printf '%s\n' "$header"; printf '%s\n' "${PROBE_GOOD_ENTRIES[@]}"; } > "$PROBE_LIST"
+        _run_list_probe
+        [[ "$output" == *"LIST REFUSED: "*"is not a release file list"* ]] \
+            || fail "the header '${header}' was not refused: $output"
+        [[ "$output" != *"LIST LOADED"* ]] || fail "a list with the header '${header}' was loaded: $output"
+        _assert_probe_untouched
+    done
+}
+
+# The folder half of the shipped-folder check (lib-release-files.sh, -d "$target/$top"). The release
+# ships a skills/ folder; the plugin folder has a regular FILE named skills at its top. Files at the
+# top of the plugin folder are never touched (F-000071), so it is kept. Without the folder check,
+# find on the file prints the file itself and it is removed as "skills". The unlisted file in
+# hooks-handlers is still removed, which shows the prune went ahead.
+@test "33033 refusal shipped folder: a FILE named like a shipped folder, at the top of the plugin folder, is kept" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}" skills/mmry/SKILL.md
+    printf 'mine\n' > "$PROBE_PLUGIN/skills"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the list did not load: $output"
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ -f "$PROBE_PLUGIN/skills" ] || fail "the top-level file named skills was removed: $output"
+    [[ "$(cat "$PROBE_PLUGIN/skills")" == "mine" ]] || fail "the top-level file named skills changed"
+    [[ "$output" != *"removed skills "* ]] || fail "$output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "precondition: the prune removed nothing: $output"
+}
