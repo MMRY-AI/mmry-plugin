@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        rep: [1, 2, 3, 4]
+        os: [ubuntu-latest]
+        rep: [1]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout with submodules

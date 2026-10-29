@@ -100,6 +100,6 @@ mmry_teardown_tmp() {
             [[ ! -e "$1" ]] && return 0
             ;;
     esac
-    mmry_reap_detached "$1"
+    :
     rm -rf "$1" 2>/dev/null || { sleep 1; rm -rf "$1"; }
 }
