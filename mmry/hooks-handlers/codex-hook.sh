@@ -103,6 +103,55 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 [[ -f "$TARGET" ]] || exit 0
 
+# THE SESSION START HAS A DEADLINE, AND MISSING IT MUST BE SAID (#33062).
+#
+# Codex gives the SessionStart hook the seconds hooks/codex-hooks.json declares (30) and then cuts
+# it off, and a hook that is cut off delivers nothing: the conversation starts without memories and
+# without a word about it. Measured on a busy Windows machine, a start took 34 s to 75 s, and in
+# one run 142 s, almost all of it starting processes, while the service answered in well under one.
+#
+# Two things keep that from reaching the person. session-init.sh hands the memories over first and
+# does its housekeeping (installing the handlers, registering the session, the update check) after,
+# with this hook's output already closed, so the wait below normally ends as soon as the memories
+# are ready. And the wait has a budget: if the output is not complete within it, this prints a
+# notice instead, so the person is told the memories were not loaded rather than told nothing.
+#
+# THE BUDGET IS BELOW THE LIMIT, NOT AT IT. The limit runs from when Codex starts the hook, and on
+# Windows a few seconds of it are spent before this line (cmd.exe, finding Git's bash, starting it:
+# 3.3 s measured on the machine above). 20 s here leaves that, and the notice, room. A test may
+# shorten it with MMRY_CODEX_START_BUDGET (whole seconds, 1 to 25); anything else means 20.
+#
+# THE HANDLER'S STDERR GOES TO A FILE, NOT TO CODEX. Its housekeeping runs on after this hook exits,
+# and a process still holding the hook's stderr would keep Codex waiting for it exactly as one
+# holding stdout would. The file is the previous start's diagnostics, overwritten each start.
+#
+# WHAT IS READ IS PASSED ON BYTE FOR BYTE. The read stops at end of input or at the budget; with
+# IFS empty, -r, and a NUL delimiter the handler never writes, nothing is trimmed or unescaped.
+if [[ "$HANDLER_NAME" == "session-init" ]]; then
+    _mmry_budget="${MMRY_CODEX_START_BUDGET:-20}"
+    if ! [[ "$_mmry_budget" =~ ^[0-9]+$ ]] || (( _mmry_budget < 1 || _mmry_budget > 25 )); then
+        _mmry_budget=20
+    fi
+    _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
+    _mmry_out=""
+    _mmry_rc=0
+    set +e
+    IFS= read -r -d '' -t "$_mmry_budget" _mmry_out < <(bash "$TARGET" "$@" 2>"$_mmry_errlog")
+    _mmry_rc=$?
+    set -e
+    if (( _mmry_rc > 128 )); then
+        # Out of time. The notice is built from fixed text and one path; the path is escaped for JSON
+        # because on Windows it carries backslashes.
+        _mmry_ref="$(mmry_host_command_ref load-memories 2>/dev/null || true)"
+        _mmry_ref="${_mmry_ref//\\/\\\\}"
+        _mmry_ref="${_mmry_ref//\"/\\\"}"
+        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with %s."}}' "${_mmry_ref:-the memory_load tool}"
+    else
+        printf '%s' "$_mmry_out"
+    fi
+    exit 0
+fi
+
 # FAIL OPEN, FOR REAL THIS TIME (#31245, 2026-09-20).
 #
 # This file's header has always promised that a hook which cannot run must not break the

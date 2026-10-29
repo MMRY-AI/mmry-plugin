@@ -90,8 +90,17 @@ if ! mmry_host_assert_own_credential 2>/dev/null; then
     exit 0
 fi
 
-# Self-update check — runs before anything else, debounced to once per hour
-bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
+# Self-update check — runs before anything else, debounced to once per hour.
+# NOT ON CODEX (#33062): there it would spend Codex's 30 s session-start limit before a single memory
+# was handed over (up to 40 s on a slow network: a 10 s version check and a 30 s download), so
+# session-init.sh makes it after the memories are delivered. _MMRY_HOST_V is set by lib-host.sh's
+# resolver; reading it starts no process, which on a slow Windows machine is most of the cost.
+_mmry_host_resolve
+_mmry_codex=0
+[[ "$_MMRY_HOST_V" == "codex" ]] && _mmry_codex=1
+if (( _mmry_codex == 0 )); then
+    bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
+fi
 
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
@@ -362,7 +371,10 @@ fi
 # via session_id rather than reading a (collidable) /tmp file.
 # #31245: the client name is the host's, not a constant. A Codex session listed as "claude-code" is
 # a session the customer cannot find in their own session list.
-mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
+# ON CODEX THE REGISTRATION WAITS UNTIL THE MEMORIES ARE OUT (#33062): see the end of this file.
+if (( _mmry_codex == 0 )); then
+    mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
+fi
 
 # Escape path for JSON.
 #
@@ -410,4 +422,13 @@ if [[ "$count" == "0" ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. %s When done, let them know %s."}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_save" "$_mmry_onboard_hint" "$EMPTY_SYSMSG"
 else
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path" "$EMPTY_SYSMSG"
+fi
+
+# ON CODEX, THE REGISTRATION COMES AFTER THE MEMORIES (#33062). The output is closed first: on Codex
+# this runs under codex-hook.sh, which hands the output to Codex the moment it closes, so the
+# conversation starts with its memories while the session is registered. The registration is the
+# same call Claude Code makes above, with the same id and directory; it only happens later.
+if (( _mmry_codex == 1 )); then
+    exec >/dev/null
+    mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
 fi
