@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [1, 2, 3, 4, 5, 6]
+        leg: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,28 +19,18 @@ jobs:
           ln -sf /bin/bash "$HOME/stockbash/bash"
           ln -sf /bin/sh   "$HOME/stockbash/sh"
           echo "$HOME/stockbash" >> "$GITHUB_PATH"
-      - name: Machine
-        run: |
-          sysctl hw.memsize hw.ncpu; vm_stat | head -8; ulimit -a
-      - name: Test 62 alone, ten times, with its memory use
+      - name: Test 62 alone, traced; on a kill show where it died and what the system says
         shell: /bin/bash {0}
         run: |
           cd mmry/tests; chmod +x libs/bats-core/bin/bats
-          for n in 1 2 3 4 5 6 7 8 9 10; do
-            /usr/bin/time -l ./libs/bats-core/bin/bats --filter "no customer surface promises" structural/codex-docs-and-eol.bats > /tmp/o.$n 2> /tmp/e.$n; rc=$?
-            echo "run $n rc=$rc maxrss=$(grep 'maximum resident' /tmp/e.$n) real=$(grep ' real' /tmp/e.$n | head -1)"
-            grep -E "Killed|^not ok" /tmp/o.$n /tmp/e.$n | head -3
-          done
-      - name: The whole structural directory, twice, watching for the kill
-        shell: /bin/bash {0}
-        run: |
-          cd mmry/tests
-          for n in 1 2; do
-            ./run-tests.sh structural > /tmp/s.$n 2>&1; rc=$?
-            echo "structural run $n rc=$rc"; grep -E "Killed|^not ok|bats warning" /tmp/s.$n | head -5
-          done
-      - name: Kernel log about kills
-        if: always()
-        shell: /bin/bash {0}
-        run: |
-          sudo log show --last 20m --predicate 'eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus" OR eventMessage CONTAINS[c] "SIGKILL" OR eventMessage CONTAINS[c] "killed"' 2>&1 | tail -40
+          ./libs/bats-core/bin/bats --trace --filter "no customer surface promises" structural/codex-docs-and-eol.bats > /tmp/o 2> /tmp/e; rc=$?
+          echo "rc=$rc"
+          if grep -q "Killed: 9" /tmp/e /tmp/o; then
+            echo "=== KILLED: last 60 trace lines"; tail -60 /tmp/e | cut -c1-240
+            echo "=== trace lines total: $(wc -l < /tmp/e)"
+            echo "=== kernel log"; sudo log show --last 10m --info --predicate 'eventMessage CONTAINS[c] "kill" OR eventMessage CONTAINS[c] "jetsam" OR eventMessage CONTAINS[c] "memorystatus"' 2>&1 | grep -v "^Filtering\|^Timestamp" | tail -40 | cut -c1-300
+            echo "=== memory"; vm_stat | head -6; memory_pressure 2>&1 | tail -5
+            echo "=== ps"; ps -Ao pid,ppid,pcpu,pmem,rss,command | sort -k4 -nr | head -8 | cut -c1-160
+          else
+            echo "not killed on this machine"; tail -3 /tmp/o
+          fi
