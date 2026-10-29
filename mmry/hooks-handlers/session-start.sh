@@ -211,7 +211,10 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown
 # CLAUDE_ENV_FILE, which Claude Code sources before each Bash tool command. Only from a payload
 # that was actually read: /mmry:load-memories runs this script with no payload, and treating that
 # as "no agent" would clear the name the real SessionStart recorded.
-if [[ "$HOOK_READ_STATUS" == "ok" ]]; then
+# On Codex (#33062) only when there is a CLAUDE_ENV_FILE to record it in: without one
+# mmry_record_session_agent does nothing, and Codex sets none, so the jq read is processes spent for
+# nothing before the memories are handed over. Claude Code is unchanged.
+if [[ "$HOOK_READ_STATUS" == "ok" ]] && { (( _mmry_codex == 0 )) || [[ -n "${CLAUDE_ENV_FILE:-}" ]]; }; then
     _mmry_agent_type="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.agent_type // empty' 2>/dev/null || true)"
     mmry_record_session_agent "$_mmry_agent_type" || true
 fi
@@ -383,7 +386,13 @@ fi
 # attached to every memory load used to name a file the reader could not open. The file itself is
 # still written to MEM_FILE; only the spelling in the message changes.
 model_path="$(mmry_host_path_for_model "$MEM_FILE")"
-escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
+# On Codex (#33062) the same doubling of every backslash, by parameter expansion: no process. Claude
+# Code keeps the sed.
+if (( _mmry_codex == 1 )); then
+    escaped_path="${model_path//\\/\\\\}"
+else
+    escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
+fi
 
 # AND THE FAULT NOTE IS ESCAPED TOO, WHICH IT WAS NOT (#31245 QA round 4).
 #
@@ -402,7 +411,10 @@ escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
 # newlines unescaped, so a multi-line note produced invalid JSON there and was discarded. That is
 # what failed tests 415, 663, 739 and 741 on the macOS CI leg. Parameter expansion behaves the same
 # on bash 3.2 and 5, with no external tool at all.
-MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
+# On Codex (#33062) an empty note, the usual case, is not escaped: escaping nothing is a process.
+if (( _mmry_codex == 0 )) || [[ -n "$MMRY_HOOK_FAULT_NOTE" ]]; then
+    MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
+fi
 
 # First-session onboarding: detect zero memories
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it

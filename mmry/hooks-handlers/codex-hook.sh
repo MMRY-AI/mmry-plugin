@@ -190,11 +190,8 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # Out of time. The notice is fixed text and one reference, escaped for JSON because on
             # Windows a path in it would carry backslashes.
             _mmry_ref="$(mmry_host_command_ref load-memories 2>/dev/null || true)"
-            # Not "${v//\\/\\\\}": from bash 5.2 the replacement's backslashes are consumed
-            # (patsub_replacement) and nothing is doubled. Quoted variables work on every bash.
-            _mmry_bs='\'; _mmry_q='"'
-            _mmry_ref="${_mmry_ref//"$_mmry_bs"/"$_mmry_bs$_mmry_bs"}"
-            _mmry_ref="${_mmry_ref//"$_mmry_q"/"$_mmry_bs$_mmry_q"}"
+            _mmry_ref="${_mmry_ref//\\/\\\\}"
+            _mmry_ref="${_mmry_ref//\"/\\\"}"
             printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with %s."}}' "${_mmry_ref:-the memory_load tool}"
         else
             printf '%s' "$_mmry_out"
