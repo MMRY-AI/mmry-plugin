@@ -141,6 +141,7 @@ tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
+tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
 tests/integration/api-health.bats
 tests/integration/database-command.bats
@@ -218,6 +219,7 @@ tests/structural/run-codex-mutations.sh
 tests/structural/search-command.bats
 tests/structural/sed-program-scan.awk
 tests/structural/setup_suite.bash
+tests/structural/teardown-tmp.bats
 tests/structural/test-file-size.bats
 tests/structural/test-isolation.bats
 tests/structural/trimmed-tool-list.bats
