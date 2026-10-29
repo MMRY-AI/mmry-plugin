@@ -277,6 +277,30 @@ _run_update() {
     [[ "$output" == *"git checkout; refusing"* ]] || fail "$output"
 }
 
+# The other half of the same refusal (#33033 fix round 7): the plugin folder is itself the checkout,
+# with .git inside it and none beside it, so only the "${PLUGIN_ROOT}/.git" check can refuse.
+@test "33033 refusal: a plugin folder holding its own .git is a checkout, and self-update leaves it untouched" {
+    _release 9.9.9 good
+    local repo="$TEST_TMPDIR/checkout-inner"
+    _updatable_plugin "$repo/mmry"
+    cp "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" "$repo/mmry/release-files.txt"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$repo/mmry/.claude-plugin/plugin.json"
+    mkdir -p "$repo/mmry/.git"
+    printf 'ref: refs/heads/wip\n' > "$repo/mmry/.git/HEAD"
+    [ ! -e "$repo/.git" ] || fail "precondition: a .git beside the plugin folder would refuse on its own"
+    printf 'work in progress\n' > "$repo/mmry/hooks-handlers/my-new-handler.sh"
+    local before after
+    before="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+
+    run bash "$repo/mmry/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"git checkout; refusing"* ]] || fail "the checkout was not refused: $output"
+    [[ "$output" != *"removed "* ]] || fail "self-update removed files from a checkout: $output"
+    [ -f "$repo/mmry/hooks-handlers/my-new-handler.sh" ] || fail "the developer's new handler was removed: $output"
+    after="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+    [[ "$before" == "$after" ]] || fail "the checkout changed:"$'\n'"$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
+}
+
 # THE UPDATE FROM 2.15.2 ITSELF. When 2.15.3 arrives every customer runs the OLD self-update.sh,
 # which knows nothing of the list. bash reads a script as it runs it, so after the old script copies
 # the new one over itself it reads on in the new file's text from byte 7345. The new file keeps
@@ -733,4 +757,78 @@ _assert_compare_refused() {
     chmod +x "$COMPARE_MOCK_BIN/sort"
     _run_list_probe
     _assert_compare_refused
+}
+
+# The last list refusal, "could not sort" (#33033 fix round 7). A sort that fails only on the
+# loader's own output file: the list passes every other check, so only this refusal stops it
+# loading, and a list that loaded would be pruned against, removing the unlisted file.
+@test "33033 refusal list sort: a sort that fails on the loaded list refuses the list and removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    local real_sort
+    real_sort="$(command -v sort)"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'for a in "$@"; do case "$a" in */probe-list.out) exit 1 ;; esac; done\n'
+        printf 'exec "%s" "$@"\n' "$real_sort"
+    } > "$COMPARE_MOCK_BIN/sort"
+    chmod +x "$COMPARE_MOCK_BIN/sort"
+    _run_list_probe
+    [[ "$output" == *"LIST REFUSED: could not sort ${PROBE_LIST}"* ]] \
+        || fail "the failed sort was not refused: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list that could not be sorted was loaded: $output"
+    _assert_probe_untouched
+}
+
+# The listed-path guard in _su_prune (#33033 fix round 7): a path the list names is never removed,
+# whatever comm said. A comm that reports every found file as missing from the list and SUCCEEDS
+# gets past the compare refusal, so only the guard keeps the listed files. The unlisted file is
+# still removed, which shows the prune went ahead.
+@test "33033 refusal listed path: a comm that succeeds but reports listed files leaves those files in place" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    # Called as: comm -23 FOUND LIST. Prints every found file and exits 0.
+    printf '#!/usr/bin/env bash\ncat "$2"\nexit 0\n' > "$COMPARE_MOCK_BIN/comm"
+    chmod +x "$COMPARE_MOCK_BIN/comm"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the good list did not load: $output"
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/self-update.sh" ] || fail "the listed hooks-handlers/self-update.sh was removed: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/save-entry.sh" ] || fail "the listed hooks-handlers/save-entry.sh was removed: $output"
+    [[ "$output" != *"removed hooks-handlers/self-update.sh"* ]] || fail "$output"
+    [[ "$output" != *"removed hooks-handlers/save-entry.sh"* ]] || fail "$output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "precondition: the unlisted file survived, so the prune never acted on comm's report: $output"
+}
+
+# The scratch-space refusal in _su_prune (#33033 fix round 7). Both callers make scratch space
+# before they call _su_prune, so neither reaches it; a direct call does. The list is loaded first
+# with the suite's TMPDIR, then TMPDIR is pointed at a regular file inside the test's own area, so
+# mktemp cannot make a folder there.
+@test "33033 refusal scratch: with no usable scratch space _su_prune returns 1 and removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    local probe="$TEST_TMPDIR/scratch-probe.sh" bad_tmp="$TEST_TMPDIR/tmpdir-is-a-file"
+    printf 'not a folder\n' > "$bad_tmp"
+    cat > "$probe" <<'PROBE'
+#!/usr/bin/env bash
+# $1 library, $2 list, $3 plugin folder, $4 the unusable TMPDIR.
+log() { printf 'LOG: %s\n' "$1"; }
+source "$1"
+_su_load_list "$2" "$TMPDIR/scratch-probe-list.out" || { printf 'LIST NOT LOADED: %s\n' "$_SU_LIST_PROBLEM"; exit 3; }
+printf 'LIST LOADED\n'
+export TMPDIR="$4"
+_su_prune "${TMPDIR%/*}/scratch-probe-list.out" "$3" 9.9.9
+printf 'RC=%s\n' "$?"
+PROBE
+    run env HOME="$HOME" TMPDIR="$TMPDIR" bash "$probe" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" \
+        "$PROBE_LIST" "$PROBE_PLUGIN" "$bad_tmp"
+    [[ "$output" == *"LIST LOADED"* ]] || fail "precondition: the good list did not load: $output"
+    [[ "$output" == *"no scratch space; removing nothing from ${PROBE_PLUGIN}"* ]] \
+        || fail "the missing scratch space was not refused: $output"
+    [[ "$output" == *"RC=1"* ]] || fail "the missing scratch space did not return 1: $output"
+    _assert_probe_untouched
+    [ -f "$bad_tmp" ] || fail "the unusable TMPDIR was changed"
+    [[ -z "$(ls -A "$TMPDIR" | grep -E '^mmry-prune-' || true)" ]] || fail "scratch space was made in the suite's TMPDIR"
 }

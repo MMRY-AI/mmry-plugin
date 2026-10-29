@@ -316,6 +316,34 @@ _query_entries_from_installed() {
     [[ "$before" == "$after" ]] || fail "the checkout changed:"$'\n'"$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
 }
 
+# The other half of the same refusal (#33033 fix round 7): the plugin folder is itself the checkout,
+# with .git inside it and none beside it, so only the "$P/.git" check can refuse.
+@test "33033 refusal: a plugin folder holding its own .git is a checkout, and session start removes nothing for it" {
+    local repo="$TEST_TMPDIR/checkout-inner" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$repo/mmry" "$NEW_VERSION"
+    mkdir -p "$repo/mmry/.git"
+    printf 'ref: refs/heads/wip\n' > "$repo/mmry/.git/HEAD"
+    [ ! -e "$repo/.git" ] || fail "precondition: a .git beside the plugin folder would refuse on its own"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$old" "$OLD_VERSION"
+    # A developer's new handler, in no list yet, and an old script still in the installed copy:
+    # a mirror that went ahead would remove both from the installed copy.
+    printf '#!/usr/bin/env bash\necho wip\n' > "$repo/mmry/hooks-handlers/my-new-handler.sh"
+    local before after
+    before="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+
+    _session_init "$repo/mmry" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"DELEGATE RAN"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "session start removed files for a checkout: $output"
+    [ -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "removed from the installed copy by a checkout's list: $output"
+    [ -e "$STATE_DIR/hooks-handlers/my-new-handler.sh" ] || fail "the developer's new handler was removed: $output"
+    [ ! -e "$STATE_DIR/.last-release-mirror" ] || fail "a checkout was recorded as mirrored: $output"
+    [ -f "$repo/mmry/.git/HEAD" ] || fail "the checkout's .git was touched"
+    after="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+    [[ "$before" == "$after" ]] || fail "the checkout changed:"$'\n'"$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
+}
+
 @test "33033 fix: a release whose manifest overstates its version leaves the installed version alone" {
     local new="$TEST_TMPDIR/cache/$NEW_VERSION" bad="$TEST_TMPDIR/cache/99.0.0"
     _plugin_root "$new" "$NEW_VERSION"
