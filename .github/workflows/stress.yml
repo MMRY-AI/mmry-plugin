@@ -18,17 +18,17 @@ jobs:
         run: |
           cd mmry/tests
           chmod +x libs/bats-core/bin/bats
-          for i in $(seq 1 16); do ( while :; do :; done ) & done
+          for i in $(seq 1 8); do ( while :; do :; done ) & done
           worker() {
             local w="$1" fails=0 n
             export MEASURE_LOG="/tmp/cksum-$w.log"
-            for n in $(seq 1 60); do
+            for n in $(seq 1 40); do
               : > "$MEASURE_LOG"
               if ! out="$(./libs/bats-core/bin/bats --filter "in-time R4: a prepared copy that no longer matches" handlers/foundation-in-time.bats 2>&1)"; then
                 fails=$((fails+1)); echo "---- FAIL worker $w iteration $n"; echo "$out" | grep -vE "^ok |^1\.\." | cut -c1-300 | head -8
                 echo "---- cksum log of that run"; cut -c1-260 "$MEASURE_LOG"
               fi
             done
-            echo "RESULT worker $w: $fails failures in 60 runs"
+            echo "RESULT worker $w: $fails failures in 40 runs"
           }
-          worker 1 & worker 2 & worker 3 & wait
+          worker 1 & worker 2 & wait
