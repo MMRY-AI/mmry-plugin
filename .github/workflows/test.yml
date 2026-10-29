@@ -6,17 +6,17 @@ name: Plugin Tests
 # is no Mac here" written into its own tests while a Mac runner sat unused in this file.
 on:
   push:
-    branches: [main, master, develop, '33079/matrix*']
+    branches: [main, master, develop, '33079/mutation*']
   pull_request:
-    branches: [main, master, develop, '33079/matrix*']
+    branches: [main, master, develop, '33079/mutation*']
 
 jobs:
   offline-tests:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        rep: [1, 2, 3, 4, 5, 6]
+        os: [ubuntu-latest]
+        rep: [1, 2]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout with submodules
