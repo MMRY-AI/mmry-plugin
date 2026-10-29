@@ -157,6 +157,7 @@ tests/libs/bats-support/
 tests/mutation/run-31789-mutations.sh
 tests/mutation/run-31893-mutations.sh
 tests/mutation/run-32889-mutations.sh
+tests/mutation/run-33062-mutations.sh
 tests/mutation/run-mutations.sh
 tests/perf/foundation-process-count.sh
 tests/perf/foundation-split-latency.sh

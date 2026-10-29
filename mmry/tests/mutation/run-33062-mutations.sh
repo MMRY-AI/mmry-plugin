@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# run-33062-mutations.sh - does each #33062 check bite?
+#
+# For each mutation: copy the checkout to a scratch directory, plant one fault in what #33062 built,
+# run handlers/codex-start-budget.bats, and report REFUSED (the suite failed, as it must) with the
+# tests that failed, or SURVIVED (nothing noticed). A mutation whose text is not found aborts the run
+# rather than scoring a no-op. The untouched copy must pass first.
+#
+# usage: bash mmry/tests/mutation/run-33062-mutations.sh [name ...]   exit 0 only if every one REFUSED.
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_SRC="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+WORK="${TMPDIR:-/tmp}/mmry-33062-mut-$$"
+mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+SUITE="handlers/codex-start-budget.bats"
+HOOK="mmry/hooks-handlers/codex-hook.sh"
+INIT="mmry/hooks-handlers/session-init.sh"
+START="mmry/hooks-handlers/session-start.sh"
+
+# _rep FILE OLD NEW - replace the first occurrence; fail if OLD is not there.
+_rep() {
+    local t; t="$(cat "$1"; printf x)"; t="${t%x}"
+    [[ "$t" == *"$2"* ]] || { echo "  mutation text not found in $1: ${2:0:60}" >&2; return 1; }
+    printf '%s' "${t/"$2"/"$3"}" > "$1"
+}
+
+# Each mutation is a function that edits the copy in $1.
+m_no_deliver_first() { _rep "$1/$INIT" 'if [[ "$(mmry_host)" == "codex" ]]; then
+    bash "$P/hooks-handlers/session-start.sh" <&0 &' 'if false; then
+    bash "$P/hooks-handlers/session-start.sh" <&0 &'; }
+m_update_first() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
+    bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"' 'if true; then
+    bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"'; }
+m_register_first() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
+    mmry_register_session' 'if true; then
+    mmry_register_session'; }
+m_init_holds_output() { _rep "$1/$INIT" '    _mmry_start_pid=$!
+    exec >/dev/null' '    _mmry_start_pid=$!'; }
+m_start_holds_output() { _rep "$1/$START" '    exec >/dev/null
+    mmry_register_session' '    mmry_register_session'; }
+m_stdin_lost() { _rep "$1/$INIT" 'session-start.sh" <&0 &' 'session-start.sh" &'; }
+m_stderr_held() { _rep "$1/$HOOK" '"$@" 2>"$_mmry_errlog")' '"$@")'; }
+m_no_notice() { _rep "$1/$HOOK" 'if (( _mmry_rc > 128 )); then' 'if false; then'; }
+m_no_budget() { _rep "$1/$HOOK" "read -r -d '' -t \"\$_mmry_budget\" _mmry_out" "read -r -d '' _mmry_out"; }
+# The measured time check itself: a budget past the limit and a start that needs 35 s before it
+# delivers. Only the elapsed-time assertion can catch this; the memories do arrive.
+m_budget_past_limit() {
+    _rep "$1/$HOOK" '(( _mmry_budget < 1 || _mmry_budget > 25 ))' '(( _mmry_budget < 1 || _mmry_budget > 99 ))' &&
+    _rep "$1/$HOOK" '_mmry_budget="${MMRY_CODEX_START_BUDGET:-20}"' '_mmry_budget="${MMRY_CODEX_START_BUDGET:-60}"' &&
+    _rep "$1/$START" 'MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"' 'sleep 35
+MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"'
+}
+# Requirement 3's control: Claude Code losing its update check before the memories.
+m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
+    bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"' 'if false; then
+    bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"'; }
+
+ALL=(no_deliver_first update_first register_first init_holds_output start_holds_output stdin_lost
+     stderr_held no_notice no_budget budget_past_limit claude_update_skipped)
+(( $# > 0 )) && ALL=("$@")
+
+copy() {
+    rm -rf "$1"; mkdir -p "$1"
+    ( cd "$REPO_SRC" && tar cf - --exclude=.git . ) | ( cd "$1" && tar xf - )
+}
+run_suite() { ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats "$SUITE" ) > "$2" 2>&1; }
+
+echo "== baseline (no mutation)"
+copy "$WORK/base"
+if ! run_suite "$WORK/base" "$WORK/base.out"; then
+    echo "the untouched copy does not pass $SUITE; mutations would prove nothing"
+    grep '^not ok' "$WORK/base.out"
+    exit 2
+fi
+echo "   passes: $(grep -c '^ok' "$WORK/base.out") tests"
+
+survived=0
+for name in "${ALL[@]}"; do
+    copy "$WORK/m"
+    if ! "m_${name}" "$WORK/m"; then echo "== $name: could not be applied"; exit 2; fi
+    if run_suite "$WORK/m" "$WORK/$name.out"; then
+        echo "== $name: SURVIVED"
+        survived=$((survived + 1))
+    else
+        echo "== $name: REFUSED by: $(grep '^not ok' "$WORK/$name.out" | sed 's/^not ok \([0-9]*\).*/\1/' | tr '\n' ' ')"
+    fi
+done
+(( survived == 0 ))
