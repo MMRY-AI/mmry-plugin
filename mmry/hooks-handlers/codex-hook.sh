@@ -110,11 +110,19 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 # without a word about it. Measured on a busy Windows machine, a start took 34 s to 75 s, and in
 # one run 142 s, almost all of it starting processes, while the service answered in well under one.
 #
-# Two things keep that from reaching the person. session-init.sh hands the memories over first and
-# does its housekeeping (installing the handlers, registering the session, the update check) after,
-# with this hook's output already closed, so the wait below normally ends as soon as the memories
-# are ready. And the wait has a budget: if the output is not complete within it, this prints a
-# notice instead, so the person is told the memories were not loaded rather than told nothing.
+# Two things keep that from reaching the person.
+#
+# THE MEMORIES FIRST, THE HOUSEKEEPING AFTER. _mmry_codex_start, below, runs session-start.sh before
+# anything else, lets go of the output it hands to this hook, and only then runs session-init.sh
+# (with --after-delivery, so it does not run session-start.sh a second time) for the handler
+# install, the version check, the mirror and the update check. session-start.sh itself registers
+# the session after it has printed and closed its output. So the output this hook waits for closes
+# as soon as the memories are out, and the housekeeping carries on while the conversation starts.
+# stdin is passed on explicitly, because a command started with & in a script otherwise reads
+# /dev/null, and the SessionStart payload, with the session id, is on stdin.
+#
+# AND THE WAIT HAS A BUDGET: if the output is not complete within it, this prints a notice instead,
+# so the person is told the memories were not loaded rather than told nothing.
 #
 # THE BUDGET IS BELOW THE LIMIT, NOT AT IT, AND IT IS COUNTED FROM THIS SHELL'S START. The limit runs
 # from when Codex starts the hook. On Windows a few seconds of it are spent before this shell exists
@@ -130,6 +138,15 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 #
 # WHAT IS READ IS PASSED ON BYTE FOR BYTE. The read stops at end of input or at the budget; with
 # IFS empty, -r, and a NUL delimiter the handler never writes, nothing is trimmed or unescaped.
+_mmry_codex_start() {
+    local start_pid
+    bash "${HANDLER_DIR}/session-start.sh" <&0 &
+    start_pid=$!
+    exec >/dev/null
+    wait "$start_pid" || true
+    bash "$TARGET" --after-delivery "$@" || true
+}
+
 if [[ "$HANDLER_NAME" == "session-init" ]]; then
     _mmry_budget="${MMRY_CODEX_START_BUDGET:-20}"
     if ! [[ "$_mmry_budget" =~ ^[0-9]+$ ]] || (( _mmry_budget < 1 || _mmry_budget > 25 )); then
@@ -143,7 +160,7 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     set +e
     # Inside eval because process substitution is bash syntax and this whole file must still PARSE
     # under dash (codex-hook.bats, "the re-exec guard is POSIX"); only bash ever runs this line.
-    eval 'IFS= read -r -d "" -t "$_mmry_left" _mmry_out < <(bash "$TARGET" "$@" 2>"$_mmry_errlog")'
+    eval 'IFS= read -r -d "" -t "$_mmry_left" _mmry_out < <(_mmry_codex_start "$@" 2>"$_mmry_errlog")'
     _mmry_rc=$?
     set -e
     if (( _mmry_rc > 128 )); then

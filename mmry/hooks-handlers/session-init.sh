@@ -105,32 +105,6 @@ if (( _mmry_marker_ok == 0 )) && [[ "$(mmry_host)" == "codex" ]]; then
     exit 0
 fi
 
-# ON CODEX THE MEMORIES GO FIRST, AND THE REST OF THIS FILE RUNS AFTER THEM (#33062).
-#
-# Codex cuts the SessionStart hook off at 30 s and a hook that is cut off delivers nothing. On a
-# slow Windows machine the steps below (the install, the version check, the mirror) and the update
-# check session-start.sh used to make first took most of that before a single memory was handed
-# over. So on Codex, session-start.sh runs NOW, on this hook's output, and this script lets go of
-# that output before it does anything else: codex-hook.sh is waiting for the output to close, and
-# it closes when session-start.sh has printed and let go of it too. Everything after this point
-# then happens while the conversation is already starting. The host marker above stays first,
-# because a handler must never be installed without it, and the update check moves to the end of
-# this file, where it still runs after the install as it always did.
-#
-# stdin is passed on explicitly: a command started with & in a script otherwise reads /dev/null,
-# and the SessionStart payload, with the session id, is on stdin.
-#
-# Claude Code is untouched: it does not enforce the limit, and it runs session-start.sh at the end
-# of this file exactly as before.
-_mmry_delivered_first=0
-if [[ "$(mmry_host)" == "codex" ]]; then
-    bash "$P/hooks-handlers/session-start.sh" <&0 &
-    _mmry_start_pid=$!
-    exec >/dev/null
-    wait "$_mmry_start_pid" || true
-    _mmry_delivered_first=1
-fi
-
 # THE PLUGIN ROOT CARRIES THE MARKER TOO (#31245 QA, Security). lib-host.sh looks for the marker
 # beside whichever copy of a handler is running. A handler run from Codex's plugin cache, with
 # CODEX_HOME unset and a relocated home, found none and resolved as Claude. The plugin-root marker
@@ -319,13 +293,25 @@ fi
 # session (#31844 QA round 2, D1). session-start.sh also has the client the sweep now needs, to ask
 # the service before it removes anything.
 
-# Delegate to the main session-start logic. On Codex it already ran, first (#33062); what is left
-# is the update check it used to make, made now, after the install, and only where session-start.sh
-# would have made it: when this host has a credential of its own.
-if (( _mmry_delivered_first == 1 )); then
-    if mmry_host_assert_own_credential 2>/dev/null; then
-        bash "$P/hooks-handlers/self-update.sh" 2>/dev/null || true
-    fi
-else
-    bash "$P/hooks-handlers/session-start.sh"
+# Delegate to the main session-start logic.
+#
+# EXCEPT WHEN codex-hook.sh HAS ALREADY RUN IT, FIRST (#33062). Codex cuts the SessionStart hook off
+# at 30 s, and on a slow Windows machine this file's install, version check and mirror, with the
+# update check session-start.sh used to make first, took most of that before a single memory was
+# handed over. So codex-hook.sh runs session-start.sh before this file, hands its output to Codex,
+# and then runs this file with --after-delivery and its output already closed. Only codex-hook.sh
+# passes that, and it counts only on Codex. On Claude Code this is the same single line it always was.
+#
+# ON CODEX THE UPDATE CHECK IS MADE HERE, AFTER THE INSTALL, rather than by session-start.sh before
+# the memories, and only where session-start.sh made it: when this host has a credential of its own.
+#
+# The exit status is still session-start.sh's, as it was when that call was this file's last line.
+_mmry_host_resolve
+_mmry_start_rc=0
+if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then
+    bash "$P/hooks-handlers/session-start.sh" || _mmry_start_rc=$?
 fi
+if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential 2>/dev/null; then
+    bash "$P/hooks-handlers/self-update.sh" 2>/dev/null || true
+fi
+exit "$_mmry_start_rc"

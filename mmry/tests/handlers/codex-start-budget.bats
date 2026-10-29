@@ -178,6 +178,9 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     # the first-session install puts the handlers and the host marker where the model runs them.
     _wait_for "$TEST_TMPDIR/su-finished" 60 || { echo "the deferred steps never finished"; return 1; }
     grep -q 'POST .*/api/sessions.*budget-7' "$TEST_TMPDIR/curl-log.txt"
+    # Once each: the memories are fetched by one session-start.sh, not by a second run after the install.
+    [ "$(grep -c 'GET .*/api/memories/startup' "$TEST_TMPDIR/curl-log.txt")" = "1" ]
+    [ "$(grep -c 'POST .*/api/sessions' "$TEST_TMPDIR/curl-log.txt")" = "1" ]
     [ -f "$CX/mmry/hooks-handlers/save-memory.sh" ]
     grep -q '^codex$' "$CX/mmry/.mmry-host"
 }
