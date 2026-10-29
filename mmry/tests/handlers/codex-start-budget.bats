@@ -219,8 +219,13 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     _codex_start 1
     run _context
     assert_output --partial "Tell the user"
-    # On Codex that is the memory_load tool; there is no slash command to type.
-    assert_output --partial "memory_load"
+    # On Codex that is the memory_load tool; there is no slash command to type. The notice spells it
+    # out rather than start a process after the budget, so it is held to what lib-host.sh says.
+    local ref
+    ref="$(env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" CODEX_HOME="$CX" \
+        bash -c 'source "$1/hooks-handlers/lib-host.sh" && mmry_host_command_ref load-memories' _ "$ROOT")"
+    [ -n "$ref" ]
+    assert_output --partial "offer to load them now with ${ref}."
 }
 
 @test "R2: on Windows the budget counts from when codex-hook.cmd started, not only from bash's start" {

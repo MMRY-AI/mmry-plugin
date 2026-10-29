@@ -199,12 +199,12 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             _mmry_late=1
         fi
         if (( _mmry_late == 1 )); then
-            # Out of time. The notice is fixed text and one reference, escaped for JSON because on
-            # Windows a path in it would carry backslashes.
-            _mmry_ref="$(mmry_host_command_ref load-memories 2>/dev/null || true)"
-            _mmry_ref="${_mmry_ref//\\/\\\\}"
-            _mmry_ref="${_mmry_ref//\"/\\\"}"
-            printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with %s."}}' "${_mmry_ref:-the memory_load tool}"
+            # Out of time. Fixed text, and NO PROCESS STARTED to build it: this runs after the
+            # budget, when every second is the margin left before Codex's limit, and on a loaded
+            # Windows machine each process cost 1 to 2 s. The reference is the one
+            # mmry_host_command_ref load-memories gives on Codex, which is all this file serves:
+            # mmry_host_tool_ref memory_load, "the mmry_plugin memory_load tool".
+            printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
         else
             printf '%s' "$_mmry_out"
         fi
