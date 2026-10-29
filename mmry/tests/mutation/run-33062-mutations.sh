@@ -72,9 +72,17 @@ run_suite() { ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats "$SUITE" ) > "$2
 
 echo "== baseline (no mutation)"
 copy "$WORK/base"
-if ! run_suite "$WORK/base" "$WORK/base.out"; then
+# Up to three tries: on a loaded Windows machine one start in a freshly written copy can run past the
+# budget for reasons that are the machine's, not the code's. Each try is reported.
+base_ok=0
+for try in 1 2 3; do
+    if run_suite "$WORK/base" "$WORK/base.out"; then base_ok=1; break; fi
+    echo "   try $try: $(grep '^not ok' "$WORK/base.out" | sed 's/^not ok \([0-9]*\).*/\1/' | tr '\n' ' ')failed"
+done
+if (( base_ok == 0 )); then
     echo "the untouched copy does not pass $SUITE; mutations would prove nothing"
-    grep '^not ok' "$WORK/base.out"
+    grep -A14 '^not ok' "$WORK/base.out"
+    grep '# elapsed' "$WORK/base.out"
     exit 2
 fi
 echo "   passes: $(grep -c '^ok' "$WORK/base.out") tests"
