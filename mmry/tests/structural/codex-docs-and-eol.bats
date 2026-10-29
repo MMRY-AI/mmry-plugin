@@ -593,115 +593,76 @@ _codex_tree() {
         [[ -n "$_found" ]] || { echo "surface discovery lost a known customer surface: $must"; return 1; }
     done
 
-    _promises_a_missing_moment() {
-        local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-        case "$l" in
-            *"before the session ends"*)   return 0 ;;
-            *"save at session end"*)       return 0 ;;
-            *"at the end of a turn"*)      return 0 ;;
-            *"at the end of each turn"*)   return 0 ;;
-            *"end of a turn"*prompt*)      return 0 ;;
-            *"session end"*prompt*)        return 0 ;;
-            *prompt*"session end"*)        return 0 ;;
-            *"context compression"*)       return 0 ;;
+    # THE JUDGEMENT RUNS IN awk, NOT IN BASH (#33079). It was a bash loop over every line of every
+    # surface, splitting cells and sentences with process substitutions and pattern replacements, and
+    # on about one macOS runner in three the stock bash 3.2 was killed by the system part-way through
+    # it ("Killed: 9", then bats' "Executed N instead of expected N+1 tests"), in different places on
+    # different runs: a memory fault in that shell, not a verdict. The test never reached a
+    # judgement on those runners. awk has no such fault, is the same on both systems, and the rules
+    # below are the ones the loop applied, in the same order, to the same unit: a sentence, or a
+    # table cell read with its row's label and against its own column header.
+    local sweep='
+        function has(l, s) { return index(l, s) > 0 }
+        function promises(s,   l) {
+            l = tolower(s)
+            if (has(l, "before the session ends") || has(l, "save at session end") || has(l, "at the end of a turn") || has(l, "at the end of each turn")) return 1
+            if (l ~ /end of a turn.*prompt/ || l ~ /session end.*prompt/ || l ~ /prompt.*session end/) return 1
             # Round 9: a Codex cell saying "yes" beside these two README rows survived, because
             # the rows are worded "the context is compressed" and "an accepted plan".
-            *"context is compressed"*)     return 0 ;;
-            *"context compresses"*)        return 0 ;;
-            *"accepted plan"*)             return 0 ;;
-            *"plan accepted"*)             return 0 ;;
-        esac
-        return 1
-    }
-
-    # No table-syntax entry any more: a pipe is never part of what is judged, only cell text is.
-    _is_disclosure() {
-        local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-        case "$l" in
-            *"claude code only"*)          return 0 ;;
-            *"on claude code"*)            return 0 ;;
-            *"not available"*)             return 0 ;;
-            *"no channel"*)                return 0 ;;
-            *"do not exist"*)              return 0 ;;
-            *"there is no"*)               return 0 ;;
-            *"has no"*)                    return 0 ;;
-            *"gives a plugin no"*)         return 0 ;;
-            *cannot*)                      return 0 ;;
-        esac
-        return 1
-    }
-
-    # A header cell that names Claude Code and not Codex: the column is ABOUT Claude Code, so what a
-    # cell under it says is true of Claude Code and is not a promise to a Codex customer.
-    _is_claude_column() {
-        local l; l="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-        [[ "$l" == *"claude code"* && "$l" != *codex* ]] || return 1
-    }
-
-    # Print a markdown table row as one cell per line, outer pipes dropped. bash 3.2.
-    _cells() {
-        local row="$1"
-        row="${row#"${row%%[![:space:]]*}"}"
-        row="${row#|}"
-        row="${row%"${row##*[![:space:]]}"}"
-        row="${row%|}"
-        printf '%s\n' "${row//|/$nl}"
-    }
-
-    local i j n subject header="" frag label cell hcell line
-    local -a _h _r
-    for f in "${_codex_only[@]}" "${_shared[@]}"; do
-        # THE UNIT OF JUDGEMENT IS WHAT A READER TAKES IN AT ONCE, which is not a line: a sentence,
-        # or a table cell read with its row label and its column header.
-        _lines=()
-        header=""
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            _lines[${#_lines[@]}]="${line%$'\r'}"
-        done < "$f"
-        n=${#_lines[@]}
-        for ((i = 0; i < n; i++)); do
+            if (has(l, "context compression") || has(l, "context is compressed") || has(l, "context compresses") || has(l, "accepted plan") || has(l, "plan accepted")) return 1
+            return 0
+        }
+        # No table-syntax entry: a pipe is never part of what is judged, only cell text is.
+        function disclosure(s,   l) {
+            l = tolower(s)
+            return has(l, "claude code only") || has(l, "on claude code") || has(l, "not available") || has(l, "no channel") || has(l, "do not exist") || has(l, "there is no") || has(l, "has no") || has(l, "gives a plugin no") || has(l, "cannot")
+        }
+        # A header cell that names Claude Code and not Codex: the column is ABOUT Claude Code, so what a
+        # cell under it says is true of Claude Code and is not a promise to a Codex customer.
+        function claude_column(h,   l) { l = tolower(h); return has(l, "claude code") && !has(l, "codex") }
+        # A markdown table row as cells, outer pipes dropped.
+        function cells(row, out) {
+            sub(/^[[:space:]]+/, "", row); sub(/^\|/, "", row)
+            sub(/[[:space:]]+$/, "", row); sub(/\|$/, "", row)
+            if (row == "") { out[1] = ""; return 1 }
+            return split(row, out, "|")
+        }
+        FNR == 1 { header = ""; prev = ""; rel = substr(FILENAME, length(root) + 2) }
+        {
+            line = $0; sub(/\r$/, "", line)
             # A separator row means the line before it was the header of this table.
-            if [[ "${_lines[$i]}" =~ ^[[:space:]]*\|[-:[:space:]|]+$ ]]; then
-                header=""
-                [[ $i -gt 0 ]] && header="${_lines[$((i - 1))]}"
-                continue
-            fi
-            if [[ "${_lines[$i]}" == *"|"* && -n "$header" ]]; then
-                _h=(); _r=()
-                while IFS= read -r cell; do _h[${#_h[@]}]="$cell"; done < <(_cells "$header")
-                while IFS= read -r cell; do _r[${#_r[@]}]="$cell"; done < <(_cells "${_lines[$i]}")
-                # The first cell is the row's LABEL. It is never judged alone, because a reader never
+            if (line ~ /^[[:space:]]*\|[-:[:space:]|]+$/) { header = prev; prev = line; next }
+            if (index(line, "|") > 0 && header != "") {
+                nh = cells(header, h); nr = cells(line, r)
+                # The first cell is the row'"'"'s LABEL. It is never judged alone, because a reader never
                 # reads it alone: it is read with each cell beside it. A one-cell row has only a label.
-                label="${_r[0]:-}"
-                j=1
-                [[ ${#_r[@]} -gt 1 ]] || j=0
-                for ((; j < ${#_r[@]}; j++)); do
-                    cell="${_r[$j]}"
-                    hcell="${_h[$j]:-}"
-                    _is_claude_column "$hcell" && continue
-                    if [[ $j -eq 0 ]]; then subject="$cell"; else subject="${label} ${cell}"; fi
-                    _promises_a_missing_moment "$subject" || continue
-                    _is_disclosure "$subject" && continue
-                    bad="${bad}${nl}  ${f#$REPO_ROOT/}: [${hcell}] ${subject}"
-                done
-                continue
-            fi
+                label = r[1]; j = 2
+                if (nr <= 1) j = 1
+                for (; j <= nr; j++) {
+                    cell = r[j]; hcell = (j <= nh) ? h[j] : ""
+                    if (claude_column(hcell)) continue
+                    subject = (j == 1) ? cell : label " " cell
+                    if (!promises(subject)) continue
+                    if (disclosure(subject)) continue
+                    print "  " rel ": [" hcell "] " subject
+                }
+                prev = line; next
+            }
             # A line with no pipe ends any table that was open.
-            [[ "${_lines[$i]}" == *"|"* ]] || header=""
-            # One sentence per line: ". " becomes ".<newline>". Parameter expansion, not sed.
-            line="${_lines[$i]}"
-            line="${line//. /.$nl}"
-            # The "|| -n" keeps the last fragment, which has no trailing newline when the
-            # here-string below is the only source; without it a single-sentence line was never
-            # examined (caught by mutation in round 7).
-            while IFS= read -r frag || [[ -n "$frag" ]]; do
-                [[ -n "$frag" ]] || continue
-                _promises_a_missing_moment "$frag" || continue
-                _is_disclosure "$frag" && continue
-                bad="${bad}${nl}  ${f#$REPO_ROOT/}: ${frag}"
-            done < <(printf '%s\n' "$line")
-        done
-    done
+            if (index(line, "|") == 0) header = ""
+            # One sentence per line: ". " becomes ".<newline>".
+            t = line; gsub(/\. /, ".\n", t)
+            nf = split(t, fr, "\n")
+            for (k = 1; k <= nf; k++) {
+                if (fr[k] == "") continue
+                if (!promises(fr[k])) continue
+                if (disclosure(fr[k])) continue
+                print "  " rel ": " fr[k]
+            }
+            prev = line
+        }'
+    bad="$(awk -v root="$REPO_ROOT" "$sweep" "${_codex_only[@]}" "${_shared[@]}" /dev/null)"
+    [[ -z "$bad" ]] || bad="${nl}${bad}"
 
     [ -z "$bad" ] || {
         echo "these customer-facing sentences promise a moment Codex has no channel at, without" >&2
