@@ -20,7 +20,7 @@ jobs:
         run: |
           cd mmry/tests
           chmod +x libs/bats-core/bin/bats
-          source helpers/isolate-home.bash; mmry_isolate_home
+          true
           for i in $(seq 1 6); do ( while :; do :; done ) & done
           run_target() {  # name file filter
             local fails=0 n
