@@ -185,8 +185,20 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     set +e
     { _mmry_codex_start "$@" <&3 3<&- 2>"$_mmry_errlog" & } | {
         _mmry_out=""
+        _mmry_read_at=$SECONDS
         IFS= read -r -d '' -t "$_mmry_left" _mmry_out
-        if (( $? > 128 )); then
+        _mmry_rc=$?
+        # Out of time is status > 128 from bash 4. bash 3.2, the stock macOS bash, returns 1 for a
+        # timeout exactly as for the end of the output, so there a read that returned at the budget
+        # with an output that is not finished counts as out of time too. Every answer session-start.sh
+        # gives is one JSON object, so a finished output ends with "}".
+        _mmry_late=0
+        if (( _mmry_rc > 128 )); then
+            _mmry_late=1
+        elif [[ "$_mmry_out" != *"}" ]] && (( SECONDS - _mmry_read_at >= _mmry_left - 1 )); then
+            _mmry_late=1
+        fi
+        if (( _mmry_late == 1 )); then
             # Out of time. The notice is fixed text and one reference, escaped for JSON because on
             # Windows a path in it would carry backslashes.
             _mmry_ref="$(mmry_host_command_ref load-memories 2>/dev/null || true)"

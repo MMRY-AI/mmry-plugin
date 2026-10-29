@@ -40,7 +40,10 @@ m_stdin_lost() { _rep "$1/$HOOK" '_mmry_codex_start "$@" <&3 3<&-' '_mmry_codex_
 m_stderr_held() { _rep "$1/$HOOK" '3<&- 2>"$_mmry_errlog" &' '3<&- &'; }
 m_init_skips_update() { _rep "$1/$INIT" 'if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential' 'if false && mmry_host_assert_own_credential'; }
 m_start_twice() { _rep "$1/$INIT" 'if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then' 'if true; then'; }
-m_no_notice() { _rep "$1/$HOOK" 'if (( $? > 128 )); then' 'if false; then'; }
+m_no_notice() { _rep "$1/$HOOK" 'if (( _mmry_late == 1 )); then' 'if false; then'; }
+# bash 3.2 reports a timeout as the end of the output: without the second test the notice is never
+# given there. Only a macOS (bash 3.2) run can see this one refuse.
+m_no_bash32_timeout() { _rep "$1/$HOOK" '        elif [[ "$_mmry_out" != *"}" ]]' '        elif false && [[ "$_mmry_out" != *"}" ]]'; }
 m_no_budget() { _rep "$1/$HOOK" "read -r -d '' -t \"\$_mmry_left\" _mmry_out" "read -r -d '' _mmry_out"; }
 m_launcher_clock_ignored() { _rep "$1/$HOOK" '                _mmry_spent=$_mmry_since' '                :'; }
 # The measured time check itself: a budget past the limit and a start that needs 35 s before it
@@ -57,7 +60,7 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
     bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"'; }
 
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
-     stderr_held init_skips_update start_twice no_notice no_budget launcher_clock_ignored budget_past_limit
+     stderr_held init_skips_update start_twice no_notice no_bash32_timeout no_budget launcher_clock_ignored budget_past_limit
      claude_update_skipped)
 (( $# > 0 )) && ALL=("$@")
 
@@ -78,6 +81,10 @@ echo "   passes: $(grep -c '^ok' "$WORK/base.out") tests"
 
 survived=0
 for name in "${ALL[@]}"; do
+    if [[ "$name" == no_bash32_timeout ]] && (( BASH_VERSINFO[0] >= 4 )); then
+        echo "== $name: NOT APPLICABLE on bash $BASH_VERSION (only bash 3.2 reports a timeout as the end of the output; run this on a stock Mac)"
+        continue
+    fi
     copy "$WORK/m"
     if ! "m_${name}" "$WORK/m"; then echo "== $name: could not be applied"; exit 2; fi
     if run_suite "$WORK/m" "$WORK/$name.out"; then
