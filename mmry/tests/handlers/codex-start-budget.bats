@@ -100,13 +100,23 @@ EOF
 # stdout and stderr both stay on the pipe `run` reads, so a step that kept either open after the
 # hook said it was done would hold this up exactly as it would hold up Codex. Sets ELAPSED (seconds)
 # and JSON (the hook's JSON line).
+#
+# ON WINDOWS Codex runs codex-hook.cmd instead, which stamps MMRY_CODEX_HOOK_STARTED with %TIME% as
+# it starts, so the budget counts from Codex starting the hook. The .cmd itself cannot run here (Git's
+# bash launcher puts its own curl ahead of the mock), so the stamp it would make is made at the
+# moment the clock below starts. A test that needs a particular stamp sets LAUNCH_STAMP.
 _codex_start() {
-    local cmd payload t0 t1
+    local cmd payload t0 t1 stamp="${LAUNCH_STAMP:-}"
     cmd="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$ROOT/hooks/codex-hooks.json")"
     payload="{\"session_id\":\"budget-${1:-1}\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"cwd\":\"$TEST_TMPDIR\"}"
+    if [[ -z "$stamp" ]]; then
+        case "$(uname -s)" in
+            MINGW*|MSYS*|CYGWIN*) printf -v stamp '%(%H:%M:%S)T.00' -1 ;;
+        esac
+    fi
     t0="$(_now)"
     run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u MMRY_NO_SELF_UPDATE \
-        HOME="$HOME" CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" \
+        HOME="$HOME" CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" MMRY_CODEX_HOOK_STARTED="$stamp" \
         bash -c 'cd "$3" && printf "%s" "$1" | sh -c "$2"' _ "$payload" "$cmd" "$TEST_TMPDIR"
     t1="$(_now)"
     ELAPSED="$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.2f", b - a }')"
@@ -222,7 +232,8 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     local now t
     printf -v now '%(%s)T' -1
     printf -v t '%(%H:%M:%S)T' $(( now - 15 ))
-    export MMRY_CODEX_START_BUDGET=25 MMRY_CODEX_HOOK_STARTED="${t#0}.50"
+    export MMRY_CODEX_START_BUDGET=25
+    LAUNCH_STAMP="${t#0}.50"
     _slow_curl "/api/memories/startup" 30
     _codex_start 1
     assert_success
