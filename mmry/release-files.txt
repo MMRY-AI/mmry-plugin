@@ -139,6 +139,7 @@ tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
 tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
+tests/helpers/measure-leftovers.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
 tests/helpers/test-helper.bash
