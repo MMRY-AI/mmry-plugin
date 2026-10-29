@@ -103,6 +103,7 @@ tests/handlers/codex-hook.bats
 tests/handlers/codex-missing-tools.bats
 tests/handlers/codex-qa-delta.bats
 tests/handlers/codex-session.bats
+tests/handlers/codex-start-budget.bats
 tests/handlers/codex-tools-first-output.bats
 tests/handlers/correction-31847.bats
 tests/handlers/database-command.bats
