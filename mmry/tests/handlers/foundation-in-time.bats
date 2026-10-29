@@ -46,7 +46,7 @@ setup() {
 
 # A cksum that logs every call and takes $1 seconds first.
 _cksum_shim() {
-    printf '#!/usr/bin/env bash\nprintf "cksum\\n" >> "%s"\nmkdir -p /tmp/mmry-measure; { printf "CKSUM t=%%s pid=%%s ppid=%%s caller=[%%s] test=[%%s]\\n" "$(date +%%s.%%N)" "$$" "$PPID" "$(tr "\\0" " " </proc/$PPID/cmdline 2>/dev/null | cut -c1-150)" "${MEASURE_TEST:-}"; ps -eo pid=,ppid=,etimes=,args= 2>/dev/null | grep -E "foundation.sh|cksum" | grep -v grep | cut -c1-170 | sed "s/^/    /"; } >> /tmp/mmry-measure/cksum.log 2>/dev/null\nsleep %s\nexec "%s" "$@"\n' "$CALLS" "$1" "$REAL_CKSUM" > "$SHIMS/cksum"
+    printf '#!/usr/bin/env bash\nprintf "cksum\\n" >> "%s"\nmkdir -p /tmp/mmry-measure; { printf "CKSUM t=%%s pid=%%s ppid=%%s caller=[%%s] test=[%%s]\\n" "$(date +%%s.%%N)" "$$" "$PPID" "$(tr "\\0" " " </proc/$PPID/cmdline 2>/dev/null | cut -c1-150)" "${MEASURE_TEST:-}"; ps -eo pid=,ppid=,etimes=,args= 2>/dev/null | grep -E "foundation.sh|cksum" | grep -v grep | cut -c1-170 | sed "s/^/    /"; } >> "${MEASURE_LOG:-/tmp/mmry-measure/cksum.log}" 2>/dev/null\nsleep %s\nexec "%s" "$@"\n' "$CALLS" "$1" "$REAL_CKSUM" > "$SHIMS/cksum"
     chmod +x "$SHIMS/cksum"
 }
 _calls() { grep -c "^$1\$" "$CALLS" 2>/dev/null || true; }
