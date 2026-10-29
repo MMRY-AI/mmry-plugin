@@ -828,6 +828,13 @@ PROBE
     [[ "$output" == *"no scratch space; removing nothing from ${PROBE_PLUGIN}"* ]] \
         || fail "the missing scratch space was not refused: $output"
     [[ "$output" == *"RC=1"* ]] || fail "the missing scratch space did not return 1: $output"
+    # The refusal stops _su_prune there: it searches and compares nothing, so its message is the
+    # only one. Without it, the prune goes on with scratch paths at the filesystem root; where
+    # those cannot be written a later refusal happens to stop it, which proves nothing about this one.
+    local logged
+    logged="$(printf '%s\n' "$output" | grep '^LOG: ' || true)"
+    [[ "$logged" == "LOG: no scratch space; removing nothing from ${PROBE_PLUGIN}" ]] \
+        || fail "_su_prune went on past the missing scratch space: $output"
     _assert_probe_untouched
     [ -f "$bad_tmp" ] || fail "the unusable TMPDIR was changed"
     [[ -z "$(ls -A "$TMPDIR" | grep -E '^mmry-prune-' || true)" ]] || fail "scratch space was made in the suite's TMPDIR"
