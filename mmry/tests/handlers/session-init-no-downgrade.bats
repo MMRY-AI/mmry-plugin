@@ -390,3 +390,108 @@ _query_entries_from_installed() {
     done
     [ -f "$STATE_DIR/commands/database.md" ] || fail "a shipped command was removed: $output"
 }
+
+# ---------------------------------------------------------------------------------------------
+# #33033 fix round 8: refusals from the developer's own inventory
+# (R:\Intranet\ClaudeAI\plans\MMRY\v1.32.1\33033-refusal-inventory.md), each red when removed.
+# ---------------------------------------------------------------------------------------------
+
+# A newer release over an older installed copy that still holds query-records.sh, which this
+# release does not list: a session that mirrors removes it.
+_newer_over_older() {
+    NEW_ROOT="$TEST_TMPDIR/cache/$NEW_VERSION"
+    local old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$NEW_ROOT" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$old" "$OLD_VERSION"
+}
+
+_assert_session_removed_nothing() {
+    [[ "$output" != *"removed "* ]] || fail "session start removed files: $output"
+    [ -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "query-records.sh was removed: $output"
+    [ ! -e "$STATE_DIR/.last-release-mirror" ] || fail "the mirror was recorded as done: $output"
+}
+
+# session-init.sh, the library check: the library is used only when it defines the version
+# comparison. A library without it is not used at all, so nothing is removed.
+@test "33033 refusal partial library: a session whose removal library lacks the version comparison removes nothing" {
+    _newer_over_older
+    printf '\nunset -f _su_version_newer\n' >> "$NEW_ROOT/hooks-handlers/lib-release-files.sh"
+    _session_init "$NEW_ROOT" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"lib-release-files.sh could not be loaded; installing without the version check, removing nothing"* ]] \
+        || fail "the library without _su_version_newer was used: $output"
+    _assert_session_removed_nothing
+}
+
+# session-init.sh _mmry_verified_release: the stop after a list that will not load. This list is
+# sorted, has a good header and this release's version, so it fails only at the core-entry check,
+# after _su_load_list has set the version and written its lines. Without the stop the versions
+# match and the mirror prunes with those lines.
+@test "33033 refusal session list: a release list that fails after a good header removes nothing at session start" {
+    _newer_over_older
+    grep -Fvx hooks-handlers/self-update.sh "$NEW_ROOT/release-files.txt" > "$TEST_TMPDIR/list.tmp"
+    mv "$TEST_TMPDIR/list.tmp" "$NEW_ROOT/release-files.txt"
+    [[ "$(head -n 1 "$NEW_ROOT/release-files.txt")" == "# mmry release files $NEW_VERSION" ]] || fail "precondition: header"
+    _session_init "$NEW_ROOT" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"could not read this release's file list ("*"does not name the release's own core files"*"); removing nothing from $STATE_DIR"* ]] \
+        || fail "the untrusted list was not refused: $output"
+    [[ "$output" == *"not recording $NEW_VERSION as the installed version"* ]] || fail "$output"
+    _assert_session_removed_nothing
+}
+
+# session-init.sh _mmry_mirror, the once-mirrored path: when the installed copy holds nothing in a
+# shipped folder that this release lacks, apart from run-time files (the credential, logs, dot
+# files and dot folders), no comparison runs. Each of those exclusions, and the stop itself, is
+# what keeps a session from re-running the full comparison on every start.
+@test "33033 refusal mirror once: once a version is mirrored, run-time files in the installed copy start no comparison" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$(cat "$STATE_DIR/.last-release-mirror")" == "$NEW_VERSION" ]] || fail "precondition: not mirrored: $output"
+    [[ "$output" == *"nothing to remove from $STATE_DIR"* ]] || fail "precondition: the first session did not compare: $output"
+    mkdir -p "$STATE_DIR/commands/.cache"
+    printf '{}' > "$STATE_DIR/hooks-handlers/mmry-config.local.json"
+    printf 'x\n' > "$STATE_DIR/hooks-handlers/debug.log"
+    printf 'f1\n' > "$STATE_DIR/hooks-handlers/.mmry-formation-sess1"
+    printf 'x\n' > "$STATE_DIR/commands/.cache/entry"
+
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"nothing to remove from"* ]] || fail "a session on a mirrored version compared again: $output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    local f
+    for f in hooks-handlers/mmry-config.local.json hooks-handlers/debug.log hooks-handlers/.mmry-formation-sess1 commands/.cache/entry; do
+        [ -e "$STATE_DIR/$f" ] || fail "$f was removed: $output"
+    done
+}
+
+# session-init.sh _mmry_mirror: the mirror is recorded only when its removal step succeeded. A comm
+# that fails makes the prune refuse; the next session must then try again, so nothing is recorded.
+@test "33033 refusal mirror marker: a mirror whose removal step failed is not recorded as done" {
+    _newer_over_older
+    local bin="$TEST_TMPDIR/failing-comm-bin"
+    mkdir -p "$bin"
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$bin/comm"
+    chmod +x "$bin/comm"
+    _session_init "$NEW_ROOT" -u MMRY_HOST PATH="$bin:$PATH"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"could not compare $STATE_DIR with the release's file list; removing nothing"* ]] \
+        || fail "precondition: the prune did not fail: $output"
+    _assert_session_removed_nothing
+}
+
+# lib _su_version_newer: each field is read as a decimal number (10#). Without it a field with a
+# leading zero is read as octal, so 2.010.0 ranks below 2.9.0 and 2.08.0 is not a number at all.
+@test "33033 refusal: a version field with a leading zero is still compared as a decimal number" {
+    log() { :; }
+    # shellcheck source=/dev/null
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 2.010.0 2.9.0 2>/dev/null || rc=$?; [[ "$rc" -eq 0 ]] || fail "2.010.0 not newer than 2.9.0 (rc $rc)"
+    rc=0; _su_version_newer 2.9.0 2.010.0 2>/dev/null || rc=$?; [[ "$rc" -eq 1 ]] || fail "2.9.0 newer than 2.010.0 (rc $rc)"
+    rc=0; _su_version_newer 2.08.0 2.7.0 2>/dev/null || rc=$?;  [[ "$rc" -eq 0 ]] || fail "2.08.0 not newer than 2.7.0 (rc $rc)"
+}
