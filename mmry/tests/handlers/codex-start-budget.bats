@@ -213,6 +213,27 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     assert_output --partial "memory_load"
 }
 
+@test "R2: on Windows the budget counts from when codex-hook.cmd started, not only from bash's start" {
+    # codex-hook.cmd records %TIME% as it starts; on a loaded machine finding and starting Git's bash
+    # took 4 to 7 s of Codex's 30 before codex-hook.sh could count anything. Here the launcher is
+    # said to have started 15 s ago with a 25 s budget, so the notice must come after about 10 s,
+    # not after about 25 s. printf's clock is bash 4.2+; the stock macOS bash never runs the .cmd.
+    printf -v _probe '%(%H)T' -1 2>/dev/null || skip "bash $BASH_VERSION has no printf clock; codex-hook.cmd runs only on Windows, under Git's bash 5"
+    local now t
+    printf -v now '%(%s)T' -1
+    printf -v t '%(%H:%M:%S)T' $(( now - 15 ))
+    export MMRY_CODEX_START_BUDGET=25 MMRY_CODEX_HOOK_STARTED="${t#0}.50"
+    _slow_curl "/api/memories/startup" 30
+    _codex_start 1
+    assert_success
+    run _context
+    assert_output --partial "MMRY AI could not load your memories in time"
+    awk -v e="$ELAPSED" 'BEGIN { exit !(e < 20) }' || {
+        echo "the notice took ${ELAPSED}s: the 15 s the launcher had already spent were not counted"
+        return 1
+    }
+}
+
 @test "R2: a start that finishes in time carries no out-of-time notice" {
     _codex_start 1
     run _context

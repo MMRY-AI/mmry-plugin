@@ -25,7 +25,7 @@ _rep() {
 }
 
 # Each mutation is a function that edits the copy in $1.
-m_no_deliver_first() { _rep "$1/$HOOK" '< <(_mmry_codex_start "$@" 2>"$_mmry_errlog")' '< <(bash "$TARGET" "$@" 2>"$_mmry_errlog")'; }
+m_no_deliver_first() { _rep "$1/$HOOK" '{ _mmry_codex_start "$@" <&3' '{ bash "$TARGET" "$@" <&3'; }
 m_update_first() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
     bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"' 'if true; then
     bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"'; }
@@ -36,12 +36,13 @@ m_hook_holds_output() { _rep "$1/$HOOK" '    exec >/dev/null
     wait "$start_pid"' '    wait "$start_pid"'; }
 m_start_holds_output() { _rep "$1/$START" '    exec >/dev/null
     mmry_register_session' '    mmry_register_session'; }
-m_stdin_lost() { _rep "$1/$HOOK" 'session-start.sh" <&0 &' 'session-start.sh" &'; }
-m_stderr_held() { _rep "$1/$HOOK" '_mmry_codex_start "$@" 2>"$_mmry_errlog")' '_mmry_codex_start "$@")'; }
+m_stdin_lost() { _rep "$1/$HOOK" '_mmry_codex_start "$@" <&3 3<&-' '_mmry_codex_start "$@" 3<&-'; }
+m_stderr_held() { _rep "$1/$HOOK" '3<&- 2>"$_mmry_errlog" &' '3<&- &'; }
 m_init_skips_update() { _rep "$1/$INIT" 'if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential' 'if false && mmry_host_assert_own_credential'; }
 m_start_twice() { _rep "$1/$INIT" 'if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then' 'if true; then'; }
-m_no_notice() { _rep "$1/$HOOK" 'if (( _mmry_rc > 128 )); then' 'if false; then'; }
-m_no_budget() { _rep "$1/$HOOK" 'read -r -d "" -t "$_mmry_left" _mmry_out' 'read -r -d "" _mmry_out'; }
+m_no_notice() { _rep "$1/$HOOK" 'if (( $? > 128 )); then' 'if false; then'; }
+m_no_budget() { _rep "$1/$HOOK" "read -r -d '' -t \"\$_mmry_left\" _mmry_out" "read -r -d '' _mmry_out"; }
+m_launcher_clock_ignored() { _rep "$1/$HOOK" '                _mmry_spent=$_mmry_since' '                :'; }
 # The measured time check itself: a budget past the limit and a start that needs 35 s before it
 # delivers. Only the elapsed-time assertion can catch this; the memories do arrive.
 m_budget_past_limit() {
@@ -56,7 +57,8 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
     bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh"'; }
 
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
-     stderr_held init_skips_update start_twice no_notice no_budget budget_past_limit claude_update_skipped)
+     stderr_held init_skips_update start_twice no_notice no_budget launcher_clock_ignored budget_past_limit
+     claude_update_skipped)
 (( $# > 0 )) && ALL=("$@")
 
 copy() {

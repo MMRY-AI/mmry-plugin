@@ -29,6 +29,11 @@ rem `@echo off` is load-bearing. With echo on, cmd.exe writes each command line 
 rem stdout is what Codex hands the model.
 
 setlocal enableextensions
+rem THE SESSION START'S CLOCK STARTS HERE (#33062). Codex cuts the SessionStart hook off at 30 s
+rem counted from when it starts this file, and on a loaded machine finding and starting Git's bash
+rem took 4 to 7 s of that. codex-hook.sh counts its budget from this time when it can read it. A
+rem builtin `set`: it starts no process.
+if /i "%~1"=="session-init" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
 rem THE FORMATION GATE, FIRST, BEFORE ANYTHING ELSE RUNS (#31746, Eric Barone 2026-10-07).
 rem
 rem The formation message check is registered on every prompt, tool call and session start, and

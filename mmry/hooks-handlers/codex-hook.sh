@@ -129,8 +129,11 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 # (cmd.exe, finding Git's bash, starting it: 3.3 s measured on the machine above), and under load
 # the lines above this one, which source a library and start a few processes, took several seconds
 # more. So the wait is what is left of 20 s since this shell started (bash's SECONDS, which bash 3.2
-# has too), never less than 1. A test may shorten the 20 with MMRY_CODEX_START_BUDGET (whole
-# seconds, 1 to 25); anything else means 20.
+# has too), or, on Windows, since codex-hook.cmd started, whichever is longer ago: the .cmd records
+# its %TIME% in MMRY_CODEX_HOOK_STARTED, read here with printf's clock (bash 4.2+, no process
+# started). A value that does not read as H:MM:SS, or that is more than two minutes away, is ignored.
+# Never less than 1. A test may shorten the 20 with MMRY_CODEX_START_BUDGET (whole seconds, 1 to 25);
+# anything else means 20.
 #
 # THE HANDLER'S STDERR GOES TO A FILE, NOT TO CODEX. Its housekeeping runs on after this hook exits,
 # and a process still holding the hook's stderr would keep Codex waiting for it exactly as one
@@ -152,27 +155,52 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     if ! [[ "$_mmry_budget" =~ ^[0-9]+$ ]] || (( _mmry_budget < 1 || _mmry_budget > 25 )); then
         _mmry_budget=20
     fi
-    _mmry_left=$(( _mmry_budget - SECONDS ))
+    _mmry_spent=$SECONDS
+    _mmry_t0="${MMRY_CODEX_HOOK_STARTED:-}"
+    _mmry_t0="${_mmry_t0// /}"
+    _mmry_t0="${_mmry_t0%%[.,]*}"
+    _mmry_re_t0='^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$'
+    if [[ "$_mmry_t0" =~ $_mmry_re_t0 ]]; then
+        _mmry_t0s=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} ))
+        _mmry_now=""
+        printf -v _mmry_now '%(%H:%M:%S)T' -1 2>/dev/null || _mmry_now=""
+        if [[ "$_mmry_now" =~ $_mmry_re_t0 ]]; then
+            _mmry_since=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} - _mmry_t0s ))
+            (( _mmry_since >= 0 )) || _mmry_since=$(( _mmry_since + 86400 ))
+            if (( _mmry_since > _mmry_spent && _mmry_since <= 120 )); then
+                _mmry_spent=$_mmry_since
+            fi
+        fi
+    fi
+    _mmry_left=$(( _mmry_budget - _mmry_spent ))
     (( _mmry_left >= 1 )) || _mmry_left=1
     _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
-    _mmry_out=""
-    _mmry_rc=0
+    # A PIPELINE WHOSE WRITING SIDE ONLY STARTS THE WORK. `{ ... & }` returns at once, so the pipeline
+    # ends when the reading side does: at the end of the output, or at the budget. The work carries on
+    # in the background, holding nothing of this hook's but the pipe, which it closes once the memories
+    # are out. Not process substitution: on macOS `sh` is bash 3.2 in POSIX mode, which has none, and
+    # this file must also parse under dash. stdin goes through fd 3 because a command started with &
+    # in a script otherwise reads /dev/null.
+    exec 3<&0
     set +e
-    # Inside eval because process substitution is bash syntax and this whole file must still PARSE
-    # under dash (codex-hook.bats, "the re-exec guard is POSIX"); only bash ever runs this line.
-    eval 'IFS= read -r -d "" -t "$_mmry_left" _mmry_out < <(_mmry_codex_start "$@" 2>"$_mmry_errlog")'
-    _mmry_rc=$?
+    { _mmry_codex_start "$@" <&3 3<&- 2>"$_mmry_errlog" & } | {
+        _mmry_out=""
+        IFS= read -r -d '' -t "$_mmry_left" _mmry_out
+        if (( $? > 128 )); then
+            # Out of time. The notice is fixed text and one reference, escaped for JSON because on
+            # Windows a path in it would carry backslashes.
+            _mmry_ref="$(mmry_host_command_ref load-memories 2>/dev/null || true)"
+            # Not "${v//\\/\\\\}": from bash 5.2 the replacement's backslashes are consumed
+            # (patsub_replacement) and nothing is doubled. Quoted variables work on every bash.
+            _mmry_bs='\'; _mmry_q='"'
+            _mmry_ref="${_mmry_ref//"$_mmry_bs"/"$_mmry_bs$_mmry_bs"}"
+            _mmry_ref="${_mmry_ref//"$_mmry_q"/"$_mmry_bs$_mmry_q"}"
+            printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with %s."}}' "${_mmry_ref:-the memory_load tool}"
+        else
+            printf '%s' "$_mmry_out"
+        fi
+    }
     set -e
-    if (( _mmry_rc > 128 )); then
-        # Out of time. The notice is built from fixed text and one path; the path is escaped for JSON
-        # because on Windows it carries backslashes.
-        _mmry_ref="$(mmry_host_command_ref load-memories 2>/dev/null || true)"
-        _mmry_ref="${_mmry_ref//\\/\\\\}"
-        _mmry_ref="${_mmry_ref//\"/\\\"}"
-        printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with %s."}}' "${_mmry_ref:-the memory_load tool}"
-    else
-        printf '%s' "$_mmry_out"
-    fi
     exit 0
 fi
 
