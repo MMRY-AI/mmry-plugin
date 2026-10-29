@@ -455,3 +455,91 @@ PROBE
     [[ "$output" == *"UNCHANGED"* ]] || fail "$output"
     [[ "$output" == *"LOADED 1.0.0"* ]] || fail "$output"
 }
+
+# The two refusals at the top of _su_prune, called directly (#33033 fix round 5). Neither can be
+# reached through self-update.sh or session-init.sh today, which hand it only the plugin root or the
+# host's state folder, so these source the real library and call the real function with the targets
+# the refusals exist for. HOME and TMPDIR are the suite's own; curl is a mock that records any call.
+_prune_probe() {
+    PRUNE_PROBE="$TEST_TMPDIR/prune-probe.sh"
+    cat > "$PRUNE_PROBE" <<'PROBE'
+#!/usr/bin/env bash
+# $1 library, $2 the target handed to _su_prune.
+log() { printf 'LOG: %s\n' "$1"; }
+source "$1"
+mkdir -p "$TMPDIR/lst"
+printf '%s\n' '# mmry release files 9.9.9' release-files.txt hooks-handlers/self-update.sh \
+    .claude-plugin/plugin.json commands/database.md > "$TMPDIR/lst/release-files.txt"
+_su_load_list "$TMPDIR/lst/release-files.txt" "$TMPDIR/lst/out" || { printf 'LIST NOT LOADED\n'; exit 3; }
+_su_prune "$TMPDIR/lst/out" "$2" 9.9.9
+printf 'RC=%s\n' "$?"
+PROBE
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'printf "%%s\n" "$*" >> "%s"\n' "$TEST_TMPDIR/curl-called"
+        printf 'exit 7\n'
+    } > "$TEST_TMPDIR/mock-bin/curl"
+    chmod +x "$TEST_TMPDIR/mock-bin/curl"
+}
+
+# Fails unless _su_prune refused target $1 with refusal text $2 and removed nothing, made no scratch
+# folder, and reached for no download.
+_assert_refused() {
+    local target="$1" reason="$2"
+    run env HOME="$HOME" TMPDIR="$TMPDIR" bash "$PRUNE_PROBE" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$target"
+    [[ "$output" != *"LIST NOT LOADED"* ]] || fail "precondition: the probe's list did not load: $output"
+    [[ "$output" == *"RC=1"* ]] || fail "target '$target' was not refused (expected return 1): $output"
+    [[ "$output" == *"refusing to remove anything from '"*"': ${reason}"* ]] \
+        || fail "target '$target' was not refused for the stated reason '${reason}': $output"
+    [[ "$output" != *"removed "* ]] || fail "target '$target': something was removed: $output"
+    [[ "$output" != *"nothing to remove from"* ]] || fail "target '$target' was searched for removals: $output"
+    [[ -z "$(ls -A "$TMPDIR" | grep -E '^mmry-prune-' || true)" ]] || fail "target '$target': scratch space was made, so the refusal came too late"
+    [ ! -e "$TEST_TMPDIR/curl-called" ] || fail "target '$target': a download was attempted: $(cat "$TEST_TMPDIR/curl-called")"
+}
+
+@test "33033 refusal O4: an empty target, '/', and HOME, with and without a trailing slash, are refused and nothing is removed" {
+    _prune_probe
+    # The suite's private HOME, never the machine's.
+    [[ "$HOME" == "$TEST_TMPDIR"/* ]] || fail "precondition: HOME is not the test's own: $HOME"
+    # HOME made to look like a plugin folder, so only this refusal stands between it and a prune:
+    # an unlisted file in a shipped folder, which a prune of HOME would remove.
+    mkdir -p "$HOME/hooks-handlers" "$HOME/commands"
+    printf 'mine\n' > "$HOME/hooks-handlers/my-script.sh"
+    printf 'mine\n' > "$HOME/commands/my-notes.md"
+
+    local target
+    for target in "" "/" "//" "$HOME" "$HOME/" "$HOME//"; do
+        _assert_refused "$target" "not a plugin folder"
+        [[ "$output" != *"it has no hooks-handlers folder"* ]] \
+            || fail "target '$target' was refused by the later hooks-handlers check, not as an empty target, '/' or HOME: $output"
+        [ -f "$HOME/hooks-handlers/my-script.sh" ] || fail "target '$target': a file in HOME/hooks-handlers was removed: $output"
+        [ -f "$HOME/commands/my-notes.md" ] || fail "target '$target': a file in HOME/commands was removed: $output"
+    done
+}
+
+@test "33033 refusal O5: a folder with no hooks-handlers folder is refused and nothing is removed" {
+    _prune_probe
+    # A folder with the release's other shipped folders but no hooks-handlers, holding unlisted files
+    # a prune would remove.
+    local bare="$TEST_TMPDIR/not-a-plugin"
+    mkdir -p "$bare/commands" "$bare/.claude-plugin"
+    printf 'mine\n' > "$bare/commands/my-notes.md"
+    printf 'mine\n' > "$bare/.claude-plugin/extra.json"
+    # hooks-handlers present, but as a file rather than a folder.
+    local filed="$TEST_TMPDIR/file-not-folder"
+    mkdir -p "$filed/commands"
+    printf 'not a folder\n' > "$filed/hooks-handlers"
+    printf 'mine\n' > "$filed/commands/my-notes.md"
+    # And a folder that is not there at all.
+    local missing="$TEST_TMPDIR/no-such-folder"
+
+    local target
+    for target in "$bare" "$bare/" "$filed" "$missing"; do
+        _assert_refused "$target" "it has no hooks-handlers folder, so it is not a plugin folder"
+    done
+    [ -f "$bare/commands/my-notes.md" ] || fail "a file in the folder without hooks-handlers was removed"
+    [ -f "$bare/.claude-plugin/extra.json" ] || fail "a file in the folder without hooks-handlers was removed"
+    [ -f "$filed/commands/my-notes.md" ] || fail "a file in the folder whose hooks-handlers is a file was removed"
+    [ -f "$filed/hooks-handlers" ] || fail "the hooks-handlers file was removed"
+    [ ! -e "$missing" ] || fail "the missing folder was created"
+}
