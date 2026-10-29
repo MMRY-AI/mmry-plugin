@@ -125,6 +125,9 @@ mmry_teardown_tmp() {
         # Again, so a leftover that went in the last instant is not named, and one that is idle is.
         _mmry_td_scan "$dir" "$out"
         while IFS=$'\t' read -r pid cmd; do
+            # A timer is never the leftover: it is what a leftover loop is sleeping on, and it cannot write.
+            a0="${cmd%% *}"; a0="${a0##*/}"
+            [[ "$a0" == sleep ]] && continue
             n=$(( n + 1 ))
             report+="  pid $pid: ${cmd}"$'\n'
         done < "$out"
