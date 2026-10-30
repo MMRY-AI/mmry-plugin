@@ -68,13 +68,17 @@ esac
 if [[ "$HANDLER_NAME" == "codex-first-prompt" ]]; then
     # Forward slashes first: codex-hook.cmd starts this file by its Windows path, C:\...\codex-hook.sh
     # (measured: without this the late memories were never delivered on Windows).
-    _mmry_self="${BASH_SOURCE[0]//\\//}"
+    # Only when there is a backslash: bash 3.2 (macOS sh) does not read that expansion the same way.
+    _mmry_self="${BASH_SOURCE[0]}"
+    case "$_mmry_self" in *\\*) _mmry_self="${_mmry_self//\\//}" ;; esac
     [[ "$_mmry_self" == */* ]] || _mmry_self="./${_mmry_self}"
-    [[ -f "${_mmry_self%/*}/codex-first-prompt.sh" ]] || exit 0
-    set +e
-    # shellcheck source=/dev/null
-    source "${_mmry_self%/*}/codex-first-prompt.sh"
-    exit 0
+    # Not found that way: carry on to the ordinary dispatch below, which also runs it, only slower.
+    if [[ -f "${_mmry_self%/*}/codex-first-prompt.sh" ]]; then
+        set +e
+        # shellcheck source=/dev/null
+        source "${_mmry_self%/*}/codex-first-prompt.sh"
+        exit 0
+    fi
 fi
 
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0

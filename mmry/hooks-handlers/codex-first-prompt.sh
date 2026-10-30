@@ -100,7 +100,10 @@ if [[ -f "${_hand}.ready" ]]; then
     # The session start's own answer, word for word, as this event's: Codex reads hookSpecificOutput
     # by its hookEventName. An answer with no JSON (no account set up says so in plain text) is
     # context as it stands on this event too.
-    printf '%s' "${_ans/\"hookEventName\":\"SessionStart\"/\"hookEventName\":\"UserPromptSubmit\"}"
+    # Pattern and replacement from variables, unquoted inside the expansion: bash 3.2 keeps escaped
+    # quotes there literally. Neither holds a glob character.
+    _from='"hookEventName":"SessionStart"' _to='"hookEventName":"UserPromptSubmit"'
+    printf '%s' "${_ans/$_from/$_to}"
     _log "delivered the late start ${_pid} (${#_ans} bytes) after ${SECONDS}s"
 else
     _log "the late start ${_pid} had not finished after ${SECONDS}s; said they were not loaded"

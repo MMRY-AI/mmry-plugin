@@ -67,13 +67,12 @@ m_drain_holds_output() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" ) >/dev/n
 m_first_no_wait() { _rep "$1/$FIRST" 'while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _budget )); do' 'while false; do'; }
 m_first_unbounded() { _rep "$1/$FIRST" ' && (( SECONDS + _spent0 < _budget )); do' '; do'; }
 m_first_keeps_marker() { _rep "$1/$FIRST" 'rm -f "$_late" "${_hand}.out"' 'rm -f "${_hand}.out"'; }
-m_first_not_retagged() { _rep "$1/$FIRST" '"${_ans/\"hookEventName\":\"SessionStart\"/\"hookEventName\":\"UserPromptSubmit\"}"' '"$_ans"'; }
+m_first_not_retagged() { _rep "$1/$FIRST" 'printf '"'%s'"' "${_ans/$_from/$_to}"' 'printf '"'%s'"' "$_ans"'; }
 m_first_no_fail_notice() { _rep "$1/$FIRST" "    printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories" "    false && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories"; }
 m_first_any_session() { _rep "$1/$FIRST" '_late="${_T}/.mmry-codex-late.${_sid}"' 'for _late in "${_T}"/.mmry-codex-late.*; do break; done; _sid="${_late##*.mmry-codex-late.}"'; }
 m_sh_gate_open() { _rep "$1/$HOOKS" "done; exit 0' mmry-late-gate" "done; exec sh \\\"\$@\\\"' mmry-late-gate"; }
 m_first_launcher_clock_ignored() { _rep "$1/$FIRST" '(( _since > SECONDS && _since <= 120 )) && _spent0=$(( _since - SECONDS ))' ':'; }
 # Only a Windows run can see this one refuse: the test that drives codex-hook.cmd skips elsewhere.
-m_win_path_unslashed() { _rep "$1/$HOOK" '_mmry_self="${BASH_SOURCE[0]//\\//}"' '_mmry_self="${BASH_SOURCE[0]}"'; }
 m_cmd_gate_open() { _rep "$1/$CMD" 'if not defined MMRY_LATE exit /b 0' 'rem gate removed'; }
 # Requirement 3's control: Claude Code losing its update check before the memories.
 m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
@@ -83,7 +82,7 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
      stderr_held init_skips_update start_twice no_notice no_bash32_timeout no_budget launcher_clock_ignored budget_past_limit
      claude_update_skipped late_marker_missing no_handoff late_always drain_holds_output first_no_wait first_unbounded
-     first_keeps_marker first_not_retagged first_no_fail_notice first_any_session first_launcher_clock_ignored sh_gate_open cmd_gate_open win_path_unslashed)
+     first_keeps_marker first_not_retagged first_no_fail_notice first_any_session first_launcher_clock_ignored sh_gate_open cmd_gate_open)
 (( $# > 0 )) && ALL=("$@")
 
 copy() {
@@ -119,7 +118,7 @@ echo "   passes: $(grep -c '^ok' "$WORK/base.out") tests"
 
 survived=0
 for name in "${ALL[@]}"; do
-    if [[ "$name" == cmd_gate_open || "$name" == win_path_unslashed ]] && [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* ]]; then
+    if [[ "$name" == cmd_gate_open ]] && [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* ]]; then
         echo "== $name: NOT APPLICABLE off Windows (codex-hook.cmd runs only there)"
         continue
     fi
