@@ -125,10 +125,32 @@ _codex_start() {
 }
 
 _within_limit() {
-    awk -v e="$ELAPSED" -v l="$LIMIT" 'BEGIN { exit !(e < l) }' || {
-        echo "the Codex session start took ${ELAPSED}s; Codex cuts it off at ${LIMIT}s"
+    awk -v e="$ELAPSED" -v l="${2:-$LIMIT}" 'BEGIN { exit !(e < l) }' || {
+        echo "the Codex ${1:-session start} took ${ELAPSED}s; Codex cuts it off at ${2:-$LIMIT}s"
         return 1
     }
+}
+
+# The conversation's first prompt, run the way Codex runs it: the UserPromptSubmit entry of
+# codex-hooks.json that delivers late startup memories, by sh, with the prompt payload on stdin.
+# _codex_prompt SESSION-NUMBER. Sets ELAPSED, JSON and PLIMIT (that entry's declared timeout).
+_codex_prompt() {
+    local cmd payload t0 t1
+    cmd="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("codex-first-prompt"))][0].command // empty' "$ROOT/hooks/codex-hooks.json")"
+    PLIMIT="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("codex-first-prompt"))][0].timeout // empty' "$ROOT/hooks/codex-hooks.json")"
+    [[ -n "$cmd" && "$PLIMIT" =~ ^[0-9]+$ ]] || {
+        echo "codex-hooks.json registers no UserPromptSubmit hook that delivers late startup memories"
+        return 1
+    }
+    payload="{\"session_id\":\"budget-${1:-1}\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"hello\",\"cwd\":\"$TEST_TMPDIR\"}"
+    t0="$(_now)"
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u MMRY_NO_SELF_UPDATE \
+        HOME="$HOME" CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" \
+        bash -c 'cd "$3" && printf "%s" "$1" | sh -c "$2"' _ "$payload" "$cmd" "$TEST_TMPDIR"
+    t1="$(_now)"
+    ELAPSED="$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.2f", b - a }')"
+    JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
+    echo "# first prompt: elapsed ${ELAPSED}s of a ${PLIMIT}s limit" >&3
 }
 
 _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext // empty'; }
@@ -196,10 +218,121 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
 }
 
 # ---------------------------------------------------------------------------------------------
+# R1: A START THAT RUNS OUT OF TIME STILL GETS ITS MEMORIES, WITH THE FIRST PROMPT
+# ---------------------------------------------------------------------------------------------
+# Measured on a heavily loaded Windows machine (76 to 88 bash processes), the start took 23 to 32 s
+# and the live spec got the out-of-time notice instead of the memories in 4 runs of 5. The memories
+# are not lost when that happens: the work goes on after the hook returns, and Codex runs the
+# UserPromptSubmit hooks before the model answers the first prompt. So the first prompt delivers them.
+
+@test "R1: a start forced past its budget still hands the memories to the conversation with the first prompt" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 8
+    _codex_start 3
+    assert_success
+    _within_limit
+    run _context
+    assert_output --partial "MMRY AI could not load your memories in time"
+    assert_output --partial "first message"
+    refute_output --partial "MMRY AI loaded"
+    # The first prompt, sent at once, as `codex exec` does: it waits for the memories that are still
+    # on their way and hands them over, inside its own declared limit, before the model answers.
+    _codex_prompt 3
+    assert_success
+    _within_limit "first prompt" "$PLIMIT"
+    printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || {
+        echo "the first prompt's answer is not a UserPromptSubmit context Codex will accept: $JSON"
+        return 1
+    }
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
+    # The file the conversation is told to read holds the memories.
+    local f="${output##*Read them now: }"
+    [ -s "$(cygpath -u "$f" 2>/dev/null || printf '%s' "$f")" ]
+}
+
+@test "R1: the late memories are handed over once, not on every prompt" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 6
+    _codex_start 4
+    _codex_prompt 4
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\.'
+    _codex_prompt 4
+    assert_success
+    [ -z "$JSON" ] || { echo "the second prompt delivered the startup memories again: $JSON"; return 1; }
+}
+
+@test "R1: a start that finished in time leaves nothing for the first prompt to deliver" {
+    _codex_start 5
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\.'
+    _codex_prompt 5
+    assert_success
+    [ -z "$JSON" ] || { echo "the memories were delivered twice, at the start and with the first prompt: $JSON"; return 1; }
+}
+
+@test "R1: one conversation's late memories never reach another conversation" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 6
+    _codex_start 6
+    _codex_prompt 66
+    assert_success
+    [ -z "$JSON" ] || { echo "conversation 66 was handed conversation 6's startup memories: $JSON"; return 1; }
+    # And the conversation they belong to still gets them.
+    _codex_prompt 6
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\.'
+}
+
+@test "R2: when the memories still have not arrived by the first prompt's budget, the person is told they were not loaded" {
+    export MMRY_CODEX_START_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_BUDGET=3
+    _slow_curl "/api/memories/startup" 40
+    _codex_start 8
+    _codex_prompt 8
+    assert_success
+    _within_limit "first prompt" "$PLIMIT"
+    printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+    run _context
+    assert_output --partial "were not loaded"
+    assert_output --partial "Tell the user"
+    assert_output --partial "memory_load"
+    refute_output --partial "MMRY AI loaded"
+}
+
+@test "R1: with no late start pending, the first-prompt hook starts no MMRY process at all (sh gate)" {
+    # It runs on every prompt of every conversation, so the common case must cost one file lookup.
+    local cmd
+    cmd="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("codex-first-prompt"))][0].command // empty' "$ROOT/hooks/codex-hooks.json")"
+    [ -n "$cmd" ]
+    printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
+    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "mkdir -p \"\$TMPDIR\" && $cmd" </dev/null
+    assert_success
+    [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate let the hook run with nothing pending"; return 1; }
+    # And a pending late start opens it.
+    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.x"
+    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "$cmd" </dev/null
+    [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate stayed shut with a late start pending"; return 1; }
+}
+
+@test "R1: on Windows, with no late start pending, codex-hook.cmd exits before it looks for bash" {
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
+    printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
+    mkdir -p "$TEST_TMPDIR/gate-tmp"
+    local wtmp; wtmp="$(cygpath -w "$TEST_TMPDIR/gate-tmp")"
+    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null
+    assert_success
+    [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd started bash with nothing pending"; return 1; }
+    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.x"
+    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null
+    [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd stayed shut with a late start pending"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
 # R2: OUT OF TIME IS SAID, NOT SILENT
 # ---------------------------------------------------------------------------------------------
 
-@test "R2: a session start forced past its budget tells the person the memories were not loaded, inside the limit" {
+@test "R2: a session start forced past its budget says, inside the limit, that the memories are late and arriving with the first message" {
     export MMRY_CODEX_START_BUDGET=3
     _slow_curl "/api/memories/startup" 15
     _codex_start 1
@@ -209,7 +342,7 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null
     run _context
     assert_output --partial "MMRY AI could not load your memories in time"
-    assert_output --partial "this conversation started without them"
+    assert_output --partial "will be delivered with the user's first message"
     refute_output --partial "MMRY AI loaded"
 }
 
