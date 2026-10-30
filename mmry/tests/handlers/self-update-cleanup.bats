@@ -542,6 +542,27 @@ _assert_refused() {
     done
 }
 
+@test "33033 refusal O4 trailing-slash HOME: HOME ending in one or two slashes is still refused, and nothing is removed" {
+    _prune_probe
+    local base="$HOME"
+    [[ "$base" == "$TEST_TMPDIR"/* ]] || fail "precondition: HOME is not the test's own: $base"
+    # HOME made to look like a plugin folder, so only the HOME refusal stands between it and a prune.
+    mkdir -p "$base/hooks-handlers" "$base/commands"
+    printf 'mine\n' > "$base/hooks-handlers/mine.sh"
+    printf 'mine\n' > "$base/commands/my-notes.md"
+
+    local home target
+    for home in "$base/" "$base//"; do
+        for target in "$base" "$base/" "$base//"; do
+            HOME="$home" _assert_refused "$target" "not a plugin folder"
+            [[ "$output" != *"it has no hooks-handlers folder"* ]] \
+                || fail "HOME '$home', target '$target': refused by the later hooks-handlers check, not as HOME: $output"
+            [ -f "$base/hooks-handlers/mine.sh" ] || fail "HOME '$home', target '$target': HOME/hooks-handlers/mine.sh was removed: $output"
+            [ -f "$base/commands/my-notes.md" ] || fail "HOME '$home', target '$target': HOME/commands/my-notes.md was removed: $output"
+        done
+    done
+}
+
 @test "33033 refusal O5: a folder with no hooks-handlers folder is refused and nothing is removed" {
     _prune_probe
     # A folder with the release's other shipped folders but no hooks-handlers, holding unlisted files
