@@ -15,6 +15,7 @@ commands/search.md
 commands/setup.md
 commands/uninstall.md
 commands/visibility.md
+hooks-handlers/codex-first-prompt.sh
 hooks-handlers/codex-hook.cmd
 hooks-handlers/codex-hook.sh
 hooks-handlers/create-database.sh

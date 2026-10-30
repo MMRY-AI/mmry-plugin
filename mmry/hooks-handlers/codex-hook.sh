@@ -141,13 +141,44 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 #
 # WHAT IS READ IS PASSED ON BYTE FOR BYTE. The read stops at end of input or at the budget; with
 # IFS empty, -r, and a NUL delimiter the handler never writes, nothing is trimmed or unescaped.
+#
+# AND A START THAT RUNS OUT OF TIME STILL GETS ITS MEMORIES, WITH THE FIRST PROMPT (#33062 fix round 1).
+# Under heavy load (76 to 88 bash processes on the machine above) the start took 23 to 32 s, so the
+# notice came instead of the memories in 4 live runs of 5. The memories were not lost: the work goes
+# on after this hook returns. So the finished answer is also handed to the conversation's first
+# prompt, which Codex runs before the model answers it (codex-first-prompt.sh, registered as a
+# UserPromptSubmit hook in hooks/codex-hooks.json).
+#
+# THE HAND-OFF, AND WHY IT IS EXACTLY ONCE. This hook reads the SessionStart payload itself, with
+# builtins, for the session id, and hands the same bytes to session-start.sh. The work writes its
+# finished answer to .mmry-codex-start.<session>.<this hook's pid>.out, then .ready, BEFORE it prints
+# it. The reader below, if and only if it gives the out-of-time notice instead of the answer, writes
+# this hook's pid to .mmry-codex-late.<session>. The first prompt delivers only when that marker
+# exists, so the memories are delivered at the start or with the first prompt, never both, and never
+# neither unless they never arrive at all (it then says so). Plain redirections: no process started.
 _mmry_codex_start() {
-    local start_pid
-    bash "${HANDLER_DIR}/session-start.sh" <&0 &
-    start_pid=$!
-    exec >/dev/null
-    wait "$start_pid" || true
-    bash "$TARGET" --after-delivery "$@" || true
+    exec 4>&1 >/dev/null
+    {
+        if (( _mmry_have_payload == 1 )); then
+            bash "${HANDLER_DIR}/session-start.sh" 4>&- <<<"$_mmry_payload"
+        else
+            bash "${HANDLER_DIR}/session-start.sh" 4>&- <&0
+        fi
+    } | {
+        _mmry_ans=""
+        IFS= read -r -d '' _mmry_ans || true
+        if [[ -n "$_mmry_hand" ]]; then
+            printf '%s' "$_mmry_ans" > "${_mmry_hand}.out" 2>/dev/null && : > "${_mmry_hand}.ready" 2>/dev/null
+        fi
+        # The reader may have given up and gone: a write to its closed pipe must fail, not kill this.
+        trap '' PIPE
+        printf '%s' "$_mmry_ans" >&4 2>/dev/null
+        exec 4>&-
+    }
+    exec 4>&-
+    bash "$TARGET" --after-delivery "$@" </dev/null || true
+    # Hand-offs and markers no conversation collected (it ended before its first prompt), half a day on.
+    find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \( -name '.mmry-codex-start.*' -o -name '.mmry-codex-late.*' \) -mmin +720 -delete 2>/dev/null || true
 }
 
 if [[ "$HANDLER_NAME" == "session-init" ]]; then
@@ -175,6 +206,19 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     _mmry_left=$(( _mmry_budget - _mmry_spent ))
     (( _mmry_left >= 1 )) || _mmry_left=1
     _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
+    # The payload, read here with builtins (Codex writes it and closes stdin). The session id in it
+    # names the hand-off; the same characters the per-prompt hook accepts, and no dot, so an id
+    # cannot reach outside the temp directory or name another conversation's file.
+    _mmry_payload="" _mmry_have_payload=0 _mmry_hand="" _mmry_late_file=""
+    if [[ ! -t 0 ]]; then
+        IFS= read -r -d '' -t 5 _mmry_payload || true
+        _mmry_have_payload=1
+        _mmry_re_sid='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"'
+        if [[ "$_mmry_payload" =~ $_mmry_re_sid ]]; then
+            _mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${BASH_REMATCH[1]}.$$"
+            _mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${BASH_REMATCH[1]}"
+        fi
+    fi
     # A PIPELINE WHOSE WRITING SIDE ONLY STARTS THE WORK. `{ ... & }` returns at once, so the pipeline
     # ends when the reading side does: at the end of the output, or at the budget. The work carries on
     # in the background, holding nothing of this hook's but the pipe, which it closes once the memories
@@ -204,7 +248,13 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # Windows machine each process cost 1 to 2 s. The reference is the one
             # mmry_host_command_ref load-memories gives on Codex, which is all this file serves:
             # mmry_host_tool_ref memory_load, "the mmry_plugin memory_load tool".
-            printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
+            # With a session id, the marker that sends the memories on with the first prompt, and the
+            # notice that says so. Without one there is nothing to send them on by: the old notice.
+            if [[ -n "$_mmry_late_file" ]] && printf '%s' "$$" > "$_mmry_late_file" 2>/dev/null; then
+                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message, in a message that begins MMRY AI loaded. If no such message arrives with it, tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
+            else
+                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
+            fi
         else
             printf '%s' "$_mmry_out"
         fi

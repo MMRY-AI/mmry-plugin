@@ -34,6 +34,27 @@ rem counted from when it starts this file, and on a loaded machine finding and s
 rem took 4 to 7 s of that. codex-hook.sh counts its budget from this time when it can read it. A
 rem builtin `set`: it starts no process.
 if /i "%~1"=="session-init" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
+rem THE LATE-MEMORIES GATE (#33062 fix round 1). codex-first-prompt runs on every prompt and has work
+rem only when a session start ran out of time and left a .mmry-codex-late.<session> marker, so with
+rem none it exits here, before where.exe, reg.exe or bash. The same folders, in the same order, as the
+rem formation gate below, which says why. Builtins only: set, if and for start no process.
+if /i not "%~1"=="codex-first-prompt" goto :after_late_gate
+set "MMRY_LATE="
+if not defined TMPDIR goto :late_usertemp
+set "MMRY_GATE_DIR=%TMPDIR%"
+set "MMRY_GATE_ABS="
+if "%MMRY_GATE_DIR:~1,1%"==":" set "MMRY_GATE_ABS=1"
+if "%MMRY_GATE_DIR:~0,2%"=="\\" set "MMRY_GATE_ABS=1"
+if not defined MMRY_GATE_ABS goto :after_late_gate
+for %%F in ("%MMRY_GATE_DIR%\.mmry-codex-late.*") do set "MMRY_LATE=1"
+goto :late_decide
+:late_usertemp
+if defined TEMP for %%F in ("%TEMP%\.mmry-codex-late.*") do set "MMRY_LATE=1"
+if defined TMP for %%F in ("%TMP%\.mmry-codex-late.*") do set "MMRY_LATE=1"
+if defined LOCALAPPDATA for %%F in ("%LOCALAPPDATA%\Temp\.mmry-codex-late.*") do set "MMRY_LATE=1"
+:late_decide
+if not defined MMRY_LATE exit /b 0
+:after_late_gate
 rem THE FORMATION GATE, FIRST, BEFORE ANYTHING ELSE RUNS (#31746, Eric Barone 2026-10-07).
 rem
 rem The formation message check is registered on every prompt, tool call and session start, and
