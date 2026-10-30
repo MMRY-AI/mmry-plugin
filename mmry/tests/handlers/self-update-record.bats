@@ -33,9 +33,12 @@ setup() {
 
 # Make the curl mock's marketplace report version $1, whatever the archive holds.
 _marketplace() {
-    # The mock's last line prints the marketplace; replace it whole.
-    sed -i '/plugins/d' "$TEST_TMPDIR/mock-bin/curl"
-    printf "printf '%%s' '{\"plugins\":[{\"name\":\"mmry\",\"version\":\"%s\"}]}'\n" "$1" >> "$TEST_TMPDIR/mock-bin/curl"
+    # The mock's last line prints the marketplace; replace it whole. No sed -i: BSD sed on macOS
+    # reads the next argument as a backup suffix.
+    grep -v plugins "$TEST_TMPDIR/mock-bin/curl" > "$TEST_TMPDIR/curl.tmp"
+    printf "printf '%%s' '{\"plugins\":[{\"name\":\"mmry\",\"version\":\"%s\"}]}'\n" "$1" >> "$TEST_TMPDIR/curl.tmp"
+    mv "$TEST_TMPDIR/curl.tmp" "$TEST_TMPDIR/mock-bin/curl"
+    chmod +x "$TEST_TMPDIR/mock-bin/curl"
     grep -q "\"version\":\"$1\"" "$TEST_TMPDIR/mock-bin/curl" || fail "the marketplace mock was not set to $1"
 }
 
