@@ -10,10 +10,12 @@
 # and writes its finished answer to a hand-off file. Codex runs UserPromptSubmit hooks before the
 # model answers the prompt, so this delivers them before the first answer.
 #
-# EXACTLY ONCE. codex-hook.sh writes .mmry-codex-late.<session> (holding its pid) only when it gave
-# the notice INSTEAD of the memories. Without that marker for this conversation this says nothing. With
-# it, this waits for the hand-off the same start wrote (.mmry-codex-start.<session>.<pid>.ready), up to
-# its budget, hands it over, and removes the marker, so a later prompt does not hand it over again.
+# EXACTLY ONCE. codex-hook.sh writes .mmry-codex-late.<session> (holding its pid) as the session start
+# begins, and rewrites it "delivered" when it gave the memories in time (fix round 2; it used to write it
+# only when it gave the notice INSTEAD of the memories). Without that marker for this conversation, or
+# with it saying "delivered" or "none", this says nothing. Otherwise it waits for the hand-off the same
+# start writes (.mmry-codex-start.<session>.<pid>.ready), hands it over, and removes the marker, so a
+# later prompt does not hand it over again.
 #
 # AND IF THEY STILL HAVE NOT ARRIVED, IT SAYS SO. The start's notice told the assistant they were on
 # their way; at the budget this tells it they were not loaded, to load them with the memory_load tool
@@ -64,8 +66,8 @@ _sweep() {
 _late="${_T}/.mmry-codex-late.${_sid}"
 [[ -f "$_late" ]] || { _log "nothing late for this session"; _sweep; exit 0; }
 
-_pid=""
-IFS= read -r _pid < "$_late" 2>/dev/null || true
+_pid="" _state=""
+{ IFS= read -r _pid; IFS= read -r _state; } < "$_late" 2>/dev/null || true
 # The pattern from a variable and the length tested apart: bash 3.2, the macOS sh, refused the
 # inline ^[0-9]{1,10}$ (CI macOS: the marker was dropped here with nothing said).
 _re_pid='^[0-9]+$'
@@ -75,6 +77,13 @@ if ! [[ "$_pid" =~ $_re_pid ]] || (( ${#_pid} > 10 )); then
     exit 0
 fi
 _hand="${_T}/.mmry-codex-start.${_sid}.${_pid}"
+# The session start arms the marker as it begins (fix round 2) and settles it: "delivered" when the
+# memories went out in time, "none" when it started no work. Either way there is nothing to hand over.
+if [[ "$_state" == delivered || "$_state" == none ]]; then
+    _log "the start ${_pid} said ${_state}: nothing to hand over"
+    rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" 2>/dev/null
+    exit 0
+fi
 
 _budget="${MMRY_CODEX_FIRST_PROMPT_BUDGET:-90}"
 if ! [[ "$_budget" =~ ^[0-9]+$ ]] || (( _budget < 1 || _budget > 100 )); then

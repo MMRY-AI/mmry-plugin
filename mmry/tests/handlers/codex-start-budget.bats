@@ -402,6 +402,43 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     }
 }
 
+@test "R1: a first prompt that comes before the session start has settled still gets the memories" {
+    # Codex stops waiting for the session start at its own 30 s and runs the first prompt, whatever the
+    # hook is doing. Measured at 112 to 177 bash processes, the hook got to its deadline within a
+    # fraction of a second of that, and once Codex dropped its notice altogether. So the hand-off must
+    # be armed from the start: here the first prompt comes while the start is still waiting for the
+    # service, long before its deadline.
+    local cmd payload
+    cmd="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$ROOT/hooks/codex-hooks.json")"
+    payload="{\"session_id\":\"budget-24\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"cwd\":\"$TEST_TMPDIR\"}"
+    _slow_curl "/api/memories/startup" 10
+    env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u MMRY_NO_SELF_UPDATE \
+        HOME="$HOME" CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" \
+        bash -c 'cd "$3" && printf "%s" "$1" | sh -c "$2"' _ "$payload" "$cmd" "$TEST_TMPDIR" \
+        > "$TEST_TMPDIR/bg-start.out" 2>&1 3>&- &
+    local bg=$!
+    _wait_for "$TEST_TMPDIR/slow-started" 60 || { echo "the session start never reached the service"; return 1; }
+    _codex_prompt 24
+    wait "$bg" || true
+    assert_success
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: ' || { _prompt_diag; return 1; }
+}
+
+@test "R1: a session start that starts no work leaves the first prompt nothing to wait for" {
+    # The marker is armed before anything else; a way out that starts no work must settle it.
+    rm -f "$ROOT/hooks-handlers/session-init.sh"
+    _codex_start 25
+    assert_success
+    _codex_prompt 25
+    assert_success
+    [ -z "$JSON" ] || { echo "the first prompt said something about a start that did nothing: $JSON"; return 1; }
+    awk -v e="$ELAPSED" 'BEGIN { exit !(e < 20) }' || {
+        echo "the first prompt waited ${ELAPSED}s for a start that had started no work"
+        return 1
+    }
+}
+
 @test "R1: with no late start pending, the first-prompt hook starts no MMRY process at all (sh gate)" {
     # It runs on every prompt of every conversation, so the common case must cost one file lookup.
     local cmd

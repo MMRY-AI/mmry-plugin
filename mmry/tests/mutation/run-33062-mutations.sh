@@ -58,11 +58,10 @@ m_budget_past_limit() {
 MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"'
 }
 # Fix round 1: a start past its budget hands the memories on to the first prompt, exactly once.
-m_late_marker_missing() { _rep "$1/$HOOK" 'if [[ -n "$_mmry_late_file" ]] && printf '"'%s\n'"' "$$" > "$_mmry_late_file" 2>/dev/null; then' 'if [[ -n "$_mmry_late_file" ]]; then'; }
+# (m_late_marker_missing and m_late_always, fix round 1, are replaced by m_marker_not_armed and
+# m_no_delivered_mark below: since fix round 2 the marker is armed as the start begins and settled
+# "delivered" by a start that was in time.)
 m_no_handoff() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" 2>/dev/null' '&& :'; }
-m_late_always() { _rep "$1/$HOOK" '        else
-            printf '"'%s'"' "$_mmry_out"' '        else
-            printf '"'%s'"' "$$" > "$_mmry_late_file"; printf '"'%s'"' "$_mmry_out"'; }
 m_drain_holds_output() { _rep "$1/$HOOK" '| _mmry_codex_drain >&4 4>&- &
         else' '| _mmry_codex_drain >&4 &
         else'; }
@@ -91,6 +90,14 @@ m_first_ceiling_at_limit() {
 fi' '    _ceiling=290
 fi'
 }
+# The marker no longer armed as the start begins: only the reader's late notice remains, with no marker.
+m_marker_not_armed() { _rep "$1/$HOOK" '        if printf '"'%s\n'"' "$$" > "$_mmry_late_file" 2>/dev/null; then
+            _mmry_armed=1' '        if true; then
+            _mmry_armed=1'; }
+# A way out that starts no work leaves the marker pending.
+m_no_disarm() { _rep "$1/$HOOK" '            trap '"'"'(( _mmry_armed == 1 ))' '            false && trap '"'"'(( _mmry_armed == 1 ))'; }
+# A start that delivered in time does not say so: the first prompt delivers the memories a second time.
+m_no_delivered_mark() { _rep "$1/$HOOK" '&& printf '"'%s\ndelivered\n'"' "$$" > "$_mmry_late_file" 2>/dev/null' '&& :'; }
 # The declared limit back at 120 s.
 m_declared_limit_back() { _rep "$1/$HOOKS" '"statusMessage": "MMRY AI: delivering your memories",
             "timeout": 300' '"statusMessage": "MMRY AI: delivering your memories",
@@ -104,9 +111,9 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
      stderr_held init_skips_update start_twice no_notice no_bash32_timeout no_budget launcher_clock_ignored budget_past_limit
-     claude_update_skipped late_marker_missing no_handoff late_always drain_holds_output first_no_wait first_unbounded
+     claude_update_skipped no_handoff drain_holds_output first_no_wait first_unbounded
      first_keeps_marker first_not_retagged first_no_fail_notice first_any_session first_launcher_clock_ignored sh_gate_open cmd_gate_open
-     first_fixed_wait no_worker_pid first_ceiling_at_limit declared_limit_back)
+     first_fixed_wait no_worker_pid first_ceiling_at_limit declared_limit_back marker_not_armed no_disarm no_delivered_mark)
 (( $# > 0 )) && ALL=("$@")
 
 copy() {

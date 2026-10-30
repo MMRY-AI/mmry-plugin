@@ -81,6 +81,36 @@ if [[ "$HANDLER_NAME" == "codex-first-prompt" ]]; then
     fi
 fi
 
+# THE SESSION START ARMS ITS HAND-OFF BEFORE ANYTHING ELSE (#33062 fix round 2). The payload is read
+# here, with builtins, and the late marker, .mmry-codex-late.<session>, is written at once, holding this
+# hook's pid: "the memories may come with the first prompt". It used to be written only when the
+# reader below gave up, at the budget, and measured on a real Codex at 112 to 177 bash processes that
+# was within a fraction of a second of Codex's own 30 s, after which Codex stops waiting for this hook
+# and runs the first prompt: a marker written after the first prompt had looked for it would have
+# delivered nothing, silently. Armed here, the first prompt always finds it. Then:
+#   - a start that delivers in time rewrites it "delivered" (a builtin write), and the first prompt
+#     and the deferred work remove it without delivering anything;
+#   - a way out below that starts no work at all rewrites it "none" (the EXIT trap), so the first
+#     prompt does not wait for work that was never started.
+_mmry_payload="" _mmry_in="" _mmry_hand="" _mmry_late_file="" _mmry_armed=0
+if [[ "$HANDLER_NAME" == "session-init" && ! -t 0 ]]; then
+    IFS= read -r -d '' -t 5 _mmry_payload || true
+    # The session id names the hand-off: the same characters the per-prompt hook accepts, and no dot,
+    # so an id cannot reach outside the temp directory or name another conversation's file.
+    _mmry_re_sid='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"'
+    if [[ "$_mmry_payload" =~ $_mmry_re_sid ]]; then
+        _mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${BASH_REMATCH[1]}.$$"
+        _mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${BASH_REMATCH[1]}"
+        # The pid ends with a newline, so every bash reads it back as a whole line.
+        if printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
+            _mmry_armed=1
+            trap '(( _mmry_armed == 1 )) && printf "%s\nnone\n" "$$" > "$_mmry_late_file" 2>/dev/null; :' EXIT
+        else
+            _mmry_hand="" _mmry_late_file=""
+        fi
+    fi
+fi
+
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 PLUGIN_ROOT="$(cd "${HANDLER_DIR}/.." && pwd)" || exit 0
 
@@ -172,10 +202,11 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 #
 # THE HAND-OFF, AND WHY IT IS EXACTLY ONCE. This hook reads the SessionStart payload itself, with
 # builtins, for the session id, and gives session-start.sh the same bytes from a file written with a
-# plain redirection. Only when the reader gives the out-of-time notice INSTEAD of the answer does it
-# write this hook's pid to .mmry-codex-late.<session>. The first prompt delivers only when that marker
-# exists. So the memories are delivered at the start or with the first prompt, never both, and never
-# neither unless they never arrive at all, which the first prompt then says.
+# plain redirection. The marker, .mmry-codex-late.<session> with this hook's pid, is armed at the top of
+# this file (fix round 2), and the reader rewrites it "delivered" when it hands the answer over in time.
+# The first prompt delivers only when the marker exists and does not say so. So the memories are
+# delivered at the start or with the first prompt, never both, and never neither unless they never
+# arrive at all, which the first prompt then says.
 #
 # THE HAND-OFF IS WRITTEN BY THE WORK, NOT BY THIS HOOK (#33062 fix round 2). With a session id, the
 # answer goes from session-start.sh through a drain, _mmry_codex_drain, started with the work: it
@@ -213,9 +244,17 @@ _mmry_codex_start() {
     wait || true
     [[ -n "$_mmry_in" ]] && rm -f "$_mmry_in" 2>/dev/null
     bash "$TARGET" --after-delivery "$@" </dev/null || true
-    # A start that delivered in time left no marker: its hand-off is nobody's.
-    if [[ -n "$_mmry_hand" && ! -f "$_mmry_late_file" ]]; then
-        rm -f "${_mmry_hand}.out" "${_mmry_hand}.ready" "${_mmry_hand}.pid" 2>/dev/null
+    # A start that delivered in time marked its marker "delivered": the marker and the hand-off are
+    # nobody's. A marker still pending is the first prompt's to collect, and is left alone.
+    if [[ -n "$_mmry_hand" ]]; then
+        local _mmry_mpid="" _mmry_state=""
+        if [[ -f "$_mmry_late_file" ]]; then
+            { IFS= read -r _mmry_mpid; IFS= read -r _mmry_state; } < "$_mmry_late_file" 2>/dev/null || true
+        fi
+        if [[ "$_mmry_state" == delivered || ! -f "$_mmry_late_file" ]]; then
+            [[ "$_mmry_state" == delivered ]] && rm -f "$_mmry_late_file" 2>/dev/null
+            rm -f "${_mmry_hand}.out" "${_mmry_hand}.ready" "${_mmry_hand}.pid" 2>/dev/null
+        fi
     fi
     # Hand-offs and markers no conversation collected (it ended before its first prompt), half a day on.
     find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \( -name '.mmry-codex-start.*' -o -name '.mmry-codex-late.*' \) -mmin +720 -delete 2>/dev/null || true
@@ -246,22 +285,15 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     # What the launcher had spent before this shell's clock started; the reader adds its own clock to it.
     _mmry_off=$(( _mmry_spent - SECONDS ))
     _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
-    # The payload, read here with builtins (Codex writes it and closes stdin), and passed on from a
-    # file (a here-string would not parse under dash). If the file cannot be written, session-start.sh
-    # reads what is left of stdin, as before. The session id names the hand-off: the same characters
-    # the per-prompt hook accepts, and no dot, so an id cannot reach outside the temp directory or name
-    # another conversation's file.
-    _mmry_payload="" _mmry_in="" _mmry_hand="" _mmry_late_file=""
+    # The payload, read at the top of this file with builtins (Codex writes it and closes stdin), is
+    # passed on from a file (a here-string would not parse under dash). If the file cannot be written,
+    # session-start.sh reads what is left of stdin, as before.
     if [[ ! -t 0 ]]; then
-        IFS= read -r -d '' -t 5 _mmry_payload || true
         _mmry_in="${TMPDIR:-/tmp}/.mmry-codex-start.payload.$$"
         printf '%s' "$_mmry_payload" > "$_mmry_in" 2>/dev/null || _mmry_in=""
-        _mmry_re_sid='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"'
-        if [[ "$_mmry_payload" =~ $_mmry_re_sid ]]; then
-            _mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${BASH_REMATCH[1]}.$$"
-            _mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${BASH_REMATCH[1]}"
-        fi
     fi
+    # From here the work is started, so the marker stays armed whatever happens to this hook.
+    (( _mmry_armed == 1 )) && _mmry_armed=2
     # A PIPELINE WHOSE WRITING SIDE ONLY STARTS THE WORK. `{ ... & }` returns at once, so the pipeline
     # ends when the reading side does: at the end of the output, or at the budget. The work carries on
     # in the background, holding nothing of this hook's but the pipe, which it closes once the memories
@@ -301,14 +333,19 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # notice that says so. Without one there is nothing to send them on by: the old notice.
             # The pid ends with a newline, so every bash reads it back as a whole line.
             # The rest of the answer reaches the hand-off through the drain the work started with
-            # (_mmry_codex_drain), so nothing is started here.
-            if [[ -n "$_mmry_late_file" ]] && printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
+            # (_mmry_codex_drain), so nothing is started here. The marker is already armed: it is not
+            # written again, because a first prompt that came before this deadline may have delivered
+            # the memories and removed it already.
+            if [[ -n "$_mmry_late_file" ]]; then
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they have not arrived when you answer it, load them with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were late to load this time."}}'
             else
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
             fi
         else
             printf '%s' "$_mmry_out"
+            # Delivered in time: the first prompt has nothing to deliver. Only if the marker is still
+            # there (a first prompt that came first has removed it, having delivered them itself).
+            [[ -n "$_mmry_late_file" && -f "$_mmry_late_file" ]] && printf '%s\ndelivered\n' "$$" > "$_mmry_late_file" 2>/dev/null
         fi
     }
     set -e
