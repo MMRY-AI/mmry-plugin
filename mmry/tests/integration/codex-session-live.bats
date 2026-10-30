@@ -12,10 +12,11 @@
 #   2. A private Codex home is made: the signed-in auth.json copied in, MMRY installed from this
 #      checkout with `codex plugin marketplace add` and `codex plugin add`, exactly as docs/codex.md
 #      tells a customer, and account A's config written where setup writes it.
-#   3. MMRY's session-start hook is trusted the way the customer trusts it, by recording its
+#   3. MMRY's hooks are trusted the way the customer trusts it, by recording each
 #      trusted_hash in that home's config.toml. Codex has no flag for that, so the record is written
 #      through Codex's own app-server (hooks/list for the key and hash, config/value/write to record
-#      it), which is what the CLI's trust review writes. Only that one hook is trusted. Codex's
+#      it), which is what the CLI's trust review writes. Every hook MMRY registers is trusted, the
+#      list read from Codex at run time. Codex's
 #      --dangerously-bypass-hook-trust is NOT used: the spec proves the trusted path a customer has.
 #   4. One real conversation is started with `codex exec`. Codex itself runs the hook (on Windows
 #      through codex-hook.cmd, elsewhere through codex-hook.sh), as it would for a customer.
@@ -105,15 +106,23 @@ setup_file() {
     live_timeout 120 "$CX_BIN" plugin add mmry@mmry-plugin >> "$S/state/install.out" 2>&1 \
         || { echo "codex plugin add failed: $(tail -3 "$S/state/install.out")" >&2; return 1; }
 
-    # Trust MMRY's session-start hook, and only it.
-    local wcwd key hash write run_trust
+    # Trust EVERY hook MMRY's Codex manifest registers, as a customer who accepted the plugin does.
+    # The list comes from Codex (hooks/list) at run time, so a hook added later is trusted too.
+    local wcwd key write run_trust allv want have
     wcwd="$(_native_path "$S/work")"
     _cx_rpc "$S/state/hooks1.jsonl" 2 "$("$LIVE_JQ" -cn --arg w "$wcwd" '{id:2,method:"hooks/list",params:{cwds:[$w]}}')"
     key="$("$LIVE_JQ" -r 'select(.id==2) | .result.data[]?.hooks[]? | select(.pluginId=="mmry@mmry-plugin" and .eventName=="sessionStart" and (.command|test("session-init"))) | .key' "$S/state/hooks1.jsonl" | head -1)"
-    hash="$("$LIVE_JQ" -r --arg k "$key" 'select(.id==2) | .result.data[]?.hooks[]? | select(.key==$k) | .currentHash' "$S/state/hooks1.jsonl" | head -1)"
-    [[ -n "$key" && -n "$hash" ]] || { echo "Codex listed no MMRY session-start hook; installed plugin hooks: $("$LIVE_JQ" -c 'select(.id==2)|[.result.data[]?.hooks[]?.key]' "$S/state/hooks1.jsonl")" >&2; return 1; }
-    write="$("$LIVE_JQ" -cn --arg k "$key" --arg h "$hash" '{id:3,method:"config/value/write",params:{keyPath:"hooks.state",mergeStrategy:"upsert",value:{($k):{trusted_hash:$h}}}}')"
+    [[ -n "$key" ]] || { echo "Codex listed no MMRY session-start hook; installed plugin hooks: $("$LIVE_JQ" -c 'select(.id==2)|[.result.data[]?.hooks[]?.key]' "$S/state/hooks1.jsonl")" >&2; return 1; }
+    allv="$("$LIVE_JQ" -c 'select(.id==2) | [.result.data[]?.hooks[]? | select(.pluginId=="mmry@mmry-plugin") | {key:.key, value:{trusted_hash:.currentHash}}] | from_entries' "$S/state/hooks1.jsonl")"
+    # Codex must list every hook the manifest registers (the count is read from hooks/codex-hooks.json).
+    want="$("$LIVE_JQ" -r '[.hooks[][].hooks[]] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")"
+    have="$("$LIVE_JQ" -r 'keys | length' <<< "$allv")"
+    (( want > 0 && have == want )) || { echo "Codex listed $have MMRY hooks, hooks/codex-hooks.json registers $want: $allv" >&2; return 1; }
+    write="$("$LIVE_JQ" -cn --argjson v "$allv" '{id:3,method:"config/value/write",params:{keyPath:"hooks.state",mergeStrategy:"upsert",value:$v}}')"
     _cx_rpc "$S/state/hooks2.jsonl" 4 "$write" "$("$LIVE_JQ" -cn --arg w "$wcwd" '{id:4,method:"hooks/list",params:{cwds:[$w]}}')"
+    # Every MMRY hook must now read trusted; name any that does not.
+    run_trust="$("$LIVE_JQ" -r 'select(.id==4) | [.result.data[]?.hooks[]? | select(.pluginId=="mmry@mmry-plugin" and .trustStatus != "trusted") | "\(.eventName):\(.trustStatus)"] | join(",")' "$S/state/hooks2.jsonl" | head -1)"
+    [[ -z "$run_trust" ]] || { echo "Codex did not record every MMRY hook as trusted (not trusted: ${run_trust})" >&2; return 1; }
     run_trust="$("$LIVE_JQ" -r --arg k "$key" 'select(.id==4) | .result.data[]?.hooks[]? | select(.key==$k) | .trustStatus' "$S/state/hooks2.jsonl" | head -1)"
     [[ "$run_trust" == "trusted" ]] || { echo "Codex did not record the session-start hook as trusted (status: ${run_trust:-none})" >&2; return 1; }
 
