@@ -231,6 +231,8 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     _codex_start 3
     assert_success
     _within_limit
+    # It returned at its budget, not when the late answer was finally collected for the first prompt.
+    [ ! -e "$TEST_TMPDIR/slow-finished" ] || { echo "the session start waited for the late answer"; return 1; }
     run _context
     assert_output --partial "MMRY AI could not load your memories in time"
     assert_output --partial "first message"

@@ -25,7 +25,7 @@
 #
 # It runs only when a late marker exists: both the sh line in codex-hooks.json and codex-hook.cmd look
 # for one with no process started, so every other prompt of every conversation pays a file lookup.
-set -uo pipefail
+set -euo pipefail
 
 _T="${TMPDIR:-/tmp}"
 

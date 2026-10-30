@@ -35,10 +35,11 @@ m_update_first() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 m_register_first() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
     mmry_register_session' 'if true; then
     mmry_register_session'; }
-m_hook_holds_output() { _rep "$1/$HOOK" '    exec 4>&1 >/dev/null' '    exec 4>&1'; }
+m_hook_holds_output() { _rep "$1/$HOOK" '    exec >/dev/null
+    wait "$start_pid"' '    wait "$start_pid"'; }
 m_start_holds_output() { _rep "$1/$START" '    exec >/dev/null
     mmry_register_session' '    mmry_register_session'; }
-m_stdin_lost() { _rep "$1/$HOOK" '(( _mmry_have_payload == 1 )) && exec <<<"$_mmry_payload"' '(( _mmry_have_payload == 1 )) && exec </dev/null'; }
+m_stdin_lost() { _rep "$1/$HOOK" 'session-start.sh" < "$_mmry_in" &' 'session-start.sh" < /dev/null &'; }
 m_stderr_held() { _rep "$1/$HOOK" '3<&- 2>"$_mmry_errlog" &' '3<&- &'; }
 m_init_skips_update() { _rep "$1/$INIT" 'if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential' 'if false && mmry_host_assert_own_credential'; }
 m_start_twice() { _rep "$1/$INIT" 'if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then' 'if true; then'; }
@@ -58,10 +59,13 @@ MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"'
 }
 # Fix round 1: a start past its budget hands the memories on to the first prompt, exactly once.
 m_late_marker_missing() { _rep "$1/$HOOK" 'if [[ -n "$_mmry_late_file" ]] && printf '"'%s'"' "$$" > "$_mmry_late_file" 2>/dev/null; then' 'if [[ -n "$_mmry_late_file" ]]; then'; }
-m_no_handoff() { _rep "$1/$HOOK" 'printf '"'%s'"' "$_mmry_ans" > "${_mmry_hand}.out" 2>/dev/null && : > "${_mmry_hand}.ready" 2>/dev/null' ':'; }
-m_late_always() { _rep "$1/$HOOK" ': > "${_mmry_hand}.ready" 2>/dev/null' ': > "${_mmry_hand}.ready" 2>/dev/null && printf '"'%s'"' "$$" > "$_mmry_late_file"'; }
-m_first_no_wait() { _rep "$1/$FIRST" 'while [[ ! -f "${_hand}.ready" ]] && (( SECONDS < _budget )); do' 'while false; do'; }
-m_first_unbounded() { _rep "$1/$FIRST" ' && (( SECONDS < _budget )); do' '; do'; }
+m_no_handoff() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" )' '&& : )'; }
+m_late_always() { _rep "$1/$HOOK" '        else
+            printf '"'%s'"' "$_mmry_out"' '        else
+            printf '"'%s'"' "$$" > "$_mmry_late_file"; printf '"'%s'"' "$_mmry_out"'; }
+m_drain_holds_output() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" ) >/dev/null 2>&1 &' '&& : > "${_mmry_hand}.ready" ) &'; }
+m_first_no_wait() { _rep "$1/$FIRST" 'while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _budget )); do' 'while false; do'; }
+m_first_unbounded() { _rep "$1/$FIRST" ' && (( SECONDS + _spent0 < _budget )); do' '; do'; }
 m_first_keeps_marker() { _rep "$1/$FIRST" 'rm -f "$_late" "${_hand}.out"' 'rm -f "${_hand}.out"'; }
 m_first_not_retagged() { _rep "$1/$FIRST" '"${_ans/\"hookEventName\":\"SessionStart\"/\"hookEventName\":\"UserPromptSubmit\"}"' '"$_ans"'; }
 m_first_no_fail_notice() { _rep "$1/$FIRST" "    printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories" "    false && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories"; }
@@ -77,7 +81,7 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
      stderr_held init_skips_update start_twice no_notice no_bash32_timeout no_budget launcher_clock_ignored budget_past_limit
-     claude_update_skipped late_marker_missing no_handoff late_always first_no_wait first_unbounded
+     claude_update_skipped late_marker_missing no_handoff late_always drain_holds_output first_no_wait first_unbounded
      first_keeps_marker first_not_retagged first_no_fail_notice first_any_session first_launcher_clock_ignored sh_gate_open cmd_gate_open)
 (( $# > 0 )) && ALL=("$@")
 
