@@ -33,7 +33,7 @@
             "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-codex-late.*; do if [ -f \"$f\" ]; then exec sh \"$@\"; fi; done; exit 0' mmry-late-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" codex-first-prompt",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" codex-first-prompt",
             "statusMessage": "MMRY AI: delivering your memories",
-            "timeout": 60
+            "timeout": 120
           }
         ]
       },

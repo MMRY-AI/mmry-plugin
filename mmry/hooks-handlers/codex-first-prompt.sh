@@ -19,9 +19,12 @@
 # their way; at the budget this tells it they were not loaded, to load them with the memory_load tool
 # before it answers, and to tell the person.
 #
-# THE BUDGET is 45 s from codex-hook.cmd's start, or this shell's (MMRY_CODEX_FIRST_PROMPT_BUDGET,
-# whole seconds 1 to 50, shortens it for a test), under the 60 s codex-hooks.json declares. The
+# THE BUDGET is 90 s from codex-hook.cmd's start, or this shell's (MMRY_CODEX_FIRST_PROMPT_BUDGET,
+# whole seconds 1 to 100, shortens it for a test), under the 120 s codex-hooks.json declares. The
 # person waits only when the memories really are still on their way; every other prompt is gated off.
+# Measured on a real Codex run at 98 to 148 bash processes: the late answer was finished a few
+# seconds after a 45 s budget gave up, because session-start.sh, after writing the memories, still
+# stores the Foundation set before it answers. The memories are worth that wait on the first prompt.
 #
 # It runs only when a late marker exists: both the sh line in codex-hooks.json and codex-hook.cmd look
 # for one with no process started, so every other prompt of every conversation pays a file lookup.
@@ -66,9 +69,9 @@ if ! [[ "$_pid" =~ ^[0-9]{1,10}$ ]]; then
 fi
 _hand="${_T}/.mmry-codex-start.${_sid}.${_pid}"
 
-_budget="${MMRY_CODEX_FIRST_PROMPT_BUDGET:-45}"
-if ! [[ "$_budget" =~ ^[0-9]+$ ]] || (( _budget < 1 || _budget > 50 )); then
-    _budget=45
+_budget="${MMRY_CODEX_FIRST_PROMPT_BUDGET:-90}"
+if ! [[ "$_budget" =~ ^[0-9]+$ ]] || (( _budget < 1 || _budget > 100 )); then
+    _budget=90
 fi
 # Counted from codex-hook.cmd's start where it stamped one, as codex-hook.sh counts the session
 # start's: on a loaded Windows machine cmd.exe and Git's bash took several seconds before this shell
