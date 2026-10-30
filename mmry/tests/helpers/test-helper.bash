@@ -5,6 +5,7 @@
 # Load BATS libraries
 load '../libs/bats-support/load'
 load '../libs/bats-assert/load'
+load '../helpers/teardown-tmp'
 
 # Set plugin root to the repo's mmry/ directory
 # Allow override via env var (set in run-tests.sh or manually)
@@ -72,5 +73,5 @@ export MMRY_AUTH_METHOD=""
 
 # Clean up after each test
 teardown() {
-    rm -rf "$TEST_TMPDIR"
+    mmry_teardown_tmp "$TEST_TMPDIR"
 }
