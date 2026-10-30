@@ -89,8 +89,11 @@ _su_prune() {
     local found="" gone="" prefixes="" odd="" shown=""
     # One spelling of the folder, so the refusals below cannot be stepped round with "dir/".
     while [[ "$target" == */ && "$target" != "/" ]]; do target="${target%/}"; done
+    # HOME is spelled the same way, so a HOME ending in "/" is still refused (#33033).
+    local home="${HOME:-/}"
+    while [[ "$home" == */ && "$home" != "/" ]]; do home="${home%/}"; done
     case "$target" in
-        ""|/|"${HOME:-/}"|"${HOME:-/}/")
+        ""|/|"$home")
             log "refusing to remove anything from '${target}': not a plugin folder"; return 1 ;;
     esac
     # A symbolic link in place of the folder points the removals at wherever it leads (#33033).
