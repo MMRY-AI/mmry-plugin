@@ -38,7 +38,7 @@ m_register_first() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 m_hook_holds_output() { _rep "$1/$HOOK" '    exec 4>&1 >/dev/null' '    exec 4>&1'; }
 m_start_holds_output() { _rep "$1/$START" '    exec >/dev/null
     mmry_register_session' '    mmry_register_session'; }
-m_stdin_lost() { _rep "$1/$HOOK" '4>&- <<<"$_mmry_payload"' '4>&- </dev/null'; }
+m_stdin_lost() { _rep "$1/$HOOK" '(( _mmry_have_payload == 1 )) && exec <<<"$_mmry_payload"' '(( _mmry_have_payload == 1 )) && exec </dev/null'; }
 m_stderr_held() { _rep "$1/$HOOK" '3<&- 2>"$_mmry_errlog" &' '3<&- &'; }
 m_init_skips_update() { _rep "$1/$INIT" 'if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential' 'if false && mmry_host_assert_own_credential'; }
 m_start_twice() { _rep "$1/$INIT" 'if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then' 'if true; then'; }

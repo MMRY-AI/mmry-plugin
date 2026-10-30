@@ -173,13 +173,10 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 # neither unless they never arrive at all (it then says so). Plain redirections: no process started.
 _mmry_codex_start() {
     exec 4>&1 >/dev/null
-    {
-        if (( _mmry_have_payload == 1 )); then
-            bash "${HANDLER_DIR}/session-start.sh" 4>&- <<<"$_mmry_payload"
-        else
-            bash "${HANDLER_DIR}/session-start.sh" 4>&- <&0
-        fi
-    } | {
+    # The payload this hook already read, as session-start.sh's stdin. Redirected here, not inside
+    # the pipeline, so its left side is one plain command: no extra subshell before the delivery.
+    (( _mmry_have_payload == 1 )) && exec <<<"$_mmry_payload"
+    bash "${HANDLER_DIR}/session-start.sh" 4>&- | {
         _mmry_ans=""
         IFS= read -r -d '' _mmry_ans || true
         if [[ -n "$_mmry_hand" ]]; then
