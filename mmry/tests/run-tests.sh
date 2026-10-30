@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run MMRY AI plugin tests
 # Usage: ./run-tests.sh [category]
-#   category: structural, unit, handlers, e2e, integration, all, offline (default)
+#   category: structural, unit, handlers, e2e, integration, journeys, all, offline (default)
 
 set -euo pipefail
 
@@ -33,11 +33,15 @@ case "$CATEGORY" in
     unit)        "$BATS" unit/ ;;
     handlers)    "$BATS" handlers/ ;;
     e2e)         "$BATS" e2e/ ;;
-    integration) "$BATS" integration/ ;;
+    # The live journey specs (#33030) are their own category. They need a second throwaway account
+    # and, for Codex, a signed-in Codex CLI, which the CI integration job does not have; there
+    # they would fail rather than skip, as a journey spec must. `journeys` runs them, `all` too.
+    integration) "$BATS" $(ls integration/*.bats | grep -v -e '/session-start-live\.bats$' -e '/codex-session-live\.bats$') ;;
+    journeys)    "$BATS" integration/session-start-live.bats integration/codex-session-live.bats ;;
     offline)     "$BATS" structural/ unit/ handlers/ e2e/ ;;
     all)         "$BATS" structural/ unit/ handlers/ e2e/ integration/ ;;
     *)
-        echo "Usage: $0 [structural|unit|handlers|e2e|integration|offline|all]" >&2
+        echo "Usage: $0 [structural|unit|handlers|e2e|integration|journeys|offline|all]" >&2
         exit 1
         ;;
 esac

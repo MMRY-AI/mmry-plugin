@@ -139,16 +139,19 @@ tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
 tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
+tests/helpers/live-journey.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
 tests/integration/api-health.bats
+tests/integration/codex-session-live.bats
 tests/integration/database-command.bats
 tests/integration/entries.bats
 tests/integration/memory-lifecycle.bats
 tests/integration/search.bats
 tests/integration/session-registration.bats
+tests/integration/session-start-live.bats
 tests/integration/setup_suite.bash
 tests/libs/bats-assert/
 tests/libs/bats-core/
@@ -156,6 +159,7 @@ tests/libs/bats-support/
 tests/mutation/run-31789-mutations.sh
 tests/mutation/run-31893-mutations.sh
 tests/mutation/run-32889-mutations.sh
+tests/mutation/run-33030-mutations.sh
 tests/mutation/run-mutations.sh
 tests/perf/foundation-process-count.sh
 tests/perf/foundation-split-latency.sh
