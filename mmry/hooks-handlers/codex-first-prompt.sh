@@ -19,8 +19,10 @@
 # their way; at the budget this tells it they were not loaded, to load them with the memory_load tool
 # before it answers, and to tell the person.
 #
-# THE BUDGET is 90 s from codex-hook.cmd's start, or this shell's (MMRY_CODEX_FIRST_PROMPT_BUDGET,
-# whole seconds 1 to 100, shortens it for a test), under the 120 s codex-hooks.json declares. The
+# HOW LONG IT WAITS (fix round 2, see the ceiling below): while the start's work is still running, up
+# to 200 s from codex-hook.cmd's start, under the 300 s codex-hooks.json declares; not at all once that
+# work has stopped without an answer; and, only when there is no work it can see, the fixed budget of
+# 90 s (MMRY_CODEX_FIRST_PROMPT_BUDGET, whole seconds 1 to 100, shortens it for a test). The
 # person waits only when the memories really are still on their way; every other prompt is gated off.
 # Measured on a real Codex run at 98 to 148 bash processes: the late answer was finished a few
 # seconds after a 45 s budget gave up, because session-start.sh, after writing the memories, still
@@ -78,6 +80,22 @@ _budget="${MMRY_CODEX_FIRST_PROMPT_BUDGET:-90}"
 if ! [[ "$_budget" =~ ^[0-9]+$ ]] || (( _budget < 1 || _budget > 100 )); then
     _budget=90
 fi
+# WAIT FOR THE WORK, NOT FOR A FIXED TIME (#33062 fix round 2). Measured with a real Codex at 157 to 177
+# bash processes, the memories were ready 142 to 163 s after this hook started, and the fixed 90 s
+# above gave up on work that was still running. So while the start's drain (its pid in .pid, written by
+# codex-hook.sh) is alive, this waits for it, up to the ceiling; when it is gone with no answer, this
+# says so at once. Only when there is no drain to watch does the fixed wait above still decide.
+#
+# THE CEILING IS 200 s FROM codex-hook.cmd's START, AND codex-hooks.json DECLARES 300. Codex counts its
+# limit from when it spawns the hook, before cmd.exe has run a line: it spawns the prompt's eight hooks
+# together, and under that load this one's cmd.exe began 19 s after Codex's clock had started. A wait
+# that ended near the declared limit by this hook's own clock ran past Codex's, and Codex dropped the
+# answer, so the conversation got no MMRY message at all. A test may shorten the ceiling with
+# MMRY_CODEX_FIRST_PROMPT_CEILING (whole seconds, 1 to 200).
+_ceiling="${MMRY_CODEX_FIRST_PROMPT_CEILING:-200}"
+if ! [[ "$_ceiling" =~ ^[0-9]+$ ]] || (( _ceiling < 1 || _ceiling > 200 )); then
+    _ceiling=200
+fi
 # Counted from codex-hook.cmd's start where it stamped one, as codex-hook.sh counts the session
 # start's: on a loaded Windows machine cmd.exe and Git's bash took several seconds before this shell
 # existed. printf's clock is bash 4.2+ and starts no process; a stamp that does not read as H:MM:SS,
@@ -92,10 +110,25 @@ if [[ "$_t0" =~ $_re_t ]]; then
     if [[ "$_now" =~ $_re_t ]]; then
         _since=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} - _t0s ))
         (( _since >= 0 )) || _since=$(( _since + 86400 ))
-        (( _since > SECONDS && _since <= 120 )) && _spent0=$(( _since - SECONDS ))
+        # Within the 300 s codex-hooks.json declares: a stamp further away is not this hook's.
+        (( _since > SECONDS && _since <= 300 )) && _spent0=$(( _since - SECONDS ))
     fi
 fi
-while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _budget )); do
+# kill -0 is a builtin: it asks whether the process is still there and starts none.
+_wpid="" _gone=0
+while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _ceiling )); do
+    if [[ -z "$_wpid" && -f "${_hand}.pid" ]]; then
+        IFS= read -r _wpid < "${_hand}.pid" 2>/dev/null || true
+        [[ "$_wpid" =~ $_re_pid ]] && (( ${#_wpid} <= 10 )) || _wpid=""
+    fi
+    if [[ -n "$_wpid" ]]; then
+        if ! kill -0 "$_wpid" 2>/dev/null; then
+            [[ -f "${_hand}.ready" ]] || _gone=1
+            break
+        fi
+    elif (( SECONDS + _spent0 >= _budget )); then
+        break
+    fi
     sleep 1
 done
 
@@ -111,9 +144,13 @@ if [[ -f "${_hand}.ready" ]]; then
     printf '%s' "${_ans/$_from/$_to}"
     _log "delivered the late start ${_pid} (${#_ans} bytes) after ${SECONDS}s"
 else
-    _log "the late start ${_pid} had not finished after ${SECONDS}s; said they were not loaded"
+    if (( _gone == 1 )); then
+        _log "the late start ${_pid} stopped without an answer after ${SECONDS}s; said they were not loaded"
+    else
+        _log "the late start ${_pid} had not finished after ${SECONDS}s; said they were not loaded"
+    fi
     printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Load them now with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were not loaded automatically this time because loading them took too long."}}'
 fi
 
-rm -f "$_late" "${_hand}.out" "${_hand}.ready" 2>/dev/null
+rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" 2>/dev/null
 exit 0

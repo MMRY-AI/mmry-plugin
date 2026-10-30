@@ -173,24 +173,50 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 # THE HAND-OFF, AND WHY IT IS EXACTLY ONCE. This hook reads the SessionStart payload itself, with
 # builtins, for the session id, and gives session-start.sh the same bytes from a file written with a
 # plain redirection. Only when the reader gives the out-of-time notice INSTEAD of the answer does it
-# write this hook's pid to .mmry-codex-late.<session>, and start, in the background and holding
-# nothing of this hook's, a drain that collects the rest of the answer into
-# .mmry-codex-start.<session>.<pid>.out and then writes .ready. The first prompt delivers only when
-# that marker exists. So the memories are delivered at the start or with the first prompt, never
-# both, and never neither unless they never arrive at all, which the first prompt then says. A start
-# that finishes in time starts no process for any of this.
+# write this hook's pid to .mmry-codex-late.<session>. The first prompt delivers only when that marker
+# exists. So the memories are delivered at the start or with the first prompt, never both, and never
+# neither unless they never arrive at all, which the first prompt then says.
+#
+# THE HAND-OFF IS WRITTEN BY THE WORK, NOT BY THIS HOOK (#33062 fix round 2). With a session id, the
+# answer goes from session-start.sh through a drain, _mmry_codex_drain, started with the work: it
+# writes the answer to .mmry-codex-start.<session>.<pid>.out, then .ready, then passes it on to the
+# reader below. So the hand-off no longer waits on this hook getting past its budget, and nothing is
+# started after the budget, when the margin to Codex's limit is all that is left. Measured on a real
+# Codex at 157 to 177 bash processes, the drain started after the budget cost 2.3 s of that margin and
+# the notice it delayed arrived past Codex's limit, which dropped it. The drain's pid goes to .pid:
+# the first prompt waits while that process is alive, because the work it is waiting for can take
+# far longer than any fixed wait (142 to 163 s there), and gives up at once when it is gone.
+_mmry_codex_drain() {
+    local ans=""
+    IFS= read -r -d '' ans
+    printf '%s' "$ans" > "${_mmry_hand}.out" 2>/dev/null && : > "${_mmry_hand}.ready" 2>/dev/null
+    # To the reader, if it is still listening. When it gave up the pipe is closed, and this ends here.
+    printf '%s' "$ans"
+}
 _mmry_codex_start() {
-    local start_pid
-    if [[ -n "$_mmry_in" ]]; then
-        bash "${HANDLER_DIR}/session-start.sh" < "$_mmry_in" &
+    # fd 4 is the reader's pipe. This shell lets go of it at once, so the reader sees the end of the
+    # answer when session-start.sh closes its output, not when this shell finishes the housekeeping.
+    exec 4>&1 >/dev/null
+    if [[ -n "$_mmry_hand" ]]; then
+        if [[ -n "$_mmry_in" ]]; then
+            bash "${HANDLER_DIR}/session-start.sh" < "$_mmry_in" 4>&- | _mmry_codex_drain >&4 4>&- &
+        else
+            bash "${HANDLER_DIR}/session-start.sh" <&0 4>&- | _mmry_codex_drain >&4 4>&- &
+        fi
+        printf '%s\n' "$!" > "${_mmry_hand}.pid" 2>/dev/null
+    elif [[ -n "$_mmry_in" ]]; then
+        bash "${HANDLER_DIR}/session-start.sh" < "$_mmry_in" >&4 4>&- &
     else
-        bash "${HANDLER_DIR}/session-start.sh" <&0 &
+        bash "${HANDLER_DIR}/session-start.sh" <&0 >&4 4>&- &
     fi
-    start_pid=$!
-    exec >/dev/null
-    wait "$start_pid" || true
+    exec 4>&-
+    wait || true
     [[ -n "$_mmry_in" ]] && rm -f "$_mmry_in" 2>/dev/null
     bash "$TARGET" --after-delivery "$@" </dev/null || true
+    # A start that delivered in time left no marker: its hand-off is nobody's.
+    if [[ -n "$_mmry_hand" && ! -f "$_mmry_late_file" ]]; then
+        rm -f "${_mmry_hand}.out" "${_mmry_hand}.ready" "${_mmry_hand}.pid" 2>/dev/null
+    fi
     # Hand-offs and markers no conversation collected (it ended before its first prompt), half a day on.
     find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \( -name '.mmry-codex-start.*' -o -name '.mmry-codex-late.*' \) -mmin +720 -delete 2>/dev/null || true
 }
@@ -217,8 +243,8 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             fi
         fi
     fi
-    _mmry_left=$(( _mmry_budget - _mmry_spent ))
-    (( _mmry_left >= 1 )) || _mmry_left=1
+    # What the launcher had spent before this shell's clock started; the reader adds its own clock to it.
+    _mmry_off=$(( _mmry_spent - SECONDS ))
     _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
     # The payload, read here with builtins (Codex writes it and closes stdin), and passed on from a
     # file (a here-string would not parse under dash). If the file cannot be written, session-start.sh
@@ -246,6 +272,12 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     set +e
     { _mmry_codex_start "$@" <&3 3<&- 2>"$_mmry_errlog" & } | {
         _mmry_out=""
+        # THE DEADLINE IS A MOMENT, NOT A LENGTH (#33062 fix round 2). What is left of the budget is
+        # counted here, when the reader runs, not before the pipeline started it: on a real Codex at 157
+        # to 177 bash processes starting the pipeline took 5 to 8 s, and a reader that then waited the
+        # whole of what had been left gave its notice past Codex's limit, which dropped it.
+        _mmry_left=$(( _mmry_budget - SECONDS - _mmry_off ))
+        (( _mmry_left >= 1 )) || _mmry_left=1
         _mmry_read_at=$SECONDS
         IFS= read -r -d '' -t "$_mmry_left" _mmry_out
         _mmry_rc=$?
@@ -268,14 +300,9 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # With a session id, the marker that sends the memories on with the first prompt, and the
             # notice that says so. Without one there is nothing to send them on by: the old notice.
             # The pid ends with a newline, so every bash reads it back as a whole line.
+            # The rest of the answer reaches the hand-off through the drain the work started with
+            # (_mmry_codex_drain), so nothing is started here.
             if [[ -n "$_mmry_late_file" ]] && printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
-                # The drain: what was read so far, then the rest of the answer as it arrives. Its
-                # output goes to the hand-off and /dev/null, never to this hook's, so Codex is not
-                # kept waiting for it; it ends when session-start.sh closes its output.
-                # stdin is named (<&0): a command started with & in a script otherwise reads /dev/null,
-                # and bash 3.2, the macOS sh, does exactly that (CI macOS: the drain got 0 bytes).
-                ( { printf '%s' "$_mmry_out"; cat; } > "${_mmry_hand}.out" 2>/dev/null \
-                    && : > "${_mmry_hand}.ready" ) <&0 >/dev/null 2>&1 &
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they have not arrived when you answer it, load them with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were late to load this time."}}'
             else
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
