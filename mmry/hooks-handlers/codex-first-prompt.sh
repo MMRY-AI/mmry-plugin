@@ -38,15 +38,25 @@ if [[ ! -t 0 ]]; then
     [[ "$_payload" =~ $_re ]] && _sid="${BASH_REMATCH[1]}"
 fi
 
+# ONE LINE PER RUN THAT GOT PAST THE GATE, for support: what it found and what it did. The bash clock
+# where there is one (4.2+), so no process is started for it; the file is overwritten past 200 lines.
+_log() {
+    local f="${_T}/mmry-codex-first-prompt.log" n=0 l
+    [[ -f "$f" ]] && while IFS= read -r l; do n=$((n + 1)); done < "$f"
+    (( n > 200 )) && : > "$f"
+    printf '%(%Y-%m-%dT%H:%M:%S)T session=%s %s
+' -1 "${_sid:-none}" "$1" >> "$f" 2>/dev/null || true
+}
+
 _sweep() {
     # A marker or hand-off no conversation collected (it ended before its first prompt) would keep
     # the gate open for every prompt on this machine. Half a day on, it is nobody's.
     find "$_T" -maxdepth 1 -type f \( -name '.mmry-codex-late.*' -o -name '.mmry-codex-start.*' \) -mmin +720 -delete 2>/dev/null || true
 }
 
-[[ -n "$_sid" ]] || { _sweep; exit 0; }
+[[ -n "$_sid" ]] || { _log "no session id in the payload"; _sweep; exit 0; }
 _late="${_T}/.mmry-codex-late.${_sid}"
-[[ -f "$_late" ]] || { _sweep; exit 0; }
+[[ -f "$_late" ]] || { _log "nothing late for this session"; _sweep; exit 0; }
 
 _pid=""
 IFS= read -r _pid < "$_late" 2>/dev/null || true
@@ -88,7 +98,9 @@ if [[ -f "${_hand}.ready" ]]; then
     # by its hookEventName. An answer with no JSON (no account set up says so in plain text) is
     # context as it stands on this event too.
     printf '%s' "${_ans/\"hookEventName\":\"SessionStart\"/\"hookEventName\":\"UserPromptSubmit\"}"
+    _log "delivered the late start ${_pid} (${#_ans} bytes) after ${SECONDS}s"
 else
+    _log "the late start ${_pid} had not finished after ${SECONDS}s; said they were not loaded"
     printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Load them now with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were not loaded automatically this time because loading them took too long."}}'
 fi
 
