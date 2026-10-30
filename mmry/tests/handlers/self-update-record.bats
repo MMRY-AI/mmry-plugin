@@ -46,14 +46,14 @@ _release_without_version() {
 }
 
 # The old install, with no record in the plugin root and record 0.0.1 in the installed copy.
-_old_install_with_record() {
+_old_install_with_last_update() {
     _old_install
     rm -f "$INSTALL_ROOT/.last-self-update"
     printf '0.0.1\n' > "$STATE_DIR/.last-self-update"
 }
 
 # Neither folder's record changed.
-_assert_records_unchanged() {
+_assert_last_update_unchanged() {
     [ ! -e "$INSTALL_ROOT/.last-self-update" ] \
         || fail "an unverified release wrote the plugin root's version record: $(cat "$INSTALL_ROOT/.last-self-update"): $output"
     [[ "$(cat "$STATE_DIR/.last-self-update")" == "0.0.1" ]] \
@@ -94,12 +94,12 @@ _later_verified_session_installs() {
     _release 2.0.0 none
     _release_without_version
     _marketplace 99.0.0
-    _old_install_with_record
+    _old_install_with_last_update
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$output" == *"could not read the release's file list"* ]] || fail "$output"
-    _assert_records_unchanged
+    _assert_last_update_unchanged
     [[ "$output" == *"recording no version"* ]] || fail "the unrecorded version was not explained: $output"
     _later_verified_session_installs
 }
@@ -108,12 +108,12 @@ _later_verified_session_installs() {
     _release 2.0.0 garbage
     _release_without_version
     _marketplace 99.0.0
-    _old_install_with_record
+    _old_install_with_last_update
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$output" == *"is not a release file list"* ]] || fail "$output"
-    _assert_records_unchanged
+    _assert_last_update_unchanged
     [[ "$output" == *"recording no version"* ]] || fail "the unrecorded version was not explained: $output"
     _later_verified_session_installs
 }
@@ -122,12 +122,12 @@ _later_verified_session_installs() {
     _release 2.0.0 wrongversion
     _release_without_version
     _marketplace 99.0.0
-    _old_install_with_record
+    _old_install_with_last_update
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$output" == *"file list is for '0.0.0-other'"* ]] || fail "$output"
-    _assert_records_unchanged
+    _assert_last_update_unchanged
     [[ "$output" == *"recording no version"* ]] || fail "the unrecorded version was not explained: $output"
     _later_verified_session_installs
 }
@@ -136,12 +136,12 @@ _later_verified_session_installs() {
 # refused for the record too, though the plugin.json then decides the installed version itself.
 @test "33033 refusal record: a list for another version beside a versioned plugin.json records no version" {
     _release 9.9.8 wrongversion
-    _old_install_with_record
+    _old_install_with_last_update
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$output" == *"file list is for '0.0.0-other' but its plugin.json says '9.9.8'"* ]] || fail "$output"
-    _assert_records_unchanged
+    _assert_last_update_unchanged
 }
 
 @test "33033 refusal record: a release without the removal library records no version, and a later verified session installs" {
@@ -149,13 +149,13 @@ _later_verified_session_installs() {
     rm -f "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/hooks-handlers/lib-release-files.sh"
     _release_without_version
     _marketplace 99.0.0
-    _old_install_with_record
+    _old_install_with_last_update
     rm -f "$INSTALL_ROOT/hooks-handlers/lib-release-files.sh"
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$output" == *"removal code (lib-release-files.sh) could not be loaded"* ]] || fail "$output"
-    _assert_records_unchanged
+    _assert_last_update_unchanged
     [[ "$output" == *"recording no version"* ]] || fail "the unrecorded version was not explained: $output"
     _later_verified_session_installs
 }
@@ -166,7 +166,7 @@ _later_verified_session_installs() {
 @test "33033 refusal record: a verified release records its own version, not the marketplace's" {
     _release 2.15.4 good
     _marketplace 99.0.0
-    _old_install_with_record
+    _old_install_with_last_update
 
     _run_update
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
@@ -184,7 +184,7 @@ _later_verified_session_installs() {
 # plugin.json naming no version. Nothing is recorded in the installed copy (finish mode never writes
 # the plugin root's record unless verified either).
 @test "33033 refusal record: finish mode with an unverified release records no version, and a later verified session installs" {
-    _old_install_with_record
+    _old_install_with_last_update
     printf '#!/usr/bin/env bash\nexit 7\n' > "$TEST_TMPDIR/mock-bin/curl"
     chmod +x "$TEST_TMPDIR/mock-bin/curl"
     local dl="$TEST_TMPDIR/dl/mmry-plugin-master/mmry"
@@ -197,7 +197,7 @@ _later_verified_session_installs() {
         bash "$INSTALL_ROOT/hooks-handlers/self-update.sh"
     [[ "$status" -eq 0 ]] || fail "status $status: $output"
     [[ "$output" == *"could not read the release's file list"* ]] || fail "$output"
-    _assert_records_unchanged
+    _assert_last_update_unchanged
     [[ "$output" == *"recording no version"* ]] || fail "the unrecorded version was not explained: $output"
     [[ "$output" != *"removed "* ]] || fail "$output"
     _later_verified_session_installs
