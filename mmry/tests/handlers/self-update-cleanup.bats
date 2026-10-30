@@ -1158,3 +1158,33 @@ _comm_fails_on_call() {
     [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
     [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
 }
+
+# The update path's copy-failure stop (#33033 round 6, found while adding .last-self-update to the
+# inventory's markers). When the release cannot be copied into the plugin root, self-update stops
+# before _su_finish_update: the plugin root still holds the OLD release, so removing what the new
+# list does not name would take files the old code still uses, and recording the new version
+# would make the old copy look current. A cp that fails on the release's files stands in for a
+# full or read-only disk.
+@test "33033 refusal copy failure: a release that could not be copied removes nothing and records no version" {
+    _release 9.9.9 good
+    _old_install
+    local real_cp
+    real_cp="$(command -v cp)"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'for a in "$@"; do [[ "$a" == */mmry-plugin-*/mmry/* ]] && exit 1; done\n'
+        printf 'exec "%s" "$@"\n' "$real_cp"
+    } > "$TEST_TMPDIR/mock-bin/cp"
+    chmod +x "$TEST_TMPDIR/mock-bin/cp"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"failed to copy update into plugin root"* ]] || fail "the copy failure was not reported: $output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "a failed copy was reported as an update: $output"
+    [[ "$output" != *"removed "* ]] || fail "a failed copy started removals: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "save-record.sh removed from the plugin root: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "save-record.sh removed from the installed copy: $output"
+    [ ! -e "$INSTALL_ROOT/.last-self-update" ] || fail "a failed copy recorded version $(cat "$INSTALL_ROOT/.last-self-update"): $output"
+    [ ! -e "$STATE_DIR/.last-self-update" ] || fail "a failed copy recorded version $(cat "$STATE_DIR/.last-self-update") in the installed copy: $output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a failed copy was recorded as cleaned: $output"
+}
