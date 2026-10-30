@@ -267,7 +267,8 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # mmry_host_tool_ref memory_load, "the mmry_plugin memory_load tool".
             # With a session id, the marker that sends the memories on with the first prompt, and the
             # notice that says so. Without one there is nothing to send them on by: the old notice.
-            if [[ -n "$_mmry_late_file" ]] && printf '%s' "$$" > "$_mmry_late_file" 2>/dev/null; then
+            # The pid ends with a newline, so every bash reads it back as a whole line.
+            if [[ -n "$_mmry_late_file" ]] && printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
                 # The drain: what was read so far, then the rest of the answer as it arrives. Its
                 # output goes to the hand-off and /dev/null, never to this hook's, so Codex is not
                 # kept waiting for it; it ends when session-start.sh closes its output.

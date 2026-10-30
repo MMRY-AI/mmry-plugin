@@ -58,7 +58,7 @@ m_budget_past_limit() {
 MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"'
 }
 # Fix round 1: a start past its budget hands the memories on to the first prompt, exactly once.
-m_late_marker_missing() { _rep "$1/$HOOK" 'if [[ -n "$_mmry_late_file" ]] && printf '"'%s'"' "$$" > "$_mmry_late_file" 2>/dev/null; then' 'if [[ -n "$_mmry_late_file" ]]; then'; }
+m_late_marker_missing() { _rep "$1/$HOOK" 'if [[ -n "$_mmry_late_file" ]] && printf '"'%s\n'"' "$$" > "$_mmry_late_file" 2>/dev/null; then' 'if [[ -n "$_mmry_late_file" ]]; then'; }
 m_no_handoff() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" )' '&& : )'; }
 m_late_always() { _rep "$1/$HOOK" '        else
             printf '"'%s'"' "$_mmry_out"' '        else

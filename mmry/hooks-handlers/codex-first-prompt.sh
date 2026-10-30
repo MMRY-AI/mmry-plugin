@@ -47,8 +47,9 @@ _log() {
     local f="${_T}/mmry-codex-first-prompt.log" n=0 l
     [[ -f "$f" ]] && while IFS= read -r l; do n=$((n + 1)); done < "$f"
     (( n > 200 )) && : > "$f"
-    printf '%(%Y-%m-%dT%H:%M:%S)T session=%s %s
-' -1 "${_sid:-none}" "$1" >> "$f" 2>/dev/null || true
+    # bash 3.2 (macOS) has no %(...)T: the line goes without its time there.
+    printf '%(%Y-%m-%dT%H:%M:%S)T session=%s %s\n' -1 "${_sid:-none}" "$1" >> "$f" 2>/dev/null \
+        || printf 'session=%s %s\n' "${_sid:-none}" "$1" >> "$f" 2>/dev/null || true
 }
 
 _sweep() {
@@ -63,7 +64,11 @@ _late="${_T}/.mmry-codex-late.${_sid}"
 
 _pid=""
 IFS= read -r _pid < "$_late" 2>/dev/null || true
-if ! [[ "$_pid" =~ ^[0-9]{1,10}$ ]]; then
+# The pattern from a variable and the length tested apart: bash 3.2, the macOS sh, refused the
+# inline ^[0-9]{1,10}$ (CI macOS: the marker was dropped here with nothing said).
+_re_pid='^[0-9]+$'
+if ! [[ "$_pid" =~ $_re_pid ]] || (( ${#_pid} > 10 )); then
+    _log "the late marker held no process id: ${_pid:0:20}"
     rm -f "$_late" 2>/dev/null
     exit 0
 fi
