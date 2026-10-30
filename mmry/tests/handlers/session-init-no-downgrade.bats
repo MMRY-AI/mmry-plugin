@@ -536,3 +536,51 @@ _assert_session_removed_nothing() {
         || fail "the older session overwrote mmry-client.sh: $output"
     [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
 }
+
+# _su_version_newer, versions with different numbers of fields (#33033 round 6, QA finding X1).
+# The comparison must run over the LONGER of the two versions, a missing field counting as 0.
+# Run over the shorter one, an installed 3.1.1 and a 3.1 session compare equal, so the older
+# session installs over the newer copy and its mirror removes what release 3.1 does not list.
+@test "33033 refusal field count: versions with different numbers of fields compare over the longer one" {
+    log() { :; }
+    # shellcheck source=/dev/null
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 3.1.1 3.1 || rc=$?; [[ "$rc" -eq 0 ]] || fail "3.1.1 not newer than 3.1 (rc $rc)"
+    rc=0; _su_version_newer 3.1 3.1.1 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1 newer than 3.1.1 (rc $rc)"
+    rc=0; _su_version_newer 3.1 3.1.0 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1 newer than 3.1.0 (rc $rc)"
+    rc=0; _su_version_newer 3.1.0 3.1 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1.0 newer than 3.1 (rc $rc)"
+}
+
+@test "33033 refusal field count: an installed 3.1.1 is newer than a 3.1 session, and a 3.1.1 session installs over 3.1" {
+    # Installed 3.1.1, session 3.1: refused, nothing copied, nothing removed.
+    local new="$TEST_TMPDIR/cache/3.1.1" old="$TEST_TMPDIR/cache/3.1"
+    _plugin_root "$new" 3.1.1
+    printf 'only in 3.1.1\n' > "$new/commands/only-in-new.md"
+    _write_list "$new" 3.1.1
+    _plugin_root "$old" 3.1 old
+    _installed_by_self_update "$new" 3.1.1
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "3.1 over 3.1.1: status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is 3.1.1, newer than this session's 3.1; leaving it as it is"* ]] \
+        || fail "3.1 over 3.1.1: the older session was not refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "3.1 over 3.1.1: the older session overwrote mmry-client.sh: $output"
+    [ -f "$STATE_DIR/commands/only-in-new.md" ] || fail "3.1 over 3.1.1: the older session's mirror removed commands/only-in-new.md: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "3.1 over 3.1.1: the older session added its old script: $output"
+    grep -q '"version": "3.1.1"' "$STATE_DIR/.claude-plugin/plugin.json" || fail "3.1 over 3.1.1: installed version changed: $output"
+    [[ "$output" != *"removed "* ]] || fail "3.1 over 3.1.1: the older session removed files: $output"
+
+    # The reverse, installed 3.1 and session 3.1.1: the newer session installs and mirrors.
+    rm -rf "$STATE_DIR"
+    _installed_by_self_update "$old" 3.1
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "3.1.1 over 3.1: status $status: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "3.1.1 over 3.1: the newer session did not update mmry-client.sh: $output"
+    grep -q '"version": "3.1.1"' "$STATE_DIR/.claude-plugin/plugin.json" || fail "3.1.1 over 3.1: version not recorded: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "3.1.1 over 3.1: the old script survived: $output"
+    [[ "$output" == *"removed hooks-handlers/query-records.sh from $STATE_DIR (not in release 3.1.1)"* ]] \
+        || fail "3.1.1 over 3.1: removal not printed: $output"
+}
