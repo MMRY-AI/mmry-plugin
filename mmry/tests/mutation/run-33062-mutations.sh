@@ -63,7 +63,10 @@ m_no_handoff() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" )' '&& : )'; }
 m_late_always() { _rep "$1/$HOOK" '        else
             printf '"'%s'"' "$_mmry_out"' '        else
             printf '"'%s'"' "$$" > "$_mmry_late_file"; printf '"'%s'"' "$_mmry_out"'; }
-m_drain_holds_output() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" ) >/dev/null 2>&1 &' '&& : > "${_mmry_hand}.ready" ) &'; }
+m_drain_holds_output() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" ) <&0 >/dev/null 2>&1 &' '&& : > "${_mmry_hand}.ready" ) <&0 &'; }
+# The drain's stdin named: without it bash 3.2 gives a command started with & /dev/null, and the
+# drain hands the first prompt nothing. Only a macOS (bash 3.2) run can see this one refuse.
+m_drain_stdin_lost() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" ) <&0 >/dev/null 2>&1 &' '&& : > "${_mmry_hand}.ready" ) >/dev/null 2>&1 &'; }
 m_first_no_wait() { _rep "$1/$FIRST" 'while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _budget )); do' 'while false; do'; }
 m_first_unbounded() { _rep "$1/$FIRST" ' && (( SECONDS + _spent0 < _budget )); do' '; do'; }
 m_first_keeps_marker() { _rep "$1/$FIRST" 'rm -f "$_late" "${_hand}.out"' 'rm -f "${_hand}.out"'; }
@@ -81,7 +84,7 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
      stderr_held init_skips_update start_twice no_notice no_bash32_timeout no_budget launcher_clock_ignored budget_past_limit
-     claude_update_skipped late_marker_missing no_handoff late_always drain_holds_output first_no_wait first_unbounded
+     claude_update_skipped late_marker_missing no_handoff late_always drain_holds_output drain_stdin_lost first_no_wait first_unbounded
      first_keeps_marker first_not_retagged first_no_fail_notice first_any_session first_launcher_clock_ignored sh_gate_open cmd_gate_open)
 (( $# > 0 )) && ALL=("$@")
 
@@ -122,7 +125,7 @@ for name in "${ALL[@]}"; do
         echo "== $name: NOT APPLICABLE off Windows (codex-hook.cmd runs only there)"
         continue
     fi
-    if [[ "$name" == no_bash32_timeout ]] && (( BASH_VERSINFO[0] >= 4 )); then
+    if [[ "$name" == no_bash32_timeout || "$name" == drain_stdin_lost ]] && (( BASH_VERSINFO[0] >= 4 )); then
         echo "== $name: NOT APPLICABLE on bash $BASH_VERSION (only bash 3.2 reports a timeout as the end of the output; run this on a stock Mac)"
         continue
     fi

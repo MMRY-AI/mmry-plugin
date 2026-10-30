@@ -272,7 +272,10 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
                 # The drain: what was read so far, then the rest of the answer as it arrives. Its
                 # output goes to the hand-off and /dev/null, never to this hook's, so Codex is not
                 # kept waiting for it; it ends when session-start.sh closes its output.
-                ( { printf '%s' "$_mmry_out"; cat; } > "${_mmry_hand}.out" 2>/dev/null                     && : > "${_mmry_hand}.ready" ) >/dev/null 2>&1 &
+                # stdin is named (<&0): a command started with & in a script otherwise reads /dev/null,
+                # and bash 3.2, the macOS sh, does exactly that (CI macOS: the drain got 0 bytes).
+                ( { printf '%s' "$_mmry_out"; cat; } > "${_mmry_hand}.out" 2>/dev/null \
+                    && : > "${_mmry_hand}.ready" ) <&0 >/dev/null 2>&1 &
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they have not arrived when you answer it, load them with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were late to load this time."}}'
             else
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
