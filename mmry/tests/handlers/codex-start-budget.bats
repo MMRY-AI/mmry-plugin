@@ -299,8 +299,9 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     assert_output --regexp '^MMRY AI loaded 1 memories\.'
 }
 
-@test "R2: when the memories still have not arrived by the first prompt's budget, the person is told they were not loaded" {
-    export MMRY_CODEX_START_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_BUDGET=3
+@test "R2: when the memories still have not arrived by the first prompt's longest wait, the person is told they were not loaded" {
+    # The work is still running, so it is the longest wait (shortened to 3 s here) that ends this one.
+    export MMRY_CODEX_START_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_CEILING=3
     _slow_curl "/api/memories/startup" 40
     _codex_start 8
     _codex_prompt 8
@@ -324,12 +325,79 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     local now t
     printf -v now '%(%s)T' -1
     printf -v t '%(%H:%M:%S)T' $(( now - 15 ))
-    export MMRY_CODEX_FIRST_PROMPT_BUDGET=25 MMRY_CODEX_HOOK_STARTED="${t#0}.50"
+    export MMRY_CODEX_FIRST_PROMPT_BUDGET=25 MMRY_CODEX_FIRST_PROMPT_CEILING=25 MMRY_CODEX_HOOK_STARTED="${t#0}.50"
     _codex_prompt 9
     run _context
     assert_output --partial "were not loaded"
     awk -v e="$ELAPSED" 'BEGIN { exit !(e < 20) }' || {
         echo "the first prompt's notice took ${ELAPSED}s: the 15 s the launcher had already spent were not counted"
+        return 1
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
+# FIX ROUND 2: WHAT A REAL CODEX ON A HEAVILY LOADED WINDOWS MACHINE SHOWED (#33062)
+#
+# Reproduced with a real Codex (0.165.0) at 157 to 177 bash processes, three runs of three missing:
+#   - the first prompt waited a fixed 90 s and gave up, while the memories it was waiting for were
+#     still being prepared; they were ready 142 to 163 s after it started, 50 to 70 s too late;
+#   - Codex counts a hook's limit from when it spawns the hook, and codex-hook.cmd's clock starts only
+#     when cmd.exe runs its first line. Codex spawns the prompt's eight hooks together and their cmd.exe
+#     starts came about 2.7 s apart, so the first-prompt hook began 19 s into Codex's 120. Its wait and
+#     exit ran past the limit and Codex dropped its answer: the conversation got no MMRY message at all.
+# ---------------------------------------------------------------------------------------------
+
+@test "R1: a start still working when the first prompt's fixed wait is up is waited for, and its memories delivered" {
+    # The fixed wait is 3 s and the work takes about 12: the first prompt must see that the work is
+    # still running and wait for it, not tell the person their memories were not loaded.
+    export MMRY_CODEX_START_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_BUDGET=3
+    _slow_curl "/api/memories/startup" 12
+    _codex_start 21
+    run _context
+    assert_output --partial "will be delivered with the user's first message"
+    _codex_prompt 21
+    assert_success
+    _within_limit "first prompt" "$PLIMIT"
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: ' || { _prompt_diag; return 1; }
+}
+
+@test "R1/R2: the first prompt's longest wait leaves a minute of its declared limit for Codex to launch the hook" {
+    # Its longest wait, counted from codex-hook.cmd's start, plus 60 s for Codex's launch of the hook
+    # (19 s measured), must fit in the limit codex-hooks.json declares, or Codex drops the answer. The
+    # launcher is said to have started 180 s ago and the work never finishes while this runs.
+    printf -v _probe '%(%H)T' -1 2>/dev/null || skip "bash $BASH_VERSION has no printf clock; codex-hook.cmd runs only on Windows, under Git's bash 5"
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 400
+    _codex_start 22
+    local now t ago=180
+    printf -v now '%(%s)T' -1
+    printf -v t '%(%H:%M:%S)T' $(( now - ago ))
+    export MMRY_CODEX_HOOK_STARTED="${t#0}.50"
+    _codex_prompt 22
+    assert_success
+    run _context
+    assert_output --partial "were not loaded" || { _prompt_diag; return 1; }
+    awk -v a="$ago" -v e="$ELAPSED" -v l="$PLIMIT" 'BEGIN { exit !(a + e + 60 <= l) }' || {
+        echo "the first prompt answered ${ago}s + ${ELAPSED}s after codex-hook.cmd started: with a minute for Codex to launch it, that is past the ${PLIMIT}s Codex allows, and Codex drops a late answer"
+        return 1
+    }
+}
+
+@test "R2: a start whose work has stopped is not waited for: the person is told at once" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 60
+    _codex_start 23
+    local pf
+    pf="$(ls "${TMPDIR:-/tmp}"/.mmry-codex-start.budget-23.*.pid 2>/dev/null | head -1)"
+    [ -s "$pf" ] || { echo "the session start recorded no work for the first prompt to watch: $(ls -a "${TMPDIR:-/tmp}" | grep mmry-codex | tr '\n' ' ')"; return 1; }
+    kill "$(cat "$pf")"
+    _codex_prompt 23
+    assert_success
+    run _context
+    assert_output --partial "were not loaded" || { _prompt_diag; return 1; }
+    awk -v e="$ELAPSED" 'BEGIN { exit !(e < 30) }' || {
+        echo "the first prompt waited ${ELAPSED}s for work that had already stopped"
         return 1
     }
 }
