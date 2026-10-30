@@ -350,6 +350,27 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd stayed shut with a late start pending"; return 1; }
 }
 
+@test "R1: on Windows, codex-hook.cmd delivers the late memories through the real codex-hook.sh" {
+    # The way Codex runs it on Windows: cmd.exe, the launcher, Git's bash, and codex-hook.sh started by
+    # its Windows path (C:\...\codex-hook.sh). A late start and its finished hand-off are waiting.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
+    local g="$TEST_TMPDIR/gate-tmp" wtmp
+    mkdir -p "$g"; wtmp="$(cygpath -w "$g")"
+    printf '4242' > "$g/.mmry-codex-late.win-1"
+    printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI loaded 3 memories. Read them now: C:\\x\\mmry-memories.md"}}' > "$g/.mmry-codex-start.win-1.4242.out"
+    : > "$g/.mmry-codex-start.win-1.4242.ready"
+    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env TMPDIR="$1" cmd //d //c "$2" codex-first-prompt' _ "$wtmp" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")"
+    assert_success
+    JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
+    printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || {
+        echo "codex-hook.cmd delivered nothing a UserPromptSubmit hook can carry: $output"
+        return 1
+    }
+    run _context
+    assert_output --regexp '^MMRY AI loaded 3 memories\. Read them now: '
+    [ ! -e "$g/.mmry-codex-late.win-1" ] || { echo "the late marker was left behind"; return 1; }
+}
+
 # ---------------------------------------------------------------------------------------------
 # R2: OUT OF TIME IS SAID, NOT SILENT
 # ---------------------------------------------------------------------------------------------

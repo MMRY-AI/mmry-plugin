@@ -66,7 +66,9 @@ esac
 # subshells and their library, and without a second bash. Measured on a heavily loaded Windows machine
 # (110 to 158 bash processes), the path through them took it past its limit.
 if [[ "$HANDLER_NAME" == "codex-first-prompt" ]]; then
-    _mmry_self="${BASH_SOURCE[0]}"
+    # Forward slashes first: codex-hook.cmd starts this file by its Windows path, C:\...\codex-hook.sh
+    # (measured: without this the late memories were never delivered on Windows).
+    _mmry_self="${BASH_SOURCE[0]//\\//}"
     [[ "$_mmry_self" == */* ]] || _mmry_self="./${_mmry_self}"
     [[ -f "${_mmry_self%/*}/codex-first-prompt.sh" ]] || exit 0
     set +e
