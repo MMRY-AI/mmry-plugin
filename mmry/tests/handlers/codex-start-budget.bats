@@ -150,7 +150,18 @@ _codex_prompt() {
     t1="$(_now)"
     ELAPSED="$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.2f", b - a }')"
     JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
+    PROMPT_OUT="$output"
     echo "# first prompt: elapsed ${ELAPSED}s of a ${PLIMIT}s limit" >&3
+}
+
+# What a failing first-prompt check needs to show: the hook's whole output (stdout and stderr), the
+# late markers and hand-offs in the temp folder, and the handler's own log.
+_prompt_diag() {
+    local t="${TMPDIR:-/tmp}"
+    echo "first-prompt hook output (stdout+stderr): ${PROMPT_OUT:-<none>}"
+    echo "late files in $t: $(ls -a "$t" 2>/dev/null | grep -E '^\.mmry-codex-(late|start)' | tr '\n' ' ')"
+    echo "handler log: $(tail -3 "$t/mmry-codex-first-prompt.log" 2>/dev/null | tr '\n' ' ')"
+    echo "sh is: $(sh -c 'echo ${BASH_VERSION:-not bash}')"
 }
 
 _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext // empty'; }
@@ -244,6 +255,7 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     _within_limit "first prompt" "$PLIMIT"
     printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || {
         echo "the first prompt's answer is not a UserPromptSubmit context Codex will accept: $JSON"
+        _prompt_diag
         return 1
     }
     run _context
