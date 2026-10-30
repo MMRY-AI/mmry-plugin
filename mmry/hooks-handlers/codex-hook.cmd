@@ -34,6 +34,7 @@ rem counted from when it starts this file, and on a loaded machine finding and s
 rem took 4 to 7 s of that. codex-hook.sh counts its budget from this time when it can read it. A
 rem builtin `set`: it starts no process.
 if /i "%~1"=="session-init" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
+if /i "%~1"=="codex-first-prompt" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
 rem THE LATE-MEMORIES GATE (#33062 fix round 1). codex-first-prompt runs on every prompt and has work
 rem only when a session start ran out of time and left a .mmry-codex-late.<session> marker, so with
 rem none it exits here, before where.exe, reg.exe or bash. The same folders, in the same order, as the

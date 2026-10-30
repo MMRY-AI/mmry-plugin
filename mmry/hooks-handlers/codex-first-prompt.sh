@@ -16,11 +16,12 @@
 # its budget, hands it over, and removes the marker, so a later prompt does not hand it over again.
 #
 # AND IF THEY STILL HAVE NOT ARRIVED, IT SAYS SO. The start's notice told the assistant they were on
-# their way; at the budget this tells it they were not loaded, and how the person can load them now.
+# their way; at the budget this tells it they were not loaded, to load them with the memory_load tool
+# before it answers, and to tell the person.
 #
-# THE BUDGET is 30 s from this shell's start (MMRY_CODEX_FIRST_PROMPT_BUDGET, whole seconds 1 to 35,
-# shortens it for a test), under the 45 s codex-hooks.json declares, leaving 15 s for cmd.exe and
-# Git's bash to start on a loaded Windows machine and for this to answer.
+# THE BUDGET is 45 s from codex-hook.cmd's start, or this shell's (MMRY_CODEX_FIRST_PROMPT_BUDGET,
+# whole seconds 1 to 50, shortens it for a test), under the 60 s codex-hooks.json declares. The
+# person waits only when the memories really are still on their way; every other prompt is gated off.
 #
 # It runs only when a late marker exists: both the sh line in codex-hooks.json and codex-hook.cmd look
 # for one with no process started, so every other prompt of every conversation pays a file lookup.
@@ -55,11 +56,28 @@ if ! [[ "$_pid" =~ ^[0-9]{1,10}$ ]]; then
 fi
 _hand="${_T}/.mmry-codex-start.${_sid}.${_pid}"
 
-_budget="${MMRY_CODEX_FIRST_PROMPT_BUDGET:-30}"
-if ! [[ "$_budget" =~ ^[0-9]+$ ]] || (( _budget < 1 || _budget > 35 )); then
-    _budget=30
+_budget="${MMRY_CODEX_FIRST_PROMPT_BUDGET:-45}"
+if ! [[ "$_budget" =~ ^[0-9]+$ ]] || (( _budget < 1 || _budget > 50 )); then
+    _budget=45
 fi
-while [[ ! -f "${_hand}.ready" ]] && (( SECONDS < _budget )); do
+# Counted from codex-hook.cmd's start where it stamped one, as codex-hook.sh counts the session
+# start's: on a loaded Windows machine cmd.exe and Git's bash took several seconds before this shell
+# existed. printf's clock is bash 4.2+ and starts no process; a stamp that does not read as H:MM:SS,
+# or is more than two minutes away, is ignored.
+_spent0=0
+_t0="${MMRY_CODEX_HOOK_STARTED:-}"; _t0="${_t0// /}"; _t0="${_t0%%[.,]*}"
+_re_t='^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$'
+if [[ "$_t0" =~ $_re_t ]]; then
+    _t0s=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} ))
+    _now=""
+    printf -v _now '%(%H:%M:%S)T' -1 2>/dev/null || _now=""
+    if [[ "$_now" =~ $_re_t ]]; then
+        _since=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} - _t0s ))
+        (( _since >= 0 )) || _since=$(( _since + 86400 ))
+        (( _since > SECONDS && _since <= 120 )) && _spent0=$(( _since - SECONDS ))
+    fi
+fi
+while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _budget )); do
     sleep 1
 done
 
@@ -71,7 +89,7 @@ if [[ -f "${_hand}.ready" ]]; then
     # context as it stands on this event too.
     printf '%s' "${_ans/\"hookEventName\":\"SessionStart\"/\"hookEventName\":\"UserPromptSubmit\"}"
 else
-    printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
+    printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Load them now with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were not loaded automatically this time because loading them took too long."}}'
 fi
 
 rm -f "$_late" "${_hand}.out" "${_hand}.ready" 2>/dev/null

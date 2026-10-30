@@ -60,6 +60,21 @@ case "$HANDLER_NAME" in
     *[/\\]*|.*|"") exit 0 ;;
 esac
 
+# THE FIRST PROMPT'S LATE MEMORIES RUN HERE, IN THIS SHELL, BEFORE ANYTHING BELOW (#33062 fix round 1).
+# codex-first-prompt.sh needs no host, no library and no credential, only the temp folder, and it runs
+# exactly when a start was already too slow, so it is sourced before the lines below start their
+# subshells and their library, and without a second bash. Measured on a heavily loaded Windows machine
+# (110 to 158 bash processes), the path through them took it past its limit.
+if [[ "$HANDLER_NAME" == "codex-first-prompt" ]]; then
+    _mmry_self="${BASH_SOURCE[0]}"
+    [[ "$_mmry_self" == */* ]] || _mmry_self="./${_mmry_self}"
+    [[ -f "${_mmry_self%/*}/codex-first-prompt.sh" ]] || exit 0
+    set +e
+    # shellcheck source=/dev/null
+    source "${_mmry_self%/*}/codex-first-prompt.sh"
+    exit 0
+fi
+
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 PLUGIN_ROOT="$(cd "${HANDLER_DIR}/.." && pwd)" || exit 0
 
@@ -251,7 +266,7 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # With a session id, the marker that sends the memories on with the first prompt, and the
             # notice that says so. Without one there is nothing to send them on by: the old notice.
             if [[ -n "$_mmry_late_file" ]] && printf '%s' "$$" > "$_mmry_late_file" 2>/dev/null; then
-                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they do not arrive with it, tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
+                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they have not arrived when you answer it, load them with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were late to load this time."}}'
             else
                 printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
             fi

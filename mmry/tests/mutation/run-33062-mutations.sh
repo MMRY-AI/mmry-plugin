@@ -67,6 +67,7 @@ m_first_not_retagged() { _rep "$1/$FIRST" '"${_ans/\"hookEventName\":\"SessionSt
 m_first_no_fail_notice() { _rep "$1/$FIRST" "    printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories" "    false && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories"; }
 m_first_any_session() { _rep "$1/$FIRST" '_late="${_T}/.mmry-codex-late.${_sid}"' 'for _late in "${_T}"/.mmry-codex-late.*; do break; done; _sid="${_late##*.mmry-codex-late.}"'; }
 m_sh_gate_open() { _rep "$1/$HOOKS" "done; exit 0' mmry-late-gate" "done; exec sh \\\"\$@\\\"' mmry-late-gate"; }
+m_first_launcher_clock_ignored() { _rep "$1/$FIRST" '(( _since > SECONDS && _since <= 120 )) && _spent0=$(( _since - SECONDS ))' ':'; }
 # Only a Windows run can see this one refuse: the test that drives codex-hook.cmd skips elsewhere.
 m_cmd_gate_open() { _rep "$1/$CMD" 'if not defined MMRY_LATE exit /b 0' 'rem gate removed'; }
 # Requirement 3's control: Claude Code losing its update check before the memories.
@@ -77,7 +78,7 @@ m_claude_update_skipped() { _rep "$1/$START" 'if (( _mmry_codex == 0 )); then
 ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_output stdin_lost
      stderr_held init_skips_update start_twice no_notice no_bash32_timeout no_budget launcher_clock_ignored budget_past_limit
      claude_update_skipped late_marker_missing no_handoff late_always first_no_wait first_unbounded
-     first_keeps_marker first_not_retagged first_no_fail_notice first_any_session sh_gate_open cmd_gate_open)
+     first_keeps_marker first_not_retagged first_no_fail_notice first_any_session first_launcher_clock_ignored sh_gate_open cmd_gate_open)
 (( $# > 0 )) && ALL=("$@")
 
 copy() {

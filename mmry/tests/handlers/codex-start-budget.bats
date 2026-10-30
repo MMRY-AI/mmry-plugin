@@ -295,9 +295,29 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
     run _context
     assert_output --partial "were not loaded"
-    assert_output --partial "Tell the user"
-    assert_output --partial "memory_load"
+    assert_output --partial "tell the user"
+    assert_output --partial "Load them now with the mmry_plugin memory_load tool before you answer"
     refute_output --partial "MMRY AI loaded"
+}
+
+@test "R2: on Windows the first prompt's budget counts from when codex-hook.cmd started" {
+    # Same reason as the session start's: cmd.exe and Git's bash took seconds before this shell ran.
+    # Launcher stamped 15 s ago, budget 25: the notice must come after about 10 s, not about 25 s.
+    printf -v _probe '%(%H)T' -1 2>/dev/null || skip "bash $BASH_VERSION has no printf clock; codex-hook.cmd runs only on Windows, under Git's bash 5"
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 60
+    _codex_start 9
+    local now t
+    printf -v now '%(%s)T' -1
+    printf -v t '%(%H:%M:%S)T' $(( now - 15 ))
+    export MMRY_CODEX_FIRST_PROMPT_BUDGET=25 MMRY_CODEX_HOOK_STARTED="${t#0}.50"
+    _codex_prompt 9
+    run _context
+    assert_output --partial "were not loaded"
+    awk -v e="$ELAPSED" 'BEGIN { exit !(e < 20) }' || {
+        echo "the first prompt's notice took ${ELAPSED}s: the 15 s the launcher had already spent were not counted"
+        return 1
+    }
 }
 
 @test "R1: with no late start pending, the first-prompt hook starts no MMRY process at all (sh gate)" {
@@ -346,19 +366,19 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     refute_output --partial "MMRY AI loaded"
 }
 
-@test "R2: the notice tells the assistant how the person can load them now" {
+@test "R2: the notice tells the assistant to load them itself, and tell the person, if they are not there by the first answer" {
     export MMRY_CODEX_START_BUDGET=3
     _slow_curl "/api/memories/startup" 15
     _codex_start 1
     run _context
-    assert_output --partial "Tell the user"
+    assert_output --partial "tell the user"
     # On Codex that is the memory_load tool; there is no slash command to type. The notice spells it
     # out rather than start a process after the budget, so it is held to what lib-host.sh says.
     local ref
     ref="$(env -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" CODEX_HOME="$CX" \
         bash -c 'source "$1/hooks-handlers/lib-host.sh" && mmry_host_command_ref load-memories' _ "$ROOT")"
     [ -n "$ref" ]
-    assert_output --partial "offer to load them now with ${ref}."
+    assert_output --partial "load them with ${ref} before you answer"
 }
 
 @test "R2: on Windows the budget counts from when codex-hook.cmd started, not only from bash's start" {
