@@ -11,10 +11,16 @@
 # Defines functions only. The caller must define log(), which takes one message, and must run with
 # its own error handling: every function here reports failure by its return status.
 #
-# set -euo pipefail is the repository convention for every script in this directory
-# (structural/file-integrity.bats). Both callers already run under it, so sourcing this changes
-# nothing for them.
-set -euo pipefail
+# mmry-lib: sets no shell options
+#
+# The line above is read by structural/file-integrity.bats (#33033). Every other script in this
+# directory turns on set -euo pipefail, and this file used to as well, which turned strict mode on
+# in any shell that sourced it: a future caller written without it would have had its error
+# handling changed by a source line. A library that only defines functions has no use for its own
+# options, so it sets none, and tests/handlers/self-update-cleanup.bats proves a caller's settings
+# are as they were after sourcing it. The functions are written to be correct with or without
+# strict mode: each failure is a tested return status, and every partial result fails closed
+# (fewer folders searched means fewer removals, never more).
 
 # Scratch space for the removal step, made only when it is needed.
 _su_scratch=""
@@ -80,11 +86,21 @@ _su_load_list() {
 _su_prune() {
     local list="$1" target="$2" ver="$3"
     local tops="" top="" f="" rel="" base="" keep="" dir="" removed=0
-    local found="" gone="" prefixes=""
+    local found="" gone="" prefixes="" odd="" shown=""
+    # One spelling of the folder, so the refusals below cannot be stepped round with "dir/".
+    while [[ "$target" == */ && "$target" != "/" ]]; do target="${target%/}"; done
+    # HOME is spelled the same way, so a HOME ending in "/" is still refused (#33033).
+    local home="${HOME:-/}"
+    while [[ "$home" == */ && "$home" != "/" ]]; do home="${home%/}"; done
     case "$target" in
-        ""|/|"${HOME:-/}"|"${HOME:-/}/")
+        ""|/|"$home")
             log "refusing to remove anything from '${target}': not a plugin folder"; return 1 ;;
     esac
+    # A symbolic link in place of the folder points the removals at wherever it leads (#33033).
+    if [[ -L "$target" ]]; then
+        log "refusing to remove anything from '${target}': it is a symbolic link, not the installed folder itself"
+        return 1
+    fi
     if [[ ! -d "$target" || ! -d "$target/hooks-handlers" ]]; then
         log "refusing to remove anything from '${target}': it has no hooks-handlers folder, so it is not a plugin folder"
         return 1
@@ -92,16 +108,22 @@ _su_prune() {
     _su_scratch_dir || { log "no scratch space; removing nothing from ${target}"; return 1; }
     found="${_su_scratch}/found"
     gone="${_su_scratch}/gone"
+    odd="${_su_scratch}/odd"
 
     # The folders the release ships, and the folders it keeps whole (entries ending in "/").
     tops="$(awk -F/ 'NF>1 && $1!="" {print $1}' "$list" | LC_ALL=C sort -u)"
     prefixes="$(awk '/\/$/' "$list")"
 
+    # Names are read whole, separated by NUL (#33033). Read a line at a time, a name holding a line
+    # break became two names: false "removed" lines, and a fragment equal to an unlisted top-level
+    # file removed that file. Such a name can never be a line of the list, so it is set aside in
+    # $odd and removed as the one name it is, below.
     : > "$found"
+    : > "$odd"
     while IFS= read -r top; do
         [[ -n "$top" ]] || continue
         [[ -d "$target/$top" && ! -L "$target/$top" ]] || continue
-        while IFS= read -r f; do
+        while IFS= read -r -d '' f; do
             rel="${f#"$target"/}"
             base="${rel##*/}"
             # Run-time and customer files, kept whatever the list says (see the header).
@@ -114,8 +136,11 @@ _su_prune() {
                 done <<< "$prefixes"
             fi
             [[ -n "$keep" ]] && continue
-            printf '%s\n' "$rel"
-        done < <(find "$target/$top" -type f 2>/dev/null) >> "$found"
+            case "$rel" in
+                *$'\n'*) printf '%s\0' "$rel" >> "$odd" ;;
+                *) printf '%s\n' "$rel" >> "$found" ;;
+            esac
+        done < <(find "$target/$top" -type f -print0 2>/dev/null)
     done <<< "$tops"
 
     # Fail closed: comm on input that is not sorted reports shipped files as missing from the list.
@@ -123,6 +148,17 @@ _su_prune() {
         log "could not compare ${target} with the release's file list; removing nothing"
         return 1
     fi
+
+    while IFS= read -r -d '' rel; do
+        [[ -n "$rel" ]] || continue
+        shown="$(printf '%q' "$rel")"
+        if rm -f -- "$target/$rel" 2>/dev/null && [[ ! -e "$target/$rel" ]]; then
+            removed=$((removed + 1))
+            log "removed ${shown} from ${target} (not in release ${ver}; its name holds a line break)"
+        else
+            log "could not remove ${shown} from ${target}"
+        fi
+    done < "$odd"
 
     while IFS= read -r rel; do
         [[ -n "$rel" ]] || continue
