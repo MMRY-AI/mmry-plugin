@@ -77,3 +77,45 @@ setup() {
     [ ! -e "$STATE_DIR/.last-self-update" ] || fail "a failed copy recorded version $(cat "$STATE_DIR/.last-self-update") in the installed copy: $output"
     [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a failed copy was recorded as cleaned: $output"
 }
+
+# Every file under $1 with its checksum, one per line, sorted.
+_tree_sums() {
+    ( cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 cksum )
+}
+
+# The update path's extraction-failure stop, self-update.sh's `exit 0` after "failed to extract
+# update archive" (#33033 fix round 7, QA round 6 finding S392). A truncated archive is the case
+# that matters: tar writes the part it could read before it fails, so the download folder holds a
+# half release. Without the stop that half is copied over the plugin root (a new plugin.json beside
+# missing handlers), recorded as the installed version and reported as an update, and since the
+# local and marketplace versions then agree, no later update repairs it.
+@test "33033 refusal extract failure: a truncated archive copies nothing, records no version and claims no update" {
+    _release 9.9.9 good
+    # Make the release big enough that a cut archive still yields files before tar fails.
+    local rel="$TEST_TMPDIR/remote/mmry-plugin-master/mmry"
+    cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$rel/hooks-handlers/"
+    ( cd "$TEST_TMPDIR/remote" && tar -czf "$TEST_TMPDIR/remote.tar.gz" mmry-plugin-master )
+    local size
+    size="$(wc -c < "$TEST_TMPDIR/remote.tar.gz" | tr -d '[:space:]')"
+    head -c "$(( size * 7 / 10 ))" "$TEST_TMPDIR/remote.tar.gz" > "$TEST_TMPDIR/cut.tar.gz"
+    mv "$TEST_TMPDIR/cut.tar.gz" "$TEST_TMPDIR/remote.tar.gz"
+    _old_install
+    _tree_sums "$INSTALL_ROOT" > "$TEST_TMPDIR/root.before"
+    _tree_sums "$STATE_DIR" > "$TEST_TMPDIR/state.before"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"failed to extract update archive"* ]] || fail "the extraction failure was not reported: $output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "a truncated archive was reported as an update: $output"
+    _tree_sums "$INSTALL_ROOT" > "$TEST_TMPDIR/root.after"
+    _tree_sums "$STATE_DIR" > "$TEST_TMPDIR/state.after"
+    cmp -s "$TEST_TMPDIR/root.before" "$TEST_TMPDIR/root.after" \
+        || fail "a half-extracted release was copied into the plugin root: $(diff "$TEST_TMPDIR/root.before" "$TEST_TMPDIR/root.after"): $output"
+    cmp -s "$TEST_TMPDIR/state.before" "$TEST_TMPDIR/state.after" \
+        || fail "a half-extracted release was copied into the installed copy: $(diff "$TEST_TMPDIR/state.before" "$TEST_TMPDIR/state.after"): $output"
+    [ ! -e "$INSTALL_ROOT/.last-self-update" ] || fail "a truncated archive recorded version $(cat "$INSTALL_ROOT/.last-self-update"): $output"
+    [ ! -e "$STATE_DIR/.last-self-update" ] || fail "a truncated archive recorded version $(cat "$STATE_DIR/.last-self-update") in the installed copy: $output"
+    [[ "$output" != *"removed "* ]] || fail "a truncated archive started removals: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
+}

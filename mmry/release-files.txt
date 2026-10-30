@@ -128,6 +128,7 @@ tests/handlers/save-supersede.bats
 tests/handlers/search-memories.bats
 tests/handlers/self-update-cleanup.bats
 tests/handlers/self-update-finish.bats
+tests/handlers/self-update-record.bats
 tests/handlers/self-update.bats
 tests/handlers/session-init-no-downgrade.bats
 tests/handlers/session-start-macos.bats

@@ -584,3 +584,52 @@ _assert_session_removed_nothing() {
     [[ "$output" == *"removed hooks-handlers/query-records.sh from $STATE_DIR (not in release 3.1.1)"* ]] \
         || fail "3.1.1 over 3.1: removal not printed: $output"
 }
+
+# _su_version_core, the pre-release and build suffix (#33033 fix round 7, QA round 6 finding Y2).
+# A version is compared by its dotted digits with any -rc1 or +build7 suffix taken off. Compared
+# with the suffix on, it is not dotted digits, so the comparison answers "cannot compare" and the
+# session installs as before: an older 3.1.0 session goes over an installed 3.2.0-rc1, and its
+# mirror removes what release 3.1.0 does not list.
+@test "33033 refusal suffix: a pre-release or build suffix is ignored, so an older session is refused and nothing is removed" {
+    log() { :; }
+    # shellcheck source=/dev/null
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 3.2.0-rc1 3.1.0 || rc=$?; [[ "$rc" -eq 0 ]] || fail "3.2.0-rc1 not newer than 3.1.0 (rc $rc)"
+    rc=0; _su_version_newer 3.1.1+build7 3.1 || rc=$?; [[ "$rc" -eq 0 ]] || fail "3.1.1+build7 not newer than 3.1 (rc $rc)"
+    rc=0; _su_version_newer 3.1.0 3.2.0-rc1 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1.0 newer than 3.2.0-rc1 (rc $rc)"
+
+    # Installed 3.2.0-rc1, session 3.1.0: refused, nothing copied, nothing removed.
+    local new="$TEST_TMPDIR/cache/3.2.0-rc1" old="$TEST_TMPDIR/cache/3.1.0"
+    _plugin_root "$new" 3.2.0-rc1
+    printf 'only in 3.2.0-rc1\n' > "$new/commands/only-in-new.md"
+    _write_list "$new" 3.2.0-rc1
+    _plugin_root "$old" 3.1.0 old
+    _installed_by_self_update "$new" 3.2.0-rc1
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is 3.2.0-rc1, newer than this session's 3.1.0; leaving it as it is"* ]] \
+        || fail "the older session was not refused: $output"
+    [ -f "$STATE_DIR/commands/only-in-new.md" ] || fail "the older session's mirror removed commands/only-in-new.md: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "the older session overwrote mmry-client.sh: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
+    grep -q '"version": "3.2.0-rc1"' "$STATE_DIR/.claude-plugin/plugin.json" || fail "installed version changed: $output"
+    [[ "$output" != *"removed "* ]] || fail "the older session removed files: $output"
+
+    # A build suffix on the installed side: installed 3.1.1+build7, session 3.1: refused likewise.
+    rm -rf "$STATE_DIR"
+    local b="$TEST_TMPDIR/cache/3.1.1+build7" s="$TEST_TMPDIR/cache/3.1"
+    _plugin_root "$b" 3.1.1+build7
+    printf 'only in 3.1.1\n' > "$b/commands/only-in-new.md"
+    _write_list "$b" 3.1.1+build7
+    _plugin_root "$s" 3.1 old
+    _installed_by_self_update "$b" 3.1.1+build7
+    _session_init "$s" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "build suffix: status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is 3.1.1+build7, newer than this session's 3.1; leaving it as it is"* ]] \
+        || fail "build suffix: the older session was not refused: $output"
+    [ -f "$STATE_DIR/commands/only-in-new.md" ] || fail "build suffix: the mirror removed commands/only-in-new.md: $output"
+    [[ "$output" != *"removed "* ]] || fail "build suffix: the older session removed files: $output"
+}
