@@ -342,11 +342,11 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
     mkdir -p "$TEST_TMPDIR/gate-tmp"
     local wtmp; wtmp="$(cygpath -w "$TEST_TMPDIR/gate-tmp")"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null
+    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd started bash with nothing pending"; return 1; }
     : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.x"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null
+    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd stayed shut with a late start pending"; return 1; }
 }
 
@@ -359,7 +359,7 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     printf '4242' > "$g/.mmry-codex-late.win-1"
     printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI loaded 3 memories. Read them now: C:\\x\\mmry-memories.md"}}' > "$g/.mmry-codex-start.win-1.4242.out"
     : > "$g/.mmry-codex-start.win-1.4242.ready"
-    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env TMPDIR="$1" cmd //d //c "$2" codex-first-prompt' _ "$wtmp" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")"
+    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env TMPDIR="$1" cmd //d //c "$2" codex-first-prompt 3>&-' _ "$wtmp" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")"
     assert_success
     JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
     printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || {
