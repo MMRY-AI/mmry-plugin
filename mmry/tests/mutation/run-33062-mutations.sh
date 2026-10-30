@@ -90,9 +90,17 @@ copy() {
     rm -rf "$1"; mkdir -p "$1"
     ( cd "$REPO_SRC" && tar cf - --exclude=.git . ) | ( cd "$1" && tar xf - )
 }
-run_suite() { ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats "$SUITE" ) > "$2" 2>&1; }
+# MUT_FILTER (a bats -f pattern) runs only the matching tests, for a machine where the whole suite per
+# mutation takes too long. Say so when reporting: a filtered run proves only what its tests cover.
+run_suite() {
+    if [[ -n "${MUT_FILTER:-}" ]]; then
+        ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats -f "$MUT_FILTER" "$SUITE" ) > "$2" 2>&1
+    else
+        ( cd "$1/mmry/tests" && ./libs/bats-core/bin/bats "$SUITE" ) > "$2" 2>&1
+    fi
+}
 
-echo "== baseline (no mutation)"
+echo "== baseline (no mutation)${MUT_FILTER:+, tests matching: $MUT_FILTER}"
 copy "$WORK/base"
 # Up to three tries: on a loaded Windows machine one start in a freshly written copy can run past the
 # budget for reasons that are the machine's, not the code's. Each try is reported.
