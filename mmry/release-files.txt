@@ -127,6 +127,7 @@ tests/handlers/save-memory.bats
 tests/handlers/save-supersede.bats
 tests/handlers/search-memories.bats
 tests/handlers/self-update-cleanup.bats
+tests/handlers/self-update-finish.bats
 tests/handlers/self-update.bats
 tests/handlers/session-init-no-downgrade.bats
 tests/handlers/session-start-macos.bats
@@ -141,6 +142,7 @@ tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
+tests/helpers/self-update-release.bash
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
 tests/integration/api-health.bats
