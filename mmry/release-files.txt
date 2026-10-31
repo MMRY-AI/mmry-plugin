@@ -1,4 +1,4 @@
-# mmry release files 2.15.4
+# mmry release files 2.15.5
 .claude-plugin/plugin.json
 .codex-plugin/plugin.json
 README.md
@@ -108,6 +108,7 @@ tests/handlers/correction-31847.bats
 tests/handlers/database-command.bats
 tests/handlers/deactivate-memory.bats
 tests/handlers/entry-handlers.bats
+tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats

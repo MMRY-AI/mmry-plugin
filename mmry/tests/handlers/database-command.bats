@@ -126,6 +126,15 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
     [ "$(_last_line)" = "$PORTAL" ]
 }
 
+@test "find: --fields and --no-note reach the route and only the named fields are shown (#33198)" {
+    run db find --database-id 42 --fields severity --no-note --filter severity=7
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q 'GET http://localhost:5291/api/databases/42/entries?field.severity=7&fields=severity&includeNote=false' "$LOG" || { cat "$LOG"; return 1; }
+    [[ "$output" == *"severity: 7"* ]] || return 1
+    [[ "$output" != *"triggers"* && "$output" != *"words:"* ]] || return 1
+    [ "$(_last_line)" = "$PORTAL" ]
+}
+
 @test "correct: updates the named entry through save-entry.sh and reports the server's outcome" {
     export MOCK_CURL_RESPONSE='{"outcome":"structured.updated","memoryId":99,"entryId":7}'
     run db correct --database-id 42 --entry-id 7 --content "It was a 5, not a 7" --fields '{"severity":5}'
