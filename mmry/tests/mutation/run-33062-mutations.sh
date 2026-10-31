@@ -62,9 +62,10 @@ MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"'
 # m_no_delivered_mark below: since fix round 2 the marker is armed as the start begins and settled
 # "delivered" by a start that was in time.)
 m_no_handoff() { _rep "$1/$HOOK" '&& : > "${_mmry_hand}.ready" 2>/dev/null' '&& :'; }
-m_drain_holds_output() { _rep "$1/$HOOK" '| _mmry_codex_drain >&4 4>&- &
-        else' '| _mmry_codex_drain >&4 &
-        else'; }
+# session-start.sh keeps the reader's pipe (fd 4): the reader then waits until it exits, after the
+# session registration, instead of until it has printed. (Fix round 2 re-pointed this: the drain's own
+# extra copy of fd 4, what it planted before, is the same pipe as its output and changes nothing.)
+m_drain_holds_output() { _rep "$1/$HOOK" 'session-start.sh" < "$_mmry_in" 4>&- |' 'session-start.sh" < "$_mmry_in" |'; }
 # (m_drain_stdin_lost, fix round 1, is gone with what it planted in: since fix round 2 the drain reads
 # session-start.sh's output through a pipe, not the hook's stdin.)
 m_first_no_wait() { _rep "$1/$FIRST" 'while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _ceiling )); do' 'while false; do'; }
