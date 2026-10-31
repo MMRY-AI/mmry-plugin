@@ -397,7 +397,11 @@ each change on their own (leads, tasks); `append` is a log where every entry is 
 outcome `save-entry.sh` prints: `structured.created` is a new entry, `structured.updated` changed
 one, and `text.degraded` means the words were kept but the fields were not. An update changes only
 the fields you send. `query-entries.sh` answers how many, which ones and in what order from the
-values; `entry-history.sh` lists what an entry used to hold, oldest first. Retiring stops a
+values; on a database with many fields, add `--fields key,key` to get only the fields the question
+needs and `--no-note` to leave out each entry's words, and a page then holds more entries (a key the
+database does not declare is refused with the keys it does declare; filters and `--order` may use
+any field). Through the MMRY connector, `mmry_entry_list` takes the same choice as `fields` and
+`includeNote: false`. `entry-history.sh` lists what an entry used to hold, oldest first. Retiring stops a
 database collecting and deletes nothing. The same databases and entries are in Claude Code,
 through the MMRY connector and at mmryai.com/databases. These scripts have not been tried from a
 live Codex session yet: if you run one, say so.

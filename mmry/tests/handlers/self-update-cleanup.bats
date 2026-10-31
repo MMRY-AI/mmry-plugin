@@ -9,6 +9,7 @@
 # machine's real install.
 
 load '../helpers/test-helper'
+load '../helpers/self-update-release'
 
 setup() {
     export MMRY_JQ_VENDOR_DIR="$PLUGIN_ROOT/vendor/jq"
@@ -18,74 +19,6 @@ setup() {
     mkdir -p "$HOME"
     rm -f "$TMPDIR/.mmry-update-checked"
     unset MMRY_NO_SELF_UPDATE
-}
-
-# A plugin tree on an older version, with the libraries the resolver needs.
-_updatable_plugin() {
-    local root="$1"
-    mkdir -p "$root/hooks-handlers" "$root/.claude-plugin"
-    cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$root/hooks-handlers/"
-    cp "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" "$root/hooks-handlers/"
-    cp "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$root/hooks-handlers/"
-    cp "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$root/hooks-handlers/"
-    printf '%s' '{ "name": "mmry", "version": "0.0.1" }' > "$root/.claude-plugin/plugin.json"
-}
-
-# A release archive served by a curl mock. $1 version; $2 list: good, none, garbage, wrongversion.
-_release() {
-    local version="$1" list="${2:-good}"
-    local rel="$TEST_TMPDIR/remote/mmry-plugin-master/mmry"
-    local listed_version="$version"
-    rm -rf "$TEST_TMPDIR/remote" "$TEST_TMPDIR/remote.tar.gz"
-    mkdir -p "$rel/hooks-handlers" "$rel/.claude-plugin" "$rel/commands"
-    cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" \
-       "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" \
-       "$rel/hooks-handlers/"
-    printf 'new\n' > "$rel/hooks-handlers/save-entry.sh"
-    printf 'new\n' > "$rel/commands/database.md"
-    printf 'readme\n' > "$rel/README.md"
-    printf '{ "name": "mmry", "version": "%s" }\n' "$version" > "$rel/.claude-plugin/plugin.json"
-    [[ "$list" == "wrongversion" ]] && listed_version="0.0.0-other"
-    case "$list" in
-        good|wrongversion)
-            {
-                printf '# mmry release files %s\n' "$listed_version"
-                {
-                    ( cd "$rel" && find . -type f | sed 's|^\./||' )
-                    printf '%s\n' release-files.txt tests/libs/bats-core/
-                } | LC_ALL=C sort -u
-            } > "$TEST_TMPDIR/list.tmp"
-            mv "$TEST_TMPDIR/list.tmp" "$rel/release-files.txt"
-            ;;
-        garbage)
-            printf 'this is not a release file list\nhooks-handlers/self-update.sh\n' > "$rel/release-files.txt"
-            ;;
-        none) ;;
-    esac
-    ( cd "$TEST_TMPDIR/remote" && tar -czf "$TEST_TMPDIR/remote.tar.gz" mmry-plugin-master )
-    {
-        printf '#!/usr/bin/env bash\n'
-        printf 'out=""; prev=""\n'
-        printf 'for arg in "$@"; do [[ "$prev" == "-o" ]] && out="$arg"; prev="$arg"; done\n'
-        printf 'if [[ -n "$out" ]]; then cp "%s" "$out"; exit 0; fi\n' "$TEST_TMPDIR/remote.tar.gz"
-        printf "printf '%%s' '{\"plugins\":[{\"name\":\"mmry\",\"version\":\"%s\"}]}'\n" "$version"
-    } > "$TEST_TMPDIR/mock-bin/curl"
-    chmod +x "$TEST_TMPDIR/mock-bin/curl"
-}
-
-# An install from an older release: the plugin root, plus the installed copy in ~/.claude/mmry,
-# each holding one of the old database scripts that 2.15.2 renamed away.
-_old_install() {
-    INSTALL_ROOT="$TEST_TMPDIR/cache/mmry"
-    _updatable_plugin "$INSTALL_ROOT"
-    STATE_DIR="$HOME/.claude/mmry"
-    mkdir -p "$STATE_DIR/hooks-handlers"
-    printf 'old\n' > "$INSTALL_ROOT/hooks-handlers/save-record.sh"
-    printf 'old\n' > "$STATE_DIR/hooks-handlers/save-record.sh"
-}
-
-_run_update() {
-    run env -u MMRY_HOST -u CODEX_HOME HOME="$HOME" bash "$INSTALL_ROOT/hooks-handlers/self-update.sh"
 }
 
 @test "32957 plant: an old script the release does not list is removed, from the plugin root and the installed copy" {
@@ -259,6 +192,30 @@ _run_update() {
     [[ "$output" == *"git checkout; refusing"* ]] || fail "$output"
 }
 
+# The other half of the same refusal (#33033 fix round 7): the plugin folder is itself the checkout,
+# with .git inside it and none beside it, so only the "${PLUGIN_ROOT}/.git" check can refuse.
+@test "33033 refusal: a plugin folder holding its own .git is a checkout, and self-update leaves it untouched" {
+    _release 9.9.9 good
+    local repo="$TEST_TMPDIR/checkout-inner"
+    _updatable_plugin "$repo/mmry"
+    cp "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" "$repo/mmry/release-files.txt"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$repo/mmry/.claude-plugin/plugin.json"
+    mkdir -p "$repo/mmry/.git"
+    printf 'ref: refs/heads/wip\n' > "$repo/mmry/.git/HEAD"
+    [ ! -e "$repo/.git" ] || fail "precondition: a .git beside the plugin folder would refuse on its own"
+    printf 'work in progress\n' > "$repo/mmry/hooks-handlers/my-new-handler.sh"
+    local before after
+    before="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+
+    run bash "$repo/mmry/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"git checkout; refusing"* ]] || fail "the checkout was not refused: $output"
+    [[ "$output" != *"removed "* ]] || fail "self-update removed files from a checkout: $output"
+    [ -f "$repo/mmry/hooks-handlers/my-new-handler.sh" ] || fail "the developer's new handler was removed: $output"
+    after="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+    [[ "$before" == "$after" ]] || fail "the checkout changed:"$'\n'"$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
+}
+
 # THE UPDATE FROM 2.15.2 ITSELF. When 2.15.3 arrives every customer runs the OLD self-update.sh,
 # which knows nothing of the list. bash reads a script as it runs it, so after the old script copies
 # the new one over itself it reads on in the new file's text from byte 7345. The new file keeps
@@ -306,4 +263,783 @@ _run_update() {
     done
     # The code is one brace group, and it ends in exit.
     [[ "$(tail -n 2 "$script")" == $'exit 0\n}' ]] || fail "self-update.sh does not end in 'exit 0' and '}'"
+}
+
+# ── #33033: every refusal proven by a test that fails when the refusal is removed ──
+
+@test "33033 refusal: a file list entry ../x is refused, nothing is removed, and the parent folder is untouched" {
+    _release 9.9.9 unsafe
+    _old_install
+    # Beside the plugin root and beside the installed copy: what '../' would reach.
+    printf 'mine\n' > "$TEST_TMPDIR/cache/planted.txt"
+    printf 'mine\n' > "$HOME/.claude/planted.txt"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"names an unsafe or empty path: '../x'"*"removing nothing"* ]] || fail "the refusal was not said: $output"
+    [[ "$output" != *"removed "* ]] || fail "something was removed: $output"
+    [ -f "$TEST_TMPDIR/cache/planted.txt" ] || fail "the file beside the plugin root was removed: $output"
+    [ -f "$HOME/.claude/planted.txt" ] || fail "the file beside the installed copy was removed: $output"
+    # Nothing at all was removed, which is what a refused list means.
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "a refused list still removed save-record.sh: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "a refused list still removed save-record.sh: $output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a refused list was recorded as done"
+    # The update itself still went in.
+    [[ "$output" == *"MMRY AI plugin updated: 0.0.1 -> 9.9.9"* ]] || fail "$output"
+}
+
+@test "33033 refusal: a file list without the core entries removes nothing" {
+    _release 9.9.9 nocore
+    _old_install
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"does not name the release's own core files"*"removing nothing"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "an untrusted list removed save-record.sh: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "an untrusted list removed save-record.sh: $output"
+}
+
+@test "33033 refusal: an installed list for another version is refused at the reconcile" {
+    # No download: the installed version is the remote one, so only the once-per-version pass runs.
+    _release 9.9.9 good
+    _old_install
+    sed '1s/.*/# mmry release files 9.9.8/' "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" \
+        > "$INSTALL_ROOT/release-files.txt"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$INSTALL_ROOT/.claude-plugin/plugin.json"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"the installed file list is for '9.9.8' but plugin.json says '9.9.9'; removing nothing"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "precondition: an update ran: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a refused list was recorded as done"
+}
+
+@test "33033 fix: a name holding a line break is one name, and no fragment of it is removed" {
+    _release 9.9.9 good
+    _old_install
+    local odd=$'hooks-handlers/stale\nmy-notes.txt'
+    printf 'x\n' > "$INSTALL_ROOT/$odd" || fail "this file system cannot hold a line break in a name"
+    [ -f "$INSTALL_ROOT/$odd" ] || fail "precondition: the name with a line break was not created"
+    # The fragment after the line break, as a real unlisted file at the top of the install folder,
+    # which the removal step must never touch.
+    printf 'mine\n' > "$INSTALL_ROOT/my-notes.txt"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [ -f "$INSTALL_ROOT/my-notes.txt" ] || fail "a fragment of a name removed a top-level file: $output"
+    [ ! -e "$INSTALL_ROOT/$odd" ] || fail "the unlisted file with a line break in its name survived: $output"
+    # Printed once, on one line, with the line break shown rather than written.
+    local line one=""
+    while IFS= read -r line; do
+        [[ "$line" == *"removed "*"hooks-handlers/stale"*"my-notes.txt"*" from $INSTALL_ROOT (not in release 9.9.9; its name holds a line break)"* ]] && one=1
+    done <<< "$output"
+    [[ -n "$one" ]] || fail "the removal was not printed as one name on one line: $output"
+    # No fragment is reported as if it were a file of its own.
+    while IFS= read -r line; do
+        [[ "$line" != *"removed my-notes.txt"* ]] || fail "a fragment was reported removed: $output"
+        [[ "$line" != *"removed hooks-handlers/stale from"* ]] || fail "a fragment was reported removed: $output"
+    done <<< "$output"
+    # And the ordinary removals still happen.
+    [ ! -e "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+}
+
+@test "33033 fix: a symbolic link in place of the installed folder is refused, and where it points is untouched" {
+    _release 9.9.9 good
+    _old_install
+    local elsewhere="$TEST_TMPDIR/elsewhere"
+    mkdir -p "$elsewhere/hooks-handlers"
+    printf 'mine\n' > "$elsewhere/hooks-handlers/save-record.sh"
+    rm -rf "$STATE_DIR"
+    # Git Bash copies instead of linking unless asked for a native link; Linux and macOS ignore MSYS.
+    MSYS=winsymlinks:nativestrict ln -s "$elsewhere" "$STATE_DIR"
+    [ -L "$STATE_DIR" ] || fail "precondition: $STATE_DIR is not a symbolic link"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"refusing to remove anything from '$STATE_DIR': it is a symbolic link"* ]] || fail "$output"
+    [ -f "$elsewhere/hooks-handlers/save-record.sh" ] || fail "removed a file through the link: $output"
+    # The real plugin root is still cleaned.
+    [ ! -e "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+}
+
+@test "33033 fix: sourcing the library leaves the calling script's shell options as they were" {
+    local probe="$TEST_TMPDIR/probe.sh"
+    cat > "$probe" <<'PROBE'
+#!/usr/bin/env bash
+# No strict mode here, on purpose: the library must not turn it on.
+before="$- $(set -o | grep -E '^(errexit|nounset|pipefail)[[:space:]]' | tr -s ' \t' ' ' | tr '\n' ';') $(shopt -p | tr '\n' ';')"
+log() { :; }
+source "$1"
+after="$- $(set -o | grep -E '^(errexit|nounset|pipefail)[[:space:]]' | tr -s ' \t' ' ' | tr '\n' ';') $(shopt -p | tr '\n' ';')"
+if [[ "$before" != "$after" ]]; then
+    printf 'CHANGED\nbefore: %s\nafter:  %s\n' "$before" "$after"
+    exit 1
+fi
+# Still a script without strict mode: an unset variable and a failing command do not end it.
+: "$this_is_unset"
+false
+printf 'UNCHANGED\n'
+# And the library works there: a good list loads.
+mkdir -p "$TMPDIR/lst"
+printf '%s\n' '# mmry release files 1.0.0' release-files.txt hooks-handlers/self-update.sh \
+    .claude-plugin/plugin.json > "$TMPDIR/lst/release-files.txt"
+_su_load_list "$TMPDIR/lst/release-files.txt" "$TMPDIR/lst/out" && printf 'LOADED %s\n' "$_SU_LIST_VERSION"
+PROBE
+    run bash "$probe" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"UNCHANGED"* ]] || fail "$output"
+    [[ "$output" == *"LOADED 1.0.0"* ]] || fail "$output"
+}
+
+# The two refusals at the top of _su_prune, called directly (#33033 fix round 5). Both can be reached
+# through self-update.sh (a plugin root that is HOME; an installed copy without hooks-handlers); a
+# direct call names the target exactly, so these source the real library and call the real function
+# with the targets the refusals exist for. HOME and TMPDIR are the suite's own; curl is a mock that
+# records any call.
+_prune_probe() {
+    PRUNE_PROBE="$TEST_TMPDIR/prune-probe.sh"
+    cat > "$PRUNE_PROBE" <<'PROBE'
+#!/usr/bin/env bash
+# $1 library, $2 the target handed to _su_prune.
+log() { printf 'LOG: %s\n' "$1"; }
+source "$1"
+mkdir -p "$TMPDIR/lst"
+printf '%s\n' '# mmry release files 9.9.9' release-files.txt hooks-handlers/self-update.sh \
+    .claude-plugin/plugin.json commands/database.md > "$TMPDIR/lst/release-files.txt"
+_su_load_list "$TMPDIR/lst/release-files.txt" "$TMPDIR/lst/out" || { printf 'LIST NOT LOADED\n'; exit 3; }
+_su_prune "$TMPDIR/lst/out" "$2" 9.9.9
+printf 'RC=%s\n' "$?"
+PROBE
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'printf "%%s\n" "$*" >> "%s"\n' "$TEST_TMPDIR/curl-called"
+        printf 'exit 7\n'
+    } > "$TEST_TMPDIR/mock-bin/curl"
+    chmod +x "$TEST_TMPDIR/mock-bin/curl"
+}
+
+# Fails unless _su_prune refused target $1 with refusal text $2 and removed nothing, made no scratch
+# folder, and reached for no download.
+_assert_refused() {
+    local target="$1" reason="$2"
+    run env HOME="$HOME" TMPDIR="$TMPDIR" bash "$PRUNE_PROBE" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$target"
+    [[ "$output" != *"LIST NOT LOADED"* ]] || fail "precondition: the probe's list did not load: $output"
+    [[ "$output" == *"RC=1"* ]] || fail "target '$target' was not refused (expected return 1): $output"
+    [[ "$output" == *"refusing to remove anything from '"*"': ${reason}"* ]] \
+        || fail "target '$target' was not refused for the stated reason '${reason}': $output"
+    [[ "$output" != *"removed "* ]] || fail "target '$target': something was removed: $output"
+    [[ "$output" != *"nothing to remove from"* ]] || fail "target '$target' was searched for removals: $output"
+    [[ -z "$(ls -A "$TMPDIR" | grep -E '^mmry-prune-' || true)" ]] || fail "target '$target': scratch space was made, so the refusal came too late"
+    [ ! -e "$TEST_TMPDIR/curl-called" ] || fail "target '$target': a download was attempted: $(cat "$TEST_TMPDIR/curl-called")"
+}
+
+@test "33033 refusal O4: an empty target, '/', and HOME, with and without a trailing slash, are refused and nothing is removed" {
+    _prune_probe
+    # The suite's private HOME, never the machine's.
+    [[ "$HOME" == "$TEST_TMPDIR"/* ]] || fail "precondition: HOME is not the test's own: $HOME"
+    # HOME made to look like a plugin folder, so only this refusal stands between it and a prune:
+    # an unlisted file in a shipped folder, which a prune of HOME would remove.
+    mkdir -p "$HOME/hooks-handlers" "$HOME/commands"
+    printf 'mine\n' > "$HOME/hooks-handlers/my-script.sh"
+    printf 'mine\n' > "$HOME/commands/my-notes.md"
+
+    local target
+    for target in "" "/" "//" "$HOME" "$HOME/" "$HOME//"; do
+        _assert_refused "$target" "not a plugin folder"
+        [[ "$output" != *"it has no hooks-handlers folder"* ]] \
+            || fail "target '$target' was refused by the later hooks-handlers check, not as an empty target, '/' or HOME: $output"
+        [ -f "$HOME/hooks-handlers/my-script.sh" ] || fail "target '$target': a file in HOME/hooks-handlers was removed: $output"
+        [ -f "$HOME/commands/my-notes.md" ] || fail "target '$target': a file in HOME/commands was removed: $output"
+    done
+}
+
+@test "33033 refusal O4 trailing-slash HOME: HOME ending in one or two slashes is still refused, and nothing is removed" {
+    _prune_probe
+    local base="$HOME"
+    [[ "$base" == "$TEST_TMPDIR"/* ]] || fail "precondition: HOME is not the test's own: $base"
+    # HOME made to look like a plugin folder, so only the HOME refusal stands between it and a prune.
+    mkdir -p "$base/hooks-handlers" "$base/commands"
+    printf 'mine\n' > "$base/hooks-handlers/mine.sh"
+    printf 'mine\n' > "$base/commands/my-notes.md"
+
+    local home target
+    for home in "$base/" "$base//"; do
+        for target in "$base" "$base/" "$base//"; do
+            HOME="$home" _assert_refused "$target" "not a plugin folder"
+            [[ "$output" != *"it has no hooks-handlers folder"* ]] \
+                || fail "HOME '$home', target '$target': refused by the later hooks-handlers check, not as HOME: $output"
+            [ -f "$base/hooks-handlers/mine.sh" ] || fail "HOME '$home', target '$target': HOME/hooks-handlers/mine.sh was removed: $output"
+            [ -f "$base/commands/my-notes.md" ] || fail "HOME '$home', target '$target': HOME/commands/my-notes.md was removed: $output"
+        done
+    done
+}
+
+@test "33033 refusal O5: a folder with no hooks-handlers folder is refused and nothing is removed" {
+    _prune_probe
+    # A folder with the release's other shipped folders but no hooks-handlers, holding unlisted files
+    # a prune would remove.
+    local bare="$TEST_TMPDIR/not-a-plugin"
+    mkdir -p "$bare/commands"
+    printf 'mine\n' > "$bare/commands/my-notes.md"
+    # hooks-handlers present, but as a file rather than a folder.
+    local filed="$TEST_TMPDIR/file-not-folder"
+    mkdir -p "$filed/commands"
+    printf 'not a folder\n' > "$filed/hooks-handlers"
+    printf 'mine\n' > "$filed/commands/my-notes.md"
+    # And a folder that is not there at all.
+    local missing="$TEST_TMPDIR/no-such-folder"
+
+    local target
+    for target in "$bare" "$bare/" "$filed" "$missing"; do
+        _assert_refused "$target" "it has no hooks-handlers folder, so it is not a plugin folder"
+    done
+    [ -f "$bare/commands/my-notes.md" ] || fail "a file in the folder without hooks-handlers was removed"
+    [ -f "$filed/commands/my-notes.md" ] || fail "a file in the folder whose hooks-handlers is a file was removed"
+    [ -f "$filed/hooks-handlers" ] || fail "the hooks-handlers file was removed"
+    [ ! -e "$missing" ] || fail "the missing folder was created"
+}
+
+# ---------------------------------------------------------------------------------------------
+# Each list refusal on its own, and the compare fail-closed refusal (#33033 fix round 6).
+# A probe sources the real library, loads list $2 with _su_load_list and, only if it loads, prunes
+# plugin folder $3 with _su_prune. The folder holds an unlisted file, hooks-handlers/stray-old.sh,
+# which any prune that goes ahead removes. So with a refusal taken out, the file is removed and the
+# refusal is not said. HOME and TMPDIR are the suite's own; nothing here touches a real install.
+# ---------------------------------------------------------------------------------------------
+
+# The complete, trusted list for the probe plugin.
+PROBE_GOOD_ENTRIES=(release-files.txt hooks-handlers/self-update.sh .claude-plugin/plugin.json hooks-handlers/save-entry.sh)
+
+_list_probe() {
+    LIST_PROBE="$TEST_TMPDIR/list-probe.sh"
+    cat > "$LIST_PROBE" <<'PROBE'
+#!/usr/bin/env bash
+# $1 library, $2 list, $3 plugin folder.
+log() { printf 'LOG: %s\n' "$1"; }
+source "$1"
+if _su_load_list "$2" "$TMPDIR/probe-list.out"; then
+    printf 'LIST LOADED %s\n' "$_SU_LIST_VERSION"
+    _su_prune "$TMPDIR/probe-list.out" "$3" 9.9.9
+    printf 'RC=%s\n' "$?"
+else
+    printf 'LIST REFUSED: %s\n' "$_SU_LIST_PROBLEM"
+fi
+PROBE
+    PROBE_PLUGIN="$TEST_TMPDIR/probe-plugin"
+    rm -rf "$PROBE_PLUGIN"
+    mkdir -p "$PROBE_PLUGIN/hooks-handlers" "$PROBE_PLUGIN/.claude-plugin"
+    printf 'listed\n' > "$PROBE_PLUGIN/hooks-handlers/self-update.sh"
+    printf 'listed\n' > "$PROBE_PLUGIN/hooks-handlers/save-entry.sh"
+    printf 'old\n' > "$PROBE_PLUGIN/hooks-handlers/stray-old.sh"
+    printf '{}\n' > "$PROBE_PLUGIN/.claude-plugin/plugin.json"
+    printf 'listed\n' > "$PROBE_PLUGIN/release-files.txt"
+}
+
+# Writes $TEST_TMPDIR/probe-list.txt: the header, then one line per argument.
+_probe_list() {
+    PROBE_LIST="$TEST_TMPDIR/probe-list.txt"
+    { printf '# mmry release files 9.9.9\n'; printf '%s\n' "$@"; } > "$PROBE_LIST"
+}
+
+_run_list_probe() {
+    run env HOME="$HOME" TMPDIR="$TMPDIR" PATH="${PROBE_PATH:-$PATH}" \
+        bash "$LIST_PROBE" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$PROBE_LIST" "$PROBE_PLUGIN"
+}
+
+# Fails unless nothing in the probe plugin was removed.
+_assert_probe_untouched() {
+    [ -f "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "the unlisted file was removed: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/self-update.sh" ] || fail "a listed file was removed: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/save-entry.sh" ] || fail "a listed file was removed: $output"
+    [[ "$output" != *"removed "* ]] || fail "something was removed: $output"
+}
+
+# Runs the probe on the good list plus entry $1, and fails unless that list was refused as unsafe
+# for that entry and nothing was removed.
+_assert_unsafe_refused() {
+    local entry="$1"
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}" "$entry"
+    _run_list_probe
+    [[ "$output" == *"LIST REFUSED: "*"names an unsafe or empty path: '${entry}'"* ]] \
+        || fail "the entry '${entry}' was not refused as unsafe: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list naming '${entry}' was loaded: $output"
+    _assert_probe_untouched
+}
+
+# Runs the probe on the good list without entry $1, and fails unless that list was refused as
+# untrusted and nothing was removed.
+_assert_core_refused() {
+    local missing="$1" e entries=()
+    for e in "${PROBE_GOOD_ENTRIES[@]}"; do [[ "$e" == "$missing" ]] || entries+=("$e"); done
+    [[ "${#entries[@]}" -eq 3 ]] || fail "precondition: '$missing' is not one of the good entries"
+    _list_probe
+    _probe_list "${entries[@]}"
+    _run_list_probe
+    [[ "$output" == *"LIST REFUSED: "*"does not name the release's own core files"* ]] \
+        || fail "a list without only '${missing}' was not refused as untrusted: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list without '${missing}' was loaded: $output"
+    _assert_probe_untouched
+}
+
+# The control the refusals below are measured against: the good list loads and the prune removes
+# exactly the unlisted file. Without it, "nothing removed" could mean the probe never prunes.
+@test "33033 control: the probe's good list loads and its prune removes only the unlisted file" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "$output"
+    [[ "$output" == *"RC=0"* ]] || fail "$output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "the unlisted file survived a good prune: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/self-update.sh" ] || fail "$output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/save-entry.sh" ] || fail "$output"
+}
+
+# One list per unsafe pattern; each entry matches that pattern and no other alternative.
+@test "33033 refusal unsafe '': an empty entry is refused and nothing is removed" {
+    _assert_unsafe_refused ""
+}
+@test "33033 refusal unsafe '/*': an absolute entry is refused and nothing is removed" {
+    _assert_unsafe_refused "/abs/x"
+}
+@test "33033 refusal unsafe backslash: an entry holding a backslash is refused and nothing is removed" {
+    _assert_unsafe_refused 'hooks-handlers\x'
+}
+@test "33033 refusal unsafe '.': an entry '.' is refused and nothing is removed" {
+    _assert_unsafe_refused "."
+}
+@test "33033 refusal unsafe '..': an entry '..' is refused and nothing is removed" {
+    _assert_unsafe_refused ".."
+}
+@test "33033 refusal unsafe './*': an entry './x' is refused and nothing is removed" {
+    _assert_unsafe_refused "./x"
+}
+@test "33033 refusal unsafe '../*': an entry '../x' is refused and nothing is removed" {
+    _assert_unsafe_refused "../x"
+}
+@test "33033 refusal unsafe '*/./*': an entry 'a/./b' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/./b"
+}
+@test "33033 refusal unsafe '*/../*': an entry 'a/../b' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/../b"
+}
+@test "33033 refusal unsafe '*/.': an entry 'a/.' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/."
+}
+@test "33033 refusal unsafe '*/..': an entry 'a/..' is refused and nothing is removed" {
+    _assert_unsafe_refused "a/.."
+}
+@test "33033 refusal unsafe '*//*': an entry 'a//b' is refused and nothing is removed" {
+    _assert_unsafe_refused "a//b"
+}
+
+# One list per core entry, each missing only that entry.
+@test "33033 refusal core: a list missing only release-files.txt is refused and nothing is removed" {
+    _assert_core_refused release-files.txt
+}
+@test "33033 refusal core: a list missing only hooks-handlers/self-update.sh is refused and nothing is removed" {
+    _assert_core_refused hooks-handlers/self-update.sh
+}
+@test "33033 refusal core: a list missing only .claude-plugin/plugin.json is refused and nothing is removed" {
+    _assert_core_refused .claude-plugin/plugin.json
+}
+
+# The compare fail-closed refusal in _su_prune: a sort or comm that fails is never trusted. The mock
+# lives in a folder put first on PATH for the probe alone.
+_compare_mock_bin() {
+    COMPARE_MOCK_BIN="$TEST_TMPDIR/compare-mock-bin"
+    mkdir -p "$COMPARE_MOCK_BIN"
+    PROBE_PATH="$COMPARE_MOCK_BIN:$PATH"
+}
+
+# Fails unless the prune refused at the compare, returned 1 and removed nothing.
+_assert_compare_refused() {
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the good list did not load: $output"
+    [[ "$output" == *"could not compare ${PROBE_PLUGIN} with the release's file list; removing nothing"* ]] \
+        || fail "the failed compare was not refused: $output"
+    [[ "$output" == *"RC=1"* ]] || fail "the failed compare did not return 1: $output"
+    _assert_probe_untouched
+}
+
+@test "33033 refusal compare: a comm that fails, printing every file it was given, removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    # Called as: comm -23 FOUND LIST. Prints every found file, as comm on unsorted input might
+    # report them, then fails.
+    printf '#!/usr/bin/env bash\ncat "$2"\nexit 1\n' > "$COMPARE_MOCK_BIN/comm"
+    chmod +x "$COMPARE_MOCK_BIN/comm"
+    _run_list_probe
+    _assert_compare_refused
+}
+
+@test "33033 refusal compare: a sort that fails on the found-file list removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    local real_sort
+    real_sort="$(command -v sort)"
+    # Fails only for the found-file list. Every other sort (the list itself, the shipped folders)
+    # is the real one, so the list still loads.
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'for a in "$@"; do case "$a" in */found) exit 1 ;; esac; done\n'
+        printf 'exec "%s" "$@"\n' "$real_sort"
+    } > "$COMPARE_MOCK_BIN/sort"
+    chmod +x "$COMPARE_MOCK_BIN/sort"
+    _run_list_probe
+    _assert_compare_refused
+}
+
+# The last list refusal, "could not sort" (#33033 fix round 7). A sort that fails only on the
+# loader's own output file: the list passes every other check, so only this refusal stops it
+# loading, and a list that loaded would be pruned against, removing the unlisted file.
+@test "33033 refusal list sort: a sort that fails on the loaded list refuses the list and removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    local real_sort
+    real_sort="$(command -v sort)"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'for a in "$@"; do case "$a" in */probe-list.out) exit 1 ;; esac; done\n'
+        printf 'exec "%s" "$@"\n' "$real_sort"
+    } > "$COMPARE_MOCK_BIN/sort"
+    chmod +x "$COMPARE_MOCK_BIN/sort"
+    _run_list_probe
+    [[ "$output" == *"LIST REFUSED: could not sort ${PROBE_LIST}"* ]] \
+        || fail "the failed sort was not refused: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list that could not be sorted was loaded: $output"
+    _assert_probe_untouched
+}
+
+# The listed-path guard in _su_prune (#33033 fix round 7): a path the list names is never removed,
+# whatever comm said. A comm that reports every found file as missing from the list and SUCCEEDS
+# gets past the compare refusal, so only the guard keeps the listed files. The unlisted file is
+# still removed, which shows the prune went ahead.
+@test "33033 refusal listed path: a comm that succeeds but reports listed files leaves those files in place" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    _compare_mock_bin
+    # Called as: comm -23 FOUND LIST. Prints every found file and exits 0.
+    printf '#!/usr/bin/env bash\ncat "$2"\nexit 0\n' > "$COMPARE_MOCK_BIN/comm"
+    chmod +x "$COMPARE_MOCK_BIN/comm"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the good list did not load: $output"
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/self-update.sh" ] || fail "the listed hooks-handlers/self-update.sh was removed: $output"
+    [ -f "$PROBE_PLUGIN/hooks-handlers/save-entry.sh" ] || fail "the listed hooks-handlers/save-entry.sh was removed: $output"
+    [[ "$output" != *"removed hooks-handlers/self-update.sh"* ]] || fail "$output"
+    [[ "$output" != *"removed hooks-handlers/save-entry.sh"* ]] || fail "$output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "precondition: the unlisted file survived, so the prune never acted on comm's report: $output"
+}
+
+# The scratch-space refusal in _su_prune (#33033 fix round 7). Both callers make scratch space
+# before they call _su_prune, so neither reaches it; a direct call does. The list is loaded first
+# with the suite's TMPDIR, then TMPDIR is pointed at a regular file inside the test's own area, so
+# mktemp cannot make a folder there.
+@test "33033 refusal scratch: with no usable scratch space _su_prune returns 1 and removes nothing" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    local probe="$TEST_TMPDIR/scratch-probe.sh" bad_tmp="$TEST_TMPDIR/tmpdir-is-a-file"
+    printf 'not a folder\n' > "$bad_tmp"
+    cat > "$probe" <<'PROBE'
+#!/usr/bin/env bash
+# $1 library, $2 list, $3 plugin folder, $4 the unusable TMPDIR.
+log() { printf 'LOG: %s\n' "$1"; }
+source "$1"
+_su_load_list "$2" "$TMPDIR/scratch-probe-list.out" || { printf 'LIST NOT LOADED: %s\n' "$_SU_LIST_PROBLEM"; exit 3; }
+printf 'LIST LOADED\n'
+export TMPDIR="$4"
+_su_prune "${TMPDIR%/*}/scratch-probe-list.out" "$3" 9.9.9
+printf 'RC=%s\n' "$?"
+PROBE
+    run env HOME="$HOME" TMPDIR="$TMPDIR" bash "$probe" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" \
+        "$PROBE_LIST" "$PROBE_PLUGIN" "$bad_tmp"
+    [[ "$output" == *"LIST LOADED"* ]] || fail "precondition: the good list did not load: $output"
+    [[ "$output" == *"no scratch space; removing nothing from ${PROBE_PLUGIN}"* ]] \
+        || fail "the missing scratch space was not refused: $output"
+    [[ "$output" == *"RC=1"* ]] || fail "the missing scratch space did not return 1: $output"
+    # The refusal stops _su_prune there: it searches and compares nothing, so its message is the
+    # only one. Without it, the prune goes on with scratch paths at the filesystem root; where
+    # those cannot be written a later refusal happens to stop it, which proves nothing about this one.
+    local logged
+    logged="$(printf '%s\n' "$output" | grep '^LOG: ' || true)"
+    [[ "$logged" == "LOG: no scratch space; removing nothing from ${PROBE_PLUGIN}" ]] \
+        || fail "_su_prune went on past the missing scratch space: $output"
+    _assert_probe_untouched
+    [ -f "$bad_tmp" ] || fail "the unusable TMPDIR was changed"
+    [[ -z "$(ls -A "$TMPDIR" | grep -E '^mmry-prune-' || true)" ]] || fail "scratch space was made in the suite's TMPDIR"
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33033 fix round 8: the three refusals QA round 4 found unproven (n56, n03, n13).
+# ---------------------------------------------------------------------------------------------
+
+# The reconcile's own stop after a list that will not load (self-update.sh, the return 0 after
+# "could not read the installed release's file list"). This list is sorted, has a good header and
+# the installed version, so it fails only at the core-entry check, after _su_load_list has set the
+# version and written its lines. Without the return, the reconcile goes on with those lines, the
+# version matches, and the prune removes the running self-update.sh and the old script.
+@test "33033 refusal reconcile: an installed list that fails after a good header stops the reconcile, and nothing is removed" {
+    _release 9.9.9 good
+    _old_install
+    grep -Fvx hooks-handlers/self-update.sh "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" \
+        > "$INSTALL_ROOT/release-files.txt"
+    [[ "$(head -n 1 "$INSTALL_ROOT/release-files.txt")" == "# mmry release files 9.9.9" ]] || fail "precondition: header"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$INSTALL_ROOT/.claude-plugin/plugin.json"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "precondition: an update ran: $output"
+    [[ "$output" == *"could not read the installed release's file list ("*"does not name the release's own core files"*"); removing nothing"* ]] \
+        || fail "the untrusted installed list was not refused: $output"
+    [[ "$output" != *"removed "* ]] || fail "the reconcile went on past its refusal and removed files: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/self-update.sh" ] || fail "the running self-update.sh was removed: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "a refused list removed save-record.sh: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "a refused list removed save-record.sh from $STATE_DIR: $output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "a refused list was recorded as done"
+}
+
+# The empty-version case of the header refusal (lib-release-files.sh, the "?*" in
+# "# mmry release files "?*). A header with nothing after "files " names no version. A caller whose
+# plugin.json has no version reads "" too, and "" equals "", so only this refusal stands between
+# such a list and a prune. The bare header without the trailing space is refused as well.
+@test "33033 refusal header: a header that names no version is not a release file list, and nothing is removed" {
+    local header
+    for header in "# mmry release files " "# mmry release files"; do
+        _list_probe
+        PROBE_LIST="$TEST_TMPDIR/probe-list.txt"
+        { printf '%s\n' "$header"; printf '%s\n' "${PROBE_GOOD_ENTRIES[@]}"; } > "$PROBE_LIST"
+        _run_list_probe
+        [[ "$output" == *"LIST REFUSED: "*"is not a release file list"* ]] \
+            || fail "the header '${header}' was not refused: $output"
+        [[ "$output" != *"LIST LOADED"* ]] || fail "a list with the header '${header}' was loaded: $output"
+        _assert_probe_untouched
+    done
+}
+
+# The folder half of the shipped-folder check (lib-release-files.sh, -d "$target/$top"). The release
+# ships a skills/ folder; the plugin folder has a regular FILE named skills at its top. Files at the
+# top of the plugin folder are never touched (F-000071), so it is kept. Without the folder check,
+# find on the file prints the file itself and it is removed as "skills". The unlisted file in
+# hooks-handlers is still removed, which shows the prune went ahead.
+@test "33033 refusal shipped folder: a FILE named like a shipped folder, at the top of the plugin folder, is kept" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}" skills/mmry/SKILL.md
+    printf 'mine\n' > "$PROBE_PLUGIN/skills"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the list did not load: $output"
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ -f "$PROBE_PLUGIN/skills" ] || fail "the top-level file named skills was removed: $output"
+    [[ "$(cat "$PROBE_PLUGIN/skills")" == "mine" ]] || fail "the top-level file named skills changed"
+    [[ "$output" != *"removed skills "* ]] || fail "$output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "precondition: the prune removed nothing: $output"
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33033 fix round 8: refusals from the developer's own inventory
+# (R:\Intranet\ClaudeAI\plans\MMRY\v1.32.1\33033-refusal-inventory.md), each red when removed.
+# ---------------------------------------------------------------------------------------------
+
+# lib _su_load_list: a list that is not a regular file is not read. A named pipe, which a release
+# archive can carry, is served the good list by a writer, so a reader that opened it would load the
+# list and prune. The refusal never opens it.
+@test "33033 refusal list file: a list that is a named pipe is not read, and nothing is removed" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    local fifo="$TEST_TMPDIR/fifo-list.txt" content writer
+    content="$(cat "$PROBE_LIST"; printf x)"; content="${content%x}"
+    mkfifo "$fifo" || fail "this system cannot make a named pipe"
+    [[ -p "$fifo" && ! -f "$fifo" ]] || fail "precondition: $fifo is not a named pipe"
+    # printf is a builtin, so the open that blocks is the subshell's own, and kill ends it.
+    ( while :; do printf '%s' "$content" > "$fifo"; done ) >/dev/null 2>&1 3>&- &
+    writer=$!
+    PROBE_LIST="$fifo"
+    _run_list_probe
+    kill "$writer" 2>/dev/null || true
+    wait "$writer" 2>/dev/null || true
+    [[ "$output" == *"LIST REFUSED: there is no readable file list at ${fifo}"* ]] \
+        || fail "the named pipe was not refused as a list: $output"
+    [[ "$output" != *"LIST LOADED"* ]] || fail "a list read from a named pipe was loaded: $output"
+    _assert_probe_untouched
+}
+
+# lib _su_prune, the shipped folders are read off entries with a folder (awk NF>1). A release that
+# lists a top-level FILE named notes does not ship a notes/ folder, so a folder of that name is
+# outside the shipped folders and is never searched.
+@test "33033 refusal shipped folder: a folder named like a top-level file the release lists is not searched" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}" notes
+    mkdir -p "$PROBE_PLUGIN/notes"
+    printf 'mine\n' > "$PROBE_PLUGIN/notes/mine.txt"
+    _run_list_probe
+    [[ "$output" == *"LIST LOADED 9.9.9"* ]] || fail "precondition: the list did not load: $output"
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ -f "$PROBE_PLUGIN/notes/mine.txt" ] || fail "a file in a folder the release does not ship was removed: $output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "precondition: the prune removed nothing: $output"
+}
+
+# lib _su_prune, the empty-folder tidy stops below the shipped folder ("$dir" == */*). A removal
+# that empties a folder inside a shipped folder takes that folder away, but never the shipped
+# folder itself.
+@test "33033 refusal shipped folder: a shipped folder a removal leaves empty is kept" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}" commands/database.md
+    mkdir -p "$PROBE_PLUGIN/commands/old"
+    printf 'old\n' > "$PROBE_PLUGIN/commands/list-formats.md"
+    printf 'old\n' > "$PROBE_PLUGIN/commands/old/list-records.md"
+    _run_list_probe
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ ! -e "$PROBE_PLUGIN/commands/list-formats.md" ] || fail "precondition: $output"
+    [ ! -e "$PROBE_PLUGIN/commands/old" ] || fail "precondition: the emptied folder inside commands/ was kept: $output"
+    [ -d "$PROBE_PLUGIN/commands" ] || fail "the shipped folder commands/ was removed: $output"
+}
+
+# lib _su_prune, only regular files are candidates (find -type f). A symbolic link in a shipped
+# folder is kept, whatever the list says (the header of self-update.sh).
+@test "33033 refusal symbolic link: a symbolic link in a shipped folder, not in the list, is kept" {
+    _list_probe
+    _probe_list "${PROBE_GOOD_ENTRIES[@]}"
+    printf 'mine\n' > "$TEST_TMPDIR/link-target.txt"
+    MSYS=winsymlinks:nativestrict ln -s "$TEST_TMPDIR/link-target.txt" "$PROBE_PLUGIN/hooks-handlers/my-link.sh"
+    [ -L "$PROBE_PLUGIN/hooks-handlers/my-link.sh" ] || fail "precondition: no symbolic link was made"
+    _run_list_probe
+    [[ "$output" == *"RC=0"* ]] || fail "precondition: the prune did not go ahead: $output"
+    [ -L "$PROBE_PLUGIN/hooks-handlers/my-link.sh" ] || fail "the symbolic link was removed: $output"
+    [ -f "$TEST_TMPDIR/link-target.txt" ] || fail "the link's target was removed: $output"
+    [ ! -e "$PROBE_PLUGIN/hooks-handlers/stray-old.sh" ] || fail "precondition: the prune removed nothing: $output"
+}
+
+# An install already on the release, which the reconcile would clean: save-record.sh is in both
+# folders and the installed list does not name it.
+_install_on_release() {
+    _release 9.9.9 good
+    _old_install
+    cp "$TEST_TMPDIR/remote/mmry-plugin-master/mmry/release-files.txt" "$INSTALL_ROOT/release-files.txt"
+    printf '{ "name": "mmry", "version": "9.9.9" }' > "$INSTALL_ROOT/.claude-plugin/plugin.json"
+}
+
+_assert_nothing_removed_by_update() {
+    [[ "$output" != *"removed "* ]] || fail "something was removed: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "save-record.sh was removed from the plugin root: $output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "save-record.sh was removed from $STATE_DIR: $output"
+    [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] || fail "the cleanup was recorded as done: $output"
+}
+
+# self-update.sh _su_removals_available: each of the four functions it checks for. A library that
+# lacks any one of them is not used, and that is said.
+@test "33033 refusal partial library: a removal library missing any one of its functions removes nothing, and says so" {
+    local fn
+    for fn in _su_load_list _su_prune _su_scratch_dir _su_json_version; do
+        rm -rf "$TEST_TMPDIR/cache" "$HOME/.claude"
+        _install_on_release
+        printf '\nunset -f %s\n' "$fn" >> "$INSTALL_ROOT/hooks-handlers/lib-release-files.sh"
+        _run_update
+        [[ "$status" -eq 0 ]] || fail "$fn: status $status: $output"
+        [[ "$output" == *"the removal code (lib-release-files.sh) could not be loaded; removing nothing"* ]] \
+            || fail "a library without $fn was not refused: $output"
+        _assert_nothing_removed_by_update
+    done
+}
+
+# self-update.sh _su_prune_both: the once-per-version marker is written only when BOTH folders were
+# cleaned. A comm that fails on its first call fails the plugin root's prune; on its second, the
+# installed copy's. Either way the cleanup is not recorded, so the next run tries again.
+_comm_fails_on_call() {
+    local real
+    real="$(command -v comm)"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'n=$(( $(cat "%s" 2>/dev/null || echo 0) + 1 ))\n' "$TEST_TMPDIR/comm-calls"
+        printf 'printf "%%s" "$n" > "%s"\n' "$TEST_TMPDIR/comm-calls"
+        printf '[[ "$n" -eq %s ]] && exit 1\n' "$1"
+        printf 'exec "%s" "$@"\n' "$real"
+    } > "$TEST_TMPDIR/mock-bin/comm"
+    chmod +x "$TEST_TMPDIR/mock-bin/comm"
+    rm -f "$TEST_TMPDIR/comm-calls"
+}
+
+@test "33033 refusal cleanup marker: a cleanup that failed in either folder is not recorded as done" {
+    local call failed cleaned
+    for call in 1 2; do
+        rm -rf "$TEST_TMPDIR/cache" "$HOME/.claude"
+        _install_on_release
+        _comm_fails_on_call "$call"
+        if [[ "$call" == 1 ]]; then failed="$INSTALL_ROOT"; cleaned="$STATE_DIR"; else failed="$STATE_DIR"; cleaned="$INSTALL_ROOT"; fi
+        _run_update
+        rm -f "$TEST_TMPDIR/mock-bin/comm"
+        [[ "$status" -eq 0 ]] || fail "call $call: status $status: $output"
+        [[ "$output" == *"could not compare ${failed} with the release's file list; removing nothing"* ]] \
+            || fail "call $call: precondition: the prune of $failed did not fail: $output"
+        [ -f "$failed/hooks-handlers/save-record.sh" ] || fail "call $call: $output"
+        [ ! -e "$cleaned/hooks-handlers/save-record.sh" ] || fail "call $call: precondition: $cleaned was not cleaned: $output"
+        [ ! -e "$INSTALL_ROOT/.last-release-cleanup" ] \
+            || fail "call $call: a cleanup that failed in $failed was recorded as done: $output"
+    done
+}
+
+# self-update.sh _su_reconcile_installed: once a version is recorded as cleaned, the reconcile does
+# not compare again. A file that appears afterwards is left for the next version's cleanup.
+@test "33033 refusal once per version: an install already cleaned for its version is not compared again" {
+    _install_on_release
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$(cat "$INSTALL_ROOT/.last-release-cleanup")" == "9.9.9" ]] || fail "precondition: not recorded: $output"
+    printf 'later\n' > "$INSTALL_ROOT/hooks-handlers/later.sh"
+    rm -f "$TMPDIR/.mmry-update-checked"
+
+    _run_update
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"removed "* ]] || fail "the reconcile ran again for a version already cleaned: $output"
+    [[ "$output" != *"nothing to remove from"* ]] || fail "the reconcile compared again for a version already cleaned: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/later.sh" ] || fail "$output"
+}
+
+# self-update.sh: MMRY_NO_SELF_UPDATE stops the whole script before the reconcile, so a harness
+# copy of the plugin is never cleaned.
+@test "33033 refusal opt-out: MMRY_NO_SELF_UPDATE stops self-update before it removes anything" {
+    _install_on_release
+    run env -u MMRY_HOST -u CODEX_HOME HOME="$HOME" MMRY_NO_SELF_UPDATE=1 bash "$INSTALL_ROOT/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"disabled by MMRY_NO_SELF_UPDATE"* ]] || fail "the opt-out was not said: $output"
+    _assert_nothing_removed_by_update
+}
+
+# self-update.sh: the continuation of an older self-update runs only when the download folder is
+# the one that run made (extracted_dir under tmp_extract). The same three variables, inherited from
+# the environment and naming another folder, do not start an update's copy and removals.
+@test "33033 refusal finish mode: inherited variables that do not name this run's download start no removals" {
+    _release 9.9.9 good
+    _old_install
+    # No update in the normal run: the marketplace cannot be reached.
+    printf '#!/usr/bin/env bash\nexit 7\n' > "$TEST_TMPDIR/mock-bin/curl"
+    chmod +x "$TEST_TMPDIR/mock-bin/curl"
+    run env -u MMRY_HOST -u CODEX_HOME HOME="$HOME" \
+        extracted_dir="$TEST_TMPDIR/remote/mmry-plugin-master" \
+        tmp_extract="$TEST_TMPDIR/no-such-download" remote_version=9.9.9 \
+        bash "$INSTALL_ROOT/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "inherited variables started an update: $output"
+    [[ "$output" != *"removed "* ]] || fail "inherited variables started removals: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
+
+    # The folders match the pattern, but no remote_version was inherited: an older self-update
+    # always has one, so this is not its continuation either. (A copy of the release, because the
+    # normal run's exit cleanup removes the folder tmp_extract names.)
+    mkdir -p "$TEST_TMPDIR/inherited"
+    cp -R "$TEST_TMPDIR/remote/mmry-plugin-master" "$TEST_TMPDIR/inherited/"
+    run env -u MMRY_HOST -u CODEX_HOME -u remote_version HOME="$HOME" \
+        extracted_dir="$TEST_TMPDIR/inherited/mmry-plugin-master" tmp_extract="$TEST_TMPDIR/inherited" \
+        bash "$INSTALL_ROOT/hooks-handlers/self-update.sh"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"MMRY AI plugin updated"* ]] || fail "inherited variables without remote_version started an update: $output"
+    [[ "$output" != *"removed "* ]] || fail "inherited variables without remote_version started removals: $output"
+    [ -f "$INSTALL_ROOT/hooks-handlers/save-record.sh" ] || fail "$output"
+    [ -f "$STATE_DIR/hooks-handlers/save-record.sh" ] || fail "$output"
 }

@@ -215,6 +215,23 @@ setup() {
     [[ "$output" == *"triggers: red wine"* ]] || return 1
 }
 
+@test "query-entries: states the page, how many per page and the total (#33197)" {
+    # An API before #33197 sends no paging sentence; the page is stated from the numbers it does send.
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"Page 1, 2 per page, 2 in total."* ]] || { echo "$output"; return 1; }
+}
+
+@test "query-entries: prints the API's paging sentence, which names the next page to ask for (#33197)" {
+    export MOCK_ENTRIES_BODY='{"total":230,"page":1,"pageSize":8,"hasMore":true,"paging":"This page was shortened to 8 entries so that it fits in one reply. Page 1, 8 per page, 230 in total. For the next entries ask for page 2 with pageSize 8.","database":{"rootId":42,"name":"Journey Catalog"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-31T09:00:00","note":"One.","values":{"title":"A"}}]}'
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
+    unset MOCK_ENTRIES_BODY
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"230 entries in Journey Catalog:"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Page 1, 8 per page, 230 in total. For the next entries ask for page 2 with pageSize 8."* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"--page 2 --page-size 8"* ]] || { echo "$output"; return 1; }
+}
+
 @test "query-entries: a field with no value reads (blank), not an empty line" {
     run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$output" == *"triggers: (blank)"* ]] || return 1
@@ -244,6 +261,64 @@ setup() {
     run bash "$HANDLERS/query-entries.sh" --database-id 42 --filter status
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"--filter takes key=value"* ]] || return 1
+}
+
+# --- query-entries: only the fields asked for, and the note left out (#33198) ---
+
+@test "query-entries: with neither --fields nor --no-note the request is exactly as before" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --filter status=open
+    [[ "$status" -eq 0 ]] || return 1
+    grep -q "GET http://localhost:5291/api/databases/42/entries?field.status=open" "$LOG" || { cat "$LOG"; return 1; }
+    ! grep -q "fields=" "$LOG" || { cat "$LOG"; return 1; }
+    ! grep -q "includeNote" "$LOG" || { cat "$LOG"; return 1; }
+    [[ "$output" == *"words: Migraine on Tuesday after red wine."* ]] || return 1
+    [[ "$output" == *"triggers: red wine"* ]] || return 1
+}
+
+@test "query-entries: --fields sends one fields= list and prints only those fields" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --fields severity
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "entries?fields=severity" "$LOG" || { cat "$LOG"; return 1; }
+    [[ "$output" == *"severity: 7"* ]] || return 1
+    [[ "$output" != *"triggers"* ]] || return 1
+}
+
+@test "query-entries: --fields takes a comma separated list, spaces trimmed and each key URL-encoded" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --fields "severity, red wine ,triggers" --filter status=open
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "field.status=open&fields=severity,red%20wine,triggers" "$LOG" || { cat "$LOG"; return 1; }
+}
+
+@test "query-entries: --no-note sends includeNote=false and prints no words" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --no-note
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "includeNote=false" "$LOG" || { cat "$LOG"; return 1; }
+    [[ "$output" != *"words:"* ]] || return 1
+    [[ "$output" == *"severity: 7"* ]] || return 1
+}
+
+@test "query-entries: --fields and --no-note together, with order and page" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --fields severity --no-note --order "severity desc" --page 2
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "fields=severity" "$LOG" || return 1
+    grep -q "includeNote=false" "$LOG" || return 1
+    grep -q "order=severity%20desc" "$LOG" || return 1
+    [[ "$output" == *"2 entries in Migraine log:"* ]] || return 1
+    [[ "$output" != *"words:"* && "$output" != *"triggers"* ]] || return 1
+}
+
+@test "query-entries: a field the database does not declare is refused with the fields it does declare" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --fields nope
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"does not declare the field 'nope'"* ]] || return 1
+    [[ "$output" == *"severity and triggers"* ]] || return 1
+}
+
+@test "query-entries: --fields with no list is refused before any request" {
+    run bash "$HANDLERS/query-entries.sh" --database-id 42 --fields
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"--fields takes"* ]] || return 1
+    [[ ! -s "$LOG" ]] || ! grep -q "/entries" "$LOG"
 }
 
 # --- save-memory, the routed save --------------------------------------------

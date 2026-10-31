@@ -45,3 +45,13 @@ setup() {
         fi
     done
 }
+
+@test "33033: the update documentation says files placed in the plugin's folders are removed, and where to keep them" {
+    local doc
+    for doc in "$REPO_ROOT/README.md" "$PLUGIN_ROOT/README.md"; do
+        grep -Fq "any file you place inside one of them is removed when the plugin updates" "$doc" \
+            || fail "$doc does not say a file placed in the plugin's folders is removed at update"
+        grep -Fq "Keep your own scripts, notes and commands outside the plugin" "$doc" \
+            || fail "$doc does not say where to keep your own files"
+    done
+}

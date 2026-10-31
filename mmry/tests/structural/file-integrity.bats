@@ -68,6 +68,14 @@ load '../helpers/test-helper'
         local lines
         lines="$(wc -l < "$f" | tr -d ' ')"
         (( lines < 6 )) && continue
+        # A sourced library that declares it sets no shell options (#33033) must set none, so a
+        # caller's error handling is its own; handlers/self-update-cleanup.bats proves it at run time.
+        if grep -qx '# mmry-lib: sets no shell options' "$f"; then
+            if grep -Eq '^[[:space:]]*(set[[:space:]]+[-+][euo]|shopt[[:space:]]+-[su][[:space:]]+-o)' "$f"; then
+                failures+="  $(basename "$f") (declares it sets no shell options, but sets one)\n"
+            fi
+            continue
+        fi
         if ! grep -q 'set -euo pipefail' "$f"; then
             failures+="  $(basename "$f")\n"
         fi

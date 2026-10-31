@@ -188,13 +188,41 @@ else
     log "lib-release-files.sh could not be loaded; installing without the version check, removing nothing"
 fi
 
+# IS THIS A VERIFIED RELEASE (#33033)? Its release-files.txt reads as a release file list, names
+# its own core files and is for the version its plugin.json states. Only then does this session
+# record its version in the installed copy or remove anything from it. A root whose plugin.json
+# overstates its version (a hand-edited or half-copied folder) used to have that version written
+# into the installed copy before any check, which then pinned it: every real release below it was
+# refused as older. Checked once, when first needed, because most sessions need neither.
+_mmry_list_state=""    # "", "ok" or "bad"
+_mmry_list_problem=""
+_mmry_verified_release() {
+    case "$_mmry_list_state" in ok) return 0 ;; bad) return 1 ;; esac
+    _mmry_list_state="bad"
+    if (( _mmry_have_lib != 1 )) || [[ -z "$_mmry_root_ver" ]]; then
+        _mmry_list_problem="this session's release has no readable version"
+        return 1
+    fi
+    if ! { _su_scratch_dir && _su_load_list "$P/release-files.txt" "${_su_scratch}/list"; }; then
+        _mmry_list_problem="could not read this release's file list (${_SU_LIST_PROBLEM:-no scratch space})"
+        return 1
+    fi
+    if [[ "$_SU_LIST_VERSION" != "$_mmry_root_ver" ]]; then
+        _mmry_list_problem="this release's file list is for '${_SU_LIST_VERSION}' but its plugin.json says '${_mmry_root_ver}'"
+        return 1
+    fi
+    _mmry_list_state="ok"
+}
+
 # Remove from the installed copy what this release does not ship. Cheap when there is nothing to
 # do: once a version has been mirrored (.last-release-mirror), the full comparison runs again only
-# when a handler or setup file appears that this release does not have, which is what an older
-# session's copy leaves.
+# when a file appears, in any folder this release ships, that this release does not have, which is
+# what an older session's copy leaves. Every shipped folder is watched (#33033), not only
+# hooks-handlers/ and setup/: a stale command or skill left there used to stay until the next
+# version. Dot-named folders are not watched, because the removal rules keep everything in them.
 _mmry_mirror() {
-    local list="$P/release-files.txt" marker="${MMRY_STATE_DIR}/.last-release-mirror"
-    local done_ver="" f="" rel="" stale=0
+    local marker="${MMRY_STATE_DIR}/.last-release-mirror"
+    local done_ver="" d="" f="" rel="" stale=0
     (( _mmry_have_lib == 1 )) && [[ -n "$_mmry_root_ver" ]] || return 0
     if [[ -e "$P/.git" || -e "$P/../.git" ]]; then
         return 0
@@ -204,23 +232,25 @@ _mmry_mirror() {
         done_ver="${done_ver%$'\r'}"
     fi
     if [[ -n "$done_ver" && "$done_ver" == "$_mmry_root_ver" ]]; then
-        for f in "${MMRY_STATE_DIR}"/hooks-handlers/* "${MMRY_STATE_DIR}"/setup/*; do
-            [[ -f "$f" ]] || continue
+        # The installed copy's counterpart of each folder this release ships, searched by ONE find.
+        set --
+        for d in "$P"/*/; do
+            d="${d%/}"; d="${d##*/}"
+            [[ -d "${MMRY_STATE_DIR}/$d" && ! -L "${MMRY_STATE_DIR}/$d" ]] && set -- "$@" "${MMRY_STATE_DIR}/$d"
+        done
+        (( $# > 0 )) || return 0
+        while IFS= read -r -d '' f; do
             case "${f##*/}" in mmry-config*.json|*.log) continue ;; esac
             rel="${f#"${MMRY_STATE_DIR}"/}"
             if [[ ! -e "$P/$rel" ]]; then
                 stale=1
                 break
             fi
-        done
+        done < <(find "$@" -name '.*' -prune -o -type f -print0 2>/dev/null)
         (( stale == 1 )) || return 0
     fi
-    if ! { _su_scratch_dir && _su_load_list "$list" "${_su_scratch}/list"; }; then
-        log "could not read this release's file list (${_SU_LIST_PROBLEM:-no scratch space}); removing nothing from ${MMRY_STATE_DIR}"
-        return 0
-    fi
-    if [[ "$_SU_LIST_VERSION" != "$_mmry_root_ver" ]]; then
-        log "this release's file list is for '${_SU_LIST_VERSION}' but its plugin.json says '${_mmry_root_ver}'; removing nothing from ${MMRY_STATE_DIR}"
+    if ! _mmry_verified_release; then
+        log "${_mmry_list_problem}; removing nothing from ${MMRY_STATE_DIR}"
         return 0
     fi
     if _su_prune "${_su_scratch}/list" "${MMRY_STATE_DIR}" "$_mmry_root_ver"; then
@@ -275,10 +305,15 @@ if (( _mmry_install == 1 )); then
         fi
     fi
 
-    # Record the version now installed, so a later older session can tell it is older.
+    # Record the version now installed, so a later older session can tell it is older. Only for a
+    # verified release (#33033): an unverified plugin.json is not evidence of a version.
     if [[ -n "$_mmry_root_ver" && "$_mmry_root_ver" != "$_mmry_inst_json_ver" ]]; then
-        { mkdir -p "${MMRY_STATE_DIR}/.claude-plugin" \
-            && cp "$P/.claude-plugin/plugin.json" "${MMRY_STATE_DIR}/.claude-plugin/plugin.json"; } 2>/dev/null || true
+        if _mmry_verified_release; then
+            { mkdir -p "${MMRY_STATE_DIR}/.claude-plugin" \
+                && cp "$P/.claude-plugin/plugin.json" "${MMRY_STATE_DIR}/.claude-plugin/plugin.json"; } 2>/dev/null || true
+        else
+            log "${_mmry_list_problem}; not recording ${_mmry_root_ver} as the installed version"
+        fi
     fi
 
     _mmry_mirror || true

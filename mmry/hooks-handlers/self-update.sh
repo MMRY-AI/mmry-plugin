@@ -185,7 +185,7 @@ _su_prune_both() {
 # Everything that follows copying a downloaded release into PLUGIN_ROOT. Uses extracted_dir,
 # remote_version, local_version and local_version_source.
 _su_finish_update() {
-    local installed="" listfile="" release_version=""
+    local installed="" listfile="" release_version="" verified_version=""
     installed="$(_su_installed_dir)"
     if [[ -d "$installed" && "$PLUGIN_ROOT" != "$installed" ]]; then
         shopt -s dotglob
@@ -200,6 +200,7 @@ _su_finish_update() {
     elif _su_scratch_dir && _su_load_list "$listfile" "${_su_scratch}/list"; then
         release_version="$(_su_json_version "${extracted_dir}/mmry/.claude-plugin/plugin.json" || true)"
         if [[ "$release_version" == "$_SU_LIST_VERSION" ]]; then
+            verified_version="$_SU_LIST_VERSION"
             _su_prune_both "$listfile" "$_SU_LIST_VERSION" || true
         else
             log "the release's file list is for '${_SU_LIST_VERSION}' but its plugin.json says '${release_version}'; removing nothing"
@@ -208,11 +209,20 @@ _su_finish_update() {
         log "could not read the release's file list (${_SU_LIST_PROBLEM:-no scratch space}); removing nothing"
     fi
 
-    # Write/refresh the sentinel anchor so future runs have a version reference even
-    # if .claude-plugin/plugin.json is somehow missing on a future install.
-    echo "$remote_version" > "$LAST_UPDATE_SENTINEL" 2>/dev/null || true
-    if [[ -d "$installed" && "$PLUGIN_ROOT" != "$installed" ]]; then
-        echo "$remote_version" > "${installed}/.last-self-update" 2>/dev/null || true
+    # The installed version record (.last-self-update), the anchor future runs and session-init.sh
+    # go by when plugin.json is missing. Written ONLY for a verified release (#33033 fix round 7,
+    # QA round 6 finding F3): its file list loaded and is for the version its own plugin.json
+    # states, and the version written is that one. It used to be the marketplace version, written
+    # after every copy, so a download with no list, or a plugin.json naming no version, could pin
+    # the installed copy at a version it never held and have every real release below it refused.
+    # Otherwise an existing record is left exactly as it was.
+    if [[ -n "$verified_version" ]]; then
+        printf '%s\n' "$verified_version" > "$LAST_UPDATE_SENTINEL" 2>/dev/null || true
+        if [[ -d "$installed" && "$PLUGIN_ROOT" != "$installed" ]]; then
+            printf '%s\n' "$verified_version" > "${installed}/.last-self-update" 2>/dev/null || true
+        fi
+    else
+        log "the downloaded release is not a verified release; recording no version (.last-self-update left as it was)"
     fi
 
     echo "MMRY AI plugin updated: ${local_version} -> ${remote_version} (source: ${local_version_source})" >&2
