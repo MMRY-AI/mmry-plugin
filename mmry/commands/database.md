@@ -80,11 +80,14 @@ were saved as an ordinary memory and the fields were not; say that plainly.
 
 ### find
 
-Read the entries of a database, filtered on their fields. Filters are ANDed.
+Read the entries of a database, filtered on their fields. Filters are ANDed. On a database with
+many fields, `--fields <key>,<key>` returns only the fields the question needs and `--no-note`
+leaves out each entry's words, so a page holds more entries; filters and order may use any field.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" find --database-id <database> \
-    [--filter <key>=<value>]... [--order "<key> desc"] [--page N] [--page-size N]
+    [--filter <key>=<value>]... [--order "<key> desc"] [--page N] [--page-size N] \
+    [--fields <key>,<key>] [--no-note]
 ```
 
 ### correct

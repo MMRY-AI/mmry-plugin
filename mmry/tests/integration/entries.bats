@@ -110,6 +110,40 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
     [[ "$first_42" -lt "$first_15" ]] || fail "amount desc did not sort: $output"
 }
 
+@test "entries live: --fields returns only the named fields, --no-note leaves the words out (#33198)" {
+    [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
+    local id; id="$(_state database_id)"
+    [[ -n "$id" ]] || fail "the type was not created by the first test, so this cannot run"
+
+    # Only amount, filtered on a field that is not selected; the same entries as a full read.
+    _plugin query-entries.sh --database-id "$id" --fields amount --filter kind=food
+    [[ "$status" -eq 0 ]] || fail "selected query failed: $output"
+    [[ "$output" == *"1 entry in"* ]] || fail "the filter on an unselected field did not filter: $output"
+    [[ "$output" == *"amount: 42"* ]] || fail "$output"
+    [[ "$output" != *"merchant:"* && "$output" != *"kind:"* ]] || fail "an unselected field came back: $output"
+    [[ "$output" == *"words: I spent 42 dollars on lunch"* ]] || fail "the words should stay by default: $output"
+
+    _plugin query-entries.sh --database-id "$id" --fields "merchant, amount" --no-note --order "amount desc"
+    [[ "$status" -eq 0 ]] || fail "selected query failed: $output"
+    [[ "$output" == *"2 entries in"* ]] || fail "$output"
+    [[ "$output" != *"words:"* ]] || fail "--no-note still printed the words: $output"
+    [[ "$output" != *"kind:"* ]] || fail "$output"
+    [[ "$output" == *"merchant: Rosie's diner"* ]] || fail "$output"
+
+    # Same entry ids as the unselected read.
+    local all sel
+    _plugin query-entries.sh --database-id "$id"
+    all="$(printf '%s\n' "$output" | grep -o '^id [0-9]*' | sort | tr '\n' ' ')"
+    _plugin query-entries.sh --database-id "$id" --fields kind --no-note
+    sel="$(printf '%s\n' "$output" | grep -o '^id [0-9]*' | sort | tr '\n' ' ')"
+    [[ -n "$all" && "$all" == "$sel" ]] || fail "selected ids [$sel] differ from full ids [$all]"
+
+    # An undeclared field is refused, naming the declared ones.
+    _plugin query-entries.sh --database-id "$id" --fields colour
+    [[ "$status" -ne 0 ]] || fail "an undeclared field was accepted: $output"
+    [[ "$output" == *"'colour'"* && "$output" == *"amount"* && "$output" == *"merchant"* ]] || fail "$output"
+}
+
 # ---- requirement 2 ----------------------------------------------------------------------------
 
 _b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
