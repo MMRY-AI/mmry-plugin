@@ -81,7 +81,30 @@ _hand="${_T}/.mmry-codex-start.${_sid}.${_pid}"
 # memories went out in time, "none" when it started no work. Either way there is nothing to hand over.
 if [[ "$_state" == delivered || "$_state" == none ]]; then
     _log "the start ${_pid} said ${_state}: nothing to hand over"
-    rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" 2>/dev/null
+    rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" "${_hand}.claim" 2>/dev/null
+    exit 0
+fi
+
+# THE HAND-OFF IS CLAIMED BEFORE IT IS WAITED FOR (#33062 fix round 3). This prompt running while the
+# start has not said "delivered" means Codex stopped listening to the start, so an answer the start
+# gives from now on, however much inside its own budget, reaches nobody: the hand-off is this
+# prompt's. It used to be taken away anyway: the start that answered in time marked "delivered" and
+# its cleanup removed the hand-off, and on a fast Linux runner (CI ubuntu) that happened between two
+# of this loop's looks, which then found the work gone and no answer and said the memories were not
+# loaded. Whichever of the two creates .claim first owns the delivery: noclobber creates it only if it
+# is not there (O_EXCL), a builtin, no process started. The start marks "delivered", and its cleanup
+# removes the hand-off, only when it got the claim.
+_claimed=0
+set -C
+{ : > "${_hand}.claim"; } 2>/dev/null && _claimed=1
+set +C
+_state=gone
+# A pending marker is one line, so the second read ends at the end of the file: not a failure.
+[[ -f "$_late" ]] && { _state=""; { IFS= read -r _; IFS= read -r _state; } < "$_late" 2>/dev/null || true; }
+if (( _claimed == 0 )) || [[ "$_state" == delivered || "$_state" == gone ]]; then
+    # The start claimed first: it answered while Codex was still listening, before this prompt ran.
+    _log "the start ${_pid} answered in time: nothing to hand over"
+    (( _claimed == 1 )) && rm -f "${_hand}.claim" 2>/dev/null
     exit 0
 fi
 
@@ -161,5 +184,5 @@ else
     printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Load them now with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were not loaded automatically this time because loading them took too long."}}'
 fi
 
-rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" 2>/dev/null
+rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" "${_hand}.claim" 2>/dev/null
 exit 0

@@ -244,8 +244,9 @@ _mmry_codex_start() {
     wait || true
     [[ -n "$_mmry_in" ]] && rm -f "$_mmry_in" 2>/dev/null
     bash "$TARGET" --after-delivery "$@" </dev/null || true
-    # A start that delivered in time marked its marker "delivered": the marker and the hand-off are
-    # nobody's. A marker still pending is the first prompt's to collect, and is left alone.
+    # A start that delivered in time marked its marker "delivered", which it does only when it got the
+    # hand-off's claim: the marker and the hand-off are nobody's. A marker still pending, including one
+    # a waiting first prompt has claimed, is the first prompt's to collect, and is left alone.
     if [[ -n "$_mmry_hand" ]]; then
         local _mmry_mpid="" _mmry_state=""
         if [[ -f "$_mmry_late_file" ]]; then
@@ -253,7 +254,7 @@ _mmry_codex_start() {
         fi
         if [[ "$_mmry_state" == delivered || ! -f "$_mmry_late_file" ]]; then
             [[ "$_mmry_state" == delivered ]] && rm -f "$_mmry_late_file" 2>/dev/null
-            rm -f "${_mmry_hand}.out" "${_mmry_hand}.ready" "${_mmry_hand}.pid" 2>/dev/null
+            rm -f "${_mmry_hand}.out" "${_mmry_hand}.ready" "${_mmry_hand}.pid" "${_mmry_hand}.claim" 2>/dev/null
         fi
     fi
     # Hand-offs and markers no conversation collected (it ended before its first prompt), half a day on.
@@ -344,8 +345,17 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
         else
             printf '%s' "$_mmry_out"
             # Delivered in time: the first prompt has nothing to deliver. Only if the marker is still
-            # there (a first prompt that came first has removed it, having delivered them itself).
-            [[ -n "$_mmry_late_file" && -f "$_mmry_late_file" ]] && printf '%s\ndelivered\n' "$$" > "$_mmry_late_file" 2>/dev/null
+            # there (a first prompt that came first has removed it, having delivered them itself), and
+            # only if this gets the hand-off's claim (fix round 3, see codex-first-prompt.sh): a first
+            # prompt already waiting holds it, because Codex is no longer listening to this answer.
+            # noclobber creates the claim only if it is not there (O_EXCL); a builtin, no process.
+            if [[ -n "$_mmry_late_file" && -f "$_mmry_late_file" ]]; then
+                _mmry_claimed=0
+                set -C
+                { : > "${_mmry_hand}.claim"; } 2>/dev/null && _mmry_claimed=1
+                set +C
+                (( _mmry_claimed == 1 )) && printf '%s\ndelivered\n' "$$" > "$_mmry_late_file" 2>/dev/null
+            fi
         fi
     }
     set -e
