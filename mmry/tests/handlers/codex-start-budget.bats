@@ -425,6 +425,58 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: ' || { _prompt_diag; return 1; }
 }
 
+@test "R1: a first prompt already waiting when the start answers in time still gets the memories, however fast the start's housekeeping is" {
+    # CI ubuntu (runs 41147101639, 41224171836): the start above answered at 10 s, inside its budget,
+    # marked its marker "delivered", and its housekeeping then removed the hand-off. On a fast Linux
+    # runner all of that ended between two of the waiting first prompt's once-a-second looks, so it
+    # found the work gone and no answer, and told the person their memories were not loaded. A first
+    # prompt that is already running means Codex stopped listening to the start, so the start's
+    # in-time answer reached nobody: the hand-off is the first prompt's.
+    #
+    # Made the same on any machine: the start's budget is the longest allowed and the service answers
+    # in 2 s, so the start answers in time even on a loaded Windows machine; the housekeeping
+    # (session-init.sh --after-delivery) is a stand-in that takes no time; and the first prompt's next
+    # look waits until that housekeeping and the removal after it are over, as they were on that runner.
+    cat > "$ROOT/hooks-handlers/session-init.sh" <<EOF
+#!/usr/bin/env bash
+: > "$TEST_TMPDIR/su-finished"
+EOF
+    local cmd payload
+    cmd="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$ROOT/hooks/codex-hooks.json")"
+    payload="{\"session_id\":\"budget-26\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"cwd\":\"$TEST_TMPDIR\"}"
+    export MMRY_CODEX_START_BUDGET=25
+    _slow_curl "/api/memories/startup" 2
+    env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u MMRY_NO_SELF_UPDATE \
+        HOME="$HOME" CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" \
+        bash -c 'cd "$3" && printf "%s" "$1" | sh -c "$2"' _ "$payload" "$cmd" "$TEST_TMPDIR" \
+        > "$TEST_TMPDIR/bg-start.out" 2>&1 3>&- &
+    local bg=$!
+    _wait_for "$TEST_TMPDIR/slow-started" 60 || { echo "the session start never reached the service"; return 1; }
+    # The first prompt's `sleep 1` between looks: until the housekeeping has run (bounded at 60 s), then
+    # 3 s more for the removal that follows it.
+    local sb="$TEST_TMPDIR/slow-sleep-bin" real
+    real="$(command -v sleep)"
+    mkdir -p "$sb"
+    cat > "$sb/sleep" <<EOF
+#!/usr/bin/env bash
+i=0
+while [ ! -e "$TEST_TMPDIR/su-finished" ] && [ \$i -lt 240 ]; do "$real" 0.25; i=\$((i + 1)); done
+exec "$real" 3
+EOF
+    chmod +x "$sb/sleep"
+    PATH="$sb:$PATH" _codex_prompt 26
+    wait "$bg" || true
+    assert_success
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: ' || { _prompt_diag; return 1; }
+    # Nothing is left behind once the first prompt has delivered.
+    _wait_for "$TEST_TMPDIR/su-finished" 30
+    sleep 1
+    local left
+    left="$(ls -a "${TMPDIR:-/tmp}" 2>/dev/null | grep -E '^\.mmry-codex-(late|start)\.budget-26' | tr '\n' ' ')"
+    [ -z "$left" ] || { echo "left behind: $left"; return 1; }
+}
+
 @test "R1: a session start that starts no work leaves the first prompt nothing to wait for" {
     # The marker is armed before anything else; a way out that starts no work must settle it.
     rm -f "$ROOT/hooks-handlers/session-init.sh"
