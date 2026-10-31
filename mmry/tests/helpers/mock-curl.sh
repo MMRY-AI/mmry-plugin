@@ -124,6 +124,35 @@ case "$URL" in
             _entries_default='{"total":2,"database":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-07T09:00:00","note":"Migraine on Tuesday after red wine.","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"entryKey":null,"savedAt":"2026-10-10T09:00:00","note":"Mild one on Friday.","values":{"severity":3,"triggers":null}}]}'
             # #33197: tests can answer with the paged reply an API after #33197 sends.
             RESPONSE_BODY="${MOCK_ENTRIES_BODY:-$_entries_default}"
+            # #33197 round 2: a database of MOCK_ENTRIES_WIDE entries, each carrying one value of
+            # MOCK_ENTRY_VALUE_CHARS characters, paged as the API pages it. Asked for with
+            # entryCharacters=B, the page holds the entries that fit in B, as the API's does;
+            # without it, every entry is on the page, which is what an oversized reply looks like.
+            # MOCK_ENTRIES_IGNORE_BUDGET=1 answers the first request as if no budget had been sent.
+            if [[ -n "${MOCK_ENTRIES_WIDE:-}" ]]; then
+                _len="${MOCK_ENTRY_VALUE_CHARS:-2000}"
+                _per=$(( _len + 90 ))
+                _count="$MOCK_ENTRIES_WIDE"
+                _budget=""
+                [[ "$URL" =~ entryCharacters=([0-9]+) ]] && _budget="${BASH_REMATCH[1]}"
+                _seen_file="${TEST_TMPDIR:-/tmp}/mock-entries-seen"
+                if [[ "${MOCK_ENTRIES_IGNORE_BUDGET:-}" == "1" && ! -f "$_seen_file" ]]; then
+                    _budget=""; : > "$_seen_file"
+                fi
+                if [[ -n "$_budget" ]]; then
+                    _count=$(( _budget / _per ))
+                    (( _count < 1 )) && _count=1
+                    (( _count > MOCK_ENTRIES_WIDE )) && _count="$MOCK_ENTRIES_WIDE"
+                fi
+                _value="$(printf '%*s' "$_len" '' | tr ' ' 'x')"
+                _entries=""
+                for (( _e = 1; _e <= _count; _e++ )); do
+                    [[ -n "$_entries" ]] && _entries+=","
+                    _entries+='{"id":'"$_e"',"entryKey":null,"savedAt":"2026-10-31T09:00:00","note":"Entry '"$_e"'.","values":{"body":"'"$_value"'","status":null}}'
+                done
+                _more=false; (( _count < MOCK_ENTRIES_WIDE )) && _more=true
+                RESPONSE_BODY='{"total":'"$MOCK_ENTRIES_WIDE"',"page":1,"pageSize":'"$_count"',"hasMore":'"$_more"',"database":{"rootId":42,"name":"Wide"},"entries":['"$_entries"']}'
+            fi
         fi
         ;;
     */api/databases/*/versions)

@@ -1175,18 +1175,24 @@ mmry_save_entry() {
 }
 
 mmry_get_entries() {
-    # Usage: mmry_get_entries DATABASE_ID [FILTER_QUERY] [ORDER] [PAGE] [PAGE_SIZE]
+    # Usage: mmry_get_entries DATABASE_ID [FILTER_QUERY] [ORDER] [PAGE] [PAGE_SIZE] [ENTRY_CHARACTERS]
+    #
+    # ENTRY_CHARACTERS (#33197 round 2) asks the API to hold the page's entries to that many
+    # characters, whatever the page size, so the page fits the output limit of the tool that prints
+    # it. The page comes back renumbered so the next page asked for continues exactly after it.
     #
     # FILTER_QUERY is already-encoded "field.<key>=<value>" pairs joined by &, which is the shape
     # the route takes: the keys are the CUSTOMER'S OWN field keys, unknown here and unknowable at
     # any layer above the account. Filters are ANDed and span EVERY VERSION of the type.
     local database_id="$1" filters="${2:-}" order="${3:-}" page="${4:-}" page_size="${5:-}"
+    local entry_characters="${6:-}"
 
     local query=""
     [[ -n "$filters" ]] && query+="${filters}&" || true
     [[ -n "$order" ]] && query+="order=$(_mmry_urlencode "$order")&" || true
     [[ -n "$page" ]] && query+="page=${page}&" || true
     [[ -n "$page_size" ]] && query+="pageSize=${page_size}&" || true
+    [[ -n "$entry_characters" ]] && query+="entryCharacters=${entry_characters}&" || true
     query="${query%&}"
 
     local path="/api/databases/${database_id}/entries"

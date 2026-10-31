@@ -252,7 +252,8 @@ database declares, blank where nothing was saved.
 Leave `--page-size` out unless you need a particular size: the page is then sized to fit in one
 reply, so a wide database gives fewer entries per page. The output's `Page` line says how many per
 page and the total, and `Next page:` gives the exact `--page` and `--page-size` to ask for next. Use
-those numbers as given, so the next page starts where this one stopped.
+those numbers as given, so the next page starts where this one stopped. Every page, even one you
+sized, is held to what your shell tool shows in full, and says so when it was shortened.
 
 `--order` takes a field key the database declares, or `createdDate`, each optionally followed by
 ` asc` or ` desc`. `recent` and `oldest` are aliases for `createdDate desc` and `createdDate asc`.
