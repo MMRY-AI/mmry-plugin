@@ -215,6 +215,23 @@ setup() {
     [[ "$output" == *"triggers: red wine"* ]] || return 1
 }
 
+@test "query-entries: states the page, how many per page and the total (#33197)" {
+    # An API before #33197 sends no paging sentence; the page is stated from the numbers it does send.
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"Page 1, 2 per page, 2 in total."* ]] || { echo "$output"; return 1; }
+}
+
+@test "query-entries: prints the API's paging sentence, which names the next page to ask for (#33197)" {
+    export MOCK_ENTRIES_BODY='{"total":230,"page":1,"pageSize":8,"hasMore":true,"paging":"This page was shortened to 8 entries so that it fits in one reply. Page 1, 8 per page, 230 in total. For the next entries ask for page 2 with pageSize 8.","database":{"rootId":42,"name":"Journey Catalog"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-31T09:00:00","note":"One.","values":{"title":"A"}}]}'
+    run bash "$HANDLERS/query-entries.sh" --database-id 42
+    unset MOCK_ENTRIES_BODY
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"230 entries in Journey Catalog:"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Page 1, 8 per page, 230 in total. For the next entries ask for page 2 with pageSize 8."* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"--page 2 --page-size 8"* ]] || { echo "$output"; return 1; }
+}
+
 @test "query-entries: a field with no value reads (blank), not an empty line" {
     run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$output" == *"triggers: (blank)"* ]] || return 1

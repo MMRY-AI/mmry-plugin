@@ -121,7 +121,9 @@ case "$URL" in
             RESPONSE_BODY='{"outcome":"structured.created","memoryId":99,"entryId":7}'
         else
             HTTP_CODE="200"
-            RESPONSE_BODY='{"total":2,"database":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-07T09:00:00","note":"Migraine on Tuesday after red wine.","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"entryKey":null,"savedAt":"2026-10-10T09:00:00","note":"Mild one on Friday.","values":{"severity":3,"triggers":null}}]}'
+            _entries_default='{"total":2,"database":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-07T09:00:00","note":"Migraine on Tuesday after red wine.","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"entryKey":null,"savedAt":"2026-10-10T09:00:00","note":"Mild one on Friday.","values":{"severity":3,"triggers":null}}]}'
+            # #33197: tests can answer with the paged reply an API after #33197 sends.
+            RESPONSE_BODY="${MOCK_ENTRIES_BODY:-$_entries_default}"
         fi
         ;;
     */api/databases/*/versions)
