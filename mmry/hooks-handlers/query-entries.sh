@@ -9,9 +9,15 @@
 # so you can compare and count without checking whether a key exists. Entries saved under an
 # older shape of the database are included and correctly attributed.
 #
+# When the question needs only some fields, name them with --fields (#33198): each entry then
+# carries only those, plus its id, entry name and dates, and a page holds more entries. --no-note
+# leaves out the words each entry was saved from, when the values answer the question. Filters
+# and order may use fields that --fields does not name. A field the database does not declare is
+# refused with the fields it does declare.
+#
 # Usage:
 #   bash query-entries.sh --database-id ID [--filter key=value]... [--order "key desc"]
-#        [--page N] [--page-size N]
+#        [--page N] [--page-size N] [--fields key,key] [--no-note]
 #
 # Filters are ANDed. Repeating one key asks for a field holding BOTH values, which is coherent
 # for a list field and empty for a single-valued one.
@@ -38,7 +44,7 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
 DATABASE_ID="" ORDER="" PAGE="" PAGE_SIZE=""
-FILTER_QUERY=""
+FILTER_QUERY="" FIELDS="" INCLUDE_NOTE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,6 +63,13 @@ while [[ $# -gt 0 ]]; do
         --order)     ORDER="$2"; shift 2 ;;
         --page)      PAGE="$2"; shift 2 ;;
         --page-size) PAGE_SIZE="$2"; shift 2 ;;
+        --fields)
+            if [[ $# -lt 2 || -z "${2//[[:space:],]/}" || "$2" == --* ]]; then
+                echo "Error: --fields takes the field keys to return, comma separated, e.g. --fields status,applied" >&2
+                exit 1
+            fi
+            FIELDS="$2"; shift 2 ;;
+        --no-note)   INCLUDE_NOTE="false"; shift ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -104,7 +117,7 @@ _render_page() {
 LIMIT="$(_mmry_reply_limit)"
 BUDGET=$(( LIMIT * 2 / 3 ))
 
-if ! mmry_get_entries "$DATABASE_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE" "$BUDGET"; then
+if ! mmry_get_entries "$DATABASE_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE" "$BUDGET" "$FIELDS" "$INCLUDE_NOTE"; then
     _mmry_print_error "read entries"
     exit 1
 fi
@@ -123,7 +136,7 @@ for _attempt in 1 2 3; do
     # Scale the budget by how far over the printed page came, with a tenth to spare.
     BUDGET=$(( BUDGET * LIMIT * 9 / 10 / _bytes ))
     (( BUDGET < 1 )) && BUDGET=1
-    if ! mmry_get_entries "$DATABASE_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE" "$BUDGET"; then
+    if ! mmry_get_entries "$DATABASE_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE" "$BUDGET" "$FIELDS" "$INCLUDE_NOTE"; then
         _mmry_print_error "read entries"
         exit 1
     fi
