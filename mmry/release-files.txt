@@ -15,6 +15,7 @@ commands/search.md
 commands/setup.md
 commands/uninstall.md
 commands/visibility.md
+hooks-handlers/codex-first-prompt.sh
 hooks-handlers/codex-hook.cmd
 hooks-handlers/codex-hook.sh
 hooks-handlers/create-database.sh
@@ -103,6 +104,7 @@ tests/handlers/codex-hook.bats
 tests/handlers/codex-missing-tools.bats
 tests/handlers/codex-qa-delta.bats
 tests/handlers/codex-session.bats
+tests/handlers/codex-start-budget.bats
 tests/handlers/codex-tools-first-output.bats
 tests/handlers/correction-31847.bats
 tests/handlers/database-command.bats
@@ -160,6 +162,7 @@ tests/libs/bats-support/
 tests/mutation/run-31789-mutations.sh
 tests/mutation/run-31893-mutations.sh
 tests/mutation/run-32889-mutations.sh
+tests/mutation/run-33062-mutations.sh
 tests/mutation/run-mutations.sh
 tests/perf/foundation-process-count.sh
 tests/perf/foundation-split-latency.sh
