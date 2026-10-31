@@ -93,10 +93,12 @@ fi
 # of this loop's looks, which then found the work gone and no answer and said the memories were not
 # loaded. Whichever of the two creates .claim first owns the delivery: noclobber creates it only if it
 # is not there (O_EXCL), a builtin, no process started. The start marks "delivered", and its cleanup
-# removes the hand-off, only when it got the claim.
+# removes the hand-off, only when it got the claim. printf, not `:`: under sh (bash in POSIX mode, the
+# Windows and macOS sh) a redirection that fails on a special builtin such as `:` ends the shell, and
+# a claim that is already taken is exactly that failure.
 _claimed=0
 set -C
-{ : > "${_hand}.claim"; } 2>/dev/null && _claimed=1
+{ printf '%s\n' "$$" > "${_hand}.claim"; } 2>/dev/null && _claimed=1
 set +C
 _state=gone
 # A pending marker is one line, so the second read ends at the end of the file: not a failure.

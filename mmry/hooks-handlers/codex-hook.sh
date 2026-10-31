@@ -349,10 +349,12 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # only if this gets the hand-off's claim (fix round 3, see codex-first-prompt.sh): a first
             # prompt already waiting holds it, because Codex is no longer listening to this answer.
             # noclobber creates the claim only if it is not there (O_EXCL); a builtin, no process.
+            # printf, not `:`: under sh (bash in POSIX mode on Windows and macOS) a failed redirection
+            # on a special builtin ends the shell, and a claim already taken is that failure.
             if [[ -n "$_mmry_late_file" && -f "$_mmry_late_file" ]]; then
                 _mmry_claimed=0
                 set -C
-                { : > "${_mmry_hand}.claim"; } 2>/dev/null && _mmry_claimed=1
+                { printf '%s\n' "$$" > "${_mmry_hand}.claim"; } 2>/dev/null && _mmry_claimed=1
                 set +C
                 (( _mmry_claimed == 1 )) && printf '%s\ndelivered\n' "$$" > "$_mmry_late_file" 2>/dev/null
             fi
