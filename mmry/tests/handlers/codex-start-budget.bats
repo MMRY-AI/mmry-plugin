@@ -477,6 +477,22 @@ EOF
     [ -z "$left" ] || { echo "left behind: $left"; return 1; }
 }
 
+@test "R1: a first prompt that finds the start already holds the hand-off's claim says nothing, and ends cleanly" {
+    # The other side of the claim: the start answered while Codex was still listening, claimed the
+    # hand-off, and had not yet marked "delivered" when the first prompt looked. Nothing is to be said
+    # twice, and a claim already taken must not end the hook's shell: under sh (bash in POSIX mode on
+    # Windows and macOS) a failed redirection on `:` would, and Codex reports that as a failed hook.
+    local t="${TMPDIR:-/tmp}"
+    printf '4242\n' > "$t/.mmry-codex-late.budget-27"
+    printf '4242\n' > "$t/.mmry-codex-start.budget-27.4242.claim"
+    export MMRY_CODEX_FIRST_PROMPT_BUDGET=2
+    _codex_prompt 27
+    assert_success
+    [ -z "$JSON" ] || { echo "the first prompt spoke although the start held the claim: $JSON"; return 1; }
+    grep -q 'answered in time: nothing to hand over' "$t/mmry-codex-first-prompt.log" || { _prompt_diag; return 1; }
+    : > "$TEST_TMPDIR/su-finished"
+}
+
 @test "R1: a session start that starts no work leaves the first prompt nothing to wait for" {
     # The marker is armed before anything else; a way out that starts no work must settle it.
     rm -f "$ROOT/hooks-handlers/session-init.sh"
