@@ -119,9 +119,21 @@ case "$URL" in
         if [[ "$METHOD" == "POST" ]]; then
             HTTP_CODE="201"
             RESPONSE_BODY='{"outcome":"structured.created","memoryId":99,"entryId":7}'
+        elif [[ "$URL" == *"fields=nope"* ]]; then
+            # #33198: a field the database does not declare is refused, naming the declared ones.
+            HTTP_CODE="400"
+            RESPONSE_BODY='{"error":"This database does not declare the field '"'"'nope'"'"', so nothing was read. Ask only for fields it declares: severity and triggers."}'
         else
             HTTP_CODE="200"
-            _entries_default='{"total":2,"database":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-07T09:00:00","note":"Migraine on Tuesday after red wine.","values":{"severity":7,"triggers":["red wine"]}},{"id":2,"entryKey":null,"savedAt":"2026-10-10T09:00:00","note":"Mild one on Friday.","values":{"severity":3,"triggers":null}}]}'
+            # #33198: the route answers only the named fields (fields=severity) and no note when
+            # includeNote=false; with neither, every field and the note, as before.
+            _n1='"note":"Migraine on Tuesday after red wine.",'
+            _n2='"note":"Mild one on Friday.",'
+            [[ "$URL" == *"includeNote=false"* ]] && { _n1=""; _n2=""; }
+            _v1='{"severity":7,"triggers":["red wine"]}'
+            _v2='{"severity":3,"triggers":null}'
+            [[ "$URL" == *"fields=severity"* ]] && { _v1='{"severity":7}'; _v2='{"severity":3}'; }
+            _entries_default='{"total":2,"database":{"rootId":42,"name":"Migraine log"},"entries":[{"id":1,"entryKey":null,"savedAt":"2026-10-07T09:00:00",'"$_n1"'"values":'"$_v1"'},{"id":2,"entryKey":null,"savedAt":"2026-10-10T09:00:00",'"$_n2"'"values":'"$_v2"'}]}'
             # #33197: tests can answer with the paged reply an API after #33197 sends.
             RESPONSE_BODY="${MOCK_ENTRIES_BODY:-$_entries_default}"
             # #33197 round 2: a database of MOCK_ENTRIES_WIDE entries, each carrying one value of
