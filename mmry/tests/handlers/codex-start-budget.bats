@@ -365,10 +365,10 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
 @test "R1/R2: the first prompt's longest wait leaves a minute of its declared limit for Codex to launch the hook" {
     # Its longest wait, counted from codex-hook.cmd's start, plus 60 s for Codex's launch of the hook
     # (19 s measured), must fit in the limit codex-hooks.json declares, or Codex drops the answer. The
-    # launcher is said to have started 180 s ago and the work never finishes while this runs.
+    # launcher is said to have started 180 s ago and the work outlasts the wait (45 s), and still ends inside the teardown's wait for it.
     printf -v _probe '%(%H)T' -1 2>/dev/null || skip "bash $BASH_VERSION has no printf clock; codex-hook.cmd runs only on Windows, under Git's bash 5"
     export MMRY_CODEX_START_BUDGET=3
-    _slow_curl "/api/memories/startup" 400
+    _slow_curl "/api/memories/startup" 45
     _codex_start 22
     local now t ago=180
     printf -v now '%(%s)T' -1
@@ -386,7 +386,7 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
 
 @test "R2: a start whose work has stopped is not waited for: the person is told at once" {
     export MMRY_CODEX_START_BUDGET=3
-    _slow_curl "/api/memories/startup" 60
+    _slow_curl "/api/memories/startup" 30
     _codex_start 23
     local pf
     pf="$(ls "${TMPDIR:-/tmp}"/.mmry-codex-start.budget-23.*.pid 2>/dev/null | head -1)"
