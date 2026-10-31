@@ -15,6 +15,10 @@
 #
 # Filters are ANDed. Repeating one key asks for a field holding BOTH values, which is coherent
 # for a list field and empty for a single-valued one.
+#
+# Leave --page-size out (#33197, DD-165): the page is then sized to fit in one reply, so a wider
+# database gives fewer entries per page. The output's Page line gives the page, how many per page
+# and the total, and the Next page line the exact --page and --page-size to ask for next.
 
 set -euo pipefail
 
@@ -55,6 +59,11 @@ if mmry_get_entries "$DATABASE_ID" "$FILTER_QUERY" "$ORDER" "$PAGE" "$PAGE_SIZE"
     if [[ -n "${MMRY_JQ:-}" ]]; then
         printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
             "\(.total) " + (if .total == 1 then "entry" else "entries" end) + " in \(.database.name):",
+            # #33197 (DD-165): the page, how many per page, the total and what to ask for next. The
+            # API words it (and says when it shortened a page to fit one reply); an API before
+            # #33197 sends no sentence, so the page is stated from the numbers it does send.
+            (.paging // "Page \(.page // 1), \(.pageSize // (.entries | length)) per page, \(.total) in total."),
+            (if .hasMore == true then "Next page: --page \((.page // 1) + 1) --page-size \(.pageSize)" else empty end),
             "",
             (.entries[] |
                 # The route answers entryKey, savedAt and note (the words the entry was saved from), not a

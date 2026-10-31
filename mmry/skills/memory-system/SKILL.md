@@ -249,6 +249,11 @@ Filters are ANDed and they span **every version** of the database, so improving 
 does not strand what was saved under the old one. Every entry comes back with every field the
 database declares, blank where nothing was saved.
 
+Leave `--page-size` out unless you need a particular size: the page is then sized to fit in one
+reply, so a wide database gives fewer entries per page. The output's `Page` line says how many per
+page and the total, and `Next page:` gives the exact `--page` and `--page-size` to ask for next. Use
+those numbers as given, so the next page starts where this one stopped.
+
 `--order` takes a field key the database declares, or `createdDate`, each optionally followed by
 ` asc` or ` desc`. `recent` and `oldest` are aliases for `createdDate desc` and `createdDate asc`.
 **A field key on its own sorts ascending; leaving `--order` out sorts newest first.** A `number`
