@@ -4,7 +4,8 @@
 #
 # query-entries.sh prints through the assistant's shell tool, which cuts output far below what a
 # connector reply holds: Claude Code's Bash tool at 30,000 characters, the Codex shell at 10,000
-# tokens (40,000 bytes as Codex counts them). The mock API below pages like the real one: asked for
+# tokens (measured live in #33197 round 3: whole at 36,045 characters, cut at 42,084; the plugin
+# holds Codex to 32,000). The mock API below pages like the real one: asked for
 # an entry budget it returns the entries that fit; asked for none it returns all 40 entries of
 # 2,000 characters, about 84,000 characters printed. So every test here FAILS if query-entries stops
 # asking for the budget.
@@ -52,12 +53,14 @@ bytes() { LC_ALL=C; printf '%s' "${#1}"; }
     grep -q "entryCharacters=8000" "$LOG"
 }
 
-@test "entry-page-fit: under Codex the page is held to Codex's 40,000 bytes" {
+@test "entry-page-fit: under Codex the page is held to 32,000 bytes, under the 36,000 measured" {
+    # #33197 round 3: Codex was measured live showing a reply whole at 36,045 characters and cut at
+    # 42,084 (10,000 of its tokens); 32,000 is the reply budget the API uses for the same reason.
     export MMRY_HOST=codex
     run bash "$HANDLERS/query-entries.sh" --database-id 42
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-    (( $(bytes "$output") <= 40000 )) || return 1
-    grep -q "entryCharacters=26666" "$LOG" || { cat "$LOG"; return 1; }
+    (( $(bytes "$output") <= 32000 )) || return 1
+    grep -q "entryCharacters=21333" "$LOG" || { cat "$LOG"; return 1; }
 }
 
 @test "entry-page-fit: a page that still prints over the limit is asked for again, smaller" {

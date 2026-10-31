@@ -29,8 +29,9 @@
 # EVERY PAGE FITS THE TOOL THAT PRINTS IT (#33197 round 2). This output reaches the assistant
 # through its shell tool, which cuts it far below what a connector reply holds: Claude Code's Bash
 # tool at 30,000 characters (BASH_MAX_OUTPUT_LENGTH when the customer set it), the Codex shell at
-# 10,000 tokens, which Codex counts as 4 bytes a token (codex-rs models.json truncation_policy,
-# utils/string APPROX_BYTES_PER_TOKEN), so 40,000 bytes. A page cut there loses its last entries
+# 10,000 of its tokens, measured live (#33197 round 3) as whole at 36,045 characters and cut at
+# 42,084, and denser text runs fewer characters a token, so the plugin holds Codex to 32,000, the
+# reply budget the API uses for the same reason (DD-165). A page cut there loses its last entries
 # with nothing to say so. So the API is asked to hold the entries to two thirds of the limit (the
 # printed form is longer than the JSON for blank fields), and if the printed page is still over it
 # the page is asked for again with a budget scaled down, at most three times. MMRY_REPLY_CHARACTERS
@@ -85,7 +86,7 @@ _mmry_reply_limit() {
     if [[ "${MMRY_REPLY_CHARACTERS:-}" =~ ^[0-9]+$ ]] && (( MMRY_REPLY_CHARACTERS >= 1000 )); then
         printf '%s' "$MMRY_REPLY_CHARACTERS"
     elif [[ "$(mmry_host)" == "codex" ]]; then
-        printf '%s' 40000
+        printf '%s' 32000
     elif [[ "${BASH_MAX_OUTPUT_LENGTH:-}" =~ ^[0-9]+$ ]] && (( BASH_MAX_OUTPUT_LENGTH >= 1000 )); then
         printf '%s' "$BASH_MAX_OUTPUT_LENGTH"
     else
