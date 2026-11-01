@@ -90,8 +90,17 @@ if ! mmry_host_assert_own_credential 2>/dev/null; then
     exit 0
 fi
 
-# Self-update check — runs before anything else, debounced to once per hour
-bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
+# Self-update check — runs before anything else, debounced to once per hour.
+# NOT ON CODEX (#33062): there it would spend Codex's 30 s session-start limit before a single memory
+# was handed over (up to 40 s on a slow network: a 10 s version check and a 30 s download), so
+# session-init.sh makes it after the memories are delivered. _MMRY_HOST_V is set by lib-host.sh's
+# resolver; reading it starts no process, which on a slow Windows machine is most of the cost.
+_mmry_host_resolve
+_mmry_codex=0
+[[ "$_MMRY_HOST_V" == "codex" ]] && _mmry_codex=1
+if (( _mmry_codex == 0 )); then
+    bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
+fi
 
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
@@ -202,7 +211,10 @@ SESSION_ID="${SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-unknown
 # CLAUDE_ENV_FILE, which Claude Code sources before each Bash tool command. Only from a payload
 # that was actually read: /mmry:load-memories runs this script with no payload, and treating that
 # as "no agent" would clear the name the real SessionStart recorded.
-if [[ "$HOOK_READ_STATUS" == "ok" ]]; then
+# On Codex (#33062) only when there is a CLAUDE_ENV_FILE to record it in: without one
+# mmry_record_session_agent does nothing, and Codex sets none, so the jq read is processes spent for
+# nothing before the memories are handed over. Claude Code is unchanged.
+if [[ "$HOOK_READ_STATUS" == "ok" ]] && { (( _mmry_codex == 0 )) || [[ -n "${CLAUDE_ENV_FILE:-}" ]]; }; then
     _mmry_agent_type="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.agent_type // empty' 2>/dev/null || true)"
     mmry_record_session_agent "$_mmry_agent_type" || true
 fi
@@ -362,7 +374,10 @@ fi
 # via session_id rather than reading a (collidable) /tmp file.
 # #31245: the client name is the host's, not a constant. A Codex session listed as "claude-code" is
 # a session the customer cannot find in their own session list.
-mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
+# ON CODEX THE REGISTRATION WAITS UNTIL THE MEMORIES ARE OUT (#33062): see the end of this file.
+if (( _mmry_codex == 0 )); then
+    mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
+fi
 
 # Escape path for JSON.
 #
@@ -371,7 +386,13 @@ mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>
 # attached to every memory load used to name a file the reader could not open. The file itself is
 # still written to MEM_FILE; only the spelling in the message changes.
 model_path="$(mmry_host_path_for_model "$MEM_FILE")"
-escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
+# On Codex (#33062) the same doubling of every backslash, by parameter expansion: no process. Claude
+# Code keeps the sed.
+if (( _mmry_codex == 1 )); then
+    escaped_path="${model_path//\\/\\\\}"
+else
+    escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
+fi
 
 # AND THE FAULT NOTE IS ESCAPED TOO, WHICH IT WAS NOT (#31245 QA round 4).
 #
@@ -390,7 +411,10 @@ escaped_path="$(printf '%s' "$model_path" | sed 's/\\/\\\\/g')"
 # newlines unescaped, so a multi-line note produced invalid JSON there and was discarded. That is
 # what failed tests 415, 663, 739 and 741 on the macOS CI leg. Parameter expansion behaves the same
 # on bash 3.2 and 5, with no external tool at all.
-MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
+# On Codex (#33062) an empty note, the usual case, is not escaped: escaping nothing is a process.
+if (( _mmry_codex == 0 )) || [[ -n "$MMRY_HOOK_FAULT_NOTE" ]]; then
+    MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
+fi
 
 # First-session onboarding: detect zero memories
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it
@@ -410,4 +434,13 @@ if [[ "$count" == "0" ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. %s When done, let them know %s."}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_save" "$_mmry_onboard_hint" "$EMPTY_SYSMSG"
 else
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path" "$EMPTY_SYSMSG"
+fi
+
+# ON CODEX, THE REGISTRATION COMES AFTER THE MEMORIES (#33062). The output is closed first: on Codex
+# this runs under codex-hook.sh, which hands the output to Codex the moment it closes, so the
+# conversation starts with its memories while the session is registered. The registration is the
+# same call Claude Code makes above, with the same id and directory; it only happens later.
+if (( _mmry_codex == 1 )); then
+    exec >/dev/null
+    mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
 fi

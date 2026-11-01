@@ -245,3 +245,391 @@ _query_entries_from_installed() {
     [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "$output"
     [ ! -d "$HOME/.claude/mmry" ] || fail "a Codex session wrote the Claude install"
 }
+
+# ── #33033: every refusal proven by a test that fails when the refusal is removed ──
+
+@test "33033 refusal: versions compare as numbers, field by field, not as text" {
+    # shellcheck source=/dev/null
+    log() { :; }
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 2.10.0 2.9.1 || rc=$?;   [[ "$rc" -eq 0 ]] || fail "2.10.0 not newer than 2.9.1 (rc $rc)"
+    rc=0; _su_version_newer 2.9.1 2.10.0 || rc=$?;   [[ "$rc" -eq 1 ]] || fail "2.9.1 newer than 2.10.0 (rc $rc)"
+    rc=0; _su_version_newer 2.15.10 2.15.9 || rc=$?; [[ "$rc" -eq 0 ]] || fail "2.15.10 not newer than 2.15.9 (rc $rc)"
+    rc=0; _su_version_newer 2.15.9 2.15.10 || rc=$?; [[ "$rc" -eq 1 ]] || fail "2.15.9 newer than 2.15.10 (rc $rc)"
+}
+
+@test "33033 refusal: an older session is refused by number: 2.9.1 under 2.10.0, and 2.15.9 under 2.15.10" {
+    local pair inst sess new old
+    for pair in "2.10.0 2.9.1" "2.15.10 2.15.9"; do
+        inst="${pair% *}"; sess="${pair#* }"
+        rm -rf "$STATE_DIR" "$TEST_TMPDIR/cache"
+        new="$TEST_TMPDIR/cache/$inst"; old="$TEST_TMPDIR/cache/$sess"
+        _plugin_root "$new" "$inst"
+        _plugin_root "$old" "$sess" old
+        _installed_by_self_update "$new" "$inst"
+
+        _session_init "$old" -u MMRY_HOST
+        [[ "$status" -eq 0 ]] || fail "$pair: status $status: $output"
+        [[ "$output" == *"installed copy at $STATE_DIR is $inst, newer than this session's $sess; leaving it as it is"* ]] \
+            || fail "$pair: the older session was not refused: $output"
+        cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+            || fail "$pair: the older session overwrote mmry-client.sh: $output"
+        [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "$pair: $output"
+    done
+}
+
+@test "33033 refusal: a list for another version is refused at the session-start mirror" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$old" "$OLD_VERSION"
+    sed -i.bak '1s/.*/# mmry release files 3.0.0/' "$new/release-files.txt" && rm -f "$new/release-files.txt.bak"
+
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"this release's file list is for '3.0.0' but its plugin.json says '$NEW_VERSION'; removing nothing from $STATE_DIR"* ]] \
+        || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    [ -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "a list for another version removed a file: $output"
+    [ ! -e "$STATE_DIR/.last-release-mirror" ] || fail "a refused list was recorded as mirrored"
+}
+
+@test "33033 refusal: a development checkout is never touched by session start, and nothing is removed for it" {
+    local repo="$TEST_TMPDIR/checkout" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    mkdir -p "$repo/.git"
+    _plugin_root "$repo/mmry" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$old" "$OLD_VERSION"
+    # A developer's new handler, in no list yet, and an old script still in the installed copy.
+    printf '#!/usr/bin/env bash\necho wip\n' > "$repo/mmry/hooks-handlers/my-new-handler.sh"
+    local before after
+    before="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+
+    _session_init "$repo/mmry" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"DELEGATE RAN"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "session start removed files for a checkout: $output"
+    [ -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "removed from the installed copy by a checkout's list: $output"
+    [ -e "$STATE_DIR/hooks-handlers/my-new-handler.sh" ] || fail "the developer's new handler was removed: $output"
+    after="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+    [[ "$before" == "$after" ]] || fail "the checkout changed:"$'\n'"$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
+}
+
+# The other half of the same refusal (#33033 fix round 7): the plugin folder is itself the checkout,
+# with .git inside it and none beside it, so only the "$P/.git" check can refuse.
+@test "33033 refusal: a plugin folder holding its own .git is a checkout, and session start removes nothing for it" {
+    local repo="$TEST_TMPDIR/checkout-inner" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$repo/mmry" "$NEW_VERSION"
+    mkdir -p "$repo/mmry/.git"
+    printf 'ref: refs/heads/wip\n' > "$repo/mmry/.git/HEAD"
+    [ ! -e "$repo/.git" ] || fail "precondition: a .git beside the plugin folder would refuse on its own"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$old" "$OLD_VERSION"
+    # A developer's new handler, in no list yet, and an old script still in the installed copy:
+    # a mirror that went ahead would remove both from the installed copy.
+    printf '#!/usr/bin/env bash\necho wip\n' > "$repo/mmry/hooks-handlers/my-new-handler.sh"
+    local before after
+    before="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+
+    _session_init "$repo/mmry" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"DELEGATE RAN"* ]] || fail "$output"
+    [[ "$output" != *"removed "* ]] || fail "session start removed files for a checkout: $output"
+    [ -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "removed from the installed copy by a checkout's list: $output"
+    [ -e "$STATE_DIR/hooks-handlers/my-new-handler.sh" ] || fail "the developer's new handler was removed: $output"
+    [ ! -e "$STATE_DIR/.last-release-mirror" ] || fail "a checkout was recorded as mirrored: $output"
+    [ -f "$repo/mmry/.git/HEAD" ] || fail "the checkout's .git was touched"
+    after="$(cd "$repo" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done)"
+    [[ "$before" == "$after" ]] || fail "the checkout changed:"$'\n'"$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
+}
+
+@test "33033 fix: a release whose manifest overstates its version leaves the installed version alone" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION" bad="$TEST_TMPDIR/cache/99.0.0"
+    _plugin_root "$new" "$NEW_VERSION"
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    # An older release whose plugin.json claims 99.0.0; its own list says what it really is.
+    _plugin_root "$bad" "$OLD_VERSION" old
+    printf '{ "name": "mmry", "version": "99.0.0" }\n' > "$bad/.claude-plugin/plugin.json"
+
+    _session_init "$bad" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    grep -q "\"version\": \"$NEW_VERSION\"" "$STATE_DIR/.claude-plugin/plugin.json" \
+        || fail "the overstated version was recorded: $(cat "$STATE_DIR/.claude-plugin/plugin.json") $output"
+    [[ "$output" == *"not recording 99.0.0 as the installed version"* ]] || fail "$output"
+    [[ "$(cat "$STATE_DIR/.last-release-mirror" 2>/dev/null)" != "99.0.0" ]] || fail "the mirror marker was pinned"
+
+    # So the real release is not refused as older afterwards, and repairs the copy.
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"newer than this session's"* ]] || fail "the real release was refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" || fail "$output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "$output"
+}
+
+@test "33033 fix: a stale file in a shipped folder other than hooks-handlers/ and setup/ triggers the refresh" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    # First session mirrors the version and records it, so the next one takes the cheap path.
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$(cat "$STATE_DIR/.last-release-mirror")" == "$NEW_VERSION" ]] || fail "precondition: not mirrored: $output"
+    # What an older copy leaves ONLY outside the two folders that used to be watched, so nothing
+    # in hooks-handlers/ or setup/ can start the refresh instead.
+    printf 'old\n' > "$STATE_DIR/commands/list-formats.md"
+    mkdir -p "$STATE_DIR/commands/old"
+    printf 'old\n' > "$STATE_DIR/commands/old/list-records.md"
+
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    local f
+    for f in commands/list-formats.md commands/old/list-records.md; do
+        [ ! -e "$STATE_DIR/$f" ] || fail "$f survived: the refresh did not run: $output"
+        [[ "$output" == *"removed $f from $STATE_DIR (not in release $NEW_VERSION)"* ]] || fail "$output"
+    done
+    [ -f "$STATE_DIR/commands/database.md" ] || fail "a shipped command was removed: $output"
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33033 fix round 8: refusals from the developer's own inventory
+# (R:\Intranet\ClaudeAI\plans\MMRY\v1.32.1\33033-refusal-inventory.md), each red when removed.
+# ---------------------------------------------------------------------------------------------
+
+# A newer release over an older installed copy that still holds query-records.sh, which this
+# release does not list: a session that mirrors removes it.
+_newer_over_older() {
+    NEW_ROOT="$TEST_TMPDIR/cache/$NEW_VERSION"
+    local old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$NEW_ROOT" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$old" "$OLD_VERSION"
+}
+
+_assert_session_removed_nothing() {
+    [[ "$output" != *"removed "* ]] || fail "session start removed files: $output"
+    [ -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "query-records.sh was removed: $output"
+    [ ! -e "$STATE_DIR/.last-release-mirror" ] || fail "the mirror was recorded as done: $output"
+}
+
+# session-init.sh, the library check: the library is used only when it defines the version
+# comparison. A library without it is not used at all, so nothing is removed.
+@test "33033 refusal partial library: a session whose removal library lacks the version comparison removes nothing" {
+    _newer_over_older
+    printf '\nunset -f _su_version_newer\n' >> "$NEW_ROOT/hooks-handlers/lib-release-files.sh"
+    _session_init "$NEW_ROOT" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"lib-release-files.sh could not be loaded; installing without the version check, removing nothing"* ]] \
+        || fail "the library without _su_version_newer was used: $output"
+    _assert_session_removed_nothing
+}
+
+# session-init.sh _mmry_verified_release: the stop after a list that will not load. This list is
+# sorted, has a good header and this release's version, so it fails only at the core-entry check,
+# after _su_load_list has set the version and written its lines. Without the stop the versions
+# match and the mirror prunes with those lines.
+@test "33033 refusal session list: a release list that fails after a good header removes nothing at session start" {
+    _newer_over_older
+    grep -Fvx hooks-handlers/self-update.sh "$NEW_ROOT/release-files.txt" > "$TEST_TMPDIR/list.tmp"
+    mv "$TEST_TMPDIR/list.tmp" "$NEW_ROOT/release-files.txt"
+    [[ "$(head -n 1 "$NEW_ROOT/release-files.txt")" == "# mmry release files $NEW_VERSION" ]] || fail "precondition: header"
+    _session_init "$NEW_ROOT" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"could not read this release's file list ("*"does not name the release's own core files"*"); removing nothing from $STATE_DIR"* ]] \
+        || fail "the untrusted list was not refused: $output"
+    [[ "$output" == *"not recording $NEW_VERSION as the installed version"* ]] || fail "$output"
+    _assert_session_removed_nothing
+}
+
+# session-init.sh _mmry_mirror, the once-mirrored path: when the installed copy holds nothing in a
+# shipped folder that this release lacks, apart from run-time files (the credential, logs, dot
+# files and dot folders), no comparison runs. Each of those exclusions, and the stop itself, is
+# what keeps a session from re-running the full comparison on every start.
+@test "33033 refusal mirror once: once a version is mirrored, run-time files in the installed copy start no comparison" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$(cat "$STATE_DIR/.last-release-mirror")" == "$NEW_VERSION" ]] || fail "precondition: not mirrored: $output"
+    [[ "$output" == *"nothing to remove from $STATE_DIR"* ]] || fail "precondition: the first session did not compare: $output"
+    mkdir -p "$STATE_DIR/commands/.cache"
+    printf '{}' > "$STATE_DIR/hooks-handlers/mmry-config.local.json"
+    printf 'x\n' > "$STATE_DIR/hooks-handlers/debug.log"
+    printf 'f1\n' > "$STATE_DIR/hooks-handlers/.mmry-formation-sess1"
+    printf 'x\n' > "$STATE_DIR/commands/.cache/entry"
+
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" != *"nothing to remove from"* ]] || fail "a session on a mirrored version compared again: $output"
+    [[ "$output" != *"removed "* ]] || fail "$output"
+    local f
+    for f in hooks-handlers/mmry-config.local.json hooks-handlers/debug.log hooks-handlers/.mmry-formation-sess1 commands/.cache/entry; do
+        [ -e "$STATE_DIR/$f" ] || fail "$f was removed: $output"
+    done
+}
+
+# session-init.sh _mmry_mirror: the mirror is recorded only when its removal step succeeded. A comm
+# that fails makes the prune refuse; the next session must then try again, so nothing is recorded.
+@test "33033 refusal mirror marker: a mirror whose removal step failed is not recorded as done" {
+    _newer_over_older
+    local bin="$TEST_TMPDIR/failing-comm-bin"
+    mkdir -p "$bin"
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$bin/comm"
+    chmod +x "$bin/comm"
+    _session_init "$NEW_ROOT" -u MMRY_HOST PATH="$bin:$PATH"
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"could not compare $STATE_DIR with the release's file list; removing nothing"* ]] \
+        || fail "precondition: the prune did not fail: $output"
+    _assert_session_removed_nothing
+}
+
+# lib _su_version_newer: each field is read as a decimal number (10#). Without it a field with a
+# leading zero is read as octal, so 2.010.0 ranks below 2.9.0 and 2.08.0 is not a number at all.
+@test "33033 refusal: a version field with a leading zero is still compared as a decimal number" {
+    log() { :; }
+    # shellcheck source=/dev/null
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 2.010.0 2.9.0 2>/dev/null || rc=$?; [[ "$rc" -eq 0 ]] || fail "2.010.0 not newer than 2.9.0 (rc $rc)"
+    rc=0; _su_version_newer 2.9.0 2.010.0 2>/dev/null || rc=$?; [[ "$rc" -eq 1 ]] || fail "2.9.0 newer than 2.010.0 (rc $rc)"
+    rc=0; _su_version_newer 2.08.0 2.7.0 2>/dev/null || rc=$?;  [[ "$rc" -eq 0 ]] || fail "2.08.0 not newer than 2.7.0 (rc $rc)"
+}
+
+# session-init.sh, the installed version: with no plugin.json in the installed copy, the
+# .last-self-update self-update writes beside it is the installed version. Without that fallback
+# the installed copy has no version, so an older session installs over it and mirrors its own
+# older list against it.
+@test "33033 refusal: an installed copy known only by its .last-self-update is still newer than an older session" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    rm -f "$STATE_DIR/.claude-plugin/plugin.json"
+    [[ "$(cat "$STATE_DIR/.last-self-update")" == "$NEW_VERSION" ]] || fail "precondition: sentinel"
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is $NEW_VERSION, newer than this session's $OLD_VERSION; leaving it as it is"* ]] \
+        || fail "the older session was not refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "the older session overwrote mmry-client.sh: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
+    [[ "$output" != *"removed "* ]] || fail "the older session removed files: $output"
+}
+
+# The same check, the other way: the installed plugin.json, when there is one, is the installed
+# version, and an older .last-self-update beside it (left by an earlier self-update, before a
+# session installed a newer release) does not make the copy look older than it is.
+@test "33033 refusal: the installed plugin.json outranks an older .last-self-update beside it" {
+    local new="$TEST_TMPDIR/cache/$NEW_VERSION" old="$TEST_TMPDIR/cache/$OLD_VERSION"
+    _plugin_root "$new" "$NEW_VERSION"
+    _plugin_root "$old" "$OLD_VERSION" old
+    _installed_by_self_update "$new" "$NEW_VERSION"
+    printf '%s\n' "$OLD_VERSION" > "$STATE_DIR/.last-self-update"
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is $NEW_VERSION, newer than this session's $OLD_VERSION; leaving it as it is"* ]] \
+        || fail "the older session was not refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "the older session overwrote mmry-client.sh: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
+}
+
+# _su_version_newer, versions with different numbers of fields (#33033 round 6, QA finding X1).
+# The comparison must run over the LONGER of the two versions, a missing field counting as 0.
+# Run over the shorter one, an installed 3.1.1 and a 3.1 session compare equal, so the older
+# session installs over the newer copy and its mirror removes what release 3.1 does not list.
+@test "33033 refusal field count: versions with different numbers of fields compare over the longer one" {
+    log() { :; }
+    # shellcheck source=/dev/null
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 3.1.1 3.1 || rc=$?; [[ "$rc" -eq 0 ]] || fail "3.1.1 not newer than 3.1 (rc $rc)"
+    rc=0; _su_version_newer 3.1 3.1.1 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1 newer than 3.1.1 (rc $rc)"
+    rc=0; _su_version_newer 3.1 3.1.0 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1 newer than 3.1.0 (rc $rc)"
+    rc=0; _su_version_newer 3.1.0 3.1 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1.0 newer than 3.1 (rc $rc)"
+}
+
+@test "33033 refusal field count: an installed 3.1.1 is newer than a 3.1 session, and a 3.1.1 session installs over 3.1" {
+    # Installed 3.1.1, session 3.1: refused, nothing copied, nothing removed.
+    local new="$TEST_TMPDIR/cache/3.1.1" old="$TEST_TMPDIR/cache/3.1"
+    _plugin_root "$new" 3.1.1
+    printf 'only in 3.1.1\n' > "$new/commands/only-in-new.md"
+    _write_list "$new" 3.1.1
+    _plugin_root "$old" 3.1 old
+    _installed_by_self_update "$new" 3.1.1
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "3.1 over 3.1.1: status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is 3.1.1, newer than this session's 3.1; leaving it as it is"* ]] \
+        || fail "3.1 over 3.1.1: the older session was not refused: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "3.1 over 3.1.1: the older session overwrote mmry-client.sh: $output"
+    [ -f "$STATE_DIR/commands/only-in-new.md" ] || fail "3.1 over 3.1.1: the older session's mirror removed commands/only-in-new.md: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "3.1 over 3.1.1: the older session added its old script: $output"
+    grep -q '"version": "3.1.1"' "$STATE_DIR/.claude-plugin/plugin.json" || fail "3.1 over 3.1.1: installed version changed: $output"
+    [[ "$output" != *"removed "* ]] || fail "3.1 over 3.1.1: the older session removed files: $output"
+
+    # The reverse, installed 3.1 and session 3.1.1: the newer session installs and mirrors.
+    rm -rf "$STATE_DIR"
+    _installed_by_self_update "$old" 3.1
+    _session_init "$new" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "3.1.1 over 3.1: status $status: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "3.1.1 over 3.1: the newer session did not update mmry-client.sh: $output"
+    grep -q '"version": "3.1.1"' "$STATE_DIR/.claude-plugin/plugin.json" || fail "3.1.1 over 3.1: version not recorded: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "3.1.1 over 3.1: the old script survived: $output"
+    [[ "$output" == *"removed hooks-handlers/query-records.sh from $STATE_DIR (not in release 3.1.1)"* ]] \
+        || fail "3.1.1 over 3.1: removal not printed: $output"
+}
+
+# _su_version_core, the pre-release and build suffix (#33033 fix round 7, QA round 6 finding Y2).
+# A version is compared by its dotted digits with any -rc1 or +build7 suffix taken off. Compared
+# with the suffix on, it is not dotted digits, so the comparison answers "cannot compare" and the
+# session installs as before: an older 3.1.0 session goes over an installed 3.2.0-rc1, and its
+# mirror removes what release 3.1.0 does not list.
+@test "33033 refusal suffix: a pre-release or build suffix is ignored, so an older session is refused and nothing is removed" {
+    log() { :; }
+    # shellcheck source=/dev/null
+    source "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh"
+    local rc
+    rc=0; _su_version_newer 3.2.0-rc1 3.1.0 || rc=$?; [[ "$rc" -eq 0 ]] || fail "3.2.0-rc1 not newer than 3.1.0 (rc $rc)"
+    rc=0; _su_version_newer 3.1.1+build7 3.1 || rc=$?; [[ "$rc" -eq 0 ]] || fail "3.1.1+build7 not newer than 3.1 (rc $rc)"
+    rc=0; _su_version_newer 3.1.0 3.2.0-rc1 || rc=$?; [[ "$rc" -eq 1 ]] || fail "3.1.0 newer than 3.2.0-rc1 (rc $rc)"
+
+    # Installed 3.2.0-rc1, session 3.1.0: refused, nothing copied, nothing removed.
+    local new="$TEST_TMPDIR/cache/3.2.0-rc1" old="$TEST_TMPDIR/cache/3.1.0"
+    _plugin_root "$new" 3.2.0-rc1
+    printf 'only in 3.2.0-rc1\n' > "$new/commands/only-in-new.md"
+    _write_list "$new" 3.2.0-rc1
+    _plugin_root "$old" 3.1.0 old
+    _installed_by_self_update "$new" 3.2.0-rc1
+
+    _session_init "$old" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is 3.2.0-rc1, newer than this session's 3.1.0; leaving it as it is"* ]] \
+        || fail "the older session was not refused: $output"
+    [ -f "$STATE_DIR/commands/only-in-new.md" ] || fail "the older session's mirror removed commands/only-in-new.md: $output"
+    cmp -s "$new/hooks-handlers/mmry-client.sh" "$STATE_DIR/hooks-handlers/mmry-client.sh" \
+        || fail "the older session overwrote mmry-client.sh: $output"
+    [ ! -e "$STATE_DIR/hooks-handlers/query-records.sh" ] || fail "the older session added its old script: $output"
+    grep -q '"version": "3.2.0-rc1"' "$STATE_DIR/.claude-plugin/plugin.json" || fail "installed version changed: $output"
+    [[ "$output" != *"removed "* ]] || fail "the older session removed files: $output"
+
+    # A build suffix on the installed side: installed 3.1.1+build7, session 3.1: refused likewise.
+    rm -rf "$STATE_DIR"
+    local b="$TEST_TMPDIR/cache/3.1.1+build7" s="$TEST_TMPDIR/cache/3.1"
+    _plugin_root "$b" 3.1.1+build7
+    printf 'only in 3.1.1\n' > "$b/commands/only-in-new.md"
+    _write_list "$b" 3.1.1+build7
+    _plugin_root "$s" 3.1 old
+    _installed_by_self_update "$b" 3.1.1+build7
+    _session_init "$s" -u MMRY_HOST
+    [[ "$status" -eq 0 ]] || fail "build suffix: status $status: $output"
+    [[ "$output" == *"installed copy at $STATE_DIR is 3.1.1+build7, newer than this session's 3.1; leaving it as it is"* ]] \
+        || fail "build suffix: the older session was not refused: $output"
+    [ -f "$STATE_DIR/commands/only-in-new.md" ] || fail "build suffix: the mirror removed commands/only-in-new.md: $output"
+    [[ "$output" != *"removed "* ]] || fail "build suffix: the older session removed files: $output"
+}

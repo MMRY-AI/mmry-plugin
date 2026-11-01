@@ -249,6 +249,25 @@ Filters are ANDed and they span **every version** of the database, so improving 
 does not strand what was saved under the old one. Every entry comes back with every field the
 database declares, blank where nothing was saved.
 
+Leave `--page-size` out unless you need a particular size: the page is then sized to fit in one
+reply, so a wide database gives fewer entries per page. The output's `Page` line says how many per
+page and the total, and `Next page:` gives the exact `--page` and `--page-size` to ask for next. Use
+those numbers as given, so the next page starts where this one stopped. Every page, even one you
+sized, is held to what your shell tool shows in full, and says so when it was shortened.
+
+**On a database with many fields, ask only for the fields the question needs.** `--fields` takes
+their keys, comma separated, and each entry then carries only those (plus its id, entry name and
+dates); `--no-note` leaves out the words each entry was saved from when the values answer the
+question. A narrower read gets more entries per page, so a count or a comparison needs fewer pages.
+Filters and `--order` may still use fields you did not name. A key the database does not declare
+comes back as an error listing the keys it does declare; it is never silently dropped. Who can see
+each entry is the same as for a full read.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/query-entries.sh" --database-id 42 \
+  --fields status,applied --no-note --filter status=open
+```
+
 `--order` takes a field key the database declares, or `createdDate`, each optionally followed by
 ` asc` or ` desc`. `recent` and `oldest` are aliases for `createdDate desc` and `createdDate asc`.
 **A field key on its own sorts ascending; leaving `--order` out sorts newest first.** A `number`

@@ -158,3 +158,5 @@ Both failures are recorded in `mmry-foundation.log` in your temp directory. Sett
 ## Auto-Updates
 
 When installed from the GitHub marketplace, the plugin updates automatically when new versions are pushed.
+
+**Keep your own files outside the plugin.** Each update makes the plugin's folders (such as `hooks-handlers`, `commands` and `skills`) match the new release exactly, so any file you place inside one of them is removed when the plugin updates. Keep your own scripts, notes and commands outside the plugin, for example in your project folder, or in `~/.claude/commands` for your own Claude Code commands. Your MMRY AI sign-in (`mmry-config.json`) and the plugin's logs are kept.
