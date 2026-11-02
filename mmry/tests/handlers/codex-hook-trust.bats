@@ -181,3 +181,22 @@ EOF
     d="$(_root_differences)"
     [[ -z "$d" ]] || { echo "after the second session the plugin folder has changed:"; printf '%s\n' "$d"; return 1; }
 }
+
+@test "codex: self-update.sh run from the plugin folder on Codex writes nothing there" {
+    # session-init.sh starts the Codex home's copy. A copy started from the plugin folder by anything
+    # else (an older session-init.sh, a person) must not write the files that broke hook trust either.
+    rm -f "$TMPDIR/.mmry-update-checked"
+    run env -u MMRY_NO_SELF_UPDATE -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" CODEX_HOME="$CX" \
+        bash "$ROOT/hooks-handlers/self-update.sh"
+    local d; d="$(_root_differences)"
+    [[ -z "$d" ]] || { echo "self-update.sh wrote into the plugin folder Codex fingerprints:"; printf '%s\n' "$d"; echo "$output"; return 1; }
+}
+
+@test "req4: on Claude Code self-update.sh still keeps its once-per-version record in its own plugin folder" {
+    # The control: Claude Code does not fingerprint its plugin folder, and nothing there changes.
+    local croot="$HOME/.claude/plugins/cache/mmry-plugin/mmry/test"
+    _copy_plugin "$croot"
+    run env -u MMRY_NO_SELF_UPDATE -u MMRY_CONFIG_FILE -u MMRY_HOST -u CODEX_HOME HOME="$HOME" \
+        bash "$croot/hooks-handlers/self-update.sh"
+    [ -f "$croot/.last-release-cleanup" ] || { echo "Claude Code's self-update no longer records its tidy-up: $output"; return 1; }
+}

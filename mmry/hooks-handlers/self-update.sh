@@ -306,6 +306,26 @@ if ! source "$(cd "$(dirname "$0")" && pwd)/lib-jq.sh" 2>/dev/null; then
 fi
 unset MMRY_ALLOW_NO_CREDENTIAL
 
+# NEVER WRITE INTO CODEX'S OWN PLUGIN FOLDER (#33062 fix round 4).
+#
+# Everything this script writes goes under PLUGIN_ROOT, the folder it runs from: the once-per-version
+# record (.last-release-cleanup), the removal of files a release no longer ships, a downloaded release
+# and .last-self-update. On Codex the plugin folder is the one Codex installed and fingerprints into
+# each hook's trusted_content_hash, so any of those made Codex refuse every MMRY hook in the next
+# session ("plugin contents changed; hook approval required"). On Codex this script therefore runs only
+# from the state directory's copy, ${CODEX_HOME}/mmry, which is what session-init.sh starts; a copy run
+# from anywhere else stops here, having written nothing. Claude Code is not affected: there the host
+# is never "codex".
+if declare -F mmry_host >/dev/null 2>&1 && declare -F _mmry_norm_path >/dev/null 2>&1         && [[ "$(mmry_host)" == "codex" ]]; then
+    _su_norm_inst="$(_su_installed_dir)"
+    _mmry_norm_path "$_su_norm_inst"; _su_norm_inst="$_MMRY_NP"
+    _mmry_norm_path "$PLUGIN_ROOT"; _su_norm_root="$_MMRY_NP"
+    if [[ -z "$_su_norm_inst" || -z "$_su_norm_root" ]] || ! _mmry_path_is_within "$_su_norm_root" "$_su_norm_inst"; then
+        log "on Codex only the copy in ${_su_norm_inst:-the Codex home} updates; not writing into ${PLUGIN_ROOT}"
+        exit 0
+    fi
+fi
+
 # AN OLDER SELF-UPDATE IS STILL RUNNING, AND HAS JUST INSTALLED THIS RELEASE (see the header).
 # It copied the release into PLUGIN_ROOT and then read on into this file. Its variables are still
 # set, so finish its update with this release's code: the installed copy, the removals and the

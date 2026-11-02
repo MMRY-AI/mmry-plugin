@@ -28,8 +28,9 @@
 set -euo pipefail
 
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# lib-host.sh finds the Codex home from the .mmry-host marker beside this copy when MMRY_HOST is not
-# set, which is how a relocated Codex home is found from the assistant's shell. This check is for
+# lib-host.sh finds the Codex home from the .mmry-host marker beside this copy (or, for a copy in
+# Codex's plugin cache, the marker in that Codex home's mmry folder) when MMRY_HOST is not set,
+# which is how a relocated Codex home is found from the assistant's shell. This check is for
 # Codex only, so whatever lib-host.sh concludes about the host, the answer is Codex.
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-host.sh"
