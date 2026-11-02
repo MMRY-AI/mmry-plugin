@@ -18,23 +18,36 @@ REPO_ROOT=""
 CHECK=""
 COPY=""
 
+# The copy is built once per file (a full copy per test is slow on Windows); each test restores the
+# files the previous test planted into, so every test starts from the clean copy.
+setup_file() {
+    local base="$BATS_FILE_TMPDIR/base"
+    REPO_ROOT="$(cd "$PLUGIN_ROOT/.." && pwd)"
+    mkdir -p "$base/mmry" "$base/docs" "$base/.claude-plugin"
+    cp -R "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/skills-codex" "$PLUGIN_ROOT/commands"           "$PLUGIN_ROOT/commands-codex" "$PLUGIN_ROOT/hooks" "$PLUGIN_ROOT/.claude-plugin"           "$PLUGIN_ROOT/.codex-plugin" "$PLUGIN_ROOT/hooks-handlers" "$PLUGIN_ROOT/setup"           "$PLUGIN_ROOT/mcp" "$base/mmry/"
+    cp "$PLUGIN_ROOT/README.md" "$PLUGIN_ROOT/codex-mcp.json" "$base/mmry/"
+    cp "$REPO_ROOT/README.md" "$base/README.md"
+    cp "$REPO_ROOT/.claude-plugin/marketplace.json" "$base/.claude-plugin/"
+    cp "$REPO_ROOT"/docs/*.md "$base/docs/"
+    cp -R "$base" "$BATS_FILE_TMPDIR/work"
+    : > "$BATS_FILE_TMPDIR/dirty"
+}
+
 setup() {
     REPO_ROOT="$(cd "$PLUGIN_ROOT/.." && pwd)"
     CHECK="$REPO_ROOT/scripts/check-storage-wording.sh"
-    COPY="$TEST_TMPDIR/repo-copy"
-    mkdir -p "$COPY/mmry" "$COPY/docs" "$COPY/.claude-plugin"
-    cp -R "$PLUGIN_ROOT/skills" "$PLUGIN_ROOT/skills-codex" "$PLUGIN_ROOT/commands" \
-          "$PLUGIN_ROOT/commands-codex" "$PLUGIN_ROOT/hooks" "$PLUGIN_ROOT/.claude-plugin" \
-          "$PLUGIN_ROOT/.codex-plugin" "$PLUGIN_ROOT/hooks-handlers" "$PLUGIN_ROOT/setup" \
-          "$PLUGIN_ROOT/mcp" "$COPY/mmry/"
-    cp "$PLUGIN_ROOT/README.md" "$PLUGIN_ROOT/codex-mcp.json" "$COPY/mmry/"
-    cp "$REPO_ROOT/README.md" "$COPY/README.md"
-    cp "$REPO_ROOT/.claude-plugin/marketplace.json" "$COPY/.claude-plugin/"
-    cp "$REPO_ROOT"/docs/*.md "$COPY/docs/"
+    COPY="$BATS_FILE_TMPDIR/work"
+    local f
+    while IFS= read -r f; do
+        [ -n "$f" ] && cp "$BATS_FILE_TMPDIR/base/$f" "$COPY/$f"
+    done < "$BATS_FILE_TMPDIR/dirty"
+    : > "$BATS_FILE_TMPDIR/dirty"
 }
 
 # Appends a line to a copied file and echoes the line number it landed on.
-_plant() { printf '%s\n' "$2" >> "$COPY/$1"; wc -l < "$COPY/$1" | tr -d '[:space:]'; }
+_plant() { printf '%s
+' "$1" >> "$BATS_FILE_TMPDIR/dirty"; printf '%s
+' "$2" >> "$COPY/$1"; wc -l < "$COPY/$1" | tr -d '[:space:]'; }
 # Removes the last line of a copied file again (portable: no sed -i).
 _unplant() { local f="$COPY/$1" n; n="$(wc -l < "$f" | tr -d '[:space:]')"; head -n "$((n - 1))" "$f" > "$f.tmp" && mv "$f.tmp" "$f"; }
 
