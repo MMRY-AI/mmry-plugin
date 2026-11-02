@@ -275,8 +275,7 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
                 read -r _mmry_marker_host || _mmry_marker_host=""
                 read -r _mmry_marker_home || true
             } < "$_mmry_marker" 2>/dev/null
-            _mmry_marker_home="${_mmry_marker_home%$'
-'}"
+            _mmry_marker_home="${_mmry_marker_home%$''}"
             _mmry_marker_host="${_mmry_marker_host:0:64}"
             _mmry_marker_host="${_mmry_marker_host//[[:space:]]/}"
             if [[ "$_mmry_marker_host" == "codex" ]]; then

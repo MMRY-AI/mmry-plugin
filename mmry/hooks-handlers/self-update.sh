@@ -167,12 +167,16 @@ _su_installed_dir() {
 }
 
 # Remove what release list $1 does not name from the plugin root and from the installed copy.
-# Writes the once-per-version marker only when both folders were handled.
+# Writes the once-per-version marker only when both folders were handled. With $3 = "keep-root" the
+# plugin root is left exactly as it is: on Codex with no new release (#33062 fix round 5), because
+# Codex fingerprints that folder and any removal there would cost the customer their hook trust.
 _su_prune_both() {
     local listfile="$1" ver="$2" sorted="" installed="" ok=1
     _su_scratch_dir || { log "no scratch space; removing nothing"; return 1; }
     sorted="${_su_scratch}/list"
-    _su_prune "$sorted" "$PLUGIN_ROOT" "$ver" || ok=0
+    if [[ "${3:-}" != "keep-root" ]]; then
+        _su_prune "$sorted" "$PLUGIN_ROOT" "$ver" || ok=0
+    fi
     installed="$(_su_installed_dir)"
     if [[ -d "$installed" && "$PLUGIN_ROOT" != "$installed" ]]; then
         _su_prune "$sorted" "$installed" "$ver" || ok=0
@@ -257,7 +261,43 @@ _su_reconcile_installed() {
         log "the installed file list is for '${_SU_LIST_VERSION}' but plugin.json says '${installed_version}'; removing nothing"
         return 0
     fi
-    _su_prune_both "$listfile" "$_SU_LIST_VERSION" || true
+    if (( ${_su_codex:-0} == 1 )); then
+        # On Codex, with no new release, only the Codex home's copy is tidied (see _su_prune_both).
+        _su_prune_both "$listfile" "$_SU_LIST_VERSION" keep-root || true
+    else
+        _su_prune_both "$listfile" "$_SU_LIST_VERSION" || true
+    fi
+    return 0
+}
+
+# ON CODEX, IS THE DOWNLOADED RELEASE ONE TO WRITE INTO THE PLUGIN FOLDER (#33062 fix round 5)?
+#
+# Only when it is a verified release, by the same test _su_finish_update applies to the version
+# record (#33033): its release-files.txt loads (a release file list naming its own core files, no
+# unsafe entry) and is for the version its own plugin.json states. And only when that version is
+# newer than the plugin folder's own, compared as numbers (lib-release-files.sh). Anything else
+# changes the folder Codex fingerprints for no release, so it is refused here, before a byte is
+# copied, and the folder, the Codex home's copy and both records are left as they are.
+_su_codex_release_ok() {
+    local rel_version="" cmp=0
+    if ! _su_removals_available || ! declare -F _su_version_newer >/dev/null 2>&1; then
+        log "the release checks (lib-release-files.sh) could not be loaded; nothing applied on Codex"
+        return 1
+    fi
+    if ! { _su_scratch_dir && _su_load_list "${extracted_dir}/mmry/${RELEASE_LIST_NAME}" "${_su_scratch}/list"; }; then
+        log "could not read the downloaded release's file list (${_SU_LIST_PROBLEM:-no scratch space}); nothing applied on Codex"
+        return 1
+    fi
+    rel_version="$(_su_json_version "${extracted_dir}/mmry/.claude-plugin/plugin.json" || true)"
+    if [[ -z "$rel_version" || "$rel_version" != "$_SU_LIST_VERSION" ]]; then
+        log "the downloaded release's file list is for '${_SU_LIST_VERSION}' but its plugin.json says '${rel_version}'; nothing applied on Codex"
+        return 1
+    fi
+    _su_version_newer "$rel_version" "$local_version" || cmp=$?
+    if (( cmp != 0 )); then
+        log "the downloaded release ${rel_version} is not newer than ${local_version}; nothing applied on Codex"
+        return 1
+    fi
     return 0
 }
 
@@ -306,24 +346,49 @@ if ! source "$(cd "$(dirname "$0")" && pwd)/lib-jq.sh" 2>/dev/null; then
 fi
 unset MMRY_ALLOW_NO_CREDENTIAL
 
-# NEVER WRITE INTO CODEX'S OWN PLUGIN FOLDER (#33062 fix round 4).
+# ON CODEX THE PLUGIN FOLDER'S OWN COPY UPDATES, AND KEEPS ITS RECORDS IN THE CODEX HOME (#33062 fix
+# round 5).
 #
-# Everything this script writes goes under PLUGIN_ROOT, the folder it runs from: the once-per-version
-# record (.last-release-cleanup), the removal of files a release no longer ships, a downloaded release
-# and .last-self-update. On Codex the plugin folder is the one Codex installed and fingerprints into
-# each hook's trusted_content_hash, so any of those made Codex refuse every MMRY hook in the next
-# session ("plugin contents changed; hook approval required"). On Codex this script therefore runs only
-# from the state directory's copy, ${CODEX_HOME}/mmry, which is what session-init.sh starts; a copy run
-# from anywhere else stops here, having written nothing. Claude Code is not affected: there the host
-# is never "codex".
-if declare -F mmry_host >/dev/null 2>&1 && declare -F _mmry_norm_path >/dev/null 2>&1         && [[ "$(mmry_host)" == "codex" ]]; then
-    _su_norm_inst="$(_su_installed_dir)"
-    _mmry_norm_path "$_su_norm_inst"; _su_norm_inst="$_MMRY_NP"
-    _mmry_norm_path "$PLUGIN_ROOT"; _su_norm_root="$_MMRY_NP"
-    if [[ -z "$_su_norm_inst" || -z "$_su_norm_root" ]] || ! _mmry_path_is_within "$_su_norm_root" "$_su_norm_inst"; then
-        log "on Codex only the copy in ${_su_norm_inst:-the Codex home} updates; not writing into ${PLUGIN_ROOT}"
+# Codex fingerprints the plugin folder it installed (<CODEX_HOME>/plugins/cache/...) into each hook's
+# trusted_content_hash when the customer trusts MMRY's hooks, and refuses a hook whose folder has
+# changed since ("plugin contents changed; hook approval required") until the customer reviews it
+# again. The hooks and the MCP server run from that folder, so a release reaches them only by being
+# written there. On Codex, therefore:
+#
+#   - Only the plugin folder's own copy of this script updates. The Codex home's copy
+#     (${CODEX_HOME}/mmry, where session-init.sh installs the handlers the model runs) is not part of
+#     what the customer reviewed, so it stops here, having written nothing.
+#   - The once-per-version cleanup record (.last-release-cleanup) and the version record
+#     (.last-self-update) live in the Codex home, never in the plugin folder.
+#   - With no new release nothing in the plugin folder changes: the once-per-version cleanup tidies
+#     only the Codex home's copy, so the customer's trust holds from one session to the next.
+#   - A release is written into the plugin folder only when it is verified (its release-files.txt
+#     loads, names its core files and is for the version its own plugin.json states) and is newer than
+#     the plugin folder's own version (_su_codex_release_ok, below). Then the plugin folder and the
+#     Codex home both get it, as on 2.15.5: Codex asks the customer to review MMRY's hooks once, and
+#     from then on runs the new hooks and MCP server.
+#
+# Claude Code is not affected: there the host is never "codex".
+_su_codex=0
+if declare -F mmry_host >/dev/null 2>&1 && [[ "$(mmry_host)" == "codex" ]]; then
+    _su_codex=1
+    _su_state="$(_su_installed_dir)"
+    _su_norm_state="$_su_state"; _su_norm_root="$PLUGIN_ROOT"
+    if declare -F _mmry_norm_path >/dev/null 2>&1; then
+        _mmry_norm_path "$_su_state"; _su_norm_state="$_MMRY_NP"
+        _mmry_norm_path "$PLUGIN_ROOT"; _su_norm_root="$_MMRY_NP"
+    fi
+    if [[ -z "$_su_norm_state" || -z "$_su_norm_root" ]]; then
+        log "on Codex, could not tell the plugin folder from the Codex home's copy; not updating"
         exit 0
     fi
+    if [[ "$_su_norm_root" == "$_su_norm_state" || "$_su_norm_root" == "$_su_norm_state"/* ]] \
+            || { declare -F _mmry_path_is_within >/dev/null 2>&1 && _mmry_path_is_within "$_su_norm_root" "$_su_norm_state"; }; then
+        log "on Codex only the plugin folder's own copy updates; ${PLUGIN_ROOT} is the Codex home's copy, so nothing was done"
+        exit 0
+    fi
+    CLEANUP_MARKER="${_su_state}/.last-release-cleanup"
+    LAST_UPDATE_SENTINEL="${_su_state}/.last-self-update"
 fi
 
 # AN OLDER SELF-UPDATE IS STILL RUNNING, AND HAS JUST INSTALLED THIS RELEASE (see the header).
@@ -426,6 +491,11 @@ fi
 extracted_dir="$(find "$tmp_extract" -maxdepth 1 -type d -name 'mmry-plugin-*' | head -1)"
 if [[ -z "$extracted_dir" || ! -d "${extracted_dir}/mmry" ]]; then
     log "extracted archive missing expected mmry/ directory"
+    exit 0
+fi
+
+# On Codex, only a verified release newer than the plugin folder's own is written (see above).
+if (( _su_codex == 1 )) && ! _su_codex_release_ok; then
     exit 0
 fi
 

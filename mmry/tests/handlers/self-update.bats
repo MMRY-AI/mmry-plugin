@@ -126,10 +126,20 @@ _updatable_plugin() {
 }
 
 # curl that answers the marketplace with a newer version and hands back a real archive.
+# A verified release (#33062 fix round 5): a plugin.json and a release-files.txt for 9.9.9 naming its
+# own core files, because on Codex self-update writes only a verified newer release.
 _mock_remote() {
-    local stage="$TEST_TMPDIR/remote/mmry-plugin-master/mmry/hooks-handlers"
-    mkdir -p "$stage"
+    local rel="$TEST_TMPDIR/remote/mmry-plugin-master/mmry"
+    local stage="$rel/hooks-handlers"
+    mkdir -p "$stage" "$rel/.claude-plugin"
     printf 'delivered by the update\n' > "$stage/updated-marker.txt"
+    cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" \
+       "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" "$stage/"
+    printf '{ "name": "mmry", "version": "9.9.9" }\n' > "$rel/.claude-plugin/plugin.json"
+    { printf '# mmry release files 9.9.9\n'
+      { ( cd "$rel" && find . -type f | sed 's|^\./||' ); printf 'release-files.txt\n'; } | LC_ALL=C sort -u
+    } > "$TEST_TMPDIR/list.tmp"
+    mv "$TEST_TMPDIR/list.tmp" "$rel/release-files.txt"
     ( cd "$TEST_TMPDIR/remote" && tar -czf "$TEST_TMPDIR/remote.tar.gz" mmry-plugin-master )
     cat > "$TEST_TMPDIR/mock-bin/curl" <<EOF
 #!/usr/bin/env bash
@@ -141,14 +151,13 @@ EOF
     chmod +x "$TEST_TMPDIR/mock-bin/curl"
 }
 
-# ON CODEX THE COPY THAT RUNS IS THE STATE DIRECTORY'S (#33062 fix round 4). session-init.sh starts
-# ~/.codex/mmry/hooks-handlers/self-update.sh, because a copy run from Codex's plugin folder wrote into
-# the folder Codex fingerprints for hook trust; such a copy now stops before writing anything
-# (handlers/codex-hook-trust.bats). These two tests therefore run the state directory's copy.
+# ON CODEX THE COPY THAT RUNS IS THE PLUGIN FOLDER'S (#33062 fix round 5, option (a)): session-init.sh
+# starts the self-update.sh in the folder Codex installed, as on 2.15.5, and a verified newer release is
+# written there and into ~/.codex/mmry. The Codex home's own copy refuses (handlers/codex-hook-trust.bats).
 @test "codex: self-update writes into the CODEX state directory, not the Claude one" {
     _mock_remote
     mkdir -p "$HOME/.codex/mmry/hooks-handlers" "$HOME/.claude/mmry/hooks-handlers"
-    local root="$HOME/.codex/mmry"
+    local root="$TEST_TMPDIR/codex-cache/mmry"
     _updatable_plugin "$root"
 
     run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
@@ -176,7 +185,7 @@ EOF
     _mock_remote
     mkdir -p "$HOME/.codex/mmry/hooks-handlers"
     [ ! -f "$HOME/.codex/mmry-config.json" ]
-    local root="$HOME/.codex/mmry"
+    local root="$TEST_TMPDIR/nocred/mmry"
     _updatable_plugin "$root"
 
     run env -u MMRY_CONFIG_FILE -u MMRY_API_KEY MMRY_HOST=codex HOME="$HOME" \

@@ -282,14 +282,15 @@ _wait_for_root_version() {
     # session-init.sh copies the plugin folder's handlers into the Codex home too, so the record, not
     # the mere fact that it ran, tells the two copies apart.
     rm -f "$TMPDIR/.mmry-update-checked" "$TEST_TMPDIR/which-ran"
-    printf '#!/usr/bin/env bash
-echo "$0" >> "%s"
-' "$TEST_TMPDIR/which-ran" > "$ROOT/hooks-handlers/self-update.sh"
-    run env -u MMRY_NO_SELF_UPDATE -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" CODEX_HOME="$CX"         CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks-handlers/session-init.sh" --after-delivery
+    printf '#!/usr/bin/env bash\necho "$0" >> "%s"\n' "$TEST_TMPDIR/which-ran" > "$ROOT/hooks-handlers/self-update.sh"
+    run env -u MMRY_NO_SELF_UPDATE -u MMRY_CONFIG_FILE MMRY_HOST=codex HOME="$HOME" CODEX_HOME="$CX" \
+        CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks-handlers/session-init.sh" --after-delivery
     cp "$REF/hooks-handlers/self-update.sh" "$ROOT/hooks-handlers/self-update.sh"
     [ -e "$TEST_TMPDIR/which-ran" ] || { echo "no self-update.sh was started: $output"; return 1; }
-    grep -q '/plugins/cache/mmry-plugin/mmry/local/hooks-handlers/self-update.sh$' "$TEST_TMPDIR/which-ran"         || { echo "the copy started was not the plugin folder's: $(cat "$TEST_TMPDIR/which-ran")"; return 1; }
-    ! grep -q '/codexhome/mmry/hooks-handlers/' "$TEST_TMPDIR/which-ran"         || { echo "the Codex home's copy was started: $(cat "$TEST_TMPDIR/which-ran")"; return 1; }
+    grep -q '/plugins/cache/mmry-plugin/mmry/local/hooks-handlers/self-update.sh$' "$TEST_TMPDIR/which-ran" \
+        || { echo "the copy started was not the plugin folder's: $(cat "$TEST_TMPDIR/which-ran")"; return 1; }
+    ! grep -q '/codexhome/mmry/hooks-handlers/' "$TEST_TMPDIR/which-ran" \
+        || { echo "the Codex home's copy was started: $(cat "$TEST_TMPDIR/which-ran")"; return 1; }
 }
 
 @test "req4: on Claude Code self-update.sh still keeps its once-per-version record in its own plugin folder" {

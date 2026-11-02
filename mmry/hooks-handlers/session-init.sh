@@ -346,15 +346,13 @@ _mmry_start_rc=0
 if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then
     bash "$P/hooks-handlers/session-start.sh" || _mmry_start_rc=$?
 fi
-# AND IT IS THE STATE DIRECTORY'S COPY OF self-update.sh THAT RUNS (#33062 fix round 4). self-update.sh
-# writes where it runs from: its once-per-version record (.last-release-cleanup), the files a release
-# no longer ships, and, when there is one, the new release itself. Run from the plugin root, all of
-# that landed in the folder Codex fingerprints, and broke hook trust exactly as the marker did. Run
-# from here, its plugin root IS the state directory, so the update reaches the handlers the model runs
-# and the plugin folder changes only when Codex installs a new version of it.
+# AND IT IS THE PLUGIN FOLDER'S OWN COPY OF self-update.sh THAT RUNS (#33062 fix round 5, option (a)).
+# The hooks and the MCP server run from the plugin folder, so that is where a new release has to land
+# for them to run it, as on 2.15.5; Codex then asks the customer to review MMRY's hooks once. And it is
+# the copy Codex fingerprinted when the customer trusted the hooks, which the Codex home's copy is not.
+# self-update.sh keeps its records in the Codex home and, with no new release, writes nothing into the
+# plugin folder, so a session with no release leaves the customer's hook trust as it was.
 if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential 2>/dev/null; then
-    if [[ -f "${MMRY_STATE_DIR}/hooks-handlers/self-update.sh" ]]; then
-        bash "${MMRY_STATE_DIR}/hooks-handlers/self-update.sh" 2>/dev/null || true
-    fi
+    bash "$P/hooks-handlers/self-update.sh" 2>/dev/null || true
 fi
 exit "$_mmry_start_rc"
