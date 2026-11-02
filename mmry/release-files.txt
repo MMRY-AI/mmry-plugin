@@ -230,6 +230,7 @@ tests/structural/run-codex-mutations.sh
 tests/structural/search-command.bats
 tests/structural/sed-program-scan.awk
 tests/structural/setup_suite.bash
+tests/structural/storage-wording-check.bats
 tests/structural/teardown-tmp.bats
 tests/structural/test-file-size.bats
 tests/structural/test-isolation.bats

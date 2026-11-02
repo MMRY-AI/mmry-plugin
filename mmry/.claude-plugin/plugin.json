@@ -1,6 +1,6 @@
 {
   "name": "mmry",
-  "description": "MMRY AI — Persistent SQL-backed memory system. Auto-loads memories at session start, prompts to save at session end, before context compression, and when plans are accepted.",
+  "description": "Persistent memory for Claude Code that follows you across sessions, computers and teams. Loads your memories at session start and prompts you to save at session end, before context compression, and when plans are accepted.",
   "version": "2.15.6",
   "author": {
     "name": "MMRY AI"
