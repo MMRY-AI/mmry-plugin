@@ -141,10 +141,14 @@ EOF
     chmod +x "$TEST_TMPDIR/mock-bin/curl"
 }
 
+# ON CODEX THE COPY THAT RUNS IS THE STATE DIRECTORY'S (#33062 fix round 4). session-init.sh starts
+# ~/.codex/mmry/hooks-handlers/self-update.sh, because a copy run from Codex's plugin folder wrote into
+# the folder Codex fingerprints for hook trust; such a copy now stops before writing anything
+# (handlers/codex-hook-trust.bats). These two tests therefore run the state directory's copy.
 @test "codex: self-update writes into the CODEX state directory, not the Claude one" {
     _mock_remote
     mkdir -p "$HOME/.codex/mmry/hooks-handlers" "$HOME/.claude/mmry/hooks-handlers"
-    local root="$TEST_TMPDIR/codex-cache/mmry"
+    local root="$HOME/.codex/mmry"
     _updatable_plugin "$root"
 
     run env MMRY_HOST=codex HOME="$HOME" bash "$root/hooks-handlers/self-update.sh"
@@ -172,7 +176,7 @@ EOF
     _mock_remote
     mkdir -p "$HOME/.codex/mmry/hooks-handlers"
     [ ! -f "$HOME/.codex/mmry-config.json" ]
-    local root="$TEST_TMPDIR/nocred/mmry"
+    local root="$HOME/.codex/mmry"
     _updatable_plugin "$root"
 
     run env -u MMRY_CONFIG_FILE -u MMRY_API_KEY MMRY_HOST=codex HOME="$HOME" \
