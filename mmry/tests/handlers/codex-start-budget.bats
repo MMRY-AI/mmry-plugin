@@ -294,8 +294,10 @@ EOF
     }
     run _context
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
-    # The file the conversation is told to read holds the memories.
+    # The file the conversation is told to read holds the memories. The path is the rest of that line:
+    # since fix round 7 the late delivery carries MMRY AI's sentence after it, on lines of its own.
     local f="${output##*Read them now: }"
+    f="${f%%$'\n'*}"
     [ -s "$(cygpath -u "$f" 2>/dev/null || printf '%s' "$f")" ]
 }
 
