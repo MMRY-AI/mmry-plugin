@@ -99,12 +99,12 @@ _claude_prompt_nosid() {
 # daily refresh ON (the interval given, in seconds) and a service that WOULD answer a fetch with a
 # directive: if the hook's refresh worker fetches for this session, the set gets stored and the next
 # prompt delivers it, which is what QA round 1 found (probe3) and requirement 3 forbids.
-#   _claude_prompt_cfg <sid> <config-file> <refresh-seconds>
+#   _claude_prompt_cfg <sid> <config-file> <refresh-seconds> [part]
 _claude_prompt_cfg() {
     printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"hi"}' "$1" \
         | env MMRY_CONFIG_FILE="$2" MMRY_API_URL="" MMRY_API_KEY="" MMRY_AUTH_METHOD="" MMRY_FOUNDATION_REFRESH_SECONDS="$3" \
               MOCK_CURL_RESPONSE="$(_startup_body "$PROD_DIRECTIVE" "$PROD_NOTE")" \
-              bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 2>/dev/null
+              bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part "${4:-1}" 2>/dev/null
 }
 
 # A Codex session: its own CODEX_HOME holding its own mmry-config.json, every hook through
@@ -673,6 +673,70 @@ _refresh_worker() {
     ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "control: the worker stored no set once the server was named"; return 1; }
     fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
     [[ "${fetched:-0}" != "0" ]] || { echo "control: the worker fetched nothing once the server was named"; return 1; }
+}
+
+# THE AUTH-METHOD HALF OF THE GATE (#32915, QA round 2, F-C). SessionStart refuses a credential that is
+# not an API key. The set's name hashes the server address and the credential STRING, whatever the
+# method, so an API-key session stores a set at the very name an OAuth session with that string
+# computes, and the supervisor's gate asked only whether the server was given: the OAuth session was
+# told nothing was loaded and its prompts then served that set from disk (QA probe4). The supervisor
+# now asks the auth method too, from the environment or a scan of the config, with no process.
+@test "startup: fail closed - a set an API-key session stored is not served to an OAuth session on the same server and credential string: SessionStart refuses it and prompts deliver nothing, while the API-key session's own prompt delivers" {
+    local out ctx i fetched
+    _plant_shared
+    _cfg "$TEST_TMPDIR/cfg-apikey5.json" "$PROD_URL" apikey "$PROD_KEY"
+    _cfg "$TEST_TMPDIR/cfg-oauth5.json"  "$PROD_URL" oauth  "$PROD_KEY"
+    [[ "$(FND_CONFIG_OVERRIDE="$TEST_TMPDIR/cfg-apikey5.json" fnd_acct)" == "$(FND_CONFIG_OVERRIDE="$TEST_TMPDIR/cfg-oauth5.json" fnd_acct)" ]] \
+        || { echo "the two configs do not compute one key, so the test proves nothing"; return 1; }
+    # The API-key session stores its set, and its own prompt delivers it (the control).
+    out="$(_claude_start_cfg claude-apikey-05 "$TEST_TMPDIR/cfg-apikey5.json" "$PROD_DIRECTIVE" "$PROD_NOTE")"
+    _told_path "$out" >/dev/null || { echo "control: the API-key session loaded nothing: ${out:0:300}"; return 1; }
+    ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "control: the API-key session stored no set"; return 1; }
+    out="$(_claude_prompt_cfg claude-apikey-05 "$TEST_TMPDIR/cfg-apikey5.json" 0)"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$PROD_DIRECTIVE"* ]] || { echo "control: the API-key session's prompt delivered nothing: ${ctx:0:300}"; return 1; }
+    # The OAuth session on the same server and credential string: refused at SessionStart, and
+    # nothing on any prompt or part after it, with the refresh on and the service ready to answer.
+    out="$(_claude_start_cfg claude-oauth-05 "$TEST_TMPDIR/cfg-oauth5.json" "$PROD_DIRECTIVE" "$PROD_NOTE")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"did not load memories"* && "$ctx" != *"Read them now"* ]] || { echo "the OAuth session was not refused at SessionStart: ${ctx:0:300}"; return 1; }
+    for i in 1 2; do
+        out="$(_claude_prompt_cfg claude-oauth-05 "$TEST_TMPDIR/cfg-oauth5.json" 60)"; ctx="$(_ctx "$out")"
+        [[ "$ctx" != *"$PROD_DIRECTIVE"* && "$ctx" != *"FOUNDATION memories"* ]] || { echo "prompt $i served the API-key session's set to the OAuth session: ${ctx:0:300}"; return 1; }
+        [[ -z "$ctx" ]] || { echo "prompt $i said something for the refused session: ${ctx:0:300}"; return 1; }
+    done
+    out="$(_claude_prompt_cfg claude-oauth-05 "$TEST_TMPDIR/cfg-oauth5.json" 60 2)"; ctx="$(_ctx "$out")"
+    [[ -z "$ctx" ]] || { echo "part 2 said something for the refused session: ${ctx:0:300}"; return 1; }
+    # The only request for startup memories was the API-key session's own start.
+    fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
+    [[ "${fetched:-0}" == "1" ]] || { echo "startup memories were fetched $fetched times; the API-key start's one was expected"; return 1; }
+    [[ "$(_file "$TEST_TMPDIR/mmry-memories.md")" == "$_PLANTED" ]] || { echo "the planted shared file was rewritten"; return 1; }
+}
+
+# THE WORKER'S OWN AUTH-METHOD CLAUSE, SEEN DIRECTLY. Through a prompt the supervisor refuses an OAuth
+# session before any worker is started, so the test above cannot tell a worker with the clause from
+# one without it (QA round 2's qa-worker-auth-dropped mutant survived the two-prompt oauth test for
+# this reason). Here the delivery worker is started as the supervisor starts it, with the OAuth
+# config and a set standing at its key: it must hand back nothing. The control starts the same worker
+# with the API-key config and sees the set, so the refusal is the clause and not the harness.
+#   _delivery_worker <config-file> <sid>
+_delivery_worker() {
+    env MMRY_CONFIG_FILE="$1" MMRY_API_URL="" MMRY_API_KEY="" MMRY_AUTH_METHOD="" MMRY_FOUNDATION_REFRESH_SECONDS=0 \
+        MMRY_FOUNDATION_WORKER=1 MMRY_FND_SID="$2" MMRY_FOUNDATION_PENDING="$TEST_TMPDIR/mmry-foundation.status.pending.test" \
+        bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 </dev/null 2>/dev/null
+}
+@test "startup: fail closed - the delivery worker, started as the supervisor starts it for an OAuth session with a set standing at its key, hands back nothing, and hands the set to the API-key session" {
+    local out body acct set
+    body="$TEST_TMPDIR/staged-oauth.md"
+    printf -- '- %s\n' "$PROD_DIRECTIVE" > "$body"
+    _cfg "$TEST_TMPDIR/cfg-oauth6.json"  "$PROD_URL" oauth  "$PROD_KEY"
+    _cfg "$TEST_TMPDIR/cfg-apikey6.json" "$PROD_URL" apikey "$PROD_KEY"
+    acct="$(FND_CONFIG_OVERRIDE="$TEST_TMPDIR/cfg-oauth6.json" fnd_acct)"
+    set="$TEST_TMPDIR/mmry-foundation-set.${acct}.md"
+    fnd_seal "$body" 1 "$set" "$acct"
+    out="$(_delivery_worker "$TEST_TMPDIR/cfg-oauth6.json" claude-oauth-06)"
+    [[ "$out" != *"$PROD_DIRECTIVE"* ]] || { echo "the worker handed the set to an OAuth session: ${out:0:300}"; return 1; }
+    [[ "$out" == "@@MMRY-NONE 1 0@@" ]] || { echo "the worker did not say it has nothing for the OAuth session: ${out:0:200}"; return 1; }
+    out="$(_delivery_worker "$TEST_TMPDIR/cfg-apikey6.json" claude-apikey-06)"
+    [[ "$out" == *"$PROD_DIRECTIVE"* ]] || { echo "control: the worker handed nothing to the API-key session: ${out:0:300}"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
