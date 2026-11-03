@@ -9,8 +9,7 @@ load '../helpers/foundation-set'
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    # A whole identity (#32915 req 3: an unidentified session is delivered nothing). In the config,
-    # not the environment, so a Codex test's CODEX_HOME config is still the one its handler reads.
+    # A whole identity, in the config so a Codex test's own config still wins (#32915 req 3).
     _make_config
     SET="$(fnd_set_file)"
     # Every real session has one of these: SessionStart writes the session id here and clears
@@ -1132,8 +1131,7 @@ _stage_codex_install() {
 
 @test "req4 control: a Claude install with NO Codex credential is unaffected by the Codex guard" {
     # The guard must key on the HOST, not on whether a Codex credential exists. A Claude install
-    # re-injects from its cache regardless, and still must; its own credential is the Claude file in
-    # its home (#32915 req 3: a session with no identity at all is delivered nothing).
+    # re-injects from its cache regardless; its own credential is the Claude file in its home.
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
     local fakehome="$TEST_TMPDIR/claude-nocred"
