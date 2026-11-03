@@ -105,20 +105,20 @@ if (( _mmry_marker_ok == 0 )) && [[ "$(mmry_host)" == "codex" ]]; then
     exit 0
 fi
 
-# THE PLUGIN ROOT CARRIES THE MARKER TOO (#31245 QA, Security). lib-host.sh looks for the marker
-# beside whichever copy of a handler is running. A handler run from Codex's plugin cache, with
-# CODEX_HOME unset and a relocated home, found none and resolved as Claude. The plugin-root marker
-# names the home on its second line, because two levels above the plugin root is not the home.
-# Codex only, and only when the plugin root is inside this Codex home, so a plugin root that Claude
-# Code reads is never marked. Best effort: the state-directory marker above is the one that gates.
-if [[ "$(mmry_host)" == "codex" ]]; then
-    _mmry_norm_path "$(mmry_host_config_dir)"; _mmry_ci_home="$_MMRY_NP"
-    _mmry_norm_path "$P"; _mmry_ci_root="$_MMRY_NP"
-    if [[ -n "$_mmry_ci_home" && -n "$_mmry_ci_root" ]] && _mmry_path_is_within "$_mmry_ci_root" "$_mmry_ci_home"; then
-        printf 'codex\n%s\n' "$(mmry_host_config_dir)" > "$P/.mmry-host" 2>/dev/null || true
-    fi
-fi
-
+# NOTHING IS WRITTEN INTO THE PLUGIN ROOT, ON EITHER HOST (#33062 fix round 4).
+#
+# On Codex this used to write a second marker into the plugin root, naming the home on its second
+# line, for a handler run from Codex's plugin cache with CODEX_HOME unset and a relocated home. But
+# the plugin root on Codex is the folder Codex installed and fingerprints into each hook's
+# trusted_content_hash when the customer trusts MMRY's hooks. The first session added the file, so
+# from the second session on Codex found "plugin contents changed": the app asked "Hooks need review"
+# again, and codex exec failed every MMRY hook with "hook approval required", so no memories loaded.
+#
+# lib-host.sh now finds the same answer without it: a copy under <home>/plugins/cache/ reads the
+# state-directory marker written above, at <home>/mmry/.mmry-host. Every file this script writes is in
+# the state directory. A plugin-root marker an earlier release left behind is still read, and is left
+# where it is: removing it would change the folder Codex fingerprinted all over again.
+#
 # NEVER PUT AN OLDER RELEASE OVER A NEWER ONE, AND REMOVE WHAT THIS RELEASE DOES NOT SHIP
 # (#32957 fix round 4b).
 #
@@ -346,6 +346,12 @@ _mmry_start_rc=0
 if [[ "${1:-}" != "--after-delivery" || "$_MMRY_HOST_V" != "codex" ]]; then
     bash "$P/hooks-handlers/session-start.sh" || _mmry_start_rc=$?
 fi
+# AND IT IS THE PLUGIN FOLDER'S OWN COPY OF self-update.sh THAT RUNS (#33062 fix round 5, option (a)).
+# The hooks and the MCP server run from the plugin folder, so that is where a new release has to land
+# for them to run it, as on 2.15.5; Codex then asks the customer to review MMRY's hooks once. And it is
+# the copy Codex fingerprinted when the customer trusted the hooks, which the Codex home's copy is not.
+# self-update.sh keeps its records in the Codex home and, with no new release, writes nothing into the
+# plugin folder, so a session with no release leaves the customer's hook trust as it was.
 if [[ "$_MMRY_HOST_V" == "codex" ]] && mmry_host_assert_own_credential 2>/dev/null; then
     bash "$P/hooks-handlers/self-update.sh" 2>/dev/null || true
 fi
