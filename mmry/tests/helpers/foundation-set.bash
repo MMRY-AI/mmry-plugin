@@ -106,3 +106,33 @@ fnd_set_record() {
 fnd_set_with() {
     printf '%s\n%s%s' "$1" "$2" "$FND_TRAILER" > "${3:-$SET}"
 }
+
+# THE STARTUP MEMORIES FILE AND THE FOUNDATION WORKING FILES, NAMED BY THE ACCOUNT (#32915). Each is
+# the plugin's name for the current environment and config, taken the same way the set's name is
+# above: AFTER the test has put in place whatever identity the handler under test will see.
+#
+#   fnd_memories_file [sid] [dir]  -> <dir>/mmry-memories.<key>.<sid>.md, or mmry-memories.<key>.md
+#                                     with no sid (the file SessionStart tells the model to read)
+#   fnd_log_file [dir]             -> <dir>/mmry-foundation.<key>.log
+#   fnd_debug_log_file [dir]       -> <dir>/mmry-foundation-debug.<key>.log
+#   fnd_refresh_file [dir]         -> <dir>/.mmry-foundation-refresh.<key>          (the worker's lock)
+#   fnd_refresh_checked_file [dir] -> <dir>/.mmry-foundation-refresh-checked.<key>  (the supervisor's stamp)
+#   fnd_byref_file [sid] [dir]     -> <dir>/mmry-foundation.byref.<key>.<sid>.md, or .byref.<key>.md
+fnd_memories_file() {
+    printf '%s/mmry-memories.%s%s.md' "${2:-$TEST_TMPDIR}" "$(fnd_acct)" "${1:+.$1}"
+}
+fnd_log_file() {
+    printf '%s/mmry-foundation.%s.log' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_debug_log_file() {
+    printf '%s/mmry-foundation-debug.%s.log' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_refresh_file() {
+    printf '%s/.mmry-foundation-refresh.%s' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_refresh_checked_file() {
+    printf '%s/.mmry-foundation-refresh-checked.%s' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_byref_file() {
+    printf '%s/mmry-foundation.byref.%s%s.md' "${2:-$TEST_TMPDIR}" "$(fnd_acct)" "${1:+.$1}"
+}
