@@ -649,6 +649,69 @@ EOF
     _codex_start 1
     run _context
     refute_output --partial "could not load your memories in time"
+    refute_output --partial "$S_LATE"
+    refute_output --partial "$S_NOT"
+}
+
+# ---------------------------------------------------------------------------------------------
+# R2: THE PERSON IS TOLD THE NOTICE COMES FROM MMRY AI (#33062 fix round 7)
+# ---------------------------------------------------------------------------------------------
+# Eric, watched check 2 on 4f0e4c6: "I saw the notice but didn't know what the source was". The person
+# reads the assistant's words, not the hook's, so the hook gives the assistant an exact sentence that
+# names MMRY AI. The two sentences are customer copy, approved by Eric on 2026-11-03 03:14 UTC
+# (R:\Intranet\ClaudeAI\plans\MMRY\v1.32.1\33062-r7\notice-wording.md); a change to either is a change
+# to approved copy.
+S_LATE='MMRY AI: your saved memories were late to load at the start of this conversation. They are loaded now.'
+S_NOT='MMRY AI: your saved memories could not be loaded for this conversation.'
+
+@test "R2 wording: the start's late notice gives the assistant the exact sentence naming MMRY AI, and the one to use if they cannot be loaded" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 15
+    _codex_start 1
+    printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null
+    run _context
+    assert_output --partial "word for word, before anything else: \"$S_LATE\""
+    assert_output --partial "word for word: \"$S_NOT\""
+}
+
+@test "R2 wording: late memories handed over with the first prompt carry the exact sentence, after the memories line" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 8
+    _codex_start 3
+    _codex_prompt 3
+    printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || { _prompt_diag; return 1; }
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
+    assert_output --partial "word for word, before anything else: \"$S_LATE\""
+    # The path is still the whole first line, so whatever reads it from there still finds the file.
+    local f="${output##*Read them now: }"
+    f="${f%%$'\n'*}"
+    [ -s "$(cygpath -u "$f" 2>/dev/null || printf '%s' "$f")" ]
+}
+
+@test "R2 wording: memories that never arrive: the first prompt gives the exact sentences, loaded or not" {
+    export MMRY_CODEX_START_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_BUDGET=3 MMRY_CODEX_FIRST_PROMPT_CEILING=3
+    _slow_curl "/api/memories/startup" 40
+    _codex_start 8
+    _codex_prompt 8
+    printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+    run _context
+    assert_output --partial "word for word, before anything else: \"$S_LATE\""
+    assert_output --partial "word for word: \"$S_NOT\""
+}
+
+@test "R2 wording: a start with no session id to hand the memories on by gives the exact not-loaded sentence" {
+    export MMRY_CODEX_START_BUDGET=3
+    _slow_curl "/api/memories/startup" 15
+    local cmd
+    cmd="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$ROOT/hooks/codex-hooks.json")"
+    run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CLAUDE_PLUGIN_ROOT -u MMRY_NO_SELF_UPDATE \
+        HOME="$HOME" CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" MMRY_CODEX_HOOK_STARTED="" \
+        bash -c 'cd "$3" && printf "%s" "$1" | sh -c "$2"' _ '{"hook_event_name":"SessionStart","source":"startup"}' "$cmd" "$TEST_TMPDIR"
+    JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
+    run _context
+    assert_output --partial "this conversation started without them"
+    assert_output --partial "word for word, before anything else: \"$S_NOT\""
 }
 
 # ---------------------------------------------------------------------------------------------
