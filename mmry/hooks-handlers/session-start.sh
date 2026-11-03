@@ -292,7 +292,7 @@ if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" 
     if [[ "$(mmry_host)" == "codex" ]]; then
         _mmry_identity_hint="offer to run $(mmry_host_setup_hint) to set it up again"
     else
-        _mmry_identity_hint="ask them to run /mmry:setup to set it up again"
+        _mmry_identity_hint="ask them to run $(mmry_host_command_ref setup) to set it up again"
     fi
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
         "$(_mmry_json_escape "MMRY AI did not load memories for this session: the configuration does not identify the account and server they belong to (it needs a server address and an API key). Nothing was loaded and nothing was guessed at. Tell the user, and ${_mmry_identity_hint}.")"

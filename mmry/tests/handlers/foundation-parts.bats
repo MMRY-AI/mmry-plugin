@@ -205,7 +205,7 @@ _stored() { STORED="$(<"$CACHE")"; }
     _fire_all S1
     _ctx 1
     [[ "$PART_TEXT" == *"BEFORE YOU ANSWER, read this file in full"* ]] || { echo "part 1 does not tell the assistant to read the file"; return 1; }
-    [[ "$PART_TEXT" == *"mmry-foundation.byref.S1.md"* ]] || { echo "part 1 does not name this session's copy: ${PART_TEXT:0:600}"; return 1; }
+    [[ "$PART_TEXT" == *"$(basename "$(fnd_byref_file S1)")"* ]] || { echo "part 1 does not name this session's copy: ${PART_TEXT:0:600}"; return 1; }
     [[ "$PART_TEXT" == *"permission"* ]] || { echo "part 1 does not say it may need permission"; return 1; }
     [[ "$PART_TEXT" != *"Directive 0001"* ]] || { echo "part 1 sent some of the set as well as the reference"; return 1; }
     (( ${#PART_TEXT} < 2000 )) || { echo "the reference is ${#PART_TEXT} long; it must fit a preview"; return 1; }
@@ -243,7 +243,7 @@ _pointed() {
     _ctx 1
     local snap v
     snap="$(_pointed)"
-    [ "$snap" -ef "$TEST_TMPDIR/mmry-foundation.byref.S1.md" ] || { echo "the assistant was pointed at [$snap], not this session's copy"; return 1; }
+    [ "$snap" -ef "$(fnd_byref_file S1)" ] || { echo "the assistant was pointed at [$snap], not this session's copy"; return 1; }
     [ -f "$snap" ] || { echo "no copy was made for this turn"; return 1; }
     v="$(fnd_set_record)"; v="${v##*cksum=}"; v="${v%%[!0-9]*}"
     # The closing line names this version of the set, and the assistant is told to reach it.
@@ -272,12 +272,12 @@ _pointed() {
 @test "parts: each session has its own copy, so one session's turn never rewrites another's" {
     _seed_lines 800
     _fire 1 SA
-    cp "$TEST_TMPDIR/mmry-foundation.byref.SA.md" "$TEST_TMPDIR/sa-before"
+    cp "$(fnd_byref_file SA)" "$TEST_TMPDIR/sa-before"
     awk 'BEGIN { for (i = 1; i <= 800; i++) printf "- Directive %04d: the set session B sees, long enough to need more than six parts.\n", i }' > "$CACHE"
     _seal
     _fire 1 SB
-    [ -f "$TEST_TMPDIR/mmry-foundation.byref.SB.md" ] || { echo "session B has no copy"; return 1; }
-    cmp -s "$TEST_TMPDIR/mmry-foundation.byref.SA.md" "$TEST_TMPDIR/sa-before" || { echo "session B rewrote session A's copy"; return 1; }
+    [ -f "$(fnd_byref_file SB)" ] || { echo "session B has no copy"; return 1; }
+    cmp -s "$(fnd_byref_file SA)" "$TEST_TMPDIR/sa-before" || { echo "session B rewrote session A's copy"; return 1; }
 }
 
 # #31597: the copy is written from the set this turn verified, so a set replaced at any moment after
@@ -286,14 +286,14 @@ _pointed() {
 @test "parts: #31597 a by-reference copy that cannot be written sends nothing, and says so" {
     _seed_lines 800
     # A directory standing where the copy goes, so no file can be put there.
-    mkdir -p "$TEST_TMPDIR/mmry-foundation.byref.S9.md"
+    mkdir -p "$(fnd_byref_file S9)"
     _fire 1 S9
     _ctx 1
     [[ "$PART_TEXT" != *"BEFORE YOU ANSWER"* ]] || { echo "it pointed the assistant at a copy that was never written"; return 1; }
     jq -e '.systemMessage | test("NOT applied") and test("could not be written") and test("Re-send the prompt")' "$TEST_TMPDIR/part1.json" >/dev/null || { echo "$(jq -r .systemMessage "$TEST_TMPDIR/part1.json")"; return 1; }
     if jq -e '.systemMessage | test("load-memories")' "$TEST_TMPDIR/part1.json" >/dev/null; then echo "it prescribed a rebuild for a set that verified"; return 1; fi
     # And nothing was written into the directory (#31411 QA round 3).
-    [ -z "$(ls -A "$TEST_TMPDIR/mmry-foundation.byref.S9.md")" ] || { echo "the copy was written into the directory"; return 1; }
+    [ -z "$(ls -A "$(fnd_byref_file S9)")" ] || { echo "the copy was written into the directory"; return 1; }
     CLAUDE_CODE_SESSION_ID=S9 run bash "$STATUSCMD"
     [[ "$output" == *"NOT on the most recent prompt - the copy prepared for your assistant to read could not be written"* ]] || { echo "$output"; return 1; }
 }

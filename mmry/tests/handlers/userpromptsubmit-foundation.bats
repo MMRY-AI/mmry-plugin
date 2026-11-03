@@ -606,7 +606,7 @@ _registered_timeout() {
     # redirects rather than discards; the terminal contract is unchanged either way.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now
-    local dbg="$TEST_TMPDIR/mmry-foundation-debug.log"
+    local dbg; dbg="$(fnd_debug_log_file)"
 
     # Default: nothing is captured anywhere.
     rm -f "$dbg"
