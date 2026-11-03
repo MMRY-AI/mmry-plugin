@@ -290,7 +290,9 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
                 # A MARKER MAY NAME THE HOME ITSELF (#31245 QA, Security). The state-directory
                 # marker sits at <home>/mmry/.mmry-host, so the rule above holds for it. The
                 # plugin-root marker, in Codex's plugin cache, is not two levels below the home, so
-                # it names the home on its second line. That line is believed only if it is a
+                # it names the home on its second line. Nothing writes that one any more
+                # (#33062 fix round 4, rule 1b below), but a folder an earlier release marked
+                # still has it, and it still reads correctly. That line is believed only if it is a
                 # directory the running script is actually inside; anything else falls back to the
                 # state-directory layout. Only reached when MMRY_HOST was not exported, so never on
                 # a hook firing.
@@ -306,6 +308,36 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
                     _MMRY_HOST_DIR_FROM_MARKER="$(cd "${_mmry_self_dir}/../.." && pwd 2>/dev/null)" || _MMRY_HOST_DIR_FROM_MARKER=""
                 fi
                 [[ -n "$_MMRY_HOST_DIR_FROM_MARKER" ]] && export _MMRY_HOST_DIR_FROM_MARKER
+            fi
+        fi
+
+        # 1b. A COPY IN A PLUGIN CACHE READS THE MARKER OF THE HOME THAT CACHE BELONGS TO (#33062
+        #     fix round 4).
+        #
+        # The plugin root carries no marker of its own any more. On Codex it is the folder Codex
+        # installed and fingerprints into each hook's trusted_content_hash, and the marker
+        # session-init.sh used to write there changed that folder after the customer had trusted
+        # it: from the second session Codex refused every MMRY hook. So a copy running from
+        # <home>/plugins/cache/<marketplace>/<plugin>/<version>/ reads the state-directory marker
+        # of <home>, <home>/mmry/.mmry-host, which session-init.sh writes on every session. It is
+        # the same statement the plugin-root marker made, from the same writer, kept outside the
+        # fingerprinted folder.
+        #
+        # Claude Code's plugin cache has the same shape under ~/.claude, whose marker says "claude",
+        # and only "codex" changes any answer, so a Claude Code copy resolves exactly as before. String
+        # work, a file test and builtin reads: no process.
+        if [[ -z "${MMRY_HOST:-}" && ! -f "$_mmry_marker" && "$_mmry_self_dir" == */plugins/cache/* ]]; then
+            _mmry_cache_home="${_mmry_self_dir%/plugins/cache/*}"
+            _mmry_marker_host=""
+            if [[ -n "$_mmry_cache_home" && -f "${_mmry_cache_home}/mmry/.mmry-host" ]]; then
+                { read -r _mmry_marker_host || true; } < "${_mmry_cache_home}/mmry/.mmry-host" 2>/dev/null
+                _mmry_marker_host="${_mmry_marker_host:0:64}"
+                _mmry_marker_host="${_mmry_marker_host//[[:space:]]/}"
+            fi
+            if [[ "$_mmry_marker_host" == "codex" ]]; then
+                MMRY_HOST="codex"
+                _MMRY_HOST_DIR_FROM_MARKER="$_mmry_cache_home"
+                export _MMRY_HOST_DIR_FROM_MARKER
             fi
         fi
 
@@ -330,7 +362,7 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
         # 3. The default Codex home, and any path segment that is literally ".codex".
         [[ -z "${MMRY_HOST:-}" && "$_mmry_self_dir" == */.codex/* ]] && MMRY_HOST="codex"
     fi
-    unset _mmry_self_dir _mmry_self_src _mmry_codex_home _mmry_marker _mmry_marker_host _mmry_marker_home 2>/dev/null || true
+    unset _mmry_self_dir _mmry_self_src _mmry_codex_home _mmry_marker _mmry_marker_host _mmry_marker_home _mmry_cache_home 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------------------------

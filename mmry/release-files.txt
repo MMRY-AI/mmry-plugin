@@ -100,9 +100,11 @@ tests/fixtures/session-init-2.15.2.sh
 tests/handlers/agent-name.bats
 tests/handlers/codex-formation-lead.bats
 tests/handlers/codex-foundation-parts.bats
+tests/handlers/codex-hook-trust.bats
 tests/handlers/codex-hook.bats
 tests/handlers/codex-missing-tools.bats
 tests/handlers/codex-qa-delta.bats
+tests/handlers/codex-self-update.bats
 tests/handlers/codex-session.bats
 tests/handlers/codex-start-budget.bats
 tests/handlers/codex-tools-first-output.bats
@@ -151,6 +153,7 @@ tests/helpers/self-update-release.bash
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
 tests/integration/api-health.bats
+tests/integration/codex-hook-trust-live.bats
 tests/integration/codex-session-live.bats
 tests/integration/database-command.bats
 tests/integration/entries.bats
@@ -240,6 +243,7 @@ tests/unit/codex-claude-config-isolation.bats
 tests/unit/config-loading.bats
 tests/unit/foundation-cache-write.bats
 tests/unit/foundation-verify.bats
+tests/unit/foundation-writer-codex.bats
 tests/unit/hook-payload-read.bats
 tests/unit/http-core.bats
 tests/unit/json-helpers.bats

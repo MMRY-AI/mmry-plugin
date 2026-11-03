@@ -139,7 +139,7 @@ Restart Claude Code. Claude will guide you through setup automatically. Restart 
 
 ## Auto-Updates
 
-When installed from the GitHub marketplace, the plugin updates automatically whenever a new version is pushed. No action needed.
+When installed from the MMRY AI marketplace, the plugin updates itself when Claude Code or Codex starts, checking for a new version at most once an hour. On Claude Code no action is needed. On OpenAI Codex, restart the Codex command-line tool after an update. It asks you to review MMRY AI's hooks once for that release: choose **Trust all and continue**, the same way as the first time.
 
 **Keep your own files outside the plugin.** Each update makes the plugin's folders (such as `hooks-handlers`, `commands` and `skills`) match the new release exactly, so any file you place inside one of them is removed when the plugin updates. Keep your own scripts, notes and commands outside the plugin, for example in your project folder, or in `~/.claude/commands` for your own Claude Code commands. Your MMRY AI sign-in (`mmry-config.json`) and the plugin's logs are kept.
 
