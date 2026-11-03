@@ -64,9 +64,9 @@ _refuses_then_passes() {
 
 @test "the real repository passes and the check says how many files it read" {
     run bash "$CHECK"
-    [[ "$status" -eq 0 ]]
-    [[ "$output" =~ ^OK:\ ([0-9]+)\ file\(s\)\ read ]]
-    [[ "${BASH_REMATCH[1]}" -ge 50 ]]
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" =~ ^OK:\ ([0-9]+)\ file\(s\)\ read ]] || return 1
+    [[ "${BASH_REMATCH[1]}" -ge 50 ]] || return 1
 }
 
 @test "SQL-backed planted in the Claude Code manifest is refused" {
@@ -122,19 +122,19 @@ _refuses_then_passes() {
 @test "the AI database product name is not refused" {
     _plant "mmry/README.md" "Your AI database remembers across sessions, computers and teams." >/dev/null
     run bash "$CHECK" "$COPY"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 }
 
 @test "a script comment naming SQL is not read" {
     _plant "mmry/hooks-handlers/session-start.sh" "# held as a T-SQL literal, never shown" >/dev/null
     run bash "$CHECK" "$COPY"
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -eq 0 ]] || return 1
 }
 
 @test "a root with nothing to read is a failed read, never a pass" {
     mkdir -p "$TEST_TMPDIR/empty"
     run bash "$CHECK" "$TEST_TMPDIR/empty"
-    [[ "$status" -eq 2 ]]
+    [[ "$status" -eq 2 ]] || return 1
 }
 
 @test "every manifest description is non-empty and within the length limit" {
@@ -147,11 +147,11 @@ _refuses_then_passes() {
     [[ -n "$d" && "$d" != "null" ]] || { echo "empty marketplace description"; return 1; }
     [[ "${#d}" -le 300 ]] || { echo "marketplace description over 300 characters (${#d})"; return 1; }
     d="$(jq -r '.description' "$PLUGIN_ROOT/.codex-plugin/plugin.json")"
-    [[ -n "$d" && "$d" != "null" && "${#d}" -le 300 ]]
+    [[ -n "$d" && "$d" != "null" && "${#d}" -le 300 ]] || return 1
     d="$(jq -r '.interface.shortDescription' "$PLUGIN_ROOT/.codex-plugin/plugin.json")"
-    [[ -n "$d" && "$d" != "null" && "${#d}" -le 100 ]]
+    [[ -n "$d" && "$d" != "null" && "${#d}" -le 100 ]] || return 1
     d="$(jq -r '.interface.longDescription' "$PLUGIN_ROOT/.codex-plugin/plugin.json")"
-    [[ -n "$d" && "$d" != "null" && "${#d}" -le 1200 ]]
+    [[ -n "$d" && "$d" != "null" && "${#d}" -le 1200 ]] || return 1
 }
 
 @test "CI runs the check" {
