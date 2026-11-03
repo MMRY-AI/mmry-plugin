@@ -511,6 +511,37 @@ _assert_prompts_deliver_nothing() {
     [[ "$ctx" == *"$PROD_DIRECTIVE"* ]] || { echo "control: the set was not delivered once the server was named: ${ctx:0:300}"; return 1; }
 }
 
+# THE WORKER'S OWN GATE, SEEN DIRECTLY (#32915, QA round 1, requirement 3). Through a prompt the
+# supervisor refuses an unidentified session before it defines, let alone starts, any worker, so the
+# two-prompt tests above cannot tell a worker with its gate from one without it: the worker-gate-off
+# mutation survived them (r2 scoring, 2026-11-03). Here the refresh-only worker is started exactly as
+# the supervisor's _mmry_fnd_refresh_check starts it, with the refresh due, a key, no server address,
+# and a service that would answer with a directive: it must fetch nothing and store nothing. The
+# control starts the same worker with the server named and sees the fetch and the stored set, so the
+# refusal is the gate and not the harness.
+#   _refresh_worker <config-file>
+_refresh_worker() {
+    env MMRY_CONFIG_FILE="$1" MMRY_API_URL="" MMRY_API_KEY="" MMRY_AUTH_METHOD="" MMRY_FOUNDATION_REFRESH_SECONDS=60 \
+        MMRY_FOUNDATION_WORKER=1 MMRY_FND_REFRESH_ONLY=1 MOCK_CURL_RESPONSE="$(_startup_body "$PROD_DIRECTIVE" "$PROD_NOTE")" \
+        bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 </dev/null >/dev/null 2>&1 || true
+    # The fetch the worker starts is detached from it; give it the time the two-prompt tests give.
+    sleep 6
+}
+@test "startup: fail closed - the refresh-only worker, started as the supervisor starts it for a session with no server address, fetches nothing and stores nothing" {
+    local fetched
+    _cfg "$TEST_TMPDIR/cfg-nourl-w.json" "" apikey "$PROD_KEY"
+    _refresh_worker "$TEST_TMPDIR/cfg-nourl-w.json"
+    ! ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "the worker stored a Foundation set for an unidentified session: $(ls "$TEST_TMPDIR"/mmry-foundation-set.*.md)"; return 1; }
+    fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
+    [[ "${fetched:-0}" == "0" ]] || { echo "the worker fetched the startup memories for an unidentified session ($fetched requests)"; return 1; }
+    # Control: the same worker, the server named, fetches and stores.
+    _cfg "$TEST_TMPDIR/cfg-whole-w.json" "$PROD_URL" apikey "$PROD_KEY"
+    _refresh_worker "$TEST_TMPDIR/cfg-whole-w.json"
+    ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "control: the worker stored no set once the server was named"; return 1; }
+    fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
+    [[ "${fetched:-0}" != "0" ]] || { echo "control: the worker fetched nothing once the server was named"; return 1; }
+}
+
 # ---------------------------------------------------------------------------------------------
 # TEST CASE 4, requirement 4. A machine-wide, unkeyed mmry-memories.md left by an older plugin is
 # never read, never named to the model, and never injected. It is left alone unless nothing has
