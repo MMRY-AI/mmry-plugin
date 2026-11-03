@@ -36,8 +36,8 @@ case "$CATEGORY" in
     # The live journey specs (#33030) are their own category. They need a second throwaway account
     # and, for Codex, a signed-in Codex CLI, which the CI integration job does not have; there
     # they would fail rather than skip, as a journey spec must. `journeys` runs them, `all` too.
-    integration) "$BATS" $(ls integration/*.bats | grep -v -e '/session-start-live\.bats$' -e '/codex-session-live\.bats$') ;;
-    journeys)    "$BATS" integration/session-start-live.bats integration/codex-session-live.bats ;;
+    integration) "$BATS" $(ls integration/*.bats | grep -v -e '/session-start-live\.bats$' -e '/codex-session-live\.bats$' -e '/codex-hook-trust-live\.bats$') ;;
+    journeys)    "$BATS" integration/session-start-live.bats integration/codex-session-live.bats integration/codex-hook-trust-live.bats ;;
     offline)     "$BATS" structural/ unit/ handlers/ e2e/ ;;
     all)         "$BATS" structural/ unit/ handlers/ e2e/ integration/ ;;
     *)

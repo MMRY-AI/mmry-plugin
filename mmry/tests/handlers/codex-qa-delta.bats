@@ -3,10 +3,12 @@
 # #31245 QA #1 delta, items 2 to 4 (formation 33, 2026-10-04): what an install leaves in the Codex
 # home, how a copy of the handlers knows it is on Codex, and the order the Foundation hook asks.
 #
-#   2. The .mmry-host marker is written into the plugin root too. lib-host.sh finds the marker
-#      beside the running copy, and took the home to be two levels up, which is right for the state
-#      directory and wrong for Codex's plugin cache. So the plugin-root marker names the home on a
-#      second line, believed only when the running script is inside it.
+#   2. A copy run from Codex's plugin cache knows it is Codex, and where its home is. That used to
+#      come from a second .mmry-host marker session-init.sh wrote into the plugin root, naming the
+#      home on a second line. Since #33062 fix round 4 nothing is written there (Codex fingerprints
+#      that folder for hook trust): lib-host.sh reads the marker of the home the cache belongs to,
+#      <home>/mmry/.mmry-host. A plugin-root marker an earlier release left is still read, and its
+#      second line is still believed only when the running script is inside it.
 #   3. The Foundation hook asks its off switch AFTER lib-host.sh has settled the host.
 #   4. The Claude Code installers are not copied into the Codex home.
 #
@@ -75,16 +77,13 @@ _host_of() {
 
 # --- 2. the marker in the plugin root -----------------------------------------------------------
 
-@test "qa2: session-init marks a plugin root inside the Codex home, naming the home" {
+@test "qa2: session-init writes no marker into a plugin root inside the Codex home, only into the home" {
+    # #33062 fix round 4: the plugin root is the folder Codex fingerprints for hook trust.
     local root; root="$(_plugin_at "$CX/plugins/cache/mmry-plugin/mmry")"
-    run env MMRY_HOST=codex CODEX_HOME="$CX" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root" \
-        bash "$root/hooks-handlers/session-init.sh"
+    run env MMRY_HOST=codex CODEX_HOME="$CX" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$root"         bash "$root/hooks-handlers/session-init.sh"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [ -f "$root/.mmry-host" ] || { echo "no marker in the plugin root"; return 1; }
-    local host home
-    { read -r host; read -r home; } < "$root/.mmry-host"
-    [ "$host" = "codex" ] || { echo "marker reads [$host]"; return 1; }
-    [ "$home" = "$CX" ] || { echo "marker names [$home], expected [$CX]"; return 1; }
+    [ ! -e "$root/.mmry-host" ] || { echo "a marker was written into the plugin root: $(cat "$root/.mmry-host")"; return 1; }
+    grep -qx 'codex' "$CX/mmry/.mmry-host" || { echo "the Codex home's own marker is missing"; return 1; }
 }
 
 @test "qa2: a plugin root outside the Codex home is never marked" {
@@ -102,10 +101,31 @@ _host_of() {
     run _host_of "$root"
     [ "$output" = "codex|$CX" ] || { echo "resolved [$output], expected [codex|$CX]"; return 1; }
 
-    # CONTROL: the marker is what did it. Without it the same copy resolves as Claude.
-    rm -f "$root/.mmry-host"
+    [ ! -e "$root/.mmry-host" ] || { echo "the answer came from a marker in the plugin root"; return 1; }
+
+    # CONTROL: the Codex home's marker is what did it. Without it the same copy resolves as Claude.
+    rm -f "$CX/mmry/.mmry-host"
     run _host_of "$root"
     [[ "$output" == claude\|* ]] || { echo "without the marker it still resolved [$output], so the test above proves nothing"; return 1; }
+}
+
+@test "qa2: a plugin-root marker an earlier release left still resolves the copy as Codex, in its home" {
+    local root; root="$(_plugin_at "$CX/plugins/cache/mmry-plugin/mmry")"
+    printf 'codex
+%s
+' "$CX" > "$root/.mmry-host"
+    run _host_of "$root"
+    [ "$output" = "codex|$CX" ] || { echo "resolved [$output], expected [codex|$CX]"; return 1; }
+}
+
+@test "qa2: req4 - a Claude Code plugin-cache copy resolves as Claude beside its home's own marker" {
+    # Claude Code's cache has the same shape under ~/.claude, and its home's marker says "claude".
+    local root; root="$(_plugin_at "$HOME/.claude/plugins/cache/mmry-plugin/mmry/2.15.6")"
+    mkdir -p "$HOME/.claude/mmry"
+    printf 'claude
+' > "$HOME/.claude/mmry/.mmry-host"
+    run _host_of "$root"
+    [ "$output" = "claude|$HOME/.claude" ] || { echo "resolved [$output], expected [claude|$HOME/.claude]"; return 1; }
 }
 
 @test "qa2: a marker naming a home the script is not inside is not believed" {
