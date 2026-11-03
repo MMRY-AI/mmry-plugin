@@ -234,6 +234,19 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 # the notice it delayed arrived past Codex's limit, which dropped it. The drain's pid goes to .pid:
 # the first prompt waits while that process is alive, because the work it is waiting for can take
 # far longer than any fixed wait (142 to 163 s there), and gives up at once when it is gone.
+# session-start.sh RUNS IN THE SUBSHELL THE PIPELINE ALREADY STARTED, NOT IN A NEW bash (#33062 fix round 7).
+# `bash session-start.sh` was one more bash.exe for Windows to load and start before a single memory was
+# read: with the subshells around it, 1.7 to 2.7 s of the start's budget, measured on a loaded machine.
+# A pipeline element is its own subshell already, so the file is read there instead. That subshell is
+# what `bash session-start.sh` was: it has its own exit, its own EXIT trap (this file's is not run in a
+# subshell), and session-start.sh sets its own options (-euo pipefail) as its first line. Two things
+# a new bash had that this shell might not, and that are set here: POSIX mode is off (this file is
+# started by sh, which on macOS is bash 3.2 in POSIX mode, where session-start.sh's process
+# substitutions would not parse), and session-start.sh finds itself by BASH_SOURCE, not $0.
+_mmry_codex_ss() {
+    set +o posix
+    source "${HANDLER_DIR}/session-start.sh"
+}
 _mmry_codex_drain() {
     local ans=""
     IFS= read -r -d '' ans
@@ -247,15 +260,15 @@ _mmry_codex_start() {
     exec 4>&1 >/dev/null
     if [[ -n "$_mmry_hand" ]]; then
         if [[ -n "$_mmry_in" ]]; then
-            bash "${HANDLER_DIR}/session-start.sh" < "$_mmry_in" 4>&- | _mmry_codex_drain >&4 4>&- &
+            _mmry_codex_ss < "$_mmry_in" 4>&- | _mmry_codex_drain >&4 4>&- &
         else
-            bash "${HANDLER_DIR}/session-start.sh" <&0 4>&- | _mmry_codex_drain >&4 4>&- &
+            _mmry_codex_ss <&0 4>&- | _mmry_codex_drain >&4 4>&- &
         fi
         printf '%s\n' "$!" > "${_mmry_hand}.pid" 2>/dev/null
     elif [[ -n "$_mmry_in" ]]; then
-        bash "${HANDLER_DIR}/session-start.sh" < "$_mmry_in" >&4 4>&- &
+        _mmry_codex_ss < "$_mmry_in" >&4 4>&- &
     else
-        bash "${HANDLER_DIR}/session-start.sh" <&0 >&4 4>&- &
+        _mmry_codex_ss <&0 >&4 4>&- &
     fi
     exec 4>&-
     wait || true
@@ -355,9 +368,9 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
             # written again, because a first prompt that came before this deadline may have delivered
             # the memories and removed it already.
             if [[ -n "$_mmry_late_file" ]]; then
-                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they have not arrived when you answer it, load them with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were late to load this time."}}'
+                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation. They are still loading and will be delivered with the user'"'"'s first message. If they have not arrived when you answer it, load them with the mmry_plugin memory_load tool before you answer. Then tell the user this sentence, word for word, before anything else: \"MMRY AI: your saved memories were late to load at the start of this conversation. They are loaded now.\" If they cannot be loaded, tell the user this sentence instead, word for word: \"MMRY AI: your saved memories could not be loaded for this conversation.\""}}'
             else
-                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user, before anything else, that their MMRY memories were not loaded this time because loading them took too long, and offer to load them now with the mmry_plugin memory_load tool."}}'
+                printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI could not load your memories in time for the start of this conversation, so this conversation started without them. Tell the user this sentence, word for word, before anything else: \"MMRY AI: your saved memories could not be loaded for this conversation.\" Then offer to load them now with the mmry_plugin memory_load tool."}}'
             fi
         else
             printf '%s' "$_mmry_out"

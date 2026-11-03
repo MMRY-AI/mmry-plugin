@@ -9,15 +9,17 @@ set -euo pipefail
 # root is that string up to its last slash: the `$(cd "$(dirname ...)/.." && pwd)` below is three
 # processes on Windows, 0.6 to 2.4 s of the start's budget there, measured. Only a POSIX absolute path
 # with no "." or ".." segment and no doubled slash is taken as it stands; Claude Code, and any other
-# spelling, go the old way.
-_mmry_ss_dir="${0%/*}"
-if [[ "${MMRY_HOST:-}" == "codex" && "$0" == /*/* && "$_mmry_ss_dir" == /?*/?* ]] \
+# spelling, go the old way. It is found by BASH_SOURCE, which is $0 when bash runs this file and this
+# file when codex-hook.sh reads it into its own subshell (fix round 7, the same round).
+_mmry_ss_self="${BASH_SOURCE[0]:-$0}"
+_mmry_ss_dir="${_mmry_ss_self%/*}"
+if [[ "${MMRY_HOST:-}" == "codex" && "$_mmry_ss_self" == /*/* && "$_mmry_ss_dir" == /?*/?* ]] \
     && [[ "${_mmry_ss_dir}/" != *//* && "${_mmry_ss_dir}/" != */./* && "${_mmry_ss_dir}/" != */../* ]]; then
     PLUGIN_ROOT="${_mmry_ss_dir%/*}"
 else
     PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fi
-unset _mmry_ss_dir
+unset _mmry_ss_dir _mmry_ss_self
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 
 # #31245: which assistant this session belongs to. Unset MMRY_HOST means Claude Code, so every
