@@ -69,6 +69,23 @@ add refresh-lock-unkeyed "the refresh lock goes back to the shared name" \
 add byref-unkeyed "the by-reference copy goes back to the session-or-token name, shared when there is neither (NEW-2)" \
     '_MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref.${_MMRY_FND_ACCT}${2:+.$2}.md"' \
     '_MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref${2:+.$2}.md"' "$K"
+# QA round 1 (#32915). Requirement 3: the per-prompt hook's gates. Requirement 2: the per-session markers.
+add worker-gate-off "the worker's refresh and delivery run for a session SessionStart refused as unidentified (QA probe3)" \
+    'if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" ]]; then
+    _mmry_fnd_nothing' \
+    'if false; then
+    _mmry_fnd_nothing' "$H"
+add supervisor-gate-off "the supervisor serves a set standing at the name an unidentified session computes" \
+    '    if ! mmry_foundation_identity_known_v; then
+        exit 0' \
+    '    if false; then
+        exit 0' "$H"
+add session-part-unkeyed "the account key is dropped from the id-less session part, so every marker made with no session id is shared again" \
+    '_MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"' \
+    '_MMRY_FND_SESSION_PART="${v:-none}"' "$K"
+add prepared-unkeyed "the prepared copy, claim, result and stored check go back to the bare token, shared across accounts with no session id" \
+    '    _FND_KEY="$_MMRY_FND_SESSION_PART"' \
+    '    _FND_KEY="${_FND_STAMP:-none}"' "$H"
 
 run_suite() { ( cd "$1/tests" && PLUGIN_ROOT="$1" ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 

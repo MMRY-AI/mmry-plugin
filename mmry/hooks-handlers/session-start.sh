@@ -252,7 +252,9 @@ fi
 # NAMED BY THIS SESSION'S ACCOUNT AND SERVER (#32889), as the set is: another account's session starting
 # on this machine writes its own marker and never this one.
 printf '%s' "$SESSION_ID" > "$(mmry_foundation_session_path "$MMRY_TMPDIR")" 2>/dev/null || true
-rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
+# The id-less delivery record is this account's own now, mmry-foundation.status.<key>.none (#32915, QA
+# round 1, requirement 2); the bare name an older plugin writes is cleared as it always was.
+rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$(mmry_foundation_record_path "$MMRY_TMPDIR" "")" 2>/dev/null || true
 # THE MACHINE-WIDE COPY AN OLDER PLUGIN LEFT IS IGNORED, AND REMOVED ONLY WHEN IT IS SAFE (#32889). The
 # unkeyed mmry-foundation-set.md and mmry-foundation.session are never read by this version, so an
 # upgrade cannot inject what they hold. They are not removed on sight: an older plugin still running in

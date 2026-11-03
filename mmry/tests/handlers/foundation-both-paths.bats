@@ -131,7 +131,8 @@ _big_response() {
     [[ "$(fnd_set_record "$CACHE")" == *'entries=10 '* ]] || return 1
 
     bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" < /dev/null >/dev/null
-    run cat "$TEST_TMPDIR/mmry-foundation.status"
+    # The id-less delivery record is named by the account since #32915 (fnd_status_file).
+    run cat "$(fnd_status_file)"
     [[ "$output" == *'entries=10'* ]]
 }
 

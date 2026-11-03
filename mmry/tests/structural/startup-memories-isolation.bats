@@ -484,6 +484,33 @@ _assert_prompts_deliver_nothing() {
     _assert_prompts_deliver_nothing claude-nourl-02 "$TEST_TMPDIR/cfg-absenturl.json" "absent server address"
 }
 
+# A set ALREADY STANDING at the name an unidentified session computes (an older plugin's refresh left
+# it, or something planted it) is not served either. The per-prompt hook's prepared path reads the set
+# file straight from disk, without the worker, so the gate has to hold there too, and the test above
+# cannot see it: it never has a set on disk. The control proves the same planted set IS delivered
+# once the server is named, so the refusal is the gate and not the harness.
+@test "startup: fail closed - a Foundation set left at the name an unidentified session would compute is not delivered by a prompt, and is once the server is named" {
+    local out ctx acct set body
+    _plant_shared
+    body="$TEST_TMPDIR/staged-unidentified.md"
+    printf -- '- %s\n' "$PROD_DIRECTIVE" > "$body"
+    printf '{\n  "authMethod": "apikey",\n  "apiKey": "%s"\n}\n' "$PROD_KEY" > "$TEST_TMPDIR/cfg-absenturl2.json"
+    acct="$(FND_CONFIG_OVERRIDE="$TEST_TMPDIR/cfg-absenturl2.json" fnd_acct)"
+    set="$TEST_TMPDIR/mmry-foundation-set.${acct}.md"
+    fnd_seal "$body" 1 "$set" "$acct"
+    out="$(_claude_prompt_cfg claude-nourl-03 "$TEST_TMPDIR/cfg-absenturl2.json" 0)"; ctx="$(_ctx "$out")"
+    [[ "$ctx" != *"$PROD_DIRECTIVE"* && "$ctx" != *"FOUNDATION memories"* ]] || { echo "a set at the unidentified name was delivered: ${ctx:0:300}"; return 1; }
+    [[ -z "$ctx" ]] || { echo "the prompt said something for an unidentified session: ${ctx:0:300}"; return 1; }
+    [[ "$(_file "$TEST_TMPDIR/mmry-memories.md")" == "$_PLANTED" ]] || { echo "the planted shared file was rewritten"; return 1; }
+    # Control: the same set, sealed for the identity that names the server, is delivered by the same harness.
+    _cfg "$TEST_TMPDIR/cfg-whole2.json" "$PROD_URL" apikey "$PROD_KEY"
+    acct="$(FND_CONFIG_OVERRIDE="$TEST_TMPDIR/cfg-whole2.json" fnd_acct)"
+    set="$TEST_TMPDIR/mmry-foundation-set.${acct}.md"
+    fnd_seal "$body" 1 "$set" "$acct"
+    out="$(_claude_prompt_cfg claude-whole-03 "$TEST_TMPDIR/cfg-whole2.json" 0)"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$PROD_DIRECTIVE"* ]] || { echo "control: the set was not delivered once the server was named: ${ctx:0:300}"; return 1; }
+}
+
 # ---------------------------------------------------------------------------------------------
 # TEST CASE 4, requirement 4. A machine-wide, unkeyed mmry-memories.md left by an older plugin is
 # never read, never named to the model, and never injected. It is left alone unless nothing has

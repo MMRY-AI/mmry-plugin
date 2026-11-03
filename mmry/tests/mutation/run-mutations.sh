@@ -453,7 +453,7 @@ mutate_m28() { _mrep "$1/$HANDLER_REL" '        && { mmry_foundation_restore_nul
 targets_m28="$PARTS_TESTS"
 desc_m28="#31583 R3, #31597 the by-reference copy is taken from the file again, not from the set this turn verified"
 
-mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"' '            :'; }
+mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FND_OUTF}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"' '            :'; }
 targets_m29="$PARTS_TESTS"
 desc_m29="#31583 R4 a part that leaves early records nothing, so an earlier prompt's record counts"
 

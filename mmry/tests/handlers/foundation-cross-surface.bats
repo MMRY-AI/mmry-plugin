@@ -20,6 +20,11 @@ setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # A whole identity for the session under test (#32915, requirement 3): the hook now delivers
+    # nothing for a session that cannot name its account and server, as SessionStart loads nothing
+    # for one, so a suite that only plants a set on disk must say whose it is. The daily refresh is
+    # off, so no planted set is refreshed from the mock behind it.
+    export MMRY_API_URL="http://localhost:5291" MMRY_API_KEY="test-api-key-32915" MMRY_FOUNDATION_REFRESH_SECONDS=0
     SET="$(fnd_set_file)"
     CFG="$TEST_TMPDIR/mmry-config.json"
     export MMRY_CONFIG_FILE="$CFG"
@@ -138,7 +143,7 @@ _assert_agree() {
 
 @test "cross-surface: #31583 4c CONTROL a brand new session with nothing on disk is silent on both" {
     printf '{"foundationReinject": true}\n' > "$CFG"
-    rm -f "$CACHE" "$SET" "$TEST_TMPDIR/mmry-foundation.status"
+    rm -f "$CACHE" "$SET" "$(fnd_status_file)"
 
     run bash "$HOOK"
     [ "$status" -eq 0 ]
@@ -156,7 +161,7 @@ _assert_agree() {
     # Exactly the state of any new session whose SessionStart fetch failed on a machine an
     # earlier session used. Before the fix this produced 932 characters of "your directives
     # have disappeared", on every prompt, forever, having never delivered anything.
-    printf 'session-from-yesterday ok entries=2 bytes=45\n' > "$TEST_TMPDIR/mmry-foundation.status"
+    printf 'session-from-yesterday ok entries=2 bytes=45\n' > "$(fnd_status_file)"
 
     local i
     for i in 1 2 3; do
@@ -179,7 +184,7 @@ _assert_agree() {
     run bash "$HOOK"
     [[ "$output" == *'Eric builds MMRY'* ]] || return 1
 
-    [ -e "$TEST_TMPDIR/mmry-foundation.status" ]
+    [ -e "$(fnd_status_file)" ]
     run bash "$STATUSCMD"
     [[ "$output" == *'Last sent'* ]] || return 1
     [[ "$output" != *'nothing yet in this session'* ]]
@@ -215,15 +220,15 @@ _assert_agree() {
     _seed_valid_cache
     run bash "$HOOK"
     [[ "$output" == *'Eric builds MMRY'* ]] || return 1
-    [ -e "$TEST_TMPDIR/mmry-foundation.status" ]
+    [ -e "$(fnd_status_file)" ]
 
     # The same turn again, with nobody reading it.
-    rm -f "$TEST_TMPDIR/mmry-foundation.status"
+    rm -f "$(fnd_status_file)"
     bash "$HOOK" 2>/dev/null | head -c 0 || true
     sleep 1
 
-    if [ -e "$TEST_TMPDIR/mmry-foundation.status" ]; then
-        echo "a turn that delivered nothing was recorded as delivered: $(cat "$TEST_TMPDIR/mmry-foundation.status")"
+    if [ -e "$(fnd_status_file)" ]; then
+        echo "a turn that delivered nothing was recorded as delivered: $(cat "$(fnd_status_file)")"
         return 1
     fi
     run bash "$STATUSCMD"
@@ -338,7 +343,7 @@ _slow_cksum_dir() {
 @test "cross-surface: #31583 a valid copy with another session record is not reported as delivered here" {
     printf '{"foundationReinject": true}\n' > "$CFG"
     _seed_valid_cache
-    printf 'session-from-yesterday ok entries=2 bytes=45\n' > "$TEST_TMPDIR/mmry-foundation.status"
+    printf 'session-from-yesterday ok entries=2 bytes=45\n' > "$(fnd_status_file)"
 
     run bash "$STATUSCMD"
     [[ "$output" == *'Stored copy:  VERIFIED'* ]] || return 1

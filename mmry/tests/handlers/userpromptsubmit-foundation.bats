@@ -9,6 +9,11 @@ load '../helpers/foundation-set'
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # A whole identity for the session under test (#32915, requirement 3): the hook now delivers
+    # nothing for a session that cannot name its account and server, as SessionStart loads nothing
+    # for one, so a suite that only plants a set on disk must say whose it is. The daily refresh is
+    # off unless a test turns it on, so no test's planted set is refreshed from the mock behind it.
+    export MMRY_API_URL="http://localhost:5291" MMRY_API_KEY="test-api-key-32915" MMRY_FOUNDATION_REFRESH_SECONDS=0
     SET="$(fnd_set_file)"
     # Every real session has one of these: SessionStart writes the session id here and clears
     # the delivery record beside it (#31583 QA round 4, finding 4c). Without it the handler
@@ -307,9 +312,10 @@ _big_foundation_set() {
     [[ "$output" != *'systemMessage'* ]] || return 1
     [[ "$output" == *'FinalDirective'* ]] || return 1
 
-    # Delivered count against the account's true total, as the ticket asks for.
-    [ -f "$TEST_TMPDIR/mmry-foundation.status" ]
-    run cat "$TEST_TMPDIR/mmry-foundation.status"
+    # Delivered count against the account's true total, as the ticket asks for. The id-less delivery
+    # record is named by the account since #32915 (fnd_status_file).
+    [ -f "$(fnd_status_file)" ]
+    run cat "$(fnd_status_file)"
     [[ "$output" == *"bytes=$total"* ]] || return 1
     [[ "$output" == *'entries=21'* ]]
 }

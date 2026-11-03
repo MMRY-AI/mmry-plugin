@@ -280,6 +280,16 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     fi
     export MMRY_FND_SID
 fi
+# THE DELIVERY RECORD AND THE OUTCOME RECORDS ARE NAMED BY THIS SESSION'S ID, and with no id by this
+# session's ACCOUNT (#32915, QA round 1, requirement 2): mmry-foundation.status.<part> and
+# mmry-foundation.outcome.<part>[.<part number>], where <part> is the id, else <account key>.none
+# (lib-foundation-key.sh, mmry_foundation_session_part_v). With no id these were one bare name for
+# every session on the machine, whatever its account. Computed once here, where the id is settled,
+# for the supervisor and the worker alike; the client's mmry_foundation_record_path and
+# mmry_foundation_outcome_path spell the same names for the status command.
+mmry_foundation_session_part_v "${MMRY_FND_SID:-}"
+_FND_SIDPART="$_MMRY_FND_SESSION_PART"
+_FND_OUTF="${_FOUND_TMPDIR}/mmry-foundation.outcome.${_FND_SIDPART}"
 
 if (( MMRY_FND_PART > 1 )); then
     _fnd_m="$_FND_SETF"
@@ -296,7 +306,7 @@ if (( MMRY_FND_PART > 1 )); then
         if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _fnd_qtok="${MMRY_FND_SID:-}"
             [[ -z "$_fnd_qtok" && -f "$_FND_SESSF" ]] && { _fnd_qtok="$(<"$_FND_SESSF")" 2>/dev/null || _fnd_qtok=""; }
-            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"
+            _mmry_fnd_write "${_FND_OUTF}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"
         fi
         exit 0
     fi
@@ -430,7 +440,7 @@ _mmry_outcome() {
     # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
     # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
     # could catch half a line, and a FIFO left at the path would have blocked the write.
-    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$_FND_OLINE"
+    _mmry_fnd_write "${_FND_OUTF}${_SFX}" "$_FND_OLINE"
     return 0
 }
 # The outcome record's line for outcome $1, into _FND_OLINE: "<session> <start second> <outcome>"
@@ -460,7 +470,7 @@ _mmry_fnd_outcome_line() {
 # one thing here that can wait: a firing running late leaves it to the next quicker prompt (it is made at
 # most once in 300 s anyway), so the time that process costs is never taken from a prompt near its limit.
 _mmry_fnd_finish() {
-    local out="$1" cut="${2:-}" o="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    local out="$1" cut="${2:-}" o="${_FND_OUTF}${_SFX}"
     set --
     [[ "$cut" == cut ]] && _mmry_fnd_mark_cut
     if [[ -n "$out" ]]; then
@@ -495,7 +505,7 @@ _mmry_fnd_finish() {
 # them on top of the deadline, outside every bound the hook has. The deadline now ends this wait too,
 # as it ends every other wait in the hook, and the polling waits without a process (_mmry_fnd_nap).
 _mmry_fnd_part1_said() {
-    local f="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}" tok="${MMRY_FND_SID:-}"
+    local f="$_FND_OUTF" tok="${MMRY_FND_SID:-}"
     local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t end=$(( SECONDS + $1 ))
     _FND_P1=""
     (( end > DEADLINE )) && end=$DEADLINE
@@ -747,8 +757,11 @@ _mmry_fnd_key() {
     if [[ -z "$_FND_STAMP" && -f "$f" && -r "$f" ]]; then
         _FND_STAMP="$(<"$f")" 2>/dev/null || _FND_STAMP=""
     fi
-    _FND_KEY="$_FND_STAMP"
-    [[ "$_FND_KEY" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || _FND_KEY="none"
+    # The account key goes in front of "unknown" and of no id at all (#32915, QA round 1, requirement
+    # 2): both are names every id-less session would use, so two accounts overwrote each other's
+    # prepared copy at .mmry-foundation-prepared.unknown. A real id stands alone, as it always did.
+    mmry_foundation_session_part_v "$_FND_STAMP"
+    _FND_KEY="$_MMRY_FND_SESSION_PART"
 }
 
 # What part $1 of $2, version $3, says, around its slice $4, into _FND_PAYLOAD. The one place the
@@ -1210,6 +1223,20 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         exit 0
     fi
 
+    # A SESSION THAT CANNOT SAY WHOSE DIRECTIVES THESE ARE DELIVERS NONE (#32915, independent QA of
+    # round 1, requirement 3). SessionStart refuses a session whose configuration names no server
+    # address (the client would guess its default server) and loads nothing for it. This hook then
+    # served whatever stood at the name that guess produces: its prepared path reads the set file
+    # straight from disk, and its worker's daily refresh fetched from the guessed server and stored
+    # the set, so from the second prompt the directives arrived one prompt after the user was told
+    # nothing was loaded (QA probe3). The same question SessionStart asks, asked here before anything
+    # can be served or started, with the library's scan of the environment and the config and no
+    # process; the worker, which loads the client, asks the whole of it (the credential must be an
+    # API key as well) before its refresh. Silent, as the off switch above is: SessionStart said it.
+    if ! mmry_foundation_identity_known_v; then
+        exit 0
+    fi
+
     # Defined here, after the off switch, so nothing that can start a worker comes before it (#31893;
     # tests/structural/hook-budgets.bats checks the order). Indented as the supervisor is.
     # THE DAILY REFRESH, DECIDED OFF THE PROMPT'S PATH (#31893). Part 1's worker used to decide it on every
@@ -1309,7 +1336,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     #
     # The worker now writes a PENDING record, scoped to this supervisor, and only this process
     # promotes it, and only after its own emit has returned success.
-    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status${MMRY_FND_SID:+.$MMRY_FND_SID}"
+    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status.${_FND_SIDPART}"
     _PENDING="${_STATUS}.pending.$$"
     # A file named for this process cannot be there already unless a pid was reused, so it is
     # removed only if it is (#31893): `rm` is a process, and this ran on every part of every prompt.
@@ -1789,6 +1816,18 @@ mmry_foundation_log_name_v "$MMRY_TMPDIR"; LOG="$_MMRY_FND_LOG_NAME"
 _mmry_fnd_nothing() { printf '@@MMRY-NONE %s 0@@' "$MMRY_FND_PART"; exit 0; }
 MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && _mmry_fnd_nothing
 
+# THE IDENTITY GATE SESSIONSTART APPLIES, BEFORE THE REFRESH AND BEFORE ANY DELIVERY (#32915,
+# independent QA of round 1, requirement 3). A session SessionStart refused as unidentified (no
+# server address given, so the client fell back to its default server; or a credential that is not
+# an API key) must get nothing from this hook either. The refresh below used to run for it as long as
+# a key was set: it fetched from the default server, stored the set under the key that guess
+# produces, and the next prompt delivered it. The supervisor asks the library's half of this question
+# before it spawns this worker; here, with the config loaded, the whole of it is asked, and the
+# refresh-only worker the supervisor starts detached passes through this line too.
+if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" ]]; then
+    _mmry_fnd_nothing
+fi
+
 # TTL-gated BACKGROUND refresh (#30579): if the cache is older than the refresh window,
 # re-fetch Foundation memories in the background so an admin-added memory propagates without
 # a Claude restart. This is non-blocking - the CURRENT prompt still uses the existing cache;
@@ -1841,7 +1880,7 @@ fi
 # Written on every verified injection so /mmry:foundation-status can answer "are my
 # directives reaching my assistants right now" without anyone reading a cache file
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
-STATUS="${MMRY_TMPDIR}/mmry-foundation.status${MMRY_FND_SID:+.$MMRY_FND_SID}"
+STATUS="$(mmry_foundation_record_path "$MMRY_TMPDIR" "${MMRY_FND_SID:-}")"
 # Where the worker writes its delivery record. Under the supervisor this is a pending file the
 # supervisor promotes after a successful emit; run on its own, as the unit tests do, the
 # worker has no supervisor and writes the record directly.

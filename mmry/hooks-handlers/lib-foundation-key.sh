@@ -248,3 +248,25 @@ mmry_foundation_byref_name_v() {
     mmry_foundation_account_key_v
     _MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref.${_MMRY_FND_ACCT}${2:+.$2}.md"
 }
+
+# THE SESSION PART OF A PER-SESSION MARKER'S NAME (#32915, independent QA of round 1, requirement 2),
+# into _MMRY_FND_SESSION_PART. The per-prompt hook's prepared copy, claim, result and stored markers
+# are named by the session: the payload's id, else the token SessionStart left, which is the literal
+# "unknown" for a session that had no id from anywhere. The delivery record and the per-part outcomes
+# are named by the payload's id alone. A real id is unique to its session and stands alone. "unknown",
+# or no id at all, is a name every id-less session on the machine would use, whatever its account, so
+# QA's probe saw account B's prompt replace account A's prepared copy, directive text and all, at
+# .mmry-foundation-prepared.unknown. Those parts now carry the account key in front, as the
+# by-reference copy's name already did: <key>.unknown, or <key>.none for no id at all. Filtered as
+# mmry_foundation_sid filters an id: only characters safe in a file name, no dot, else no id at all.
+#   mmry_foundation_session_part_v [sid-or-token]   -> <sid>, or <key>.unknown, or <key>.none
+mmry_foundation_session_part_v() {
+    local v="${1:-}"
+    [[ "$v" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || v=""
+    if [[ -n "$v" && "$v" != "unknown" ]]; then
+        _MMRY_FND_SESSION_PART="$v"
+        return 0
+    fi
+    mmry_foundation_account_key_v
+    _MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"
+}
