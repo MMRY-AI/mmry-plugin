@@ -68,6 +68,7 @@ _MMRY_FND_DEFAULT_URL="https://mmryai.com"
 _MMRY_FND_HASH=""
 _MMRY_FND_ID_URL=""
 _MMRY_FND_ID_KEY=""
+_MMRY_FND_ID_AUTH=""
 _MMRY_FND_CFG=""
 _MMRY_FND_ACCT=""
 _MMRY_FND_ACCT_FOR=""
@@ -139,8 +140,8 @@ _mmry_fnd_config_file_v() {
 # names one (an unconfigured session, which has no copy to read anyway). The URL is lowercased and
 # stripped of trailing slashes so that two spellings of one server are one key.
 mmry_foundation_identity_v() {
-    local url="${MMRY_API_URL:-}" key="${MMRY_API_KEY:-}" txt=""
-    if [[ -z "$url" || -z "$key" ]]; then
+    local url="${MMRY_API_URL:-}" key="${MMRY_API_KEY:-}" auth="${MMRY_AUTH_METHOD:-}" txt=""
+    if [[ -z "$url" || -z "$key" || -z "$auth" ]]; then
         _mmry_fnd_config_file_v
         if [[ -n "$_MMRY_FND_CFG" && -r "$_MMRY_FND_CFG" ]]; then
             # read -d '' takes the whole file with no subshell; it returns 1 at end of input even when it
@@ -152,8 +153,14 @@ mmry_foundation_identity_v() {
             if [[ -z "$key" && "$txt" =~ \"apiKey\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
                 key="${BASH_REMATCH[1]}"
             fi
+            if [[ -z "$auth" && "$txt" =~ \"authMethod\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+                auth="${BASH_REMATCH[1]}"
+            fi
         fi
     fi
+    # The client's rule (mmry_load_config): a credential with no method named is an API key.
+    [[ -z "$auth" && -n "$key" ]] && auth="apikey"
+    _MMRY_FND_ID_AUTH="$auth"
     _MMRY_FND_ID_URL_GIVEN=0
     [[ -n "$url" ]] && _MMRY_FND_ID_URL_GIVEN=1
     [[ -n "$url" ]] || url="$_MMRY_FND_DEFAULT_URL"
@@ -208,6 +215,19 @@ mmry_foundation_identity_known_v() {
     # and the scan above decides.
     [[ -n "${_MMRY_CFG_URL_GIVEN:-}" ]] && given="$_MMRY_CFG_URL_GIVEN"
     [[ -n "$_MMRY_FND_ID_KEY" && "$given" == 1 ]]
+}
+
+# WHETHER THE CREDENTIAL IS AN API KEY (#32915, QA round 2, F-C), the other half of the question
+# SessionStart asks before it loads anything (MMRY_AUTH_METHOD must be "apikey"). The set's name
+# hashes the server address and the credential STRING, whatever the method, so an API-key session
+# stores a set at the very name an OAuth session configured with that string computes; the
+# per-prompt supervisor asked only whether the server was given, and served that set to a session
+# SessionStart had refused (QA probe4). The method comes from the environment, else the same text
+# scan of the config as above, with the client's rule that a credential with no method named is an
+# API key: the same answer the client gives once it has loaded the config, with no process.
+mmry_foundation_auth_apikey_v() {
+    mmry_foundation_identity_v
+    [[ "$_MMRY_FND_ID_AUTH" == "apikey" ]]
 }
 
 # THE STARTUP MEMORIES FILE (#32915): "<dir>/mmry-memories.<key>.<session id>.md", or without the

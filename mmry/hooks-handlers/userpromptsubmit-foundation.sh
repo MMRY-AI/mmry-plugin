@@ -1231,9 +1231,13 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # the set, so from the second prompt the directives arrived one prompt after the user was told
     # nothing was loaded (QA probe3). The same question SessionStart asks, asked here before anything
     # can be served or started, with the library's scan of the environment and the config and no
-    # process; the worker, which loads the client, asks the whole of it (the credential must be an
-    # API key as well) before its refresh. Silent, as the off switch above is: SessionStart said it.
-    if ! mmry_foundation_identity_known_v; then
+    # process. BOTH HALVES (#32915, QA round 2, F-C): the server given, and the credential an API
+    # key. The set's name hashes the server and the credential string whatever the method, so an
+    # API-key session's set stands at the name an OAuth session with that string computes, and the
+    # server half alone served it to a session SessionStart had refused (QA probe4). The worker,
+    # which loads the client, asks the same two before its refresh. Silent, as the off switch above
+    # is: SessionStart said it.
+    if ! mmry_foundation_identity_known_v || ! mmry_foundation_auth_apikey_v; then
         exit 0
     fi
 

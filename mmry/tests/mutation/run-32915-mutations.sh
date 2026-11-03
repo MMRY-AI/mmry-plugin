@@ -76,7 +76,7 @@ add worker-gate-off "the worker's refresh and delivery run for a session Session
     'if false; then
     _mmry_fnd_nothing' "$H"
 add supervisor-gate-off "the supervisor serves a set standing at the name an unidentified session computes" \
-    '    if ! mmry_foundation_identity_known_v; then
+    '    if ! mmry_foundation_identity_known_v || ! mmry_foundation_auth_apikey_v; then
         exit 0' \
     '    if false; then
         exit 0' "$H"
@@ -99,6 +99,15 @@ add byref-told-unkeyed "the by-reference told marker goes back to the id-or-noth
 add empty-told-unkeyed "SessionStart writes the empty-set told marker back at the bare shared name" \
     '"${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}"' \
     '"${MMRY_TMPDIR}/.mmry-foundation-empty-told"' "$S"
+# QA round 2 (#32915). F-C: the auth-method half of the supervisor's gate.
+add supervisor-auth-dropped "the supervisor asks only whether the server was given, so an OAuth session refused at SessionStart is served the set an API-key session stored at the same name (QA probe4)" \
+    '    if ! mmry_foundation_identity_known_v || ! mmry_foundation_auth_apikey_v; then
+        exit 0' \
+    '    if ! mmry_foundation_identity_known_v; then
+        exit 0' "$H"
+add auth-oauth-as-apikey "the library takes any credential for an API key, so the auth method named in the config never refuses" \
+    '    [[ -z "$auth" && -n "$key" ]] && auth="apikey"' \
+    '    [[ -n "$key" ]] && auth="apikey"' "$K"
 # QA round 2 (#32915). F-A: the Codex writer's quick path.
 add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the token itself, so two Codex accounts with no session id share mmry-foundation.stored.unknown (QA probe5)" \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
