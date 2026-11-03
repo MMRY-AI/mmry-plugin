@@ -242,6 +242,7 @@ tests/unit/codex-claude-config-isolation.bats
 tests/unit/config-loading.bats
 tests/unit/foundation-cache-write.bats
 tests/unit/foundation-verify.bats
+tests/unit/foundation-writer-codex.bats
 tests/unit/hook-payload-read.bats
 tests/unit/http-core.bats
 tests/unit/json-helpers.bats
