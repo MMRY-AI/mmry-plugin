@@ -27,7 +27,29 @@ _mmry_client_dir="${BASH_SOURCE[0]%/*}"
 source "${_mmry_client_dir}/lib-foundation-key.sh"
 if [[ "${MMRY_CLIENT_DEFINE_ONLY:-}" != "1" ]]; then
 source "${_mmry_client_dir}/lib-jq.sh"
-mmry_resolve_jq || true
+# ON CODEX, jq IS PROVED BY THE QUESTION THE FOUNDATION WRITER ASKS ANYWAY (#33062 fix round 7). The
+# writer runs jq once to learn whether it writes carriage returns; that answer is also proof that jq
+# runs, parses and prints, which is more than `jq --version` proves. So on Codex the likely jq
+# (mmry_jq_candidate, no process) is asked that question here, once, and the writer reuses the answer
+# (_MMRY_JQ_CR): one jq on Windows instead of two, 0.5 to 1.5 s of the session start's budget there,
+# measured. A candidate that does not answer goes to mmry_resolve_jq, the old way. Claude Code unchanged.
+_mmry_jq_codex_probe() {
+    local cand probe
+    mmry_jq_candidate || return 1
+    cand="${_MMRY_JQ_CANDIDATE:-}"
+    [[ -n "$cand" ]] || return 1
+    probe="$("$cand" -j . <<<'"x\ny"' 2>/dev/null)" || return 1
+    [[ "$probe" == x$'\n'y || "$probe" == x$'\r\n'y ]] || return 1
+    MMRY_JQ="$cand"; export MMRY_JQ; _MMRY_JQ_VERIFIED="$cand"
+    _MMRY_JQ_CR_FOR="$cand"; _MMRY_JQ_CR=0
+    [[ "$probe" == *$'\r'* ]] && _MMRY_JQ_CR=1
+    return 0
+}
+if [[ "${_MMRY_HOST_V:-}" == "codex" ]] && ! [[ -n "${MMRY_JQ:-}" && "${_MMRY_JQ_VERIFIED:-}" == "$MMRY_JQ" ]]; then
+    _mmry_jq_codex_probe || mmry_resolve_jq || true
+else
+    mmry_resolve_jq || true
+fi
 fi
 unset _mmry_client_dir
 
@@ -108,11 +130,10 @@ _mmry_urlencode() {
 #
 # MMRY_HOST is the answer, and reading it costs no process. codex-hook.sh exports it for every
 # hook. For anything else, lib-host.sh sets it in this shell when it is sourced and can tell it is
-# on Codex: the .mmry-host marker beside the running copy (the state directory, and since #31245 QA
-# the plugin root too), a script inside an exported CODEX_HOME, or a script under a .codex
-# directory. A copy outside all three is not recognised as Codex. That was a plugin-cache copy with
-# CODEX_HOME unset, which no shipped instruction leads to, and which the plugin-root marker now
-# covers. The resolver keys on MMRY_HOST alone (_mmry_host_resolve), so asking it as well added
+# on Codex: the .mmry-host marker beside the running copy (the state directory), or for a copy in a
+# plugin cache the marker of the home that cache belongs to (#33062 fix round 4; until then a second
+# marker in the plugin root, which broke Codex's hook trust), a script inside an exported CODEX_HOME,
+# or a script under a .codex directory. A copy outside all of these is not recognised as Codex. The resolver keys on MMRY_HOST alone (_mmry_host_resolve), so asking it as well added
 # nothing. The mutation
 # harness proved that: a mutant that dropped the resolver branch survived every test, because no
 # reachable state tells the two apart.
@@ -712,8 +733,65 @@ mmry_write_foundation_cache() {
     # it, so it is used only when this jq is seen to convert: one probe, here, where the set is
     # written, never on the per-prompt path.
     local jqb="" probe
-    probe="$(printf '%s' '"x\ny"' | "$MMRY_JQ" -j . 2>/dev/null)"
+    if [[ "${_MMRY_HOST_V:-}" == "codex" && "${_MMRY_JQ_CR_FOR:-}" == "$MMRY_JQ" ]]; then
+        # Asked already, of this jq, when it was chosen (_mmry_jq_codex_probe above).
+        probe=""
+        [[ "${_MMRY_JQ_CR:-0}" == "1" ]] && probe=$'\r'
+    elif [[ "${_MMRY_HOST_V:-}" == "codex" ]]; then
+        probe="$("$MMRY_JQ" -j . <<<'"x\ny"' 2>/dev/null)"
+    else
+        probe="$(printf '%s' '"x\ny"' | "$MMRY_JQ" -j . 2>/dev/null)"
+    fi
     [[ "$probe" == *$'\r'* ]] && jqb="-b"
+
+    # ON CODEX, THE SAME FILE WITH FEWER PROCESSES (#33062 fix round 7). This writer runs inside Codex's
+    # session start, before the memories are handed over, and below it is about twenty processes: on
+    # Windows 3 to 5 s of the start's budget, measured. So on Codex: ONE jq gives the entry count and the
+    # set (the count on the first line), into the temp file; the set is read back with the read builtin,
+    # which holds it whole because tr has already turned every NUL into 0xFF; the temp file is rewritten
+    # with the set alone for cksum, then with the record line, the set and the trailer, and renamed. No
+    # cat, no second jq, no rm. Byte for byte the file the steps below write (unit test:
+    # foundation-writer-codex.bats). Claude Code keeps the steps below.
+    # The same jq also gives the response's own length, first, into MMRY_FND_RESPONSE_LENGTH: Codex's
+    # session start reports it as the number of memories loaded, and would otherwise start a jq for it.
+    if [[ "${_MMRY_HOST_V:-}" == "codex" ]]; then
+        local set_text="" total=""
+        MMRY_FND_RESPONSE_LENGTH=""
+        if ! "$MMRY_JQ" ${jqb:+"$jqb"} -r 'length as $n | [.[] | select(.memoryTier == "Foundation")] | ($n | tostring), (length | tostring), (.[] | "- \(.topic): \(.content)")' <<<"$resp" \
+            | LC_ALL=C tr '\000' '\377' \
+            > "$tmp" 2>/dev/null
+        then
+            rm -f "$tmp" 2>/dev/null
+            return 1
+        fi
+        { IFS= read -r total; IFS= read -r entries; IFS= read -r -d '' set_text; } < "$tmp" 2>/dev/null || true
+        total="${total%$'\r'}"
+        entries="${entries%$'\r'}"
+        [[ "$total" =~ ^[0-9]+$ && "$entries" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
+        MMRY_FND_RESPONSE_LENGTH="$total"
+        printf '%s' "$set_text" > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+        read -r sum count < <(cksum < "$tmp" 2>/dev/null)
+        [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
+        mmry_foundation_account_key_v
+        if ! { printf 'mmry-foundation v3 entries=%s bytes=%s cksum=%s acct=%s\n' "$entries" "$count" "$sum" "$_MMRY_FND_ACCT" \
+               && printf '%s' "$set_text" \
+               && printf '%s' "$MMRY_FND_TRAILER"; } > "$tmp" 2>/dev/null
+        then
+            rm -f "$tmp" 2>/dev/null
+            return 1
+        fi
+        mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+        MMRY_FND_WRITTEN_ENTRIES="$entries"
+        # The stored marker, named as mmry_foundation_stored_path names it. With a valid session id the
+        # name is the id itself, written here without the three command substitutions; otherwise the
+        # shared function decides, as before.
+        if [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
+            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true
+        else
+            mmry_foundation_mark_stored "${cache%/*}" "$sid" "$entries" || true
+        fi
+        return 0
+    fi
 
     if ! printf '%s' "$resp" \
         | "$MMRY_JQ" ${jqb:+"$jqb"} -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \

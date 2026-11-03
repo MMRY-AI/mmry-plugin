@@ -175,7 +175,25 @@ if [[ -f "${_hand}.ready" ]]; then
     # Pattern and replacement from variables, unquoted inside the expansion: bash 3.2 keeps escaped
     # quotes there literally. Neither holds a glob character.
     _from='"hookEventName":"SessionStart"' _to='"hookEventName":"UserPromptSubmit"'
-    printf '%s' "${_ans/$_from/$_to}"
+    _out="${_ans/$_from/$_to}"
+    # AND THE PERSON IS TOLD, IN MMRY AI'S NAME, THAT THEY WERE LATE (#33062 fix round 7). Eric, watched
+    # check 2: "I saw the notice but didn't know what the source was". The start's own late notice says
+    # so too, but Codex drops it when the start is cut off at its limit, so the memories handed over here
+    # carry the sentence themselves, after the "Read them now: <path>" line, so that line and its path
+    # are unchanged for whatever reads them. Only for an answer that loaded memories; any other answer
+    # (no account, credits, a fault) is passed on as it stands. The sentence is Eric's approved copy
+    # (2026-11-03 03:14 UTC), already escaped for JSON. Patterns from variables, unquoted inside the
+    # expansion, as above, for bash 3.2.
+    _late_note='\n\nThese memories were late: they could not be loaded in time for the start of this conversation. Tell the user this sentence, word for word, before anything else: \"MMRY AI: your saved memories were late to load at the start of this conversation. They are loaded now.\"'
+    _mark='Read them now: ' _q='"' _bs='\'
+    if [[ "$_out" == *"$_mark"* ]]; then
+        _rest="${_out#*${_mark}}"
+        _path="${_rest%%${_q}*}"
+        if [[ "$_path" != "$_rest" && "${_path: -1}" != "$_bs" ]]; then
+            _out="${_out%%${_mark}*}${_mark}${_path}${_late_note}${_q}${_rest#*${_q}}"
+        fi
+    fi
+    printf '%s' "$_out"
     _log "delivered the late start ${_pid} (${#_ans} bytes) after ${SECONDS}s"
 else
     if (( _gone == 1 )); then
@@ -183,7 +201,7 @@ else
     else
         _log "the late start ${_pid} had not finished after ${SECONDS}s; said they were not loaded"
     fi
-    printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Load them now with the mmry_plugin memory_load tool before you answer, and tell the user that their MMRY memories were not loaded automatically this time because loading them took too long."}}'
+    printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"MMRY AI: the memories that were still loading at the start of this conversation did not arrive in time, so they were not loaded. Load them now with the mmry_plugin memory_load tool before you answer. If that loads them, tell the user this sentence, word for word, before anything else: \"MMRY AI: your saved memories were late to load at the start of this conversation. They are loaded now.\" If it does not, tell the user this sentence instead, word for word: \"MMRY AI: your saved memories could not be loaded for this conversation.\""}}'
 fi
 
 rm -f "$_late" "${_hand}.out" "${_hand}.ready" "${_hand}.pid" "${_hand}.claim" 2>/dev/null

@@ -4,7 +4,22 @@
 
 set -euo pipefail
 
-PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# ON CODEX, WITHOUT A PROCESS (#33062 fix round 7). codex-hook.sh starts this file as
+# "${HANDLER_DIR}/session-start.sh" with HANDLER_DIR already what `cd` and `pwd` print, so the plugin
+# root is that string up to its last slash: the `$(cd "$(dirname ...)/.." && pwd)` below is three
+# processes on Windows, 0.6 to 2.4 s of the start's budget there, measured. Only a POSIX absolute path
+# with no "." or ".." segment and no doubled slash is taken as it stands; Claude Code, and any other
+# spelling, go the old way. It is found by BASH_SOURCE, which is $0 when bash runs this file and this
+# file when codex-hook.sh reads it into its own subshell (fix round 7, the same round).
+_mmry_ss_self="${BASH_SOURCE[0]:-$0}"
+_mmry_ss_dir="${_mmry_ss_self%/*}"
+if [[ "${MMRY_HOST:-}" == "codex" && "$_mmry_ss_self" == /*/* && "$_mmry_ss_dir" == /?*/?* ]] \
+    && [[ "${_mmry_ss_dir}/" != *//* && "${_mmry_ss_dir}/" != */./* && "${_mmry_ss_dir}/" != */../* ]]; then
+    PLUGIN_ROOT="${_mmry_ss_dir%/*}"
+else
+    PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+unset _mmry_ss_dir _mmry_ss_self
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 
 # #31245: which assistant this session belongs to. Unset MMRY_HOST means Claude Code, so every
@@ -173,7 +188,18 @@ fi
 # back to the env vars, then "unknown". This is a data fallback, not a jq one.
 # CLAUDE_CODE_SESSION_ID is what the Bash tool sets: /mmry:load-memories runs this script there with
 # no payload, and its Foundation marker must be filed under the real session (#31597 QA round 3, R3).
-SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
+# ON CODEX, A BUILTIN MATCH FIRST (#33062 fix round 7): the jq below is four processes on Windows, 0.7
+# to 2.8 s of the start's budget there, measured. Taken only as Codex sends it: session_id as the
+# payload's FIRST field, with a value of plain id characters, which can hold no escape. jq would answer
+# differently only for a payload that repeats the field or is not JSON after it, which Codex does not
+# send. Anything else is parsed by jq as before.
+SESSION_ID=""
+_mmry_re_sid0='^[[:space:]]*\{[[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"[[:space:]]*[,}]'
+if (( _mmry_codex == 1 )) && [[ "$HOOK_PAYLOAD" =~ $_mmry_re_sid0 ]]; then
+    SESSION_ID="${BASH_REMATCH[1]}"
+else
+    SESSION_ID="$(printf '%s' "$HOOK_PAYLOAD" | "$MMRY_JQ" -r '.session_id // empty' 2>/dev/null || true)"
+fi
 
 # AND IF THE PAYLOAD ARRIVED BUT DID NOT CARRY session_id, SAY SO (#31245 QA round 2).
 #
@@ -251,10 +277,25 @@ fi
 # not today; that is its own piece of work.
 # NAMED BY THIS SESSION'S ACCOUNT AND SERVER (#32889), as the set is: another account's session starting
 # on this machine writes its own marker and never this one.
-printf '%s' "$SESSION_ID" > "$(mmry_foundation_session_path "$MMRY_TMPDIR")" 2>/dev/null || true
+# On Codex the name is taken from the global the library sets, not by command substitution (#33062 fix
+# round 7: a process on Windows). The same file.
+if (( _mmry_codex == 1 )); then
+    mmry_foundation_session_name_v "$MMRY_TMPDIR"
+    printf '%s' "$SESSION_ID" > "$_MMRY_FND_SESSION_NAME" 2>/dev/null || true
+else
+    printf '%s' "$SESSION_ID" > "$(mmry_foundation_session_path "$MMRY_TMPDIR")" 2>/dev/null || true
+fi
 # The id-less delivery record is this account's own now, mmry-foundation.status.<key>.none (#32915, QA
-# round 1, requirement 2); the bare name an older plugin writes is cleared as it always was.
-rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$(mmry_foundation_record_path "$MMRY_TMPDIR" "")" 2>/dev/null || true
+# round 1, requirement 2); the bare name an older plugin writes is cleared as it always was. The keyed
+# name is the one mmry_foundation_record_path spells for no id, taken here from the library's global
+# rather than a command substitution, and on Codex the rm runs only when there is something to remove
+# (#33062 fix round 7: rm is two processes on Windows).
+mmry_foundation_session_part_v ""
+_mmry_idless_record="${MMRY_TMPDIR}/mmry-foundation.status.${_MMRY_FND_SESSION_PART}"
+if (( _mmry_codex == 0 )) || [[ -e "${MMRY_TMPDIR}/mmry-foundation.status" || -L "${MMRY_TMPDIR}/mmry-foundation.status" || -e "$_mmry_idless_record" || -L "$_mmry_idless_record" ]]; then
+    rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$_mmry_idless_record" 2>/dev/null || true
+fi
+unset _mmry_idless_record
 # THE MACHINE-WIDE COPY AN OLDER PLUGIN LEFT IS IGNORED, AND REMOVED ONLY WHEN IT IS SAFE (#32889). The
 # unkeyed mmry-foundation-set.md and mmry-foundation.session are never read by this version, so an
 # upgrade cannot inject what they hold. They are not removed on sight: an older plugin still running in
@@ -270,7 +311,18 @@ rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$(mmry_foundation_record_path "$M
 # the unkeyed mmry-memories.md an older plugin wrote is never read by this version (it is not this
 # session's file, and the model is never pointed at it) but is left for an older plugin still running
 # here, until it too is a week old.
-find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' \) -mtime +7 -delete 2>/dev/null || true
+_mmry_fnd_sweep() {
+    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' \) -mtime +7 -delete 2>/dev/null || true
+}
+# ON CODEX THE SWEEP RUNS AS THIS FILE ENDS, AFTER ITS OUTPUT IS CLOSED (#33062 fix round 7). It removes
+# week-old records and has nothing to do with the memories, and on Windows the find is two processes,
+# 0.5 to 2.4 s of the start's budget, measured. The EXIT trap closes stdout first, so the hand-over is
+# not held for it, and it runs on every way out of this file, as it ran before every one of them.
+if (( _mmry_codex == 1 )); then
+    trap 'exec >/dev/null; _mmry_fnd_sweep' EXIT
+else
+    _mmry_fnd_sweep
+fi
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
@@ -358,7 +410,13 @@ fi
 } > "$MEM_FILE" 2>/dev/null
 
 # Count memories
-count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
+# On Codex it is counted below, after the Foundation writer, whose one jq reports the length too
+# (#33062 fix round 7: a jq fewer on Windows). Nothing between here and there reads it.
+if (( _mmry_codex == 1 )); then
+    count=""
+else
+    count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
+fi
 
 # Write the Foundation-only cache the UserPromptSubmit hook re-injects each turn (#30579).
 # Presentation/framing is applied at inject time; this file holds just the data.
@@ -380,7 +438,14 @@ count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 
 # this session, so a set deleted before its first delivery is reported as missing (#31597, and r2:
 # the writer does it, so the per-prompt refresh does it too). See mmry_foundation_stored_path.
 EMPTY_SYSMSG=""
-if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$(mmry_foundation_set_path "$MMRY_TMPDIR")" "$SESSION_ID"; then
+# On Codex the set's name comes from the library's global, not a command substitution (#33062 fix round 7).
+if (( _mmry_codex == 1 )); then
+    mmry_foundation_set_name_v "$MMRY_TMPDIR"
+    _mmry_set_file="$_MMRY_FND_SET_NAME"
+else
+    _mmry_set_file="$(mmry_foundation_set_path "$MMRY_TMPDIR")"
+fi
+if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$_mmry_set_file" "$SESSION_ID"; then
     # The remedy is the host's own (#31245 merged onto #31411): on Codex there is nothing to type,
     # so the assistant is told it can run the script itself, as the other Codex hints here do.
     if [[ "$(mmry_host)" == "codex" ]]; then
@@ -400,6 +465,16 @@ elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     _fnd_ekey="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$SESSION_ID" || true)"
     [[ -n "$_fnd_esid" ]] && { printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true; }
     printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true
+fi
+
+# On Codex the count, from the writer's jq when it got that far, else as Claude Code counts it but on a
+# here-string (jq ignores the newline it adds; two processes fewer on Windows).
+if (( _mmry_codex == 1 )); then
+    if [[ "${MMRY_FND_RESPONSE_LENGTH:-}" =~ ^[0-9]+$ ]]; then
+        count="$MMRY_FND_RESPONSE_LENGTH"
+    else
+        count="$("$MMRY_JQ" 'length' <<<"$MMRY_RESPONSE" 2>/dev/null || echo 0)"
+    fi
 fi
 
 # Register session — uses session_id read from hook stdin (see top of file).
