@@ -9,11 +9,8 @@ load '../helpers/foundation-set'
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    # A whole identity for the session under test (#32915, requirement 3): the hook now delivers
-    # nothing for a session that cannot name its account and server, as SessionStart loads nothing
-    # for one, so a suite that only plants a set on disk must say whose it is. The same config
-    # _make_config writes, so a test that writes it again keeps the same key; in the config and not
-    # the environment, so a Codex test's own config (CODEX_HOME) is still the one its handler reads.
+    # A whole identity (#32915 req 3: an unidentified session is delivered nothing). In the config,
+    # not the environment, so a Codex test's CODEX_HOME config is still the one its handler reads.
     _make_config
     SET="$(fnd_set_file)"
     # Every real session has one of these: SessionStart writes the session id here and clears
@@ -313,8 +310,7 @@ _big_foundation_set() {
     [[ "$output" != *'systemMessage'* ]] || return 1
     [[ "$output" == *'FinalDirective'* ]] || return 1
 
-    # Delivered count against the account's true total, as the ticket asks for. The id-less delivery
-    # record is named by the account since #32915 (fnd_status_file).
+    # Delivered count against the account's true total, as the ticket asks for.
     [ -f "$(fnd_status_file)" ]
     run cat "$(fnd_status_file)"
     [[ "$output" == *"bytes=$total"* ]] || return 1
@@ -1135,10 +1131,9 @@ _stage_codex_install() {
 }
 
 @test "req4 control: a Claude install with NO Codex credential is unaffected by the Codex guard" {
-    # The guard must key on the HOST, not on whether a Codex credential happens to exist. A Claude
-    # install re-injects from its cache regardless, and still must. Its own credential is the Claude
-    # file in its home (#32915, requirement 3: a session with no identity at all now delivers nothing,
-    # so the Claude file names the same account the set in setup was sealed for).
+    # The guard must key on the HOST, not on whether a Codex credential exists. A Claude install
+    # re-injects from its cache regardless, and still must; its own credential is the Claude file in
+    # its home (#32915 req 3: a session with no identity at all is delivered nothing).
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
     local fakehome="$TEST_TMPDIR/claude-nocred"
