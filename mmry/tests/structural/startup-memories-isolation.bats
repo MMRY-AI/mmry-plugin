@@ -124,6 +124,16 @@ _codex_start() {
               bash "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" session-start 2>/dev/null
 }
 
+# The same Codex start with NO session id in the payload: the session is registered as "unknown".
+#   _codex_start_nosid <codex-home> <directive> <note>
+_codex_start_nosid() {
+    local home="$1"; shift
+    printf '{"hook_event_name":"SessionStart","cwd":"/w"}' \
+        | env -u MMRY_CONFIG_FILE -u MMRY_HOST -u MMRY_API_URL -u MMRY_API_KEY -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID \
+              CODEX_HOME="$home" MOCK_CURL_RESPONSE="$(_startup_body "$@")" \
+              bash "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" session-start 2>/dev/null
+}
+
 _ctx() { jq -j '.hookSpecificOutput.additionalContext // ""' <<<"$1" | tr -d '\r'; }
 
 # THE FILE THE MODEL WAS TOLD TO READ, from a SessionStart output. On Codex for Windows the path is
@@ -392,6 +402,33 @@ _write_large_set() {
              mmry-foundation.stored.unknown mmry-foundation.status mmry-foundation.outcome; do
         [[ ! -e "$TEST_TMPDIR/$f" ]] || { echo "the shared marker $f was written"; return 1; }
     done
+}
+
+# THE CODEX WRITER'S QUICK PATH (#32915, QA round 2, F-A). On Codex the set writer spells the stored
+# marker itself, without the shared function, to keep Codex's start inside its budget (#33062). It
+# spelled it from the session token alone, and the token for a session with no id is "unknown", so
+# two Codex accounts starting with no session id wrote ONE bare mmry-foundation.stored.unknown and
+# neither wrote the keyed marker the per-prompt hook looks for (QA probe5). The test above drives
+# Claude Code starts only; this one drives two Codex starts through codex-hook.sh.
+@test "startup: two Codex sessions starting with NO session id each get their own stored marker - the Codex writer's quick path names it by the account too, never the shared mmry-foundation.stored.unknown" {
+    local ha hb ma mb out
+    ha="$(_codex_home nosid-a "$PROD_URL" "$PROD_KEY")"
+    hb="$(_codex_home nosid-b "$INT_URL"  "$INT_KEY")"
+    ma="$(FND_CONFIG_OVERRIDE="$ha/mmry-config.json" fnd_stored_file unknown)"
+    mb="$(FND_CONFIG_OVERRIDE="$hb/mmry-config.json" fnd_stored_file unknown)"
+    [[ "$ma" != "$mb" && "${ma##*/}" == mmry-foundation.stored.*.unknown ]] || { echo "unexpected marker names: ${ma##*/} ${mb##*/}"; return 1; }
+
+    out="$(_codex_start_nosid "$ha" "$PROD_DIRECTIVE" "$PROD_NOTE")"
+    _told_path "$out" >/dev/null || { echo "control: Codex session A loaded nothing: ${out:0:300}"; return 1; }
+    [[ -f "$ma" ]] || { echo "no stored marker for A at ${ma##*/}; stored files: $(ls -a "$TEST_TMPDIR" | grep stored | tr '\n' ' ')"; return 1; }
+    [[ "$(_file "$ma")" == "1" ]] || { echo "A's marker does not hold A's count: $(_file "$ma")"; return 1; }
+
+    out="$(_codex_start_nosid "$hb" "$INT_DIRECTIVE" "$INT_NOTE")"
+    _told_path "$out" >/dev/null || { echo "control: Codex session B loaded nothing: ${out:0:300}"; return 1; }
+    [[ -f "$mb" ]] || { echo "no stored marker for B at ${mb##*/}; stored files: $(ls -a "$TEST_TMPDIR" | grep stored | tr '\n' ' ')"; return 1; }
+    [[ -f "$ma" ]] || { echo "A's stored marker went when B started"; return 1; }
+    # The shared name is never written, by either start.
+    [[ ! -e "$TEST_TMPDIR/mmry-foundation.stored.unknown" ]] || { echo "the shared marker mmry-foundation.stored.unknown was written"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
