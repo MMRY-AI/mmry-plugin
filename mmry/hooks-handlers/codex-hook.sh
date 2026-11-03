@@ -111,8 +111,23 @@ if [[ "$HANDLER_NAME" == "session-init" && ! -t 0 ]]; then
     fi
 fi
 
-HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
-PLUGIN_ROOT="$(cd "${HANDLER_DIR}/.." && pwd)" || exit 0
+# WITHOUT A PROCESS WHERE THE PATH IS ALREADY WHAT pwd WOULD SAY (#33062 fix round 7). These two lines
+# were `$(cd "$(dirname ...)" && pwd)` and `$(cd ../ && pwd)`: four processes on Windows, 0.6 to 3 s of
+# the session start's budget there, measured. The registered command names this file by an absolute
+# path, so the common case is a string: a POSIX absolute directory with no "." or ".." segment and no
+# doubled slash is exactly what `cd` then `pwd` print back, and its parent is the string up to its last
+# slash. Anything else (a Windows path from codex-hook.cmd, a relative or dotted spelling) still goes
+# through `cd` and `pwd`, once, and the parent is taken from that canonical answer the same way.
+_mmry_src="${BASH_SOURCE[0]//\\//}"
+HANDLER_DIR="${_mmry_src%/*}"
+[[ "$HANDLER_DIR" == "$_mmry_src" ]] && HANDLER_DIR="."
+[[ -n "$HANDLER_DIR" ]] || HANDLER_DIR="/"
+case "${HANDLER_DIR}/" in
+    /*//*|*/./*|*/../*|[!/]*) HANDLER_DIR="$(cd "$HANDLER_DIR" && pwd)" || exit 0 ;;
+esac
+[[ "$HANDLER_DIR" == /* ]] || exit 0
+PLUGIN_ROOT="${HANDLER_DIR%/*}"
+[[ -n "$PLUGIN_ROOT" ]] || PLUGIN_ROOT="/"
 
 # ---- Declare the host, before anything reads a path. ----
 export MMRY_HOST="codex"
@@ -129,7 +144,9 @@ source "${HANDLER_DIR}/lib-host.sh" 2>/dev/null || exit 0
 # directory, the memories file. With none of HOME, USERPROFILE or HOMEDRIVE/HOMEPATH set, those
 # become paths rooted at "/" and the handlers spend their time failing to create directories they
 # were never going to be able to use. Exiting here keeps the session clean instead.
-[[ -n "$(mmry_home)" ]] || exit 0
+# HOME set is the first thing mmry_home answers with, so it is read here without the subshell (#33062
+# fix round 7: a process on Windows); only without one is mmry_home asked.
+[[ -n "${HOME:-}" ]] || [[ -n "$(mmry_home)" ]] || exit 0
 
 # CLAUDE_PLUGIN_ROOT is exported by Codex itself for plugin-sourced hooks
 # (codex-rs/hooks/src/engine/discovery.rs line 267, commented "For OOTB compat with existing
