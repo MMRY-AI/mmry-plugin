@@ -1153,6 +1153,8 @@ _stage_codex_install() {
     mkdir -p "$root/mmry/hooks-handlers" "$root/fakehome/.claude"
     cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$root/mmry/hooks-handlers/"
     rm -f "$root/mmry/hooks-handlers/lib-host.sh"
+    # Its credential, in the plugin root the key library reads without lib-host.sh (#32915 req 3).
+    cp "$MMRY_CONFIG_FILE" "$root/mmry/mmry-config.json"
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
 
