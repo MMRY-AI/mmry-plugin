@@ -40,8 +40,10 @@ snap() { curl -s -H "X-Api-Key: $J_KEY" "$LIVE_URL/api/memories/startup?workingD
 snap > "$OUT/service-startup-before-p1.json"
 timeout 500 "$CX" exec --skip-git-repo-check --sandbox read-only --json -o "$OUT/p1-last.txt" "Reply with the single word OK. Do not run any commands." < /dev/null > "$OUT/p1.jsonl" 2> "$OUT/p1.err"; echo "rc=$?" > "$OUT/p1.rc"
 TID="$("$LIVE_JQ" -r 'select(.type=="thread.started")|.thread_id' "$OUT/p1.jsonl" | head -1)"; printf '%s' "$TID" > "$OUT/thread-id"
-snap > "$OUT/service-startup-before-p2.json"
-timeout 500 "$CX" exec resume --skip-git-repo-check --json -o "$OUT/p2-last.txt" "$TID" "Reply with the single word FINE. Do not run any commands." < /dev/null > "$OUT/p2.jsonl" 2> "$OUT/p2.err"; echo "rc=$?" > "$OUT/p2.rc"
+for n in 2 3 4; do
+  sleep "${SETTLE:-30}"; snap > "$OUT/service-startup-before-p$n.json"; ls -la --time-style=full-iso "$TMPDIR" > "$OUT/tmp-before-p$n.txt"
+  timeout 500 "$CX" exec resume --skip-git-repo-check --json -o "$OUT/p$n-last.txt" "$TID" "Reply with the single word FINE. Do not run any commands." < /dev/null > "$OUT/p$n.jsonl" 2> "$OUT/p$n.err"; echo "rc=$?" > "$OUT/p$n.rc"; date -u +%FT%TZ > "$OUT/p$n.done"
+done
 snap > "$OUT/service-startup-after-p2.json"
 find "$CODEX_HOME/sessions" -name 'rollout-*.jsonl' -type f > "$OUT/rollouts.txt"
 while read -r r; do cp "$r" "$OUT/rollout.jsonl"; done < "$OUT/rollouts.txt"
