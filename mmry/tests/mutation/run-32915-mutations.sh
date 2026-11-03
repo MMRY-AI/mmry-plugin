@@ -86,6 +86,19 @@ add session-part-unkeyed "the account key is dropped from the id-less session pa
 add prepared-unkeyed "the prepared copy, claim, result and stored check go back to the bare token, shared across accounts with no session id" \
     '    _FND_KEY="$_MMRY_FND_SESSION_PART"' \
     '    _FND_KEY="${_FND_STAMP:-none}"' "$H"
+# QA round 2 (#32915). F-B: the four notice markers made with no session id.
+add inflight-unkeyed "the in-flight marker goes back to the id-or-nothing name, so one account's killed turn is reported to the other account" \
+    '_INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight.${_FND_SIDPART}${_SFX}"' \
+    '_INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"' "$H"
+add cutshort-unkeyed "the cut-short marker goes back to the id-or-nothing name" \
+    '_CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort.${_FND_SIDPART}${_SFX}"' \
+    '_CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"' "$H"
+add byref-told-unkeyed "the by-reference told marker goes back to the id-or-nothing name, so one account's telling stands for the other's" \
+    '_told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told.${_FND_SIDPART}" _tok="" _told_tok=""' \
+    '_told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""' "$H"
+add empty-told-unkeyed "SessionStart writes the empty-set told marker back at the bare shared name" \
+    '"${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}"' \
+    '"${MMRY_TMPDIR}/.mmry-foundation-empty-told"' "$S"
 # QA round 2 (#32915). F-A: the Codex writer's quick path.
 add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the token itself, so two Codex accounts with no session id share mmry-foundation.stored.unknown (QA probe5)" \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \

@@ -273,7 +273,9 @@ _outcome() {
 # A firing killed before it finished leaves its in-flight marker behind. Markers older than this
 # session's start belong to an earlier session in the same temp directory and are not read.
 _cut_short() {
-    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight${_sid:+.$_sid}$1"
+    # The hook's name for it: the id, else this account's <key>.none (#32915, QA round 2, F-B).
+    mmry_foundation_session_part_v "$_sid"
+    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight.${_MMRY_FND_SESSION_PART}$1"
     [[ -e "$f" ]] || return 1
     # A marker that is not a regular file is still a marker: fail closed (#31583 QA round 2).
     [[ -f "$f" ]] || return 0

@@ -220,7 +220,7 @@ _big_response() {
     bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
 
     bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" >/dev/null
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    [ ! -f "$(fnd_inflight_file)" ]
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]

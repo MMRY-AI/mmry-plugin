@@ -486,7 +486,7 @@ mutate_m35() { _mrep "$1/$HANDLER_REL" '            NOTICE="MMRY AI could not lo
 targets_m35="$PARTS_TESTS"
 desc_m35="#31411 a failing part tells the assistant the whole turn went without the directives"
 
-mutate_m36() { _mrep "$1/$HANDLER_REL" '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""' '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""'; }
+mutate_m36() { _mrep "$1/$HANDLER_REL" '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told.${_FND_SIDPART}" _tok="" _told_tok=""' '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""'; }
 targets_m36="$PARTS_TESTS"
 desc_m36="#31411 the told marker is shared, so a session is told again after another session"
 
@@ -842,7 +842,7 @@ desc_m81="#31597 r2 TC4 parts 2-6 give the empty notice as well as part 1"
 # TC4 (#31597 QA round 3, Q4). SessionStart does not write the token-form told-marker, so a session with
 # no session id is told about the empty set at SessionStart and again on its first prompt.
 mutate_m82() {
-    _mrep "$1/$SESSION_START_REL" '    printf '"'"'%s'"'"' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true' '    :'
+    _mrep "$1/$SESSION_START_REL" '    printf '"'"'%s'"'"' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' '    :'
 }
 file_m82="$SESSION_START_REL"
 targets_m82="$EDGES_TESTS"

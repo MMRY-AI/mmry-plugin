@@ -331,7 +331,7 @@ _slow_cksum_dir() {
     bash "$HOOK" >/dev/null 2>&1
     sleep 1
     # What the harness leaves behind when it kills the hook past its budget.
-    : > "$TEST_TMPDIR/.mmry-foundation-inflight"
+    : > "$(fnd_inflight_file)"
 
     run bash "$STATUSCMD"
     [[ "$output" == *'NOT on the most recent prompt'* ]] || return 1

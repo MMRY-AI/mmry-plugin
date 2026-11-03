@@ -457,14 +457,20 @@ if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$_mmry_set_file" "$SESSION_ID
 elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     # AN EMPTY SET IS TOLD TO THE CUSTOMER, ONCE A SESSION (#31597 r2, TC4). systemMessage is the
     # channel the customer sees. The marker stops the per-prompt hook saying it again this session;
-    # it is written in both the session-id form and the token form the hook falls back to.
+    # it is written in both the session-id form and the id-less form the hook falls back to. The
+    # id-less form is THIS ACCOUNT'S (#32915, QA round 2, F-B): .mmry-foundation-empty-told.<key>.none,
+    # the name the hook reads with no id (mmry_foundation_session_part_v ""), never the one bare
+    # .mmry-foundation-empty-told every id-less session on the machine shared. The id form is written
+    # only for a real id: the token "unknown" is no session's own, and nothing reads it.
     # shellcheck source=/dev/null
     source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
     EMPTY_SYSMSG=",\"systemMessage\":\"$(_mmry_json_escape "$MMRY_FND_EMPTY_NOTICE")\""
     _fnd_esid="$(mmry_foundation_sid "$SESSION_ID")"
     _fnd_ekey="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$SESSION_ID" || true)"
-    [[ -n "$_fnd_esid" ]] && { printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true; }
-    printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true
+    mmry_foundation_session_part_v "$_fnd_esid"
+    [[ -n "$_fnd_esid" && "$_fnd_esid" == "$_MMRY_FND_SESSION_PART" ]] && { printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true; }
+    mmry_foundation_session_part_v ""
+    printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
 fi
 
 # On Codex the count, from the writer's jq when it got that far, else as Claude Code counts it but on a

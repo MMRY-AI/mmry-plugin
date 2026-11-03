@@ -1274,11 +1274,15 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # payload would make a long pasted prompt cost every part process. The rest is left unread, as
     # this hook has always left all of it. No id means the old token-named records, unchanged.
     # This session's id was read at the top, before the quick exit (#31583 QA round 2, R4).
-    _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    # NAMED BY THE SESSION PART, NOT THE ID ALONE (#32915, QA round 2, F-B): with no id this and the
+    # three markers below were bare names, one for every id-less session on the machine whatever its
+    # account, so one account's assistant was told of another account's lost turn and one account's
+    # user went untold. The part is the id, else <account key>.none, as the delivery record's is.
+    _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight.${_FND_SIDPART}${_SFX}"
     # A TURN CUT SHORT AT THE DEADLINE (#31893 TC3). It was reported to the assistant on that turn, and
     # this tells the next turn too, as the in-flight marker does for a turn the harness killed. Kept
     # apart from the in-flight marker so /mmry:foundation-status still reads the cause it recorded.
-    _CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    _CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort.${_FND_SIDPART}${_SFX}"
 
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
     # story: the supervisor still has to start, reap the worker, decide WHY it failed and
@@ -1688,9 +1692,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # SessionStart writes when it told them first, so it is never repeated on later prompts:
         # #31583 removed the warning on every prompt and that stays removed. With no session id and
         # no token the marker holds a fixed word, so even then it is said once, not every prompt.
-        # Part 1 only: it owns everything said about the set as a whole.
+        # Part 1 only: it owns everything said about the set as a whole. Named by the session part
+        # (#32915, QA round 2, F-B): with no id it is this account's, never one shared name.
         if (( MMRY_FND_PART == 1 )) && [[ "$_FND_KIND" == *" empty" ]]; then
-            _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
+            _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told.${_FND_SIDPART}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
             [[ -z "$_etok" && -f "$_FND_SESSF" ]] && { _etok="$(<"$_FND_SESSF")" 2>/dev/null || _etok=""; }
             _etok="${_etok:-no-session}"
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
@@ -1732,8 +1737,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # told on every prompt, because it needs the instruction every time.
     if [[ "$_FND_KIND" == BYREF* ]]; then
         # Named by the session (#31411 QA round 2), like every other record here, so one session
-        # telling its customer never stops another from telling theirs.
-        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""
+        # telling its customer never stops another from telling theirs; and with no session id by
+        # the account (#32915, QA round 2, F-B), so one account's telling never stands for another's.
+        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told.${_FND_SIDPART}" _tok="" _told_tok=""
         _tok="${MMRY_FND_SID:-}"
         [[ -z "$_tok" && -f "$_FND_SESSF" ]] && { _tok="$(<"$_FND_SESSF")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
