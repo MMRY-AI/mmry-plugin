@@ -179,7 +179,10 @@ _memories_files() { ( cd "$TEST_TMPDIR" && ls -1 2>/dev/null | grep '^mmry-memor
     out="$(_codex_start "$codex" "$int_sid" "$INT_DIRECTIVE" "$INT_NOTE")"
     pb="$(_told_path "$out")" || { echo "no instruction: ${out:0:300}"; return 1; }
     want="$(FND_CONFIG_OVERRIDE="$codex/mmry-config.json" fnd_memories_file "$int_sid")"
-    [[ "$pb" == "$want" ]] || { echo "Integration session told to read $pb, its own file is $want"; return 1; }
+    # By name and content, not by spelling: on Windows the Codex path is spelled for PowerShell and
+    # comes back as /tmp/..., the same folder $TEST_TMPDIR spells /c/Users/.../Temp/....
+    [[ "${pb##*/}" == "${want##*/}" && -f "$pb" && -f "$want" && "$(_file "$pb")" == "$(_file "$want")" ]] \
+        || { echo "Integration session told to read $pb, its own file is $want"; return 1; }
     IFS= read -r first < "$pb"
     [[ "$first" == *"$(FND_CONFIG_OVERRIDE="$codex/mmry-config.json" fnd_acct)"* ]] || { echo "the file is not stamped with its account: $first"; return 1; }
     # The machine-wide name is never written.
