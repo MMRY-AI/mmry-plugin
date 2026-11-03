@@ -291,11 +291,11 @@ fi
 # rather than a command substitution, and on Codex the rm runs only when there is something to remove
 # (#33062 fix round 7: rm is two processes on Windows).
 mmry_foundation_session_part_v ""
-_mmry_idless_record="${MMRY_TMPDIR}/mmry-foundation.status.${_MMRY_FND_SESSION_PART}"
-if (( _mmry_codex == 0 )) || [[ -e "${MMRY_TMPDIR}/mmry-foundation.status" || -L "${MMRY_TMPDIR}/mmry-foundation.status" || -e "$_mmry_idless_record" || -L "$_mmry_idless_record" ]]; then
-    rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$_mmry_idless_record" 2>/dev/null || true
+_mmry_idless_status="${MMRY_TMPDIR}/mmry-foundation.status.${_MMRY_FND_SESSION_PART}"
+if (( _mmry_codex == 0 )) || [[ -e "${MMRY_TMPDIR}/mmry-foundation.status" || -L "${MMRY_TMPDIR}/mmry-foundation.status" || -e "$_mmry_idless_status" || -L "$_mmry_idless_status" ]]; then
+    rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$_mmry_idless_status" 2>/dev/null || true
 fi
-unset _mmry_idless_record
+unset _mmry_idless_status
 # THE MACHINE-WIDE COPY AN OLDER PLUGIN LEFT IS IGNORED, AND REMOVED ONLY WHEN IT IS SAFE (#32889). The
 # unkeyed mmry-foundation-set.md and mmry-foundation.session are never read by this version, so an
 # upgrade cannot inject what they hold. They are not removed on sight: an older plugin still running in
