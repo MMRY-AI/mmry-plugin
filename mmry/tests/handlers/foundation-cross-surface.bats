@@ -310,7 +310,7 @@ _slow_cksum_dir() {
 @test "cross-surface: #31583 4e a failure logged by an EARLIER session is not this session news" {
     printf '{"foundationReinject": true}\n' > "$CFG"
     _seed_valid_cache
-    printf '2026-01-01T00:00:00 foundation reinjection FAILED: deadline exceeded (10s), worker killed\n' > "$TEST_TMPDIR/mmry-foundation.log"
+    printf '2026-01-01T00:00:00 foundation reinjection FAILED: deadline exceeded (10s), worker killed\n' > "$(fnd_log_file)"
     # SessionStart for THIS session happens after that line was written.
     sleep 1
     printf 'session-under-test' > "$(fnd_session_file)"

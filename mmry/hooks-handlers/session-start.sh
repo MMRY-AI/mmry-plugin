@@ -264,7 +264,11 @@ rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
 # a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
 # The per-prompt hook's prepared set, claim, result and cut-short markers (#31893) are one each per
 # session (a claim also leaves one small file per change of the set), and go the same way.
-find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' \) -mtime +7 -delete 2>/dev/null || true
+# THE STARTUP MEMORIES FILES GO THE SAME WAY (#32915): the keyed ones below are one per session, and
+# the unkeyed mmry-memories.md an older plugin wrote is never read by this version (it is not this
+# session's file, and the model is never pointed at it) but is left for an older plugin still running
+# here, until it too is a week old.
+find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' \) -mtime +7 -delete 2>/dev/null || true
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
 # /tmp/mmry-session-dir-${SESSION_ID} writes that previously lived here.
@@ -277,7 +281,32 @@ if [[ -z "${MMRY_API_KEY:-}" ]]; then
     exit 0
 fi
 
-MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"
+# THE ACCOUNT AND SERVER MUST BE KNOWN, OR NOTHING IS LOADED (#32915, requirement 3). The startup
+# file below is named for the account and server this session is configured for, so that a session
+# on another account never reads it. A session that cannot say which account and server those are -
+# a credential that is not an API key, or no server address at all, where the client would otherwise
+# fall back to the default server - cannot name its own file, and so it delivers nothing rather than
+# load memories under a name another such session would share. It is told why, once, here. The
+# ordinary configuration setup writes (a server address and an API key) is never affected.
+if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" ]]; then
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        _mmry_identity_hint="offer to run $(mmry_host_setup_hint) to set it up again"
+    else
+        _mmry_identity_hint="ask them to run /mmry:setup to set it up again"
+    fi
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+        "$(_mmry_json_escape "MMRY AI did not load memories for this session: the configuration does not identify the account and server they belong to (it needs a server address and an API key). Nothing was loaded and nothing was guessed at. Tell the user, and ${_mmry_identity_hint}.")"
+    exit 0
+fi
+
+# NAMED BY THIS SESSION'S ACCOUNT, SERVER AND SESSION (#32915): mmry-memories.<key>.<session id>.md,
+# never the one machine-wide mmry-memories.md this used to be. With one name, a session on another
+# account starting on this machine before this session's model had opened the file replaced its
+# contents, and the model read that account's memories and directives (QA of #32889, NEW-1; in practice
+# on 2026-10-10). The key is the one the Foundation set is named by (lib-foundation-key.sh); the
+# session id keeps two sessions of one account apart as well. The model is told this name below.
+mmry_foundation_memories_name_v "$MMRY_TMPDIR" "$SESSION_ID"
+MEM_FILE="$_MMRY_FND_MEMORIES_NAME"
 
 # Load startup memories
 if ! mmry_get_startup_memories "$WORK_DIR"; then
@@ -318,8 +347,10 @@ if ! mmry_get_startup_memories "$WORK_DIR"; then
 fi
 
 # Parse JSON response into markdown using the resolved jq (#30624).
+# Stamped with the account it was written for (#32915), as the Foundation set's record line is: a
+# file that somehow reaches the wrong name still says whose it is.
 {
-    echo "# MMRY AI — Loaded Memories"
+    echo "# MMRY AI — Loaded Memories (account ${_MMRY_FND_ACCT})"
     echo ""
     "$MMRY_JQ" -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"' <<<"$MMRY_RESPONSE"
 } > "$MEM_FILE" 2>/dev/null

@@ -321,7 +321,7 @@ _EMPTY_WORDS='this account has no Foundation directives'
     out="$(cat "$TEST_TMPDIR/prompt.json")"
     [[ "$out" == *'too large to show here'* ]] || { echo "control: not delivered by reference: ${out:0:300}"; return 1; }
     id="$(fnd_set_record "$SET")"; id="${id##*cksum=}"; id="${id%% *}"
-    copy="$TEST_TMPDIR/mmry-foundation.byref.tc5d.md"
+    copy="$(fnd_byref_file tc5d)"
     [ -f "$copy" ] || { echo "no copy at $copy"; ls -a "$TEST_TMPDIR"; return 1; }
     { cat "$TEST_TMPDIR/want.bin"; printf '\n\nEND OF FOUNDATION SET %s\n' "$id"; } > "$TEST_TMPDIR/want-copy.bin"
     cmp "$TEST_TMPDIR/want-copy.bin" "$copy" || { _show "$TEST_TMPDIR/want-copy.bin" "$copy"; return 1; }

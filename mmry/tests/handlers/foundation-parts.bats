@@ -344,7 +344,7 @@ _pointed() {
 
     _fire 1 S4
     # The failure log made to look newer than the delivery.
-    touch "$TEST_TMPDIR/mmry-foundation.log"
+    touch "$(fnd_log_file)"
     CLAUDE_CODE_SESSION_ID=S4 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    IN FULL on the most recent prompt."* ]] || { echo "after the recovery: $output"; return 1; }
     [[ "$output" != *"NOT on the most recent prompt"* ]]
@@ -758,7 +758,7 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     # write, so a damaged set hung the hook instead of being reported.
     _seed_lines 3
     printf -- '- x\n' > "$SET"        # the stub #31583 is about, in place of the sealed set (#31597)
-    local fifo="$TEST_TMPDIR/mmry-foundation.log"
+    local fifo="$(fnd_log_file)"
     mkfifo "$fifo"
     _finishes_within 25 _fire 1 N2L || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
     jq -e '.systemMessage | test("NOT applied")' "$TEST_TMPDIR/part1.json" >/dev/null \
@@ -1068,7 +1068,7 @@ _damage_set() {
     [[ "$(cat "$(_outcome_file S90 3)")" =~ ^S90\ [0-9]+\ failed\ emit$ ]] || { echo "part 3 record: $(cat "$(_outcome_file S90 3)")"; return 1; }
     # And the log line it adds is that line alone: on macOS a "$(date)" taken after the failed emit
     # carried 1,024 bytes of the directives into it (Mac bench, fc6a954).
-    local last; last="$(tail -n 1 "$TEST_TMPDIR/mmry-foundation.log")"
+    local last; last="$(tail -n 1 "$(fnd_log_file)")"
     [[ "$last" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}\ foundation\ reinjection\ FAILED:\ the\ output\ could\ not\ be\ written\ \(part\ 3\)$ ]] \
         || { echo "log line: ${last:0:200} ($(printf '%s' "$last" | wc -c) bytes)"; return 1; }
 }

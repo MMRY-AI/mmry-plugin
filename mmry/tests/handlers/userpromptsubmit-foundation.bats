@@ -68,7 +68,7 @@ manifest_now() {
     export MMRY_API_KEY="test-key"
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-refresh" ]
+    [ ! -f "$(fnd_refresh_file)" ]
 }
 
 @test "userpromptsubmit-foundation: a stale cache triggers a gated background refresh (lock created)" {
@@ -88,8 +88,8 @@ manifest_now() {
     # The lock is touched before the background fetch is spawned. Since #31893 the decision itself is
     # made by a detached process, off the prompt's path, so the lock is waited for, up to 30 s.
     local i
-    for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
-    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ]
+    for (( i = 0; i < 150; i++ )); do [ -f "$(fnd_refresh_file)" ] && break; sleep 0.2; done
+    [ -f "$(fnd_refresh_file)" ]
 }
 
 @test "userpromptsubmit-foundation: toggle off emits nothing and exits 0" {
@@ -221,8 +221,8 @@ _big_foundation_set() {
     [[ "$output" != *'token cap'* ]] || return 1
     # The old log line recorded the length AFTER the cut, so all 1,457 entries on the
     # affected machine read "had 6000 chars". Nothing may write that line any more.
-    if [ -f "$TEST_TMPDIR/mmry-foundation.log" ]; then
-        run grep -c 'truncated Foundation reinjection' "$TEST_TMPDIR/mmry-foundation.log"
+    if [ -f "$(fnd_log_file)" ]; then
+        run grep -c 'truncated Foundation reinjection' "$(fnd_log_file)"
         [ "$output" = "0" ]
     fi
 }
@@ -535,8 +535,8 @@ _registered_timeout() {
     [[ "$output" != *'exit code'* ]] || return 1
     # And it must leave a trace. A failure that drops the customer's directives and records
     # nothing is how this defect survived three reports without anyone being able to act on it.
-    grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
-    grep -q 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log"
+    grep -q 'foundation reinjection FAILED' "$(fnd_log_file)"
+    grep -q 'deadline exceeded' "$(fnd_log_file)"
 }
 
 @test "userpromptsubmit-foundation: a worker that CRASHES is not reported as a slow one (#31434)" {
@@ -590,12 +590,12 @@ _registered_timeout() {
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
     [[ "$output" != *'never overstate evidence'* ]] || return 1
     # Logged as a crash, not as a deadline, so the log agrees with what the customer was told.
-    grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
-    grep -q 'without hitting' "$TEST_TMPDIR/mmry-foundation.log"
+    grep -q 'foundation reinjection FAILED' "$(fnd_log_file)"
+    grep -q 'without hitting' "$(fnd_log_file)"
     # Counted, not `! grep -q`: a `!`-negated command is exempt from `set -e`, so the
     # original form could not fail this test even when the log DID say 'deadline exceeded'
     # - the one thing this assertion exists to catch (#31434 QA).
-    (( $(grep -c 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log" || true) == 0 ))
+    (( $(grep -c 'deadline exceeded' "$(fnd_log_file)" || true) == 0 ))
 }
 
 @test "userpromptsubmit-foundation: MMRY_DEBUG captures the stderr the handler otherwise discards (#31434)" {

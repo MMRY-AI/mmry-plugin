@@ -71,6 +71,9 @@ _MMRY_FND_ID_KEY=""
 _MMRY_FND_CFG=""
 _MMRY_FND_ACCT=""
 _MMRY_FND_ACCT_FOR=""
+# Whether a server address was actually GIVEN, by the environment or the config, as opposed to the
+# default applied below when none was (#32915, mmry_foundation_identity_known_v).
+_MMRY_FND_ID_URL_GIVEN=0
 
 # Lowercase ASCII with no process, as lib-foundation-switch.sh and lib-host.sh do: bash 3.2 has no ${x,,}.
 _mmry_fnd_key_tolower_v() {
@@ -151,6 +154,8 @@ mmry_foundation_identity_v() {
             fi
         fi
     fi
+    _MMRY_FND_ID_URL_GIVEN=0
+    [[ -n "$url" ]] && _MMRY_FND_ID_URL_GIVEN=1
     [[ -n "$url" ]] || url="$_MMRY_FND_DEFAULT_URL"
     _mmry_fnd_key_tolower_v "$url"; url="$_MMRY_FND_LOWER"
     while [[ "$url" == */ && ${#url} -gt 1 ]]; do url="${url%/}"; done
@@ -186,4 +191,54 @@ mmry_foundation_set_name_v() {
 mmry_foundation_session_name_v() {
     mmry_foundation_account_key_v
     _MMRY_FND_SESSION_NAME="${1}/mmry-foundation.session.${_MMRY_FND_ACCT}"
+}
+
+# WHETHER THE IDENTITY IS WHOLE (#32915): a credential AND a server address this session was actually
+# given, by the environment or by its config. The default server is applied above so that the set's
+# name stays stable for a config that never named one; but a session that could name neither a key nor
+# a server cannot say WHOSE startup memories it would be loading, and session-start.sh then delivers
+# nothing rather than guess. Independent QA of #32889 asked for exactly that (requirement 3 of #32915:
+# no key, or an empty server address, delivers nothing, and no shared file is read).
+mmry_foundation_identity_known_v() {
+    mmry_foundation_identity_v
+    [[ -n "$_MMRY_FND_ID_KEY" && "$_MMRY_FND_ID_URL_GIVEN" == 1 ]]
+}
+
+# THE STARTUP MEMORIES FILE (#32915): "<dir>/mmry-memories.<key>.<session id>.md", or without the
+# session part when no usable id is given. This is the file SessionStart writes every startup memory
+# to and tells the model to read. It was one machine-wide name, mmry-memories.md, and when another
+# account's session started on the machine before this session's model had opened it, the model read
+# that account's memories (QA of #32889, NEW-1; seen in practice on 2026-10-10). The account is in
+# the name so that two accounts never share one; the session is in the name so that two sessions of
+# one account do not replace each other's file either. The id is filtered as mmry_foundation_sid in
+# mmry-client.sh filters it: only characters safe in a file name, and no dot, else no id at all.
+mmry_foundation_memories_name_v() {
+    local sid="${2:-}"
+    [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || sid=""
+    mmry_foundation_account_key_v
+    _MMRY_FND_MEMORIES_NAME="${1}/mmry-memories.${_MMRY_FND_ACCT}${sid:+.$sid}.md"
+}
+
+# THE FOUNDATION WORKING FILES, NAMED THE SAME WAY (#32915, QA of #32889 NEW-2 and NEW-3). The
+# per-prompt hook's failure log, its refresh throttle stamp and refresh lock, and the by-reference
+# copy it makes for a set too large to show, were machine-wide names: one account's throttle could
+# hold another's refresh for up to 300 s, and with no session id and no marker the by-reference copy
+# fell back to one shared mmry-foundation.byref.md. Each is now the account's own.
+mmry_foundation_log_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_LOG_NAME="${1}/mmry-foundation.${_MMRY_FND_ACCT}.log"
+}
+mmry_foundation_refresh_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_REFRESH_NAME="${1}/.mmry-foundation-refresh.${_MMRY_FND_ACCT}"
+}
+mmry_foundation_refresh_checked_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_REFRESH_CHECKED_NAME="${1}/.mmry-foundation-refresh-checked.${_MMRY_FND_ACCT}"
+}
+# "<dir>/mmry-foundation.byref.<key>.<session id or token>.md", or without the last part when the
+# caller has neither: still the account's own, never a shared name.
+mmry_foundation_byref_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref.${_MMRY_FND_ACCT}${2:+.$2}.md"
 }

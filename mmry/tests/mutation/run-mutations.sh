@@ -162,7 +162,8 @@ desc_m06="in-flight marker is never written"
 
 # Hard-wire stderr back to /dev/null, so MMRY_DEBUG captures nothing and the next
 # unreproducible customer report stays unreproducible.
-mutate_m07() { _sedi '/_FOUND_ERR="\${_FOUND_TMPDIR}\/mmry-foundation-debug.log"/d' "$1/$HANDLER_REL"; }
+# REPOINTED (#32915): the debug log is named by the account, mmry-foundation-debug.<key>.log.
+mutate_m07() { _sedi '/_FOUND_ERR="\${_FOUND_TMPDIR}\/mmry-foundation-debug\./d' "$1/$HANDLER_REL"; }
 targets_m07="$HANDLER_TESTS"
 desc_m07="MMRY_DEBUG no longer redirects the discarded stderr"
 

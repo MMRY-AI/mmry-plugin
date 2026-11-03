@@ -279,13 +279,18 @@ _memories_files() { ( cd "$TEST_TMPDIR" && ls -1 2>/dev/null | grep '^mmry-memor
 }
 
 # A set too large to show in six parts, written as the plugin writes it, for the account the
-# environment names. 650 directives of about 95 bytes: over the 57,000-character capacity.
+# environment names: twelve directives of about 5,100 bytes, over the 57,000-character capacity. A
+# few large entries rather than hundreds of small ones, as handlers/foundation-31597-edges.bats
+# builds its by-reference set: the cutter's cost grows with the lines, and on a loaded Windows
+# machine 650 lines put the prompt past the hook's deadline. The response goes through a file
+# because a body this size cannot travel in an environment variable on Windows.
 _write_large_set() {
-    local resp="$TEST_TMPDIR/large-$1.json" i
+    local resp="$TEST_TMPDIR/large-$1.json" i w=""
+    for (( i = 0; i < 100; i++ )); do w+="$1 directive text: keep every claim backed by a run. "; done
     { printf '['
-      for (( i = 1; i <= 650; i++ )); do
+      for (( i = 1; i <= 12; i++ )); do
           (( i > 1 )) && printf ','
-          printf '{"memoryTier":"Foundation","topic":"R%03d","content":"%s directive %03d: keep every sentence short and every claim backed by a run."}' "$i" "$1" "$i"
+          printf '{"memoryTier":"Foundation","topic":"R%02d","content":"%s directive %02d. %s"}' "$i" "$1" "$i" "$w"
       done
       printf ']'
     } > "$resp"
@@ -308,8 +313,8 @@ _write_large_set() {
     [[ "$ctx" == *"too large to show here"* ]] || { echo "control: B was not delivered by reference: ${ctx:0:300}"; return 1; }
     [[ -f "$cb" ]] || { echo "no copy for B at $cb"; return 1; }
     [[ "$ctx" == *"${cb##*/}"* ]] || { echo "B's prompt points at a file other than its own copy: ${ctx:0:400}"; return 1; }
-    grep -q 'PRODUCTION directive 650' "$ca" || { echo "A's copy does not hold A's set"; return 1; }
-    grep -q 'INTEGRATION directive 650' "$cb" || { echo "B's copy does not hold B's set"; return 1; }
+    grep -q 'PRODUCTION directive 12\.' "$ca" || { echo "A's copy does not hold A's set"; return 1; }
+    grep -q 'INTEGRATION directive 12\.' "$cb" || { echo "B's copy does not hold B's set"; return 1; }
     (( $(grep -c 'INTEGRATION directive' "$ca" || true) == 0 )) || { echo "A's copy holds B's directives"; return 1; }
     [[ ! -e "$TEST_TMPDIR/mmry-foundation.byref.md" ]] || { echo "the shared, unkeyed by-reference copy was written"; return 1; }
 }
@@ -347,7 +352,10 @@ _assert_nothing_delivered() {
     [[ "$(_memories_files)" == "mmry-memories.md" ]] || { echo "$what: a memories file was written: $(_memories_files | tr '\n' ' ')"; return 1; }
     [[ "$(_file "$TEST_TMPDIR/mmry-memories.md")" == "$_PLANTED" ]] || { echo "$what: the planted shared file was rewritten"; return 1; }
     ! ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "$what: a Foundation set was stored: $(ls "$TEST_TMPDIR"/mmry-foundation-set.*.md)"; return 1; }
-    [[ "$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)" == "0" ]] || { echo "$what: the startup memories were fetched"; return 1; }
+    # No request for them was even made. Counted, with no log at all counting as none: grep -c on a
+    # missing file prints nothing, not 0.
+    local fetched; fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
+    [[ "${fetched:-0}" == "0" ]] || { echo "$what: the startup memories were fetched ($fetched requests)"; return 1; }
     [[ -n "$ctx" ]] || { echo "$what: the session was told nothing at all"; return 1; }
 }
 

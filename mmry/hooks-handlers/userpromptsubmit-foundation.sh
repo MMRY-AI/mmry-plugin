@@ -1127,14 +1127,18 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # unreproducible. MMRY_DEBUG=1 REDIRECTS that stderr to a file instead of discarding it.
     # The customer-facing contract is identical either way: stderr never reaches the terminal,
     # so a debug session cannot turn the handler into a source of noise.
+    # Both logs are named by this session's account and server (#32915, QA of #32889 NEW-3), as the
+    # set is: one machine-wide log mixed two accounts' failures, and a log is a file another session
+    # on another account could otherwise find standing where its own would go. _FND_ACCT costs no
+    # process; it was computed at the top with the set's name.
     _FOUND_ERR=/dev/null
-    [[ -n "${MMRY_DEBUG:-}" ]] && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.log"
+    [[ -n "${MMRY_DEBUG:-}" ]] && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.${_FND_ACCT}.log"
     exec 2>>"$_FOUND_ERR"
 
     # Every abnormal exit below appends here regardless of MMRY_DEBUG. A failure that tells the
     # customer their directives were dropped and leaves no trace of WHY is the reason this
     # ticket needed three reports before anyone could act on it.
-    _FOUND_LOG="${_FOUND_TMPDIR}/mmry-foundation.log"
+    mmry_foundation_log_name_v "$_FOUND_TMPDIR"; _FOUND_LOG="$_MMRY_FND_LOG_NAME"
 
     # A HOST WITH NO CREDENTIAL OF ITS OWN IS SILENT, NOT ALARMING (#31245 QA round 4).
     #
@@ -1217,7 +1221,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # is a day by default, deciding at most five minutes late changes nothing a customer can see.
     _mmry_fnd_refresh_check() {
         (( MMRY_FND_PART == 1 )) || return 0
-        local every=300 f="${_FOUND_TMPDIR}/.mmry-foundation-refresh-checked" last=""
+        # The stamp is this account's own (#32915, QA of #32889 NEW-3): one machine-wide stamp let one
+        # account's prompt hold another account's refresh decision for up to the whole interval.
+        mmry_foundation_refresh_checked_name_v "$_FOUND_TMPDIR"
+        local every=300 f="$_MMRY_FND_REFRESH_CHECKED_NAME" last=""
         if [[ -n "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" ]]; then
             [[ "$MMRY_FOUNDATION_REFRESH_SECONDS" =~ ^[0-9]+$ ]] || return 0
             (( MMRY_FOUNDATION_REFRESH_SECONDS == 0 )) && return 0
@@ -1764,7 +1771,8 @@ CACHE="$(mmry_foundation_set_path "$MMRY_TMPDIR")"
 # more: the line that did recorded a truncation that no longer happens, and recorded it
 # wrongly - it printed the length AFTER the cut, so every one of the 1,457 entries on the
 # affected machine read "had 6000 chars" (#31411).
-LOG="${MMRY_TMPDIR}/mmry-foundation.log"
+# Named by the account and server, as the supervisor's _FOUND_LOG is (#32915).
+mmry_foundation_log_name_v "$MMRY_TMPDIR"; LOG="$_MMRY_FND_LOG_NAME"
 
 # Toggle off -> no-op. The supervisor checks this too, before it ever spawns this worker, so
 # that the remedy the crash notice recommends actually works (#31434 QA).
@@ -1790,7 +1798,8 @@ MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && _mm
 # Part 1 only (#31411 split): six firings asking for one refresh is five too many.
 if (( MMRY_FND_PART == 1 )) && [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_API_KEY:-}" ]]; then
     _now="$(date +%s 2>/dev/null || echo 0)"
-    _lock="${MMRY_TMPDIR}/.mmry-foundation-refresh"
+    # The lock is this account's own (#32915): one account's attempt never bounds another's.
+    mmry_foundation_refresh_name_v "$MMRY_TMPDIR"; _lock="$_MMRY_FND_REFRESH_NAME"
     _cache_age=$(( _now - $(_mmry_mtime "$CACHE") ))
     _lock_age=$(( _now - $(_mmry_mtime "$_lock") ))
     if (( _cache_age >= REFRESH_SECS )) && (( _lock_age >= REFRESH_SECS )); then
@@ -1981,8 +1990,11 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
     # can replace the file at any moment, but nothing can change what was verified. So the copy is
     # exactly the set this turn checked, and its closing line names that version. A copy that cannot
     # be written, or a directory standing where it goes, sends nothing.
+    # NAMED BY THE ACCOUNT AS WELL AS THE SESSION (#32915, QA of #32889 NEW-2). With no session id and
+    # no marker this fell back to one shared mmry-foundation.byref.md, which a session on another
+    # account in the same state would write too. The account is in the name whatever else is.
     _fnd_key="${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}"
-    _fnd_snap="${MMRY_TMPDIR}/mmry-foundation.byref${_fnd_key:+.$_fnd_key}.md"
+    mmry_foundation_byref_name_v "$MMRY_TMPDIR" "$_fnd_key"; _fnd_snap="$_MMRY_FND_BYREF_NAME"
     _fnd_snaptmp="${_fnd_snap}.new.$$"
     _fnd_end="END OF FOUNDATION SET ${_fnd_setid}"
     #

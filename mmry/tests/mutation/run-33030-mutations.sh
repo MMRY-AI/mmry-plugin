@@ -52,7 +52,7 @@ add() { SPECS+=("$1"); NAMES+=("$2"); DESCS+=("$3"); FILES+=("$4"); OLDS+=("$5")
 for host in claude codex; do
     if [[ "$host" == "claude" ]]; then spec=session-start-live.bats; else spec=codex-session-live.bats; fi
     add "$spec" deliver-nothing "session-start.sh hands the session nothing" \
-        hooks-handlers/session-start.sh 'MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"' 'exit 0'
+        hooks-handlers/session-start.sh 'MEM_FILE="$_MMRY_FND_MEMORIES_NAME"' 'exit 0'
 done
 add session-start-live.bats other-account "Claude Code reads the Codex config, another account's key" \
     hooks-handlers/mmry-client.sh 'config_file="${HOME}/.claude/mmry-config.json"' 'config_file="${HOME}/.codex/mmry-config.json"'
