@@ -476,7 +476,7 @@ Store enough that any Claude session can do a great job working with the team. D
 
 ## Working Directory
 
-`--working-dir` is optional. The working directory is recorded server-side on `dbo.Session` when `session-start.sh` registers the session, and the API resolves it back when a save call includes `--session-id` without an explicit `--working-dir`. When neither is supplied (e.g., scripts invoked outside a Claude Code session), the client falls back to `$PWD`. The previous `${TMPDIR:-/tmp}/mmry-session-dir*` file mechanism was removed in v1.8 (Bug #9) because concurrent Claude Code sessions on the same machine collided through the shared file.
+`--working-dir` is optional. The working directory is recorded server-side with the session when `session-start.sh` registers the session, and the API resolves it back when a save call includes `--session-id` without an explicit `--working-dir`. When neither is supplied (e.g., scripts invoked outside a Claude Code session), the client falls back to `$PWD`. The previous `${TMPDIR:-/tmp}/mmry-session-dir*` file mechanism was removed in v1.8 (Bug #9) because concurrent Claude Code sessions on the same machine collided through the shared file.
 
 The API records the working directory for directory-scoped loading and traceability. Universal memories (Foundation, Strategic, most Operational) load everywhere regardless of working directory — recording it simply tells future sessions where the memory was created.
 
@@ -563,8 +563,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
 # Not from a task: general convention (omit --task-id)
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-memory.sh" \
   --tier "Foundation" --category "Convention" --scope "global" \
-  --topic "SQL Security Pattern" \
-  --content "CONVENTION: Use ownership chaining with stored procedures. No direct table access for service accounts." \
+  --topic "Reset Link Security Pattern" \
+  --content "CONVENTION: Password reset links expire after one hour and work once. Never write the link to a log." \
   --source "eric" --working-dir "$PWD" --session-id "$CLAUDE_SESSION_ID"
 ```
 
