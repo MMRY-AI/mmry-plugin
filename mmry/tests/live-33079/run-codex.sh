@@ -27,6 +27,11 @@ live_write_config "$CODEX_HOME/mmry-config.json" "$J_KEY"
 date -u +%FT%TZ > "$OUT/started"
 "$CX" plugin marketplace add "$(_native "$J_REPO")" > "$OUT/install.out" 2>&1 || { echo "marketplace add failed" > "$OUT/FAILED"; exit 1; }
 "$CX" plugin add mmry@mmry-plugin >> "$OUT/install.out" 2>&1 || { echo "plugin add failed" > "$OUT/FAILED"; exit 1; }
+if [[ -n "${HOOK_TIMEOUT:-}" ]]; then  # MEASUREMENT VARIANT: the scratch plugin copy only, never the repo
+  M="$CODEX_HOME/plugins/cache/mmry-plugin/mmry/local/hooks/codex-hooks.json"; cp "$M" "$OUT/codex-hooks.as-installed.json"
+  "$LIVE_JQ" --argjson t "$HOOK_TIMEOUT" '(.hooks[][].hooks[].timeout) |= (if . < $t then $t else . end)' "$OUT/codex-hooks.as-installed.json" > "$M"
+  echo "variant: every hook timeout raised to at least ${HOOK_TIMEOUT} s in the scratch plugin copy" > "$OUT/VARIANT.txt"
+fi
 wcwd="$(_native "$S/work")"
 _cx_rpc "$OUT/hooks1.jsonl" 2 "$("$LIVE_JQ" -cn --arg w "$wcwd" '{id:2,method:"hooks/list",params:{cwds:[$w]}}')"
 allv="$("$LIVE_JQ" -c 'select(.id==2) | [.result.data[]?.hooks[]? | select(.pluginId=="mmry@mmry-plugin") | {key:.key, value:{trusted_hash:.currentHash}}] | from_entries' "$OUT/hooks1.jsonl")"
