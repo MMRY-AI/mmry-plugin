@@ -77,7 +77,8 @@ copy() { rm -rf "$1"; mkdir -p "$1"; cp -R "$PLUGIN_SRC/." "$1/"; }
 echo "baseline: the untouched copy"
 copy "$WORK/base"
 if ! run_suite "$WORK/base" "$WORK/base.out"; then
-    echo "BASELINE FAILED; nothing can be scored"; grep '^not ok' "$WORK/base.out"; exit 2
+    # With the failing test's own lines: the work directory goes at exit, so this is the only trace.
+    echo "BASELINE FAILED; nothing can be scored"; grep -A8 '^not ok' "$WORK/base.out"; exit 2
 fi
 echo "baseline passed: $(grep -c '^ok' "$WORK/base.out") checks"
 
