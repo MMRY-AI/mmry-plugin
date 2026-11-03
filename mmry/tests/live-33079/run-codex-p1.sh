@@ -22,7 +22,7 @@ echo "MOCK: scratch mmry-config.json points at http://127.0.0.1:9 until the firs
   cp "$S/mmry-config.good" "$CODEX_HOME/mmry-config.json"; date -u +%T.%N > "$OUT/config-restored-at" ) &
 W=$!
 cd "$S/work" || exit 1
-timeout 400 "$CX" exec --skip-git-repo-check --sandbox read-only --json -o "$OUT/p1-last.txt" "Load my MMRY memories now." < /dev/null > "$OUT/p1.jsonl" 2> "$OUT/p1.err"; echo "rc=$?" > "$OUT/p1.rc"
+timeout 400 "$CX" exec --skip-git-repo-check --sandbox read-only --json -o "$OUT/p1-last.txt" "${PROMPT:-Load my MMRY memories now.}" < /dev/null > "$OUT/p1.jsonl" 2> "$OUT/p1.err"; echo "rc=$?" > "$OUT/p1.rc"
 wait $W
 cp "$S/mmry-config.good" "$CODEX_HOME/mmry-config.json"
 cp "$S/tmp/mmry-codex-session-start.log" "$S/tmp/mmry-codex-first-prompt.log" "$OUT/" 2>/dev/null
