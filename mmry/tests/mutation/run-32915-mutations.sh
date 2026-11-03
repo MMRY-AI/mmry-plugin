@@ -86,6 +86,10 @@ add session-part-unkeyed "the account key is dropped from the id-less session pa
 add prepared-unkeyed "the prepared copy, claim, result and stored check go back to the bare token, shared across accounts with no session id" \
     '    _FND_KEY="$_MMRY_FND_SESSION_PART"' \
     '    _FND_KEY="${_FND_STAMP:-none}"' "$H"
+# QA round 2 (#32915). F-A: the Codex writer's quick path.
+add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the token itself, so two Codex accounts with no session id share mmry-foundation.stored.unknown (QA probe5)" \
+    'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
+    'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true' "$C"
 
 run_suite() { ( cd "$1/tests" && PLUGIN_ROOT="$1" ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 

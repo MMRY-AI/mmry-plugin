@@ -783,10 +783,16 @@ mmry_write_foundation_cache() {
         mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
         MMRY_FND_WRITTEN_ENTRIES="$entries"
         # The stored marker, named as mmry_foundation_stored_path names it. With a valid session id the
-        # name is the id itself, written here without the three command substitutions; otherwise the
-        # shared function decides, as before.
+        # name is written here without the three command substitutions; otherwise the shared function
+        # decides, as before. THROUGH THE SESSION PART, NOT THE ID ITSELF (#32915, QA round 2, F-A):
+        # the token "unknown", which SessionStart leaves for a session with no id, passes this regex,
+        # and spelled as the id it made one bare mmry-foundation.stored.unknown for every Codex account
+        # with no session id, while the per-prompt hook looked for the keyed name. The session part
+        # routine is builtins only (a real id stands alone; "unknown" becomes <account key>.unknown),
+        # so Codex's start pays no process for it.
         if [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
-            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true
+            mmry_foundation_session_part_v "$sid"
+            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
         else
             mmry_foundation_mark_stored "${cache%/*}" "$sid" "$entries" || true
         fi
