@@ -236,6 +236,40 @@ _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext 
 # are not lost when that happens: the work goes on after the hook returns, and Codex runs the
 # UserPromptSubmit hooks before the model answers the first prompt. So the first prompt delivers them.
 
+# THE WINDOWS COST IS PROCESSES, SO THE PROCESSES ARE COUNTED (#33062 fix round 7). On Windows each process
+# the start creates costs 0.2 to 3 s depending on load (Cygwin's fork and exec are each one), and the
+# measured tests above failed on a quiet Windows machine at 17 to 25 s while Linux and macOS passed. A
+# time depends on the machine; a count does not. Measured on 4f0e4c6: session-start.sh, run as Codex's
+# hook runs it, created 77 processes from start to registration, 61 of them before it handed the
+# memories over. The count is taken by the operating system (a job object, helpers/count-processes.ps1),
+# so nothing it starts escapes it.
+@test "R1 (Windows): the Codex session start creates at most 50 processes from its start to the session's registration (77 on 4f0e4c6)" {
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: counts processes with a Windows job object" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    # No update check runs here (session-init.sh is not started), so teardown has none to wait for.
+    : > "$TEST_TMPDIR/su-finished"
+    printf '{"session_id":"count-1","hook_event_name":"SessionStart","source":"startup","cwd":"%s"}' "$TEST_TMPDIR" > "$TEST_TMPDIR/payload.json"
+    # The environment codex-hook.sh gives session-start.sh: the host, the plugin root, the payload on stdin.
+    cat > "$TEST_TMPDIR/ss.sh" <<EOF
+export PATH="$TEST_TMPDIR/mock-bin:\$PATH" TEST_TMPDIR="$TEST_TMPDIR" TMPDIR="$TMPDIR" HOME="$HOME" CODEX_HOME="$CX" MMRY_HOST=codex CLAUDE_PLUGIN_ROOT="$ROOT"
+unset MMRY_CONFIG_FILE MMRY_NO_SELF_UPDATE
+cd "$TEST_TMPDIR" && bash "$ROOT/hooks-handlers/session-start.sh" < "$TEST_TMPDIR/payload.json" > "$TEST_TMPDIR/ss.out" 2> "$TEST_TMPDIR/ss.err"
+EOF
+    local counter wb n
+    counter="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/count-processes.ps1")"
+    wb="$(cygpath -w "$(command -v bash)")"
+    # Into a file, with bats' fd 3 closed: a counted process must not hold the test's own output open.
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$counter" \
+        -CommandLine "\"$wb\" \"$(cygpath -w "$TEST_TMPDIR/ss.sh")\"" < /dev/null > "$TEST_TMPDIR/count.txt" 2>&1 3>&- || true
+    n="$(tr -d '\r' < "$TEST_TMPDIR/count.txt" | sed -n 's/.*PROCESSES=\([0-9]*\).*/\1/p')"
+    echo "# session-start.sh on Codex: ${n:-?} processes" >&3
+    [[ "$n" =~ ^[0-9]+$ ]] || { echo "the counter did not answer: $(cat "$TEST_TMPDIR/count.txt")"; return 1; }
+    run jq -r '.hookSpecificOutput.additionalContext' "$TEST_TMPDIR/ss.out"
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
+    grep -q 'POST .*/api/sessions.*count-1' "$TEST_TMPDIR/curl-log.txt" || { echo "the session was not registered"; return 1; }
+    (( n <= 50 )) || { echo "session-start.sh on Codex created $n processes; at most 50"; return 1; }
+}
+
 @test "R1: a start forced past its budget still hands the memories to the conversation with the first prompt" {
     export MMRY_CODEX_START_BUDGET=3
     _slow_curl "/api/memories/startup" 8
