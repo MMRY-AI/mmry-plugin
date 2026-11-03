@@ -168,3 +168,24 @@ fnd_outcome_file() {
     (( n > 1 )) && sfx=".$n"
     printf '%s/mmry-foundation.outcome.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
 }
+# THE NOTICE MARKERS, NAMED THE SAME WAY (#32915, QA round 2, F-B). The in-flight marker (a turn the
+# harness killed), the cut-short marker (a turn stopped at the deadline), the empty-set told marker
+# and the by-reference told marker were bare names with no session id, one for every id-less session
+# on the machine whatever its account: one account's user went untold of a by-reference set, and was
+# told of the other account's lost turn. Each takes the session part above: the id, else <key>.none.
+#   fnd_inflight_file   [sid] [part number] [dir] -> <dir>/.mmry-foundation-inflight.<part>[.<n>]
+#   fnd_cutshort_file   [sid] [part number] [dir] -> <dir>/.mmry-foundation-cutshort.<part>[.<n>]
+#   fnd_empty_told_file [sid] [dir]               -> <dir>/.mmry-foundation-empty-told.<part>
+#   fnd_byref_told_file [sid] [dir]               -> <dir>/.mmry-foundation-byref-told.<part>
+fnd_inflight_file() {
+    local n="${2:-1}" sfx=""
+    (( n > 1 )) && sfx=".$n"
+    printf '%s/.mmry-foundation-inflight.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
+}
+fnd_cutshort_file() {
+    local n="${2:-1}" sfx=""
+    (( n > 1 )) && sfx=".$n"
+    printf '%s/.mmry-foundation-cutshort.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
+}
+fnd_empty_told_file() { printf '%s/.mmry-foundation-empty-told.%s' "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_byref_told_file() { printf '%s/.mmry-foundation-byref-told.%s' "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }

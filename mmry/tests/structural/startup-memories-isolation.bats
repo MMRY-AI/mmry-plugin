@@ -134,7 +134,21 @@ _codex_start_nosid() {
               bash "$PLUGIN_ROOT/hooks-handlers/codex-hook.sh" session-start 2>/dev/null
 }
 
+# A Claude Code SessionStart with NO session id whose response carries NO Foundation memory at all (an
+# empty set), for the empty-set notice.
+#   _claude_start_nosid_empty <url> <key>
+_claude_start_nosid_empty() {
+    printf '{"hook_event_name":"SessionStart","cwd":"/w"}' \
+        | env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID MMRY_API_URL="$1" MMRY_API_KEY="$2" MMRY_AUTH_METHOD=apikey \
+              MOCK_CURL_RESPONSE='[{"id":2,"topic":"Note","content":"an ordinary memory","memoryTier":"Experience","scope":"global","category":"Fact"}]' \
+              bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" 2>/dev/null
+}
+
 _ctx() { jq -j '.hookSpecificOutput.additionalContext // ""' <<<"$1" | tr -d '\r'; }
+_umsg() { jq -j '.systemMessage // ""' <<<"$1" | tr -d '\r'; }
+# A directive padded past one part's capacity, so that with MMRY_FOUNDATION_PARTS_MAX=1 the set goes
+# by reference: the directive text first, then 12,000 filler characters.
+_big_directive() { printf '%s %s' "$1" "$(printf '%*s' 12000 '' | tr ' ' 'q')"; }
 
 # THE FILE THE MODEL WAS TOLD TO READ, from a SessionStart output. On Codex for Windows the path is
 # spelled for PowerShell (C:\...), so it is turned back into the path this shell can open.
@@ -429,6 +443,88 @@ _write_large_set() {
     [[ -f "$ma" ]] || { echo "A's stored marker went when B started"; return 1; }
     # The shared name is never written, by either start.
     [[ ! -e "$TEST_TMPDIR/mmry-foundation.stored.unknown" ]] || { echo "the shared marker mmry-foundation.stored.unknown was written"; return 1; }
+}
+
+# THE NOTICE MARKERS (#32915, QA round 2, F-B). The by-reference told marker, the in-flight marker and
+# the cut-short marker were bare names with no session id, so two accounts in that state shared each
+# of them. QA's privacy probe: account B's user was never told its set goes by reference (A's marker
+# stood for B's), B's assistant was told B's previous turn ran without directives (A's killed turn),
+# and A's own lost turn was never reported (B's prompt consumed the marker). Two accounts, no session
+# id, each set too large to show so each goes by reference.
+@test "startup: the by-reference, in-flight and cut-short markers made with NO session id are each account's own - one account's user is always told, and never told of the other account's lost turn" {
+    local out ia ib ca cb ta tb f
+    _claude_start_nosid "$PROD_URL" "$PROD_KEY" "$(_big_directive "$PROD_DIRECTIVE")" "$PROD_NOTE" >/dev/null
+    _claude_start_nosid "$INT_URL"  "$INT_KEY"  "$(_big_directive "$INT_DIRECTIVE")"  "$INT_NOTE"  >/dev/null
+    export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"
+    ia="$(fnd_inflight_file)"; ca="$(fnd_cutshort_file)"; ta="$(fnd_byref_told_file)"
+    export MMRY_API_URL="$INT_URL"  MMRY_API_KEY="$INT_KEY"
+    ib="$(fnd_inflight_file)"; cb="$(fnd_cutshort_file)"; tb="$(fnd_byref_told_file)"
+    unset MMRY_API_URL MMRY_API_KEY
+    [[ "$ia" != "$ib" && "$ca" != "$cb" && "$ta" != "$tb" ]] || { echo "one marker name for two accounts: ${ia##*/}"; return 1; }
+
+    # A's first prompt: its user is told once that the set goes by reference, under A's own marker.
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$PROD_URL" "$PROD_KEY")"
+    [[ "$(_umsg "$out")" == *"larger than"* ]] || { echo "control: A's user was not told of A's by-reference set: ${out:0:300}"; return 1; }
+    [[ -f "$ta" ]] || { echo "A's told marker is not at ${ta##*/}; files: $(ls -a "$TEST_TMPDIR" | grep told | tr '\n' ' ')"; return 1; }
+    # B's first prompt: B's user is told too. With one shared marker, A's telling stood for B's.
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$INT_URL" "$INT_KEY")"
+    [[ "$(_umsg "$out")" == *"larger than"* ]] || { echo "B's user was NOT told of B's by-reference set: A's marker stood for B's"; return 1; }
+    [[ -f "$tb" ]] || { echo "B's told marker is not at ${tb##*/}"; return 1; }
+    # A's second prompt: said once a session, so not again.
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$PROD_URL" "$PROD_KEY")"
+    [[ "$(_umsg "$out")" != *"larger than"* ]] || { echo "A's user was told twice"; return 1; }
+
+    # A's turn killed by the harness: the in-flight marker it leaves behind, at A's own name. B's
+    # next turn must not report it; A's must, once.
+    : > "$ia"
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$INT_URL" "$INT_KEY")"
+    [[ "$(_ctx "$out")" != *"PREVIOUS turn"* ]] || { echo "B's assistant was told of A's lost turn"; return 1; }
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$PROD_URL" "$PROD_KEY")"
+    [[ "$(_ctx "$out")" == *"PREVIOUS turn"* ]] || { echo "A's own lost turn was never reported to A"; return 1; }
+    [[ ! -e "$ia" ]] || { echo "A's in-flight marker was not consumed by A's turn"; return 1; }
+    # A turn stopped at the deadline leaves the cut-short marker, reported the same way.
+    : > "$ca"
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$INT_URL" "$INT_KEY")"
+    [[ "$(_ctx "$out")" != *"PREVIOUS turn"* ]] || { echo "B's assistant was told of A's cut-short turn"; return 1; }
+    out="$(MMRY_FOUNDATION_PARTS_MAX=1 _claude_prompt_nosid "$PROD_URL" "$PROD_KEY")"
+    [[ "$(_ctx "$out")" == *"PREVIOUS turn"* ]] || { echo "A's own cut-short turn was never reported to A"; return 1; }
+    [[ ! -e "$ca" ]] || { echo "A's cut-short marker was not consumed by A's turn"; return 1; }
+    # And the shared names are never used.
+    for f in .mmry-foundation-inflight .mmry-foundation-cutshort .mmry-foundation-byref-told .mmry-foundation-empty-told; do
+        [[ ! -e "$TEST_TMPDIR/$f" ]] || { echo "the shared marker $f was written"; return 1; }
+    done
+}
+
+# The empty-set notice is said once a session, and the marker that records it was the bare
+# .mmry-foundation-empty-told with no session id, written by SessionStart (even with an id) and read
+# by the per-prompt hook: one Foundation working file for every id-less session on the machine. It is
+# the account's own now, and SessionStart writes no shared one.
+@test "startup: the empty-set told marker made with NO session id is each account's own, and SessionStart never writes the shared one" {
+    local out ea eb
+    export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"; ea="$(fnd_empty_told_file)"
+    export MMRY_API_URL="$INT_URL"  MMRY_API_KEY="$INT_KEY";  eb="$(fnd_empty_told_file)"
+    unset MMRY_API_URL MMRY_API_KEY
+    [[ "$ea" != "$eb" ]] || { echo "one told marker name for two accounts: ${ea##*/}"; return 1; }
+    out="$(_claude_start_nosid_empty "$PROD_URL" "$PROD_KEY")"
+    [[ "$(_umsg "$out")" == *"no Foundation directives"* ]] || { echo "control: A's user was not told the set is empty: ${out:0:300}"; return 1; }
+    [[ -f "$ea" ]] || { echo "A's told marker is not at ${ea##*/}; files: $(ls -a "$TEST_TMPDIR" | grep told | tr '\n' ' ')"; return 1; }
+    out="$(_claude_start_nosid_empty "$INT_URL" "$INT_KEY")"
+    [[ "$(_umsg "$out")" == *"no Foundation directives"* ]] || { echo "control: B's user was not told the set is empty"; return 1; }
+    [[ -f "$eb" && -f "$ea" ]] || { echo "B's start did not leave B's marker, or took A's"; return 1; }
+    # Told once: neither account's prompt says it again, each reading its own marker.
+    out="$(_claude_prompt_nosid "$PROD_URL" "$PROD_KEY")"
+    [[ "$(_umsg "$out")" != *"no Foundation directives"* ]] || { echo "A's user was told twice"; return 1; }
+    out="$(_claude_prompt_nosid "$INT_URL" "$INT_KEY")"
+    [[ "$(_umsg "$out")" != *"no Foundation directives"* ]] || { echo "B's user was told twice"; return 1; }
+    [[ ! -e "$TEST_TMPDIR/.mmry-foundation-empty-told" ]] || { echo "the shared marker .mmry-foundation-empty-told was written"; return 1; }
+    # With a session id the marker is named by the id alone, as it always was, and still no shared one.
+    _claude_start claude-empty-01 "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE" "$PROD_NOTE" >/dev/null
+    printf '{"session_id":"claude-empty-02","hook_event_name":"SessionStart","cwd":"/w"}' \
+        | env MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY" MMRY_AUTH_METHOD=apikey \
+              MOCK_CURL_RESPONSE='[{"id":2,"topic":"Note","content":"an ordinary memory","memoryTier":"Experience","scope":"global","category":"Fact"}]' \
+              bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" >/dev/null 2>&1
+    [[ -f "$TEST_TMPDIR/.mmry-foundation-empty-told.claude-empty-02" ]] || { echo "the id-named told marker was not written"; return 1; }
+    [[ ! -e "$TEST_TMPDIR/.mmry-foundation-empty-told" ]] || { echo "the shared marker .mmry-foundation-empty-told was written by a start WITH an id"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
