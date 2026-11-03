@@ -17,6 +17,7 @@ PLUGIN_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
 K="hooks-handlers/lib-foundation-key.sh"
 S="hooks-handlers/session-start.sh"
 H="hooks-handlers/userpromptsubmit-foundation.sh"
+C="hooks-handlers/mmry-client.sh"
 SUITE="tests/structural/startup-memories-isolation.bats"
 WORK="${TMPDIR:-/tmp}/mmry-32915-mut-$$"
 mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
@@ -51,8 +52,8 @@ add failclosed-off "a session whose account or server cannot be identified loads
     'if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" ]]; then' \
     'if false; then' "$S"
 add url-default-counts "an empty server address is taken as the default server, so the identity is never unknown for want of one" \
-    '    [[ -n "$url" ]] && _MMRY_FND_ID_URL_GIVEN=1' \
-    '    _MMRY_FND_ID_URL_GIVEN=1' "$K"
+    '    [[ -n "$MMRY_API_URL" ]] && _MMRY_CFG_URL_GIVEN=1' \
+    '    _MMRY_CFG_URL_GIVEN=1' "$C"
 add legacy-not-swept "the legacy machine-wide file is left out of the week-old sweep" \
     "-o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md'" \
     "" "$S"

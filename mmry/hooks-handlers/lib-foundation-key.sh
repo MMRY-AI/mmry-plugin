@@ -201,7 +201,13 @@ mmry_foundation_session_name_v() {
 # no key, or an empty server address, delivers nothing, and no shared file is read).
 mmry_foundation_identity_known_v() {
     mmry_foundation_identity_v
-    [[ -n "$_MMRY_FND_ID_KEY" && "$_MMRY_FND_ID_URL_GIVEN" == 1 ]]
+    local given="$_MMRY_FND_ID_URL_GIVEN"
+    # When mmry-client.sh has loaded the config in this shell it has already put its default server
+    # into MMRY_API_URL, so whether one was GIVEN is what it recorded at that moment, not what the
+    # environment holds now. A caller without the client (the per-prompt supervisor) has no record
+    # and the scan above decides.
+    [[ -n "${_MMRY_CFG_URL_GIVEN:-}" ]] && given="$_MMRY_CFG_URL_GIVEN"
+    [[ -n "$_MMRY_FND_ID_KEY" && "$given" == 1 ]]
 }
 
 # THE STARTUP MEMORIES FILE (#32915): "<dir>/mmry-memories.<key>.<session id>.md", or without the

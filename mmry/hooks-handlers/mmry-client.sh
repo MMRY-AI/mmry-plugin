@@ -233,6 +233,12 @@ mmry_load_config() {
         fi
     fi
 
+    # WHETHER A SERVER ADDRESS WAS GIVEN AT ALL, recorded before the default replaces an empty one
+    # (#32915). The key library (lib-foundation-key.sh, mmry_foundation_identity_known_v) reads
+    # MMRY_API_URL after this and would otherwise take the default for an address the session was
+    # configured with; a session given none cannot name whose startup memories it would load.
+    _MMRY_CFG_URL_GIVEN=0
+    [[ -n "$MMRY_API_URL" ]] && _MMRY_CFG_URL_GIVEN=1
     # Apply defaults
     MMRY_API_URL="${MMRY_API_URL:-$_MMRY_DEFAULT_URL}"
     MMRY_FOUNDATION_REINJECT="${MMRY_FOUNDATION_REINJECT:-true}"
