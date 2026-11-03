@@ -253,7 +253,10 @@ _memories_files() { ( cd "$TEST_TMPDIR" && ls -1 2>/dev/null | grep '^mmry-memor
 
 @test "startup: the refresh throttle stamp and lock are each account's own, and one account's fresh stamp does not delay the other account's refresh" {
     local out sa sb ka kb i now last
-    # Both accounts have a set a year old, so a refresh is due for each, with a 60 s window.
+    # Both accounts have a set a year old, so a refresh is due for each. The interval is 600 s, so
+    # the throttle window is the hook's own cap of 300 s: wide enough that a loaded machine (this PC
+    # under three concurrent runs took over 60 s for one prompt and its wait) cannot age A's stamp
+    # out of the window before B fires, which would fail the control, not the check.
     _claude_start claude-refresh-a "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE" "$PROD_NOTE" >/dev/null
     _claude_start claude-refresh-b "$INT_URL"  "$INT_KEY"  "$INT_DIRECTIVE"  "$INT_NOTE"  >/dev/null
     export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"; sa="$(fnd_refresh_checked_file)"; ka="$(fnd_refresh_file)"; touch -t 202501010000 "$(fnd_set_file)"
@@ -261,20 +264,20 @@ _memories_files() { ( cd "$TEST_TMPDIR" && ls -1 2>/dev/null | grep '^mmry-memor
     [[ "$sa" != "$sb" && "$ka" != "$kb" ]] || { echo "one throttle name for two accounts"; return 1; }
 
     # Account A's prompt: its stamp is written and, by a detached decision, its lock.
-    out="$(_claude_prompt claude-refresh-a "$PROD_URL" "$PROD_KEY" 60)"
+    out="$(_claude_prompt claude-refresh-a "$PROD_URL" "$PROD_KEY" 600)"
     [[ "$(_ctx "$out")" == *"$PROD_DIRECTIVE"* ]] || { echo "control: A did not deliver: ${out:0:300}"; return 1; }
     [[ -f "$sa" ]] || { echo "A's stamp was not written at $sa; files: $(ls -a "$TEST_TMPDIR" | tr '\n' ' ')"; return 1; }
-    for (( i = 0; i < 150; i++ )); do [[ -f "$ka" ]] && break; sleep 0.2; done
+    for (( i = 0; i < 300; i++ )); do [[ -f "$ka" ]] && break; sleep 0.2; done
     [[ -f "$ka" ]] || { echo "A's refresh was not decided (no lock at $ka)"; return 1; }
 
-    # Account B's prompt, at once, while A's stamp is well inside the 60 s window. An unkeyed stamp
+    # Account B's prompt, at once, while A's stamp is well inside the 300 s window. An unkeyed stamp
     # would throttle B here: B's refresh would wait for A's window to pass.
     last="$(<"$sa")"; now="$(date +%s)"
-    (( now - last < 60 )) || { echo "control: A's stamp is already $(( now - last )) s old, so this proves nothing about the throttle"; return 1; }
-    out="$(_claude_prompt claude-refresh-b "$INT_URL" "$INT_KEY" 60)"
+    (( now - last < 300 )) || { echo "control: A's stamp is already $(( now - last )) s old, so this proves nothing about the throttle"; return 1; }
+    out="$(_claude_prompt claude-refresh-b "$INT_URL" "$INT_KEY" 600)"
     [[ "$(_ctx "$out")" == *"$INT_DIRECTIVE"* ]] || { echo "control: B did not deliver: ${out:0:300}"; return 1; }
     [[ -f "$sb" ]] || { echo "B's stamp was not written: A's stamp throttled B"; return 1; }
-    for (( i = 0; i < 150; i++ )); do [[ -f "$kb" ]] && break; sleep 0.2; done
+    for (( i = 0; i < 300; i++ )); do [[ -f "$kb" ]] && break; sleep 0.2; done
     [[ -f "$kb" ]] || { echo "B's refresh was not decided inside A's window: one account's throttle delayed the other's refresh"; return 1; }
 
     [[ ! -e "$TEST_TMPDIR/.mmry-foundation-refresh-checked" && ! -e "$TEST_TMPDIR/.mmry-foundation-refresh" ]] \
