@@ -136,3 +136,35 @@ fnd_refresh_checked_file() {
 fnd_byref_file() {
     printf '%s/mmry-foundation.byref.%s%s.md' "${2:-$TEST_TMPDIR}" "$(fnd_acct)" "${1:+.$1}"
 }
+
+# THE PER-SESSION MARKERS, NAMED SO THAT TWO ACCOUNTS NEVER SHARE ONE (#32915, QA round 1,
+# requirement 2). The prepared copy, claim, result and stored markers are named by the session: the
+# payload's id, else the token SessionStart left, which is the literal "unknown" for a session that
+# had no id. A real session id is unique to its session and stands alone; "unknown", or no id at
+# all ("none"), is a name every id-less session would use, so it carries the account key in front:
+# <key>.unknown. The delivery record and the per-part outcomes take the same rule with the payload's
+# id only (they never carried the token), so with no id they are <key>.none.
+#
+#   fnd_session_part [sid-or-token]      -> <sid>, or <key>.unknown / <key>.none
+#   fnd_prepared_file [sid-or-token] [dir] -> <dir>/.mmry-foundation-prepared.<part>
+#   fnd_claim_file    [sid-or-token] [dir] -> <dir>/.mmry-foundation-claim.<part>
+#   fnd_result_file   [sid-or-token] [dir] -> <dir>/.mmry-foundation-result.<part>
+#   fnd_stored_file   [sid-or-token] [dir] -> <dir>/mmry-foundation.stored.<part>
+#   fnd_status_file   [sid] [dir]          -> <dir>/mmry-foundation.status.<part>
+#   fnd_outcome_file  [sid] [part] [dir]   -> <dir>/mmry-foundation.outcome.<part>[.<part number>]
+fnd_session_part() {
+    local v="${1:-}"
+    [[ "$v" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || v=""
+    if [[ -n "$v" && "$v" != "unknown" ]]; then printf '%s' "$v"; return 0; fi
+    printf '%s.%s' "$(fnd_acct)" "${v:-none}"
+}
+fnd_prepared_file() { printf '%s/.mmry-foundation-prepared.%s' "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_claim_file()    { printf '%s/.mmry-foundation-claim.%s'    "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_result_file()   { printf '%s/.mmry-foundation-result.%s'   "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_stored_file()   { printf '%s/mmry-foundation.stored.%s'    "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_status_file()   { printf '%s/mmry-foundation.status.%s'    "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_outcome_file() {
+    local n="${2:-1}" sfx=""
+    (( n > 1 )) && sfx=".$n"
+    printf '%s/mmry-foundation.outcome.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
+}

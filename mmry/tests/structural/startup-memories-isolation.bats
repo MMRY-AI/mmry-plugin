@@ -95,6 +95,18 @@ _claude_prompt_nosid() {
               bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 2>/dev/null
 }
 
+# A Claude Code prompt whose identity comes from a CONFIG FILE, for the fail-closed cases, with the
+# daily refresh ON (the interval given, in seconds) and a service that WOULD answer a fetch with a
+# directive: if the hook's refresh worker fetches for this session, the set gets stored and the next
+# prompt delivers it, which is what QA round 1 found (probe3) and requirement 3 forbids.
+#   _claude_prompt_cfg <sid> <config-file> <refresh-seconds>
+_claude_prompt_cfg() {
+    printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","prompt":"hi"}' "$1" \
+        | env MMRY_CONFIG_FILE="$2" MMRY_API_URL="" MMRY_API_KEY="" MMRY_AUTH_METHOD="" MMRY_FOUNDATION_REFRESH_SECONDS="$3" \
+              MOCK_CURL_RESPONSE="$(_startup_body "$PROD_DIRECTIVE" "$PROD_NOTE")" \
+              bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 2>/dev/null
+}
+
 # A Codex session: its own CODEX_HOME holding its own mmry-config.json, every hook through
 # codex-hook.sh, the real Codex entry point. Nothing about the account is in the environment.
 _codex_home() {
@@ -340,6 +352,48 @@ _write_large_set() {
     [[ "$ctx" == *"${c##*/}"* ]] || { echo "the prompt points elsewhere: ${ctx:0:400}"; return 1; }
 }
 
+# Found by independent QA of round 1 (probe2, requirement 2). With no session id on either session,
+# the per-prompt hook named its prepared copy, claim, result and stored markers by the token
+# SessionStart leaves for an id-less session, the literal "unknown": one name for both accounts, and
+# the prepared copy holds the directive text, so account B's prompt overwrote account A's copy.
+@test "startup: the per-session markers made with NO session id are each account's own - two accounts never share the prepared copy, result, stored marker or delivery record" {
+    local out ctx pa pb ra rb ma mb sa sb
+    _claude_start_nosid "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE" "$PROD_NOTE" >/dev/null
+    _claude_start_nosid "$INT_URL"  "$INT_KEY"  "$INT_DIRECTIVE"  "$INT_NOTE"  >/dev/null
+    # The names each account's markers must have: the token is "unknown" for both, so the account
+    # key is what keeps them apart.
+    export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"
+    pa="$(fnd_prepared_file unknown)"; ra="$(fnd_result_file unknown)"; ma="$(fnd_stored_file unknown)"; sa="$(fnd_status_file)"
+    export MMRY_API_URL="$INT_URL"  MMRY_API_KEY="$INT_KEY"
+    pb="$(fnd_prepared_file unknown)"; rb="$(fnd_result_file unknown)"; mb="$(fnd_stored_file unknown)"; sb="$(fnd_status_file)"
+    [[ "$pa" != "$pb" && "$ra" != "$rb" && "$ma" != "$mb" && "$sa" != "$sb" ]] || { echo "one marker name for two accounts: ${pa##*/}"; return 1; }
+    # SessionStart stored a set for each, and said so under each account's own marker.
+    [[ -f "$ma" && -f "$mb" ]] || { echo "stored markers missing: $(ls -a "$TEST_TMPDIR" | grep stored | tr '\n' ' ')"; return 1; }
+
+    out="$(_claude_prompt_nosid "$PROD_URL" "$PROD_KEY")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$PROD_DIRECTIVE"* ]] || { echo "control: A did not deliver: ${ctx:0:300}"; return 1; }
+    [[ -f "$pa" ]] || { echo "no prepared copy for A at ${pa##*/}; files: $(ls -a "$TEST_TMPDIR" | tr '\n' ' ')"; return 1; }
+    grep -q "$PROD_DIRECTIVE" "$pa" || { echo "A's prepared copy does not hold A's directive"; return 1; }
+    [[ -f "$ra" ]] || { echo "no result marker for A at ${ra##*/}"; return 1; }
+    [[ -f "$sa" ]] || { echo "no delivery record for A at ${sa##*/}; files: $(ls -a "$TEST_TMPDIR" | tr '\n' ' ')"; return 1; }
+
+    out="$(_claude_prompt_nosid "$INT_URL" "$INT_KEY")"; ctx="$(_ctx "$out")"
+    [[ "$ctx" == *"$INT_DIRECTIVE"* ]] || { echo "control: B did not deliver: ${ctx:0:300}"; return 1; }
+    [[ -f "$pb" ]] || { echo "no prepared copy for B at ${pb##*/}"; return 1; }
+    grep -q "$INT_DIRECTIVE" "$pb" || { echo "B's prepared copy does not hold B's directive"; return 1; }
+    [[ -f "$rb" && -f "$sb" ]] || { echo "B's result or delivery record missing"; return 1; }
+    # The overwrite QA saw: after B's prompt, A's prepared copy must still be A's.
+    grep -q "$PROD_DIRECTIVE" "$pa" || { echo "A's prepared copy was overwritten by B's prompt"; return 1; }
+    (( $(grep -c "$INT_DIRECTIVE" "$pa" || true) == 0 )) || { echo "A's prepared copy holds B's directive"; return 1; }
+    (( $(grep -c "$PROD_DIRECTIVE" "$pb" || true) == 0 )) || { echo "B's prepared copy holds A's directive"; return 1; }
+    # And the shared names are never used.
+    local f
+    for f in .mmry-foundation-prepared.unknown .mmry-foundation-claim.unknown .mmry-foundation-result.unknown \
+             mmry-foundation.stored.unknown mmry-foundation.status mmry-foundation.outcome; do
+        [[ ! -e "$TEST_TMPDIR/$f" ]] || { echo "the shared marker $f was written"; return 1; }
+    done
+}
+
 # ---------------------------------------------------------------------------------------------
 # TEST CASE 3, requirement 3. A session that cannot identify its account and server delivers nothing:
 # no API key, an authentication method that is not an API key, or an empty server address. A shared
@@ -369,6 +423,24 @@ _assert_nothing_delivered() {
     [[ "${fetched:-0}" == "0" ]] || { echo "$what: the startup memories were fetched ($fetched requests)"; return 1; }
     [[ -n "$ctx" ]] || { echo "$what: the session was told nothing at all"; return 1; }
 }
+# THE PROMPTS AFTER A REFUSED START (QA round 1, probe3). SessionStart refused and stored nothing; the
+# per-prompt hook's refresh worker, with the daily refresh on, then fetched from the default server,
+# stored the set, and the second prompt delivered it. Two prompts, the refresh on, the service ready
+# to answer: nothing delivered on either, no request made, no set stored. The worker runs detached,
+# so each prompt is given time to do its worst before the files are checked.
+#   _assert_prompts_deliver_nothing <sid> <config-file> <what>
+_assert_prompts_deliver_nothing() {
+    local sid="$1" cfg="$2" what="$3" out ctx i fetched
+    for i in 1 2; do
+        out="$(_claude_prompt_cfg "$sid" "$cfg" 60)"; ctx="$(_ctx "$out")"
+        [[ "$ctx" != *"$PROD_DIRECTIVE"* && "$ctx" != *"FOUNDATION memories"* ]] || { echo "$what: prompt $i delivered directives: ${ctx:0:300}"; return 1; }
+        sleep 6
+        ! ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "$what: a Foundation set was stored by prompt $i: $(ls "$TEST_TMPDIR"/mmry-foundation-set.*.md)"; return 1; }
+        fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
+        [[ "${fetched:-0}" == "0" ]] || { echo "$what: prompt $i fetched the startup memories ($fetched requests)"; return 1; }
+    done
+    [[ "$(_memories_files)" == "mmry-memories.md" ]] || { echo "$what: a memories file was written by a prompt: $(_memories_files | tr '\n' ' ')"; return 1; }
+}
 
 @test "startup: positive control - with a whole identity the same harness sees the delivery, so the fail-closed checks below can see one too" {
     local out p
@@ -395,6 +467,7 @@ _assert_nothing_delivered() {
     _cfg "$TEST_TMPDIR/cfg-oauth.json" "$PROD_URL" oauth "an-oauth-access-token-0000000000000000001"
     out="$(_claude_start_cfg claude-oauth-01 "$TEST_TMPDIR/cfg-oauth.json" "$PROD_DIRECTIVE" "$PROD_NOTE")"
     _assert_nothing_delivered "$out" "oauth"
+    _assert_prompts_deliver_nothing claude-oauth-01 "$TEST_TMPDIR/cfg-oauth.json" "oauth"
 }
 
 @test "startup: fail closed - with an EMPTY server address nothing is delivered and the shared file is not read" {
@@ -403,10 +476,12 @@ _assert_nothing_delivered() {
     _cfg "$TEST_TMPDIR/cfg-nourl.json" "" apikey "$PROD_KEY"
     out="$(_claude_start_cfg claude-nourl-01 "$TEST_TMPDIR/cfg-nourl.json" "$PROD_DIRECTIVE" "$PROD_NOTE")"
     _assert_nothing_delivered "$out" "empty server address"
-    # And the same with the address absent from the config altogether.
+    _assert_prompts_deliver_nothing claude-nourl-01 "$TEST_TMPDIR/cfg-nourl.json" "empty server address"
+    # And the same with the address absent from the config altogether: the case QA's probe3 ran.
     printf '{\n  "authMethod": "apikey",\n  "apiKey": "%s"\n}\n' "$PROD_KEY" > "$TEST_TMPDIR/cfg-absenturl.json"
     out="$(_claude_start_cfg claude-nourl-02 "$TEST_TMPDIR/cfg-absenturl.json" "$PROD_DIRECTIVE" "$PROD_NOTE")"
     _assert_nothing_delivered "$out" "absent server address"
+    _assert_prompts_deliver_nothing claude-nourl-02 "$TEST_TMPDIR/cfg-absenturl.json" "absent server address"
 }
 
 # ---------------------------------------------------------------------------------------------
