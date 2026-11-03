@@ -303,6 +303,10 @@ _write_large_set() {
 
 @test "startup: the by-reference copy made with NO session id and NO marker is each account's own, never the shared mmry-foundation.byref.md" {
     local out ctx ca cb
+    # Cutting a 60,000-character set runs past the hook's 10 s deadline on a loaded Windows machine
+    # (seen twice on this PC); the deadline is not what this test is about, so it is widened the way
+    # the README documents. The name of the copy is what is under test.
+    export MMRY_FOUNDATION_DEADLINE_SECS=60
     export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"; _write_large_set PRODUCTION || { echo "the writer failed for A"; return 1; }; ca="$(fnd_byref_file)"
     export MMRY_API_URL="$INT_URL"  MMRY_API_KEY="$INT_KEY";  _write_large_set INTEGRATION || { echo "the writer failed for B"; return 1; }; cb="$(fnd_byref_file)"
     [[ "$ca" != "$cb" ]] || { echo "one by-reference name for two accounts: $ca"; return 1; }
@@ -324,6 +328,7 @@ _write_large_set() {
 
 @test "startup: the by-reference copy made WITH a session id carries the account as well as the session" {
     local out ctx c
+    export MMRY_FOUNDATION_DEADLINE_SECS=60
     export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"; _write_large_set PRODUCTION || return 1
     c="$(fnd_byref_file claude-byref-sid)"
     out="$(_claude_prompt claude-byref-sid "$PROD_URL" "$PROD_KEY")"; ctx="$(_ctx "$out")"
