@@ -21,6 +21,10 @@ setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     STATUSCMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # A whole identity for the session under test (#32915, requirement 3): the hook delivers nothing
+    # for a session that cannot name its account and server, as SessionStart loads nothing for one.
+    # The same values the tests below write, so their configs keep the same key.
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
     SET="$(fnd_set_file)"
     # SessionStart writes this in every real session; see userpromptsubmit-foundation.bats.
     printf 'session-under-test' > "$(fnd_session_file)"

@@ -11,9 +11,10 @@ setup() {
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
     # A whole identity for the session under test (#32915, requirement 3): the hook now delivers
     # nothing for a session that cannot name its account and server, as SessionStart loads nothing
-    # for one, so a suite that only plants a set on disk must say whose it is. The daily refresh is
-    # off unless a test turns it on, so no test's planted set is refreshed from the mock behind it.
-    export MMRY_API_URL="http://localhost:5291" MMRY_API_KEY="test-api-key-32915" MMRY_FOUNDATION_REFRESH_SECONDS=0
+    # for one, so a suite that only plants a set on disk must say whose it is. The same config
+    # _make_config writes, so a test that writes it again keeps the same key; in the config and not
+    # the environment, so a Codex test's own config (CODEX_HOME) is still the one its handler reads.
+    _make_config
     SET="$(fnd_set_file)"
     # Every real session has one of these: SessionStart writes the session id here and clears
     # the delivery record beside it (#31583 QA round 4, finding 4c). Without it the handler
@@ -1133,13 +1134,16 @@ _stage_codex_install() {
     [[ "$output" == *'never overstate evidence'* ]]
 }
 
-@test "req4 control: a Claude install with NO credential is unaffected by the Codex guard" {
-    # The guard must key on the HOST, not on whether a credential happens to exist. A Claude
-    # install has always re-injected from cache regardless, and still must.
+@test "req4 control: a Claude install with NO Codex credential is unaffected by the Codex guard" {
+    # The guard must key on the HOST, not on whether a Codex credential happens to exist. A Claude
+    # install re-injects from its cache regardless, and still must. Its own credential is the Claude
+    # file in its home (#32915, requirement 3: a session with no identity at all now delivers nothing,
+    # so the Claude file names the same account the set in setup was sealed for).
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
     local fakehome="$TEST_TMPDIR/claude-nocred"
     mkdir -p "$fakehome/.claude"
+    cp "$MMRY_CONFIG_FILE" "$fakehome/.claude/mmry-config.json"
 
     run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CODEX_HOME HOME="$fakehome" bash "$HANDLER"
 

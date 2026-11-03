@@ -24,7 +24,7 @@ setup() {
     # nothing for a session that cannot name its account and server, as SessionStart loads nothing
     # for one, so a suite that only plants a set on disk must say whose it is. The daily refresh is
     # off, so no planted set is refreshed from the mock behind it.
-    export MMRY_API_URL="http://localhost:5291" MMRY_API_KEY="test-api-key-32915" MMRY_FOUNDATION_REFRESH_SECONDS=0
+    export MMRY_API_URL="http://127.0.0.1:9" MMRY_API_KEY="test-key" MMRY_FOUNDATION_REFRESH_SECONDS=0
     SET="$(fnd_set_file)"
     CFG="$TEST_TMPDIR/mmry-config.json"
     export MMRY_CONFIG_FILE="$CFG"
