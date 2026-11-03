@@ -62,6 +62,13 @@ jobs:
         shell: /bin/bash -e {0}
         run: bash scripts/check-database-names.sh
 
+      # #32944 (MMRY feedback #43): customer-readable text must not name the storage technology
+      # behind MMRY (SQL, Azure, stored procedures and the rest). Its own step so a refusal is named
+      # in the job summary. The suite runs it again in structural/storage-wording-check.bats.
+      - name: Check customer-readable text for storage technology wording
+        shell: /bin/bash -e {0}
+        run: bash scripts/check-storage-wording.sh
+
       # #32957 fix round 3: round 1's substring rename damaged a Formation name
       # (mmry_create_formation became mmry_create_database-ion) and no check noticed. Every Formation
       # name on develop must still exist, and no rename may join a letter onto database or entry.

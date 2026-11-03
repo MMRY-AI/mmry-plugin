@@ -235,6 +235,7 @@ tests/structural/search-command.bats
 tests/structural/sed-program-scan.awk
 tests/structural/setup_suite.bash
 tests/structural/startup-memories-isolation.bats
+tests/structural/storage-wording-check.bats
 tests/structural/teardown-tmp.bats
 tests/structural/test-file-size.bats
 tests/structural/test-isolation.bats
