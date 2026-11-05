@@ -19,6 +19,11 @@ setup() {
     STATUS_CMD="$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # A whole identity for the session under test (#32915, requirement 3): the hook now delivers
+    # nothing for a session that cannot name its account and server, as SessionStart loads nothing
+    # for one, so a suite that only plants a set on disk must say whose it is. The daily refresh is
+    # off, so no planted set is refreshed from the mock behind it.
+    export MMRY_API_URL="http://127.0.0.1:9" MMRY_API_KEY="test-key" MMRY_FOUNDATION_REFRESH_SECONDS=0
     SET="$(fnd_set_file)"
 }
 

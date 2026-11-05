@@ -57,7 +57,7 @@ add no-cut-marker "a turn cut short leaves nothing for the next turn" \
 add next-not-told "the next turn does not read the cut-short marker" \
     '[[ -f "$_INFLIGHT" || -f "$_CUTSHORT" ]] && MISSED_PREVIOUS=1' '[[ -f "$_INFLIGHT" ]] && MISSED_PREVIOUS=1'
 add one-key "every session shares one prepared copy" \
-    '    _FND_KEY="$_FND_STAMP"' '    _FND_KEY="shared"'
+    '    _FND_KEY="$_MMRY_FND_SESSION_PART"' '    _FND_KEY="shared"'
 add refresh-unthrottled "the refresh decision is started on every prompt" \
     '[[ "$last" =~ ^[0-9]+$ ]] && (( _FND_NOW > 0 && _FND_NOW - last < every && _FND_NOW >= last )) && return 0' ':'
 add refresh-never "the refresh is never decided" \

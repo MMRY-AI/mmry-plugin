@@ -54,8 +54,8 @@ m_launcher_clock_ignored() { _rep "$1/$HOOK" '                _mmry_spent=$_mmry
 m_budget_past_limit() {
     _rep "$1/$HOOK" '(( _mmry_budget < 1 || _mmry_budget > 25 ))' '(( _mmry_budget < 1 || _mmry_budget > 99 ))' &&
     _rep "$1/$HOOK" '_mmry_budget="${MMRY_CODEX_START_BUDGET:-20}"' '_mmry_budget="${MMRY_CODEX_START_BUDGET:-60}"' &&
-    _rep "$1/$START" 'MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"' 'sleep 35
-MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"'
+    _rep "$1/$START" 'MEM_FILE="$_MMRY_FND_MEMORIES_NAME"' 'sleep 35
+MEM_FILE="$_MMRY_FND_MEMORIES_NAME"'
 }
 # Fix round 1: a start past its budget hands the memories on to the first prompt, exactly once.
 # (m_late_marker_missing and m_late_always, fix round 1, are replaced by m_marker_not_armed and

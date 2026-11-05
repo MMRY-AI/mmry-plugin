@@ -285,10 +285,17 @@ if (( _mmry_codex == 1 )); then
 else
     printf '%s' "$SESSION_ID" > "$(mmry_foundation_session_path "$MMRY_TMPDIR")" 2>/dev/null || true
 fi
-# On Codex only when there is something to remove (#33062 fix round 7: rm is two processes on Windows).
-if (( _mmry_codex == 0 )) || [[ -e "${MMRY_TMPDIR}/mmry-foundation.status" || -L "${MMRY_TMPDIR}/mmry-foundation.status" ]]; then
-    rm -f "${MMRY_TMPDIR}/mmry-foundation.status" 2>/dev/null || true
+# The id-less delivery record is this account's own now, mmry-foundation.status.<key>.none (#32915, QA
+# round 1, requirement 2); the bare name an older plugin writes is cleared as it always was. The keyed
+# name is the one mmry_foundation_record_path spells for no id, taken here from the library's global
+# rather than a command substitution, and on Codex the rm runs only when there is something to remove
+# (#33062 fix round 7: rm is two processes on Windows).
+mmry_foundation_session_part_v ""
+_mmry_idless_status="${MMRY_TMPDIR}/mmry-foundation.status.${_MMRY_FND_SESSION_PART}"
+if (( _mmry_codex == 0 )) || [[ -e "${MMRY_TMPDIR}/mmry-foundation.status" || -L "${MMRY_TMPDIR}/mmry-foundation.status" || -e "$_mmry_idless_status" || -L "$_mmry_idless_status" ]]; then
+    rm -f "${MMRY_TMPDIR}/mmry-foundation.status" "$_mmry_idless_status" 2>/dev/null || true
 fi
+unset _mmry_idless_status
 # THE MACHINE-WIDE COPY AN OLDER PLUGIN LEFT IS IGNORED, AND REMOVED ONLY WHEN IT IS SAFE (#32889). The
 # unkeyed mmry-foundation-set.md and mmry-foundation.session are never read by this version, so an
 # upgrade cannot inject what they hold. They are not removed on sight: an older plugin still running in
@@ -300,8 +307,12 @@ fi
 # a session that is over. find -mtime and -delete behave the same on GNU and BSD find.
 # The per-prompt hook's prepared set, claim, result and cut-short markers (#31893) are one each per
 # session (a claim also leaves one small file per change of the set), and go the same way.
+# THE STARTUP MEMORIES FILES GO THE SAME WAY (#32915): the keyed ones below are one per session, and
+# the unkeyed mmry-memories.md an older plugin wrote is never read by this version (it is not this
+# session's file, and the model is never pointed at it) but is left for an older plugin still running
+# here, until it too is a week old.
 _mmry_fnd_sweep() {
-    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' \) -mtime +7 -delete 2>/dev/null || true
+    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' \) -mtime +7 -delete 2>/dev/null || true
 }
 # ON CODEX THE SWEEP RUNS AS THIS FILE ENDS, AFTER ITS OUTPUT IS CLOSED (#33062 fix round 7). It removes
 # week-old records and has nothing to do with the memories, and on Windows the find is two processes,
@@ -324,7 +335,32 @@ if [[ -z "${MMRY_API_KEY:-}" ]]; then
     exit 0
 fi
 
-MEM_FILE="${MMRY_TMPDIR}/mmry-memories.md"
+# THE ACCOUNT AND SERVER MUST BE KNOWN, OR NOTHING IS LOADED (#32915, requirement 3). The startup
+# file below is named for the account and server this session is configured for, so that a session
+# on another account never reads it. A session that cannot say which account and server those are -
+# a credential that is not an API key, or no server address at all, where the client would otherwise
+# fall back to the default server - cannot name its own file, and so it delivers nothing rather than
+# load memories under a name another such session would share. It is told why, once, here. The
+# ordinary configuration setup writes (a server address and an API key) is never affected.
+if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" ]]; then
+    if [[ "$(mmry_host)" == "codex" ]]; then
+        _mmry_identity_hint="offer to run $(mmry_host_setup_hint) to set it up again"
+    else
+        _mmry_identity_hint="ask them to run $(mmry_host_command_ref setup) to set it up again"
+    fi
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \
+        "$(_mmry_json_escape "MMRY AI did not load memories for this session: the configuration does not identify the account and server they belong to (it needs a server address and an API key). Nothing was loaded and nothing was guessed at. Tell the user, and ${_mmry_identity_hint}.")"
+    exit 0
+fi
+
+# NAMED BY THIS SESSION'S ACCOUNT, SERVER AND SESSION (#32915): mmry-memories.<key>.<session id>.md,
+# never the one machine-wide mmry-memories.md this used to be. With one name, a session on another
+# account starting on this machine before this session's model had opened the file replaced its
+# contents, and the model read that account's memories and directives (QA of #32889, NEW-1; in practice
+# on 2026-10-10). The key is the one the Foundation set is named by (lib-foundation-key.sh); the
+# session id keeps two sessions of one account apart as well. The model is told this name below.
+mmry_foundation_memories_name_v "$MMRY_TMPDIR" "$SESSION_ID"
+MEM_FILE="$_MMRY_FND_MEMORIES_NAME"
 
 # Load startup memories
 if ! mmry_get_startup_memories "$WORK_DIR"; then
@@ -365,8 +401,10 @@ if ! mmry_get_startup_memories "$WORK_DIR"; then
 fi
 
 # Parse JSON response into markdown using the resolved jq (#30624).
+# Stamped with the account it was written for (#32915), as the Foundation set's record line is: a
+# file that somehow reaches the wrong name still says whose it is.
 {
-    echo "# MMRY AI — Loaded Memories"
+    echo "# MMRY AI — Loaded Memories (account ${_MMRY_FND_ACCT})"
     echo ""
     "$MMRY_JQ" -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"' <<<"$MMRY_RESPONSE"
 } > "$MEM_FILE" 2>/dev/null
@@ -419,14 +457,20 @@ if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$_mmry_set_file" "$SESSION_ID
 elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     # AN EMPTY SET IS TOLD TO THE CUSTOMER, ONCE A SESSION (#31597 r2, TC4). systemMessage is the
     # channel the customer sees. The marker stops the per-prompt hook saying it again this session;
-    # it is written in both the session-id form and the token form the hook falls back to.
+    # it is written in both the session-id form and the id-less form the hook falls back to. The
+    # id-less form is THIS ACCOUNT'S (#32915, QA round 2, F-B): .mmry-foundation-empty-told.<key>.none,
+    # the name the hook reads with no id (mmry_foundation_session_part_v ""), never the one bare
+    # .mmry-foundation-empty-told every id-less session on the machine shared. The id form is written
+    # only for a real id: the token "unknown" is no session's own, and nothing reads it.
     # shellcheck source=/dev/null
     source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
     EMPTY_SYSMSG=",\"systemMessage\":\"$(_mmry_json_escape "$MMRY_FND_EMPTY_NOTICE")\""
     _fnd_esid="$(mmry_foundation_sid "$SESSION_ID")"
     _fnd_ekey="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$SESSION_ID" || true)"
-    [[ -n "$_fnd_esid" ]] && { printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true; }
-    printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true
+    mmry_foundation_session_part_v "$_fnd_esid"
+    [[ -n "$_fnd_esid" && "$_fnd_esid" == "$_MMRY_FND_SESSION_PART" ]] && { printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true; }
+    mmry_foundation_session_part_v ""
+    printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
 fi
 
 # On Codex the count, from the writer's jq when it got that far, else as Claude Code counts it but on a

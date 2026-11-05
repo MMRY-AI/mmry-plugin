@@ -168,6 +168,7 @@ tests/libs/bats-support/
 tests/mutation/run-31789-mutations.sh
 tests/mutation/run-31893-mutations.sh
 tests/mutation/run-32889-mutations.sh
+tests/mutation/run-32915-mutations.sh
 tests/mutation/run-33030-mutations.sh
 tests/mutation/run-33062-mutations.sh
 tests/mutation/run-mutations.sh
@@ -233,6 +234,7 @@ tests/structural/run-codex-mutations.sh
 tests/structural/search-command.bats
 tests/structural/sed-program-scan.awk
 tests/structural/setup_suite.bash
+tests/structural/startup-memories-isolation.bats
 tests/structural/storage-wording-check.bats
 tests/structural/teardown-tmp.bats
 tests/structural/test-file-size.bats

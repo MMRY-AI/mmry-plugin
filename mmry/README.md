@@ -132,7 +132,7 @@ Override the 10 seconds with the `MMRY_FOUNDATION_DEADLINE_SECS` environment var
 
 **If re-injection fails outright** — rather than merely running slowly — you are told that instead, with the exit code, and without the suggestion to re-send the prompt, because re-sending cannot help when the loader is broken. The usual cause is an incomplete install: run `/mmry:load-memories` to rebuild the cache, and reinstall the plugin if that does not clear it. Either way the turn still proceeds, and Claude is told not to claim it is following directives it never received.
 
-Both failures are recorded in `mmry-foundation.log` in your temp directory. Setting `MMRY_DEBUG=1` additionally captures the hook's internal stderr to `mmry-foundation-debug.log` alongside it. Neither is ever printed to your terminal, in debug mode or out of it.
+Both failures are recorded in your temp directory, in a `mmry-foundation.<account>.log` named for the account and server this session is configured for, so two accounts on one machine never share a log. Setting `MMRY_DEBUG=1` additionally captures the hook's internal stderr to `mmry-foundation-debug.<account>.log` alongside it. Neither is ever printed to your terminal, in debug mode or out of it.
 
 ## What It Does
 

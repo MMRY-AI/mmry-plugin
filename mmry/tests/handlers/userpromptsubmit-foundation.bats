@@ -9,6 +9,8 @@ load '../helpers/foundation-set'
 setup() {
     HANDLER="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # A whole identity, in the config so a Codex test's own config still wins (#32915 req 3).
+    _make_config
     SET="$(fnd_set_file)"
     # Every real session has one of these: SessionStart writes the session id here and clears
     # the delivery record beside it (#31583 QA round 4, finding 4c). Without it the handler
@@ -68,7 +70,7 @@ manifest_now() {
     export MMRY_API_KEY="test-key"
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-refresh" ]
+    [ ! -f "$(fnd_refresh_file)" ]
 }
 
 @test "userpromptsubmit-foundation: a stale cache triggers a gated background refresh (lock created)" {
@@ -88,8 +90,8 @@ manifest_now() {
     # The lock is touched before the background fetch is spawned. Since #31893 the decision itself is
     # made by a detached process, off the prompt's path, so the lock is waited for, up to 30 s.
     local i
-    for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
-    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ]
+    for (( i = 0; i < 150; i++ )); do [ -f "$(fnd_refresh_file)" ] && break; sleep 0.2; done
+    [ -f "$(fnd_refresh_file)" ]
 }
 
 @test "userpromptsubmit-foundation: toggle off emits nothing and exits 0" {
@@ -221,8 +223,8 @@ _big_foundation_set() {
     [[ "$output" != *'token cap'* ]] || return 1
     # The old log line recorded the length AFTER the cut, so all 1,457 entries on the
     # affected machine read "had 6000 chars". Nothing may write that line any more.
-    if [ -f "$TEST_TMPDIR/mmry-foundation.log" ]; then
-        run grep -c 'truncated Foundation reinjection' "$TEST_TMPDIR/mmry-foundation.log"
+    if [ -f "$(fnd_log_file)" ]; then
+        run grep -c 'truncated Foundation reinjection' "$(fnd_log_file)"
         [ "$output" = "0" ]
     fi
 }
@@ -308,8 +310,8 @@ _big_foundation_set() {
     [[ "$output" == *'FinalDirective'* ]] || return 1
 
     # Delivered count against the account's true total, as the ticket asks for.
-    [ -f "$TEST_TMPDIR/mmry-foundation.status" ]
-    run cat "$TEST_TMPDIR/mmry-foundation.status"
+    [ -f "$(fnd_status_file)" ]
+    run cat "$(fnd_status_file)"
     [[ "$output" == *"bytes=$total"* ]] || return 1
     [[ "$output" == *'entries=21'* ]]
 }
@@ -535,8 +537,8 @@ _registered_timeout() {
     [[ "$output" != *'exit code'* ]] || return 1
     # And it must leave a trace. A failure that drops the customer's directives and records
     # nothing is how this defect survived three reports without anyone being able to act on it.
-    grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
-    grep -q 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log"
+    grep -q 'foundation reinjection FAILED' "$(fnd_log_file)"
+    grep -q 'deadline exceeded' "$(fnd_log_file)"
 }
 
 @test "userpromptsubmit-foundation: a worker that CRASHES is not reported as a slow one (#31434)" {
@@ -558,7 +560,7 @@ _registered_timeout() {
     # reference, which is still the worker's.
     _seed_worker_only_set
     export MMRY_FOUNDATION_PARTS_MAX=1
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     local start elapsed shimdir real_bash
     real_bash="$(command -v bash)"
     shimdir="$TEST_TMPDIR/broken-bash"
@@ -590,12 +592,12 @@ _registered_timeout() {
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
     [[ "$output" != *'never overstate evidence'* ]] || return 1
     # Logged as a crash, not as a deadline, so the log agrees with what the customer was told.
-    grep -q 'foundation reinjection FAILED' "$TEST_TMPDIR/mmry-foundation.log"
-    grep -q 'without hitting' "$TEST_TMPDIR/mmry-foundation.log"
+    grep -q 'foundation reinjection FAILED' "$(fnd_log_file)"
+    grep -q 'without hitting' "$(fnd_log_file)"
     # Counted, not `! grep -q`: a `!`-negated command is exempt from `set -e`, so the
     # original form could not fail this test even when the log DID say 'deadline exceeded'
     # - the one thing this assertion exists to catch (#31434 QA).
-    (( $(grep -c 'deadline exceeded' "$TEST_TMPDIR/mmry-foundation.log" || true) == 0 ))
+    (( $(grep -c 'deadline exceeded' "$(fnd_log_file)" || true) == 0 ))
 }
 
 @test "userpromptsubmit-foundation: MMRY_DEBUG captures the stderr the handler otherwise discards (#31434)" {
@@ -606,7 +608,7 @@ _registered_timeout() {
     # redirects rather than discards; the terminal contract is unchanged either way.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now
-    local dbg="$TEST_TMPDIR/mmry-foundation-debug.log"
+    local dbg; dbg="$(fnd_debug_log_file)"
 
     # Default: nothing is captured anywhere.
     rm -f "$dbg"
@@ -627,7 +629,7 @@ _registered_timeout() {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now
     # The marker the supervisor leaves behind when it never reaches its own exit.
-    : > "$TEST_TMPDIR/.mmry-foundation-inflight"
+    : > "$(fnd_inflight_file)"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -638,13 +640,13 @@ _registered_timeout() {
     # The miss is reported AND this turn's directives are still delivered.
     [[ "$output" == *'never overstate evidence'* ]] || return 1
     # The marker is consumed, so the report is not repeated forever.
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    [ ! -f "$(fnd_inflight_file)" ]
 }
 
 @test "userpromptsubmit-foundation: a clean firing reports nothing and leaves no marker" {
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -652,13 +654,13 @@ _registered_timeout() {
     # No notice of any kind on a healthy turn — a nag on every prompt would be its own bug.
     [[ "$output" != *'systemMessage'* ]] || return 1
     [[ "$output" != *'PREVIOUS turn'* ]] || return 1
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    [ ! -f "$(fnd_inflight_file)" ]
 }
 
 @test "userpromptsubmit-foundation: no false alarm when there were no directives to lose" {
     # Marker present, but nothing to inject. Reporting a loss here would be a lie.
     rm -f "$CACHE"
-    : > "$TEST_TMPDIR/.mmry-foundation-inflight"
+    : > "$(fnd_inflight_file)"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]
@@ -847,7 +849,7 @@ _broken_bash_dir() {
     # with the orphan against a 15 s deadline, 494/515/604/567/572 ms without it.
     printf -- '- Truthfulness: never overstate evidence.\n' > "$CACHE"
     manifest_now
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
 
     local start elapsed captured
     # LOAD (#31411 QA round 3, item 8). The orphan this exists for holds the descriptor until the
@@ -874,7 +876,7 @@ _broken_bash_dir() {
     # checks is the worker's; the next test drives the same kill on the ordinary, prepared path.
     _seed_worker_only_set
     export MMRY_FOUNDATION_PARTS_MAX=1
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     cat > "$MMRY_CONFIG_FILE" <<'EOF'
 {
   "apiUrl": "http://127.0.0.1:9",
@@ -889,13 +891,13 @@ EOF
 
     # SIGKILL, because that is what the harness does on timeout: no trap, no cleanup, nothing.
     MMRY_JQ="$shim" bash "$HANDLER" >/dev/null 2>&1 </dev/null &
-    local victim=$! i
+    local victim=$! i inflight; inflight="$(fnd_inflight_file)"
     # Killed once it has written its marker and its out-file, not after a fixed 2 s (#31411 QA round 3,
     # item 8): on a loaded machine 2 s was not always enough to get that far, and the test then failed
     # on the kill landing early rather than on anything the handler did. Up to 30 s, polled; a handler
     # that never writes the marker still fails below.
     for (( i = 0; i < 300; i++ )); do
-        [[ -f "$TEST_TMPDIR/.mmry-foundation-inflight" && -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]] && break
+        [[ -f "$inflight" && -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]] && break
         sleep 0.1
     done
     # It may already have finished if it never wrote the marker; the assertions below say so.
@@ -903,7 +905,7 @@ EOF
     wait "$victim" 2>/dev/null || true
 
     # The evidence that a turn was lost has to survive the kill, or nobody can ever be told.
-    [ -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    [ -f "$(fnd_inflight_file)" ]
 
     # The same kill ORPHANS this firing's out-file - the worker outlives its supervisor and
     # goes on writing to a file no one will ever read. Deleting the sweep that reaps it turned
@@ -918,7 +920,7 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *'PREVIOUS turn'* ]]
     [[ "$output" == *'too large to show here'* ]]
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    [ ! -f "$(fnd_inflight_file)" ]
     # ...and that same firing reaps the orphan, because its supervisor no longer exists.
     [ ! -f "$TEST_TMPDIR/.mmry-foundation-out.$victim" ]
 }
@@ -975,14 +977,14 @@ EOF
     # CONTROL FIRST: with the toggle ON, this exact scenario must produce the banner.
     # Without it the test would also pass against a handler that did nothing at all.
     _write_toggle_config '"true"'
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [ "$status" -eq 0 ]
     [[ "$output" == *'NOT applied to this turn'* ]] || return 1
 
     # Now the remedy the notice just handed the customer.
     _write_toggle_config '"false"'
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
@@ -999,12 +1001,12 @@ EOF
     shimdir="$(_make_broken_bash)"
 
     _write_toggle_config 'true'
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [[ "$output" == *'NOT applied to this turn'* ]] || return 1
 
     _write_toggle_config 'false'
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
@@ -1021,11 +1023,11 @@ EOF
     # being honoured - and it must be honoured by the SUPERVISOR, since no worker ever starts.
     _write_toggle_config '"true"'
 
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [[ "$output" == *'NOT applied to this turn'* ]] || return 1
 
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     MMRY_FOUNDATION_REINJECT=false PATH="$shimdir:$PATH" run "$real_bash" "$HANDLER"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
@@ -1045,7 +1047,7 @@ manifest_now
     shim="$(_make_slow_jq 120)"
 
     _write_toggle_config '"false"'
-    rm -f "$TEST_TMPDIR/.mmry-foundation-inflight"
+    rm -f "$(fnd_inflight_file)"
     start="$(date +%s)"
     MMRY_JQ="$shim" MMRY_FOUNDATION_DEADLINE_SECS=60 run bash "$HANDLER"
     elapsed=$(( $(date +%s) - start ))
@@ -1127,13 +1129,14 @@ _stage_codex_install() {
     [[ "$output" == *'never overstate evidence'* ]]
 }
 
-@test "req4 control: a Claude install with NO credential is unaffected by the Codex guard" {
-    # The guard must key on the HOST, not on whether a credential happens to exist. A Claude
-    # install has always re-injected from cache regardless, and still must.
+@test "req4 control: a Claude install with NO Codex credential is unaffected by the Codex guard" {
+    # The guard must key on the HOST, not on whether a Codex credential exists. A Claude install
+    # re-injects from its cache regardless; its own credential is the Claude file in its home.
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
     local fakehome="$TEST_TMPDIR/claude-nocred"
     mkdir -p "$fakehome/.claude"
+    cp "$MMRY_CONFIG_FILE" "$fakehome/.claude/mmry-config.json"
 
     run env -u MMRY_CONFIG_FILE -u MMRY_HOST -u CODEX_HOME HOME="$fakehome" bash "$HANDLER"
 
@@ -1148,6 +1151,8 @@ _stage_codex_install() {
     mkdir -p "$root/mmry/hooks-handlers" "$root/fakehome/.claude"
     cp "$PLUGIN_ROOT"/hooks-handlers/*.sh "$root/mmry/hooks-handlers/"
     rm -f "$root/mmry/hooks-handlers/lib-host.sh"
+    # Its credential, in the plugin root the key library reads without lib-host.sh (#32915 req 3).
+    cp "$MMRY_CONFIG_FILE" "$root/mmry/mmry-config.json"
     printf -- '- Identity: Eric builds MMRY.\n' > "$CACHE"
     manifest_now   # 31411 refuses a cache with no manifest beside it
 
@@ -1199,7 +1204,7 @@ _stage_codex_install() {
     : > "$CACHE"
     manifest_now "$CACHE" 0
     [[ "$(fnd_set_record)" == 'mmry-foundation v3 entries=0 bytes=0 '* ]] || return 1
-    printf 'session-under-test' > "$TEST_TMPDIR/.mmry-foundation-empty-told"
+    printf 'session-under-test' > "$(fnd_empty_told_file)"
 
     run bash "$HANDLER"
     [ "$status" -eq 0 ]

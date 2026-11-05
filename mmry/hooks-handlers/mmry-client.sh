@@ -254,6 +254,12 @@ mmry_load_config() {
         fi
     fi
 
+    # WHETHER A SERVER ADDRESS WAS GIVEN AT ALL, recorded before the default replaces an empty one
+    # (#32915). The key library (lib-foundation-key.sh, mmry_foundation_identity_known_v) reads
+    # MMRY_API_URL after this and would otherwise take the default for an address the session was
+    # configured with; a session given none cannot name whose startup memories it would load.
+    _MMRY_CFG_URL_GIVEN=0
+    [[ -n "$MMRY_API_URL" ]] && _MMRY_CFG_URL_GIVEN=1
     # Apply defaults
     MMRY_API_URL="${MMRY_API_URL:-$_MMRY_DEFAULT_URL}"
     MMRY_FOUNDATION_REINJECT="${MMRY_FOUNDATION_REINJECT:-true}"
@@ -432,11 +438,27 @@ mmry_foundation_session_key() {
     mmry_foundation_session_token "$dir"
 }
 
-# Where this session's delivery record lives.
+# Where this session's delivery record lives: mmry-foundation.status.<session id>, and with no id
+# mmry-foundation.status.<account key>.none (#32915, QA round 1, requirement 2). It was the bare
+# mmry-foundation.status with no id, one name for every id-less session on the machine whatever its
+# account. The per-prompt hook spells the same name from the same routine.
 mmry_foundation_record_path() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid
     sid="$(mmry_foundation_sid "${2:-}")"
-    printf '%s/mmry-foundation.status%s' "$dir" "${sid:+.$sid}"
+    mmry_foundation_session_part_v "$sid"
+    printf '%s/mmry-foundation.status.%s' "$dir" "$_MMRY_FND_SESSION_PART"
+}
+
+# Where part $3 (1 to 6, default 1) of this session's outcome record lives, named the same way:
+# mmry-foundation.outcome.<session part>[.<part number>]. Spelled here for the status command; the
+# per-prompt hook writes the same names.
+mmry_foundation_outcome_path() {
+    local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid part="${3:-1}"
+    sid="$(mmry_foundation_sid "${2:-}")"
+    mmry_foundation_session_part_v "$sid"
+    printf '%s/mmry-foundation.outcome.%s' "$dir" "$_MMRY_FND_SESSION_PART"
+    [[ "$part" =~ ^[0-9]+$ ]] && (( part > 1 )) && printf '.%s' "$part"
+    return 0
 }
 
 # Did THIS session record a verified delivery? The record is named by the session and stamped with
@@ -480,7 +502,11 @@ mmry_foundation_stored_path() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" key
     key="$(mmry_foundation_session_key "$dir" "${2:-}")" || return 1
     [[ -n "$key" ]] || return 1
-    printf '%s/mmry-foundation.stored.%s' "$dir" "$key"
+    # The token "unknown" carries the account key in front (#32915, QA round 1, requirement 2): the
+    # per-prompt hook reads this marker under the same name (its _FND_KEY), and two accounts with no
+    # session id used to share mmry-foundation.stored.unknown.
+    mmry_foundation_session_part_v "$key"
+    printf '%s/mmry-foundation.stored.%s' "$dir" "$_MMRY_FND_SESSION_PART"
 }
 
 # Usage: mmry_foundation_mark_stored <dir> <sid> <entries>
@@ -757,10 +783,16 @@ mmry_write_foundation_cache() {
         mv -f "$tmp" "$cache" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
         MMRY_FND_WRITTEN_ENTRIES="$entries"
         # The stored marker, named as mmry_foundation_stored_path names it. With a valid session id the
-        # name is the id itself, written here without the three command substitutions; otherwise the
-        # shared function decides, as before.
+        # name is written here without the three command substitutions; otherwise the shared function
+        # decides, as before. THROUGH THE SESSION PART, NOT THE ID ITSELF (#32915, QA round 2, F-A):
+        # the token "unknown", which SessionStart leaves for a session with no id, passes this regex,
+        # and spelled as the id it made one bare mmry-foundation.stored.unknown for every Codex account
+        # with no session id, while the per-prompt hook looked for the keyed name. The session part
+        # routine is builtins only (a real id stands alone; "unknown" becomes <account key>.unknown),
+        # so Codex's start pays no process for it.
         if [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
-            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true
+            mmry_foundation_session_part_v "$sid"
+            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
         else
             mmry_foundation_mark_stored "${cache%/*}" "$sid" "$entries" || true
         fi

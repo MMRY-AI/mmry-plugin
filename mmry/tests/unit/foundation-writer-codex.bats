@@ -101,6 +101,20 @@ _same_files() {
     _same_files tok-9
 }
 
+# The token "unknown" is what SessionStart leaves for a session with no id, and it passes the plain-id
+# regex the quick path keys on. The shared function puts the account key in front of it (#32915), so
+# the quick path must too, or two Codex accounts with no session id share one bare marker (QA round 2, F-A).
+@test "codex writer: with the token unknown (a session with no id) the stored marker carries the account key, as the shared function names it, and the bare mmry-foundation.stored.unknown is never written" {
+    local part
+    part="$(fnd_session_part unknown)"
+    [[ "$part" == *.unknown && "$part" != unknown ]] || { echo "the session part for the token is $part"; return 1; }
+    _both '[{"memoryTier":"Foundation","topic":"T","content":"c"}]' 'unknown'
+    [ "$RC_B" = "0" ]
+    _same_files "$part"
+    [ ! -e "$TEST_TMPDIR/codex/mmry-foundation.stored.unknown" ] || { echo "the Codex road wrote the bare shared marker"; return 1; }
+    [ ! -e "$TEST_TMPDIR/classic/mmry-foundation.stored.unknown" ] || { echo "the classic road wrote the bare shared marker"; return 1; }
+}
+
 @test "codex writer: reports the response's own length, as jq length counts it" {
     local resp='[{"memoryTier":"Foundation","topic":"a","content":"b"},{"memoryTier":"Fact","topic":"c","content":"d"},{"memoryTier":"Strategic","topic":"e","content":"f"}]'
     _MMRY_HOST_V="codex"

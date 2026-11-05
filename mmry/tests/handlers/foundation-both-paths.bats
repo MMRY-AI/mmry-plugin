@@ -131,7 +131,8 @@ _big_response() {
     [[ "$(fnd_set_record "$CACHE")" == *'entries=10 '* ]] || return 1
 
     bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" < /dev/null >/dev/null
-    run cat "$TEST_TMPDIR/mmry-foundation.status"
+    # The id-less delivery record is named by the account since #32915 (fnd_status_file).
+    run cat "$(fnd_status_file)"
     [[ "$output" == *'entries=10'* ]]
 }
 
@@ -219,7 +220,7 @@ _big_response() {
     bash -c "bash '$PLUGIN_ROOT/hooks-handlers/session-start.sh' 2>/dev/null" >/dev/null
 
     bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh" >/dev/null
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight" ]
+    [ ! -f "$(fnd_inflight_file)" ]
 
     run bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     [ "$status" -eq 0 ]

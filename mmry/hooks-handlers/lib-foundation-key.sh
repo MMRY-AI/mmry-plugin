@@ -68,9 +68,13 @@ _MMRY_FND_DEFAULT_URL="https://mmryai.com"
 _MMRY_FND_HASH=""
 _MMRY_FND_ID_URL=""
 _MMRY_FND_ID_KEY=""
+_MMRY_FND_ID_AUTH=""
 _MMRY_FND_CFG=""
 _MMRY_FND_ACCT=""
 _MMRY_FND_ACCT_FOR=""
+# Whether a server address was actually GIVEN, by the environment or the config, as opposed to the
+# default applied below when none was (#32915, mmry_foundation_identity_known_v).
+_MMRY_FND_ID_URL_GIVEN=0
 
 # Lowercase ASCII with no process, as lib-foundation-switch.sh and lib-host.sh do: bash 3.2 has no ${x,,}.
 _mmry_fnd_key_tolower_v() {
@@ -136,8 +140,8 @@ _mmry_fnd_config_file_v() {
 # names one (an unconfigured session, which has no copy to read anyway). The URL is lowercased and
 # stripped of trailing slashes so that two spellings of one server are one key.
 mmry_foundation_identity_v() {
-    local url="${MMRY_API_URL:-}" key="${MMRY_API_KEY:-}" txt=""
-    if [[ -z "$url" || -z "$key" ]]; then
+    local url="${MMRY_API_URL:-}" key="${MMRY_API_KEY:-}" auth="${MMRY_AUTH_METHOD:-}" txt=""
+    if [[ -z "$url" || -z "$key" || -z "$auth" ]]; then
         _mmry_fnd_config_file_v
         if [[ -n "$_MMRY_FND_CFG" && -r "$_MMRY_FND_CFG" ]]; then
             # read -d '' takes the whole file with no subshell; it returns 1 at end of input even when it
@@ -149,8 +153,16 @@ mmry_foundation_identity_v() {
             if [[ -z "$key" && "$txt" =~ \"apiKey\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
                 key="${BASH_REMATCH[1]}"
             fi
+            if [[ -z "$auth" && "$txt" =~ \"authMethod\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+                auth="${BASH_REMATCH[1]}"
+            fi
         fi
     fi
+    # The client's rule (mmry_load_config): a credential with no method named is an API key.
+    [[ -z "$auth" && -n "$key" ]] && auth="apikey"
+    _MMRY_FND_ID_AUTH="$auth"
+    _MMRY_FND_ID_URL_GIVEN=0
+    [[ -n "$url" ]] && _MMRY_FND_ID_URL_GIVEN=1
     [[ -n "$url" ]] || url="$_MMRY_FND_DEFAULT_URL"
     _mmry_fnd_key_tolower_v "$url"; url="$_MMRY_FND_LOWER"
     while [[ "$url" == */ && ${#url} -gt 1 ]]; do url="${url%/}"; done
@@ -186,4 +198,95 @@ mmry_foundation_set_name_v() {
 mmry_foundation_session_name_v() {
     mmry_foundation_account_key_v
     _MMRY_FND_SESSION_NAME="${1}/mmry-foundation.session.${_MMRY_FND_ACCT}"
+}
+
+# WHETHER THE IDENTITY IS WHOLE (#32915): a credential AND a server address this session was actually
+# given, by the environment or by its config. The default server is applied above so that the set's
+# name stays stable for a config that never named one; but a session that could name neither a key nor
+# a server cannot say WHOSE startup memories it would be loading, and session-start.sh then delivers
+# nothing rather than guess. Independent QA of #32889 asked for exactly that (requirement 3 of #32915:
+# no key, or an empty server address, delivers nothing, and no shared file is read).
+mmry_foundation_identity_known_v() {
+    mmry_foundation_identity_v
+    local given="$_MMRY_FND_ID_URL_GIVEN"
+    # When mmry-client.sh has loaded the config in this shell it has already put its default server
+    # into MMRY_API_URL, so whether one was GIVEN is what it recorded at that moment, not what the
+    # environment holds now. A caller without the client (the per-prompt supervisor) has no record
+    # and the scan above decides.
+    [[ -n "${_MMRY_CFG_URL_GIVEN:-}" ]] && given="$_MMRY_CFG_URL_GIVEN"
+    [[ -n "$_MMRY_FND_ID_KEY" && "$given" == 1 ]]
+}
+
+# WHETHER THE CREDENTIAL IS AN API KEY (#32915, QA round 2, F-C), the other half of the question
+# SessionStart asks before it loads anything (MMRY_AUTH_METHOD must be "apikey"). The set's name
+# hashes the server address and the credential STRING, whatever the method, so an API-key session
+# stores a set at the very name an OAuth session configured with that string computes; the
+# per-prompt supervisor asked only whether the server was given, and served that set to a session
+# SessionStart had refused (QA probe4). The method comes from the environment, else the same text
+# scan of the config as above, with the client's rule that a credential with no method named is an
+# API key: the same answer the client gives once it has loaded the config, with no process.
+mmry_foundation_auth_apikey_v() {
+    mmry_foundation_identity_v
+    [[ "$_MMRY_FND_ID_AUTH" == "apikey" ]]
+}
+
+# THE STARTUP MEMORIES FILE (#32915): "<dir>/mmry-memories.<key>.<session id>.md", or without the
+# session part when no usable id is given. This is the file SessionStart writes every startup memory
+# to and tells the model to read. It was one machine-wide name, mmry-memories.md, and when another
+# account's session started on the machine before this session's model had opened it, the model read
+# that account's memories (QA of #32889, NEW-1; seen in practice on 2026-10-10). The account is in
+# the name so that two accounts never share one; the session is in the name so that two sessions of
+# one account do not replace each other's file either. The id is filtered as mmry_foundation_sid in
+# mmry-client.sh filters it: only characters safe in a file name, and no dot, else no id at all.
+mmry_foundation_memories_name_v() {
+    local sid="${2:-}"
+    [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || sid=""
+    mmry_foundation_account_key_v
+    _MMRY_FND_MEMORIES_NAME="${1}/mmry-memories.${_MMRY_FND_ACCT}${sid:+.$sid}.md"
+}
+
+# THE FOUNDATION WORKING FILES, NAMED THE SAME WAY (#32915, QA of #32889 NEW-2 and NEW-3). The
+# per-prompt hook's failure log, its refresh throttle stamp and refresh lock, and the by-reference
+# copy it makes for a set too large to show, were machine-wide names: one account's throttle could
+# hold another's refresh for up to 300 s, and with no session id and no marker the by-reference copy
+# fell back to one shared mmry-foundation.byref.md. Each is now the account's own.
+mmry_foundation_log_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_LOG_NAME="${1}/mmry-foundation.${_MMRY_FND_ACCT}.log"
+}
+mmry_foundation_refresh_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_REFRESH_NAME="${1}/.mmry-foundation-refresh.${_MMRY_FND_ACCT}"
+}
+mmry_foundation_refresh_checked_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_REFRESH_CHECKED_NAME="${1}/.mmry-foundation-refresh-checked.${_MMRY_FND_ACCT}"
+}
+# "<dir>/mmry-foundation.byref.<key>.<session id or token>.md", or without the last part when the
+# caller has neither: still the account's own, never a shared name.
+mmry_foundation_byref_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref.${_MMRY_FND_ACCT}${2:+.$2}.md"
+}
+
+# THE SESSION PART OF A PER-SESSION MARKER'S NAME (#32915, independent QA of round 1, requirement 2),
+# into _MMRY_FND_SESSION_PART. The per-prompt hook's prepared copy, claim, result and stored markers
+# are named by the session: the payload's id, else the token SessionStart left, which is the literal
+# "unknown" for a session that had no id from anywhere. The delivery record and the per-part outcomes
+# are named by the payload's id alone. A real id is unique to its session and stands alone. "unknown",
+# or no id at all, is a name every id-less session on the machine would use, whatever its account, so
+# QA's probe saw account B's prompt replace account A's prepared copy, directive text and all, at
+# .mmry-foundation-prepared.unknown. Those parts now carry the account key in front, as the
+# by-reference copy's name already did: <key>.unknown, or <key>.none for no id at all. Filtered as
+# mmry_foundation_sid filters an id: only characters safe in a file name, no dot, else no id at all.
+#   mmry_foundation_session_part_v [sid-or-token]   -> <sid>, or <key>.unknown, or <key>.none
+mmry_foundation_session_part_v() {
+    local v="${1:-}"
+    [[ "$v" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || v=""
+    if [[ -n "$v" && "$v" != "unknown" ]]; then
+        _MMRY_FND_SESSION_PART="$v"
+        return 0
+    fi
+    mmry_foundation_account_key_v
+    _MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"
 }

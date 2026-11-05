@@ -78,8 +78,8 @@ _sid="$(mmry_foundation_sid "${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}")
 # "nothing yet" after a delivery. With nothing at all under this session's id, it reads the token's.
 _fnd_any_record() {
     local p
-    for p in "" .2 .3 .4 .5 .6; do
-        [[ -e "${MMRY_TMPDIR}/mmry-foundation.outcome${1:+.$1}${p}" ]] && return 0
+    for p in 1 2 3 4 5 6; do
+        [[ -e "$(mmry_foundation_outcome_path "$MMRY_TMPDIR" "$1" "$p")" ]] && return 0
     done
     [[ -e "$(mmry_foundation_record_path "$MMRY_TMPDIR" "$1")" ]]
 }
@@ -228,7 +228,8 @@ _FND_GAP=3
 _sfx() { (( $1 > 1 )) && printf '.%s' "$1"; }
 _rs=() _rt=() _ro=()
 for (( _k = 1; _k <= 6; _k++ )); do
-    _f="${MMRY_TMPDIR}/mmry-foundation.outcome${_sid:+.$_sid}$(_sfx "$_k")"
+    # Named by the session, and with no id by the account (#32915): the client spells it for the hook too.
+    _f="$(mmry_foundation_outcome_path "$MMRY_TMPDIR" "$_sid" "$_k")"
     _rs[_k]=absent _rt[_k]="" _ro[_k]=""
     # Something at the path that is not a regular file is not a record of anything, and is said so
     # rather than read (#31583 QA round 2). A directory cannot be read and a FIFO would block.
@@ -272,7 +273,9 @@ _outcome() {
 # A firing killed before it finished leaves its in-flight marker behind. Markers older than this
 # session's start belong to an earlier session in the same temp directory and are not read.
 _cut_short() {
-    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight${_sid:+.$_sid}$1"
+    # The hook's name for it: the id, else this account's <key>.none (#32915, QA round 2, F-B).
+    mmry_foundation_session_part_v "$_sid"
+    local f="${MMRY_TMPDIR}/.mmry-foundation-inflight.${_MMRY_FND_SESSION_PART}$1"
     [[ -e "$f" ]] || return 1
     # A marker that is not a regular file is still a marker: fail closed (#31583 QA round 2).
     [[ -f "$f" ]] || return 0

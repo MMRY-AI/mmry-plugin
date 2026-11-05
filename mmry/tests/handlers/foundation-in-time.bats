@@ -26,6 +26,10 @@ load '../helpers/foundation-set'
 setup() {
     HOOK="$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
+    # A whole identity for the session under test (#32915, requirement 3): the hook delivers nothing
+    # for a session that cannot name its account and server, as SessionStart loads nothing for one.
+    # The same values the tests below write, so their configs keep the same key.
+    printf '{"apiUrl":"http://127.0.0.1:9","authMethod":"apikey","apiKey":"test-key","foundationReinject":"true","foundationRefreshSeconds":0}\n' > "$MMRY_CONFIG_FILE"
     SET="$(fnd_set_file)"
     printf 'session-under-test' > "$(fnd_session_file)"
     REAL_CKSUM="$(command -v cksum)"
@@ -118,14 +122,14 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     _ctx 1
     [[ "$PART_TEXT" == *"Directive 0003"* ]] || { echo "the prompt did not deliver: ${PART_TEXT:0:200}"; return 1; }
     # Decided by a detached process, so it is waited for, up to 30 s.
-    local i; for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
-    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "no refresh was decided"; return 1; }
+    local i; for (( i = 0; i < 150; i++ )); do [ -f "$(fnd_refresh_file)" ] && break; sleep 0.2; done
+    [ -f "$(fnd_refresh_file)" ] || { echo "no refresh was decided"; return 1; }
     # Once decided, the next prompt inside the interval does not start the decision again.
-    rm -f "$TEST_TMPDIR/.mmry-foundation-refresh"
+    rm -f "$(fnd_refresh_file)"
     : > "$CALLS"
     _fire 1
     sleep 3
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "decided again inside the interval"; return 1; }
+    [ ! -f "$(fnd_refresh_file)" ] || { echo "decided again inside the interval"; return 1; }
     [ "$(_calls jq)" -eq 0 ] || { echo "the decision was started again: $(_calls jq) jq"; return 1; }
 }
 
@@ -435,12 +439,12 @@ _logging_shim() {
     _ctx 1
     [[ "$PART_TEXT" == *"Directive 0003"* ]] || { echo "the prompt did not deliver: ${PART_TEXT:0:200}"; return 1; }
     # The decision writes its stamp before it starts anything, so no stamp means it did not run.
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-refresh-checked" ] || { echo "a part past half its deadline started the refresh decision"; return 1; }
+    [ ! -f "$(fnd_refresh_checked_file)" ] || { echo "a part past half its deadline started the refresh decision"; return 1; }
     # The next prompt is served at once and makes it.
     _cksum_shim 0
     MMRY_FOUNDATION_DEADLINE_SECS=4 _fire 1
-    local i; for (( i = 0; i < 150; i++ )); do [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] && break; sleep 0.2; done
-    [ -f "$TEST_TMPDIR/.mmry-foundation-refresh" ] || { echo "the quicker prompt did not decide the refresh"; return 1; }
+    local i; for (( i = 0; i < 150; i++ )); do [ -f "$(fnd_refresh_file)" ] && break; sleep 0.2; done
+    [ -f "$(fnd_refresh_file)" ] || { echo "the quicker prompt did not decide the refresh"; return 1; }
 }
 
 # A Japanese set of $1 lines, each 37 characters and 95 bytes, written in octal so no locale is

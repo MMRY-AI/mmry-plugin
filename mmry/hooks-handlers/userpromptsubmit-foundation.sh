@@ -280,6 +280,16 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     fi
     export MMRY_FND_SID
 fi
+# THE DELIVERY RECORD AND THE OUTCOME RECORDS ARE NAMED BY THIS SESSION'S ID, and with no id by this
+# session's ACCOUNT (#32915, QA round 1, requirement 2): mmry-foundation.status.<part> and
+# mmry-foundation.outcome.<part>[.<part number>], where <part> is the id, else <account key>.none
+# (lib-foundation-key.sh, mmry_foundation_session_part_v). With no id these were one bare name for
+# every session on the machine, whatever its account. Computed once here, where the id is settled,
+# for the supervisor and the worker alike; the client's mmry_foundation_record_path and
+# mmry_foundation_outcome_path spell the same names for the status command.
+mmry_foundation_session_part_v "${MMRY_FND_SID:-}"
+_FND_SIDPART="$_MMRY_FND_SESSION_PART"
+_FND_OUTF="${_FOUND_TMPDIR}/mmry-foundation.outcome.${_FND_SIDPART}"
 
 if (( MMRY_FND_PART > 1 )); then
     _fnd_m="$_FND_SETF"
@@ -296,7 +306,7 @@ if (( MMRY_FND_PART > 1 )); then
         if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             _fnd_qtok="${MMRY_FND_SID:-}"
             [[ -z "$_fnd_qtok" && -f "$_FND_SESSF" ]] && { _fnd_qtok="$(<"$_FND_SESSF")" 2>/dev/null || _fnd_qtok=""; }
-            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"
+            _mmry_fnd_write "${_FND_OUTF}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"
         fi
         exit 0
     fi
@@ -430,7 +440,7 @@ _mmry_outcome() {
     # By temp and rename (#31583 QA round 2), see _mmry_fnd_write. It was one redirect for latency
     # (#31411 QA round 2): that saved the mv, about 40 ms of process start on Windows, but a reader
     # could catch half a line, and a FIFO left at the path would have blocked the write.
-    _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "$_FND_OLINE"
+    _mmry_fnd_write "${_FND_OUTF}${_SFX}" "$_FND_OLINE"
     return 0
 }
 # The outcome record's line for outcome $1, into _FND_OLINE: "<session> <start second> <outcome>"
@@ -460,7 +470,7 @@ _mmry_fnd_outcome_line() {
 # one thing here that can wait: a firing running late leaves it to the next quicker prompt (it is made at
 # most once in 300 s anyway), so the time that process costs is never taken from a prompt near its limit.
 _mmry_fnd_finish() {
-    local out="$1" cut="${2:-}" o="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    local out="$1" cut="${2:-}" o="${_FND_OUTF}${_SFX}"
     set --
     [[ "$cut" == cut ]] && _mmry_fnd_mark_cut
     if [[ -n "$out" ]]; then
@@ -495,7 +505,7 @@ _mmry_fnd_finish() {
 # them on top of the deadline, outside every bound the hook has. The deadline now ends this wait too,
 # as it ends every other wait in the hook, and the polling waits without a process (_mmry_fnd_nap).
 _mmry_fnd_part1_said() {
-    local f="${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}" tok="${MMRY_FND_SID:-}"
+    local f="$_FND_OUTF" tok="${MMRY_FND_SID:-}"
     local re='^([^ ]+) ([0-9]{1,12}) (.+)$' l t end=$(( SECONDS + $1 ))
     _FND_P1=""
     (( end > DEADLINE )) && end=$DEADLINE
@@ -747,8 +757,11 @@ _mmry_fnd_key() {
     if [[ -z "$_FND_STAMP" && -f "$f" && -r "$f" ]]; then
         _FND_STAMP="$(<"$f")" 2>/dev/null || _FND_STAMP=""
     fi
-    _FND_KEY="$_FND_STAMP"
-    [[ "$_FND_KEY" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || _FND_KEY="none"
+    # The account key goes in front of "unknown" and of no id at all (#32915, QA round 1, requirement
+    # 2): both are names every id-less session would use, so two accounts overwrote each other's
+    # prepared copy at .mmry-foundation-prepared.unknown. A real id stands alone, as it always did.
+    mmry_foundation_session_part_v "$_FND_STAMP"
+    _FND_KEY="$_MMRY_FND_SESSION_PART"
 }
 
 # What part $1 of $2, version $3, says, around its slice $4, into _FND_PAYLOAD. The one place the
@@ -1127,14 +1140,18 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # unreproducible. MMRY_DEBUG=1 REDIRECTS that stderr to a file instead of discarding it.
     # The customer-facing contract is identical either way: stderr never reaches the terminal,
     # so a debug session cannot turn the handler into a source of noise.
+    # Both logs are named by this session's account and server (#32915, QA of #32889 NEW-3), as the
+    # set is: one machine-wide log mixed two accounts' failures, and a log is a file another session
+    # on another account could otherwise find standing where its own would go. _FND_ACCT costs no
+    # process; it was computed at the top with the set's name.
     _FOUND_ERR=/dev/null
-    [[ -n "${MMRY_DEBUG:-}" ]] && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.log"
+    [[ -n "${MMRY_DEBUG:-}" ]] && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.${_FND_ACCT}.log"
     exec 2>>"$_FOUND_ERR"
 
     # Every abnormal exit below appends here regardless of MMRY_DEBUG. A failure that tells the
     # customer their directives were dropped and leaves no trace of WHY is the reason this
     # ticket needed three reports before anyone could act on it.
-    _FOUND_LOG="${_FOUND_TMPDIR}/mmry-foundation.log"
+    mmry_foundation_log_name_v "$_FOUND_TMPDIR"; _FOUND_LOG="$_MMRY_FND_LOG_NAME"
 
     # A HOST WITH NO CREDENTIAL OF ITS OWN IS SILENT, NOT ALARMING (#31245 QA round 4).
     #
@@ -1206,6 +1223,24 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         exit 0
     fi
 
+    # A SESSION THAT CANNOT SAY WHOSE DIRECTIVES THESE ARE DELIVERS NONE (#32915, independent QA of
+    # round 1, requirement 3). SessionStart refuses a session whose configuration names no server
+    # address (the client would guess its default server) and loads nothing for it. This hook then
+    # served whatever stood at the name that guess produces: its prepared path reads the set file
+    # straight from disk, and its worker's daily refresh fetched from the guessed server and stored
+    # the set, so from the second prompt the directives arrived one prompt after the user was told
+    # nothing was loaded (QA probe3). The same question SessionStart asks, asked here before anything
+    # can be served or started, with the library's scan of the environment and the config and no
+    # process. BOTH HALVES (#32915, QA round 2, F-C): the server given, and the credential an API
+    # key. The set's name hashes the server and the credential string whatever the method, so an
+    # API-key session's set stands at the name an OAuth session with that string computes, and the
+    # server half alone served it to a session SessionStart had refused (QA probe4). The worker,
+    # which loads the client, asks the same two before its refresh. Silent, as the off switch above
+    # is: SessionStart said it.
+    if ! mmry_foundation_identity_known_v || ! mmry_foundation_auth_apikey_v; then
+        exit 0
+    fi
+
     # Defined here, after the off switch, so nothing that can start a worker comes before it (#31893;
     # tests/structural/hook-budgets.bats checks the order). Indented as the supervisor is.
     # THE DAILY REFRESH, DECIDED OFF THE PROMPT'S PATH (#31893). Part 1's worker used to decide it on every
@@ -1217,7 +1252,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # is a day by default, deciding at most five minutes late changes nothing a customer can see.
     _mmry_fnd_refresh_check() {
         (( MMRY_FND_PART == 1 )) || return 0
-        local every=300 f="${_FOUND_TMPDIR}/.mmry-foundation-refresh-checked" last=""
+        # The stamp is this account's own (#32915, QA of #32889 NEW-3): one machine-wide stamp let one
+        # account's prompt hold another account's refresh decision for up to the whole interval.
+        mmry_foundation_refresh_checked_name_v "$_FOUND_TMPDIR"
+        local every=300 f="$_MMRY_FND_REFRESH_CHECKED_NAME" last=""
         if [[ -n "${MMRY_FOUNDATION_REFRESH_SECONDS:-}" ]]; then
             [[ "$MMRY_FOUNDATION_REFRESH_SECONDS" =~ ^[0-9]+$ ]] || return 0
             (( MMRY_FOUNDATION_REFRESH_SECONDS == 0 )) && return 0
@@ -1240,11 +1278,15 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # payload would make a long pasted prompt cost every part process. The rest is left unread, as
     # this hook has always left all of it. No id means the old token-named records, unchanged.
     # This session's id was read at the top, before the quick exit (#31583 QA round 2, R4).
-    _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    # NAMED BY THE SESSION PART, NOT THE ID ALONE (#32915, QA round 2, F-B): with no id this and the
+    # three markers below were bare names, one for every id-less session on the machine whatever its
+    # account, so one account's assistant was told of another account's lost turn and one account's
+    # user went untold. The part is the id, else <account key>.none, as the delivery record's is.
+    _INFLIGHT="${_FOUND_TMPDIR}/.mmry-foundation-inflight.${_FND_SIDPART}${_SFX}"
     # A TURN CUT SHORT AT THE DEADLINE (#31893 TC3). It was reported to the assistant on that turn, and
     # this tells the next turn too, as the in-flight marker does for a turn the harness killed. Kept
     # apart from the in-flight marker so /mmry:foundation-status still reads the cause it recorded.
-    _CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}"
+    _CUTSHORT="${_FOUND_TMPDIR}/.mmry-foundation-cutshort.${_FND_SIDPART}${_SFX}"
 
     # 10, not the 15 this shipped to QA with (#31434 QA). The deadline is not the whole
     # story: the supervisor still has to start, reap the worker, decide WHY it failed and
@@ -1302,7 +1344,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     #
     # The worker now writes a PENDING record, scoped to this supervisor, and only this process
     # promotes it, and only after its own emit has returned success.
-    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status${MMRY_FND_SID:+.$MMRY_FND_SID}"
+    _STATUS="${_FOUND_TMPDIR}/mmry-foundation.status.${_FND_SIDPART}"
     _PENDING="${_STATUS}.pending.$$"
     # A file named for this process cannot be there already unless a pid was reused, so it is
     # removed only if it is (#31893): `rm` is a process, and this ran on every part of every prompt.
@@ -1654,9 +1696,10 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         # SessionStart writes when it told them first, so it is never repeated on later prompts:
         # #31583 removed the warning on every prompt and that stays removed. With no session id and
         # no token the marker holds a fixed word, so even then it is said once, not every prompt.
-        # Part 1 only: it owns everything said about the set as a whole.
+        # Part 1 only: it owns everything said about the set as a whole. Named by the session part
+        # (#32915, QA round 2, F-B): with no id it is this account's, never one shared name.
         if (( MMRY_FND_PART == 1 )) && [[ "$_FND_KIND" == *" empty" ]]; then
-            _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
+            _etold="${_FOUND_TMPDIR}/.mmry-foundation-empty-told.${_FND_SIDPART}" _etok="${MMRY_FND_SID:-}" _etold_tok=""
             [[ -z "$_etok" && -f "$_FND_SESSF" ]] && { _etok="$(<"$_FND_SESSF")" 2>/dev/null || _etok=""; }
             _etok="${_etok:-no-session}"
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
@@ -1698,8 +1741,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # told on every prompt, because it needs the instruction every time.
     if [[ "$_FND_KIND" == BYREF* ]]; then
         # Named by the session (#31411 QA round 2), like every other record here, so one session
-        # telling its customer never stops another from telling theirs.
-        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""
+        # telling its customer never stops another from telling theirs; and with no session id by
+        # the account (#32915, QA round 2, F-B), so one account's telling never stands for another's.
+        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told.${_FND_SIDPART}" _tok="" _told_tok=""
         _tok="${MMRY_FND_SID:-}"
         [[ -z "$_tok" && -f "$_FND_SESSF" ]] && { _tok="$(<"$_FND_SESSF")" 2>/dev/null || _tok=""; }
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
@@ -1764,7 +1808,8 @@ CACHE="$(mmry_foundation_set_path "$MMRY_TMPDIR")"
 # more: the line that did recorded a truncation that no longer happens, and recorded it
 # wrongly - it printed the length AFTER the cut, so every one of the 1,457 entries on the
 # affected machine read "had 6000 chars" (#31411).
-LOG="${MMRY_TMPDIR}/mmry-foundation.log"
+# Named by the account and server, as the supervisor's _FOUND_LOG is (#32915).
+mmry_foundation_log_name_v "$MMRY_TMPDIR"; LOG="$_MMRY_FND_LOG_NAME"
 
 # Toggle off -> no-op. The supervisor checks this too, before it ever spawns this worker, so
 # that the remedy the crash notice recommends actually works (#31434 QA).
@@ -1781,6 +1826,18 @@ LOG="${MMRY_TMPDIR}/mmry-foundation.log"
 _mmry_fnd_nothing() { printf '@@MMRY-NONE %s 0@@' "$MMRY_FND_PART"; exit 0; }
 MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && _mmry_fnd_nothing
 
+# THE IDENTITY GATE SESSIONSTART APPLIES, BEFORE THE REFRESH AND BEFORE ANY DELIVERY (#32915,
+# independent QA of round 1, requirement 3). A session SessionStart refused as unidentified (no
+# server address given, so the client fell back to its default server; or a credential that is not
+# an API key) must get nothing from this hook either. The refresh below used to run for it as long as
+# a key was set: it fetched from the default server, stored the set under the key that guess
+# produces, and the next prompt delivered it. The supervisor asks the library's half of this question
+# before it spawns this worker; here, with the config loaded, the whole of it is asked, and the
+# refresh-only worker the supervisor starts detached passes through this line too.
+if ! mmry_foundation_identity_known_v || [[ "${MMRY_AUTH_METHOD:-}" != "apikey" ]]; then
+    _mmry_fnd_nothing
+fi
+
 # TTL-gated BACKGROUND refresh (#30579): if the cache is older than the refresh window,
 # re-fetch Foundation memories in the background so an admin-added memory propagates without
 # a Claude restart. This is non-blocking - the CURRENT prompt still uses the existing cache;
@@ -1790,7 +1847,8 @@ MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here && _mm
 # Part 1 only (#31411 split): six firings asking for one refresh is five too many.
 if (( MMRY_FND_PART == 1 )) && [[ "$REFRESH_SECS" =~ ^[0-9]+$ ]] && (( REFRESH_SECS > 0 )) && [[ -n "${MMRY_API_KEY:-}" ]]; then
     _now="$(date +%s 2>/dev/null || echo 0)"
-    _lock="${MMRY_TMPDIR}/.mmry-foundation-refresh"
+    # The lock is this account's own (#32915): one account's attempt never bounds another's.
+    mmry_foundation_refresh_name_v "$MMRY_TMPDIR"; _lock="$_MMRY_FND_REFRESH_NAME"
     _cache_age=$(( _now - $(_mmry_mtime "$CACHE") ))
     _lock_age=$(( _now - $(_mmry_mtime "$_lock") ))
     if (( _cache_age >= REFRESH_SECS )) && (( _lock_age >= REFRESH_SECS )); then
@@ -1832,7 +1890,7 @@ fi
 # Written on every verified injection so /mmry:foundation-status can answer "are my
 # directives reaching my assistants right now" without anyone reading a cache file
 # (#31583 requirement 4). Costs one redirect and no process; its mtime is the timestamp.
-STATUS="${MMRY_TMPDIR}/mmry-foundation.status${MMRY_FND_SID:+.$MMRY_FND_SID}"
+STATUS="$(mmry_foundation_record_path "$MMRY_TMPDIR" "${MMRY_FND_SID:-}")"
 # Where the worker writes its delivery record. Under the supervisor this is a pending file the
 # supervisor promotes after a successful emit; run on its own, as the unit tests do, the
 # worker has no supervisor and writes the record directly.
@@ -1981,8 +2039,11 @@ if (( _fnd_n > MMRY_FND_PARTS_MAX )); then
     # can replace the file at any moment, but nothing can change what was verified. So the copy is
     # exactly the set this turn checked, and its closing line names that version. A copy that cannot
     # be written, or a directory standing where it goes, sends nothing.
+    # NAMED BY THE ACCOUNT AS WELL AS THE SESSION (#32915, QA of #32889 NEW-2). With no session id and
+    # no marker this fell back to one shared mmry-foundation.byref.md, which a session on another
+    # account in the same state would write too. The account is in the name whatever else is.
     _fnd_key="${MMRY_FND_SID:-$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)}"
-    _fnd_snap="${MMRY_TMPDIR}/mmry-foundation.byref${_fnd_key:+.$_fnd_key}.md"
+    mmry_foundation_byref_name_v "$MMRY_TMPDIR" "$_fnd_key"; _fnd_snap="$_MMRY_FND_BYREF_NAME"
     _fnd_snaptmp="${_fnd_snap}.new.$$"
     _fnd_end="END OF FOUNDATION SET ${_fnd_setid}"
     #

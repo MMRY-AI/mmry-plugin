@@ -162,7 +162,8 @@ desc_m06="in-flight marker is never written"
 
 # Hard-wire stderr back to /dev/null, so MMRY_DEBUG captures nothing and the next
 # unreproducible customer report stays unreproducible.
-mutate_m07() { _sedi '/_FOUND_ERR="\${_FOUND_TMPDIR}\/mmry-foundation-debug.log"/d' "$1/$HANDLER_REL"; }
+# REPOINTED (#32915): the debug log is named by the account, mmry-foundation-debug.<key>.log.
+mutate_m07() { _sedi '/_FOUND_ERR="\${_FOUND_TMPDIR}\/mmry-foundation-debug\./d' "$1/$HANDLER_REL"; }
 targets_m07="$HANDLER_TESTS"
 desc_m07="MMRY_DEBUG no longer redirects the discarded stderr"
 
@@ -452,7 +453,7 @@ mutate_m28() { _mrep "$1/$HANDLER_REL" '        && { mmry_foundation_restore_nul
 targets_m28="$PARTS_TESTS"
 desc_m28="#31583 R3, #31597 the by-reference copy is taken from the file again, not from the set this turn verified"
 
-mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FOUND_TMPDIR}/mmry-foundation.outcome${MMRY_FND_SID:+.$MMRY_FND_SID}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"' '            :'; }
+mutate_m29() { _mrep "$1/$HANDLER_REL" '            _mmry_fnd_write "${_FND_OUTF}${_SFX}" "${_fnd_qtok} ${_FND_T0} none"' '            :'; }
 targets_m29="$PARTS_TESTS"
 desc_m29="#31583 R4 a part that leaves early records nothing, so an earlier prompt's record counts"
 
@@ -485,7 +486,7 @@ mutate_m35() { _mrep "$1/$HANDLER_REL" '            NOTICE="MMRY AI could not lo
 targets_m35="$PARTS_TESTS"
 desc_m35="#31411 a failing part tells the assistant the whole turn went without the directives"
 
-mutate_m36() { _mrep "$1/$HANDLER_REL" '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told${MMRY_FND_SID:+.$MMRY_FND_SID}" _tok="" _told_tok=""' '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""'; }
+mutate_m36() { _mrep "$1/$HANDLER_REL" '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told.${_FND_SIDPART}" _tok="" _told_tok=""' '        _told="${_FOUND_TMPDIR}/.mmry-foundation-byref-told" _tok="" _told_tok=""'; }
 targets_m36="$PARTS_TESTS"
 desc_m36="#31411 the told marker is shared, so a session is told again after another session"
 
@@ -841,7 +842,7 @@ desc_m81="#31597 r2 TC4 parts 2-6 give the empty notice as well as part 1"
 # TC4 (#31597 QA round 3, Q4). SessionStart does not write the token-form told-marker, so a session with
 # no session id is told about the empty set at SessionStart and again on its first prompt.
 mutate_m82() {
-    _mrep "$1/$SESSION_START_REL" '    printf '"'"'%s'"'"' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told" 2>/dev/null || true' '    :'
+    _mrep "$1/$SESSION_START_REL" '    printf '"'"'%s'"'"' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' '    :'
 }
 file_m82="$SESSION_START_REL"
 targets_m82="$EDGES_TESTS"

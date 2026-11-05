@@ -106,3 +106,86 @@ fnd_set_record() {
 fnd_set_with() {
     printf '%s\n%s%s' "$1" "$2" "$FND_TRAILER" > "${3:-$SET}"
 }
+
+# THE STARTUP MEMORIES FILE AND THE FOUNDATION WORKING FILES, NAMED BY THE ACCOUNT (#32915). Each is
+# the plugin's name for the current environment and config, taken the same way the set's name is
+# above: AFTER the test has put in place whatever identity the handler under test will see.
+#
+#   fnd_memories_file [sid] [dir]  -> <dir>/mmry-memories.<key>.<sid>.md, or mmry-memories.<key>.md
+#                                     with no sid (the file SessionStart tells the model to read)
+#   fnd_log_file [dir]             -> <dir>/mmry-foundation.<key>.log
+#   fnd_debug_log_file [dir]       -> <dir>/mmry-foundation-debug.<key>.log
+#   fnd_refresh_file [dir]         -> <dir>/.mmry-foundation-refresh.<key>          (the worker's lock)
+#   fnd_refresh_checked_file [dir] -> <dir>/.mmry-foundation-refresh-checked.<key>  (the supervisor's stamp)
+#   fnd_byref_file [sid] [dir]     -> <dir>/mmry-foundation.byref.<key>.<sid>.md, or .byref.<key>.md
+fnd_memories_file() {
+    printf '%s/mmry-memories.%s%s.md' "${2:-$TEST_TMPDIR}" "$(fnd_acct)" "${1:+.$1}"
+}
+fnd_log_file() {
+    printf '%s/mmry-foundation.%s.log' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_debug_log_file() {
+    printf '%s/mmry-foundation-debug.%s.log' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_refresh_file() {
+    printf '%s/.mmry-foundation-refresh.%s' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_refresh_checked_file() {
+    printf '%s/.mmry-foundation-refresh-checked.%s' "${1:-$TEST_TMPDIR}" "$(fnd_acct)"
+}
+fnd_byref_file() {
+    printf '%s/mmry-foundation.byref.%s%s.md' "${2:-$TEST_TMPDIR}" "$(fnd_acct)" "${1:+.$1}"
+}
+
+# THE PER-SESSION MARKERS, NAMED SO THAT TWO ACCOUNTS NEVER SHARE ONE (#32915, QA round 1,
+# requirement 2). The prepared copy, claim, result and stored markers are named by the session: the
+# payload's id, else the token SessionStart left, which is the literal "unknown" for a session that
+# had no id. A real session id is unique to its session and stands alone; "unknown", or no id at
+# all ("none"), is a name every id-less session would use, so it carries the account key in front:
+# <key>.unknown. The delivery record and the per-part outcomes take the same rule with the payload's
+# id only (they never carried the token), so with no id they are <key>.none.
+#
+#   fnd_session_part [sid-or-token]      -> <sid>, or <key>.unknown / <key>.none
+#   fnd_prepared_file [sid-or-token] [dir] -> <dir>/.mmry-foundation-prepared.<part>
+#   fnd_claim_file    [sid-or-token] [dir] -> <dir>/.mmry-foundation-claim.<part>
+#   fnd_result_file   [sid-or-token] [dir] -> <dir>/.mmry-foundation-result.<part>
+#   fnd_stored_file   [sid-or-token] [dir] -> <dir>/mmry-foundation.stored.<part>
+#   fnd_status_file   [sid] [dir]          -> <dir>/mmry-foundation.status.<part>
+#   fnd_outcome_file  [sid] [part] [dir]   -> <dir>/mmry-foundation.outcome.<part>[.<part number>]
+fnd_session_part() {
+    local v="${1:-}"
+    [[ "$v" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || v=""
+    if [[ -n "$v" && "$v" != "unknown" ]]; then printf '%s' "$v"; return 0; fi
+    printf '%s.%s' "$(fnd_acct)" "${v:-none}"
+}
+fnd_prepared_file() { printf '%s/.mmry-foundation-prepared.%s' "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_claim_file()    { printf '%s/.mmry-foundation-claim.%s'    "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_result_file()   { printf '%s/.mmry-foundation-result.%s'   "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_stored_file()   { printf '%s/mmry-foundation.stored.%s'    "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_status_file()   { printf '%s/mmry-foundation.status.%s'    "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_outcome_file() {
+    local n="${2:-1}" sfx=""
+    (( n > 1 )) && sfx=".$n"
+    printf '%s/mmry-foundation.outcome.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
+}
+# THE NOTICE MARKERS, NAMED THE SAME WAY (#32915, QA round 2, F-B). The in-flight marker (a turn the
+# harness killed), the cut-short marker (a turn stopped at the deadline), the empty-set told marker
+# and the by-reference told marker were bare names with no session id, one for every id-less session
+# on the machine whatever its account: one account's user went untold of a by-reference set, and was
+# told of the other account's lost turn. Each takes the session part above: the id, else <key>.none.
+#   fnd_inflight_file   [sid] [part number] [dir] -> <dir>/.mmry-foundation-inflight.<part>[.<n>]
+#   fnd_cutshort_file   [sid] [part number] [dir] -> <dir>/.mmry-foundation-cutshort.<part>[.<n>]
+#   fnd_empty_told_file [sid] [dir]               -> <dir>/.mmry-foundation-empty-told.<part>
+#   fnd_byref_told_file [sid] [dir]               -> <dir>/.mmry-foundation-byref-told.<part>
+fnd_inflight_file() {
+    local n="${2:-1}" sfx=""
+    (( n > 1 )) && sfx=".$n"
+    printf '%s/.mmry-foundation-inflight.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
+}
+fnd_cutshort_file() {
+    local n="${2:-1}" sfx=""
+    (( n > 1 )) && sfx=".$n"
+    printf '%s/.mmry-foundation-cutshort.%s%s' "${3:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")" "$sfx"
+}
+fnd_empty_told_file() { printf '%s/.mmry-foundation-empty-told.%s' "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }
+fnd_byref_told_file() { printf '%s/.mmry-foundation-byref-told.%s' "${2:-$TEST_TMPDIR}" "$(fnd_session_part "${1:-}")"; }

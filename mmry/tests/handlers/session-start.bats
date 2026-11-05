@@ -3,6 +3,7 @@
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
 
 setup() {
     setup_mock_curl
@@ -30,7 +31,9 @@ setup() {
 
 @test "session-start: creates temp markdown file with memory content" {
     bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" > /dev/null 2>&1
-    local mem_file="$TEST_TMPDIR/mmry-memories.md"
+    # Named by the account and server and session since #32915; the helper computes the name the
+    # handler uses for this test's config and session id.
+    local mem_file; mem_file="$(fnd_memories_file test-session-123)"
     [[ -f "$mem_file" ]]
 }
 
