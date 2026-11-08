@@ -106,17 +106,22 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" correct --database-id <d
 Save or correct several entries in one database in one request, instead of running `add` or
 `correct` once per entry: for example "renumber these thirteen entries". Find the entries' ids with
 `find` first. Build one JSON array, one object per entry: `content` (the entry as it should now
-read, in the customer's words), `fields`, and `entryId` for an entry already saved.
+read, in the customer's words), `fields`, and `entryId` for an entry already saved. An entry is
+seen by whoever can see its database unless it is given its own visibility. Pass `visibility` only
+when the customer has said who may see the entry. Otherwise leave it out, and if an entry reads
+personal (health, pay or finances, a personnel matter, a private opinion about someone, or what
+privacy law treats as sensitive), also pass `"personal": true` on that entry. Do not ask before
+sending, and never choose for the customer.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" batch --database-id <database>     --entries '[{"entryId":<entry>,"content":"<the entry, as it should now read>","fields":{"number":4}}]'
 ```
 
 Each entry is saved or refused on its own, and the script prints one line per entry in the order
-sent. Report every one: what was saved, what was refused and why, and, for an entry marked
-`NOT SAVED`, the question to ask the customer (send that entry again with their answer as
-`visibility` and the `questionId` printed). At most 25 entries at a time; for a long batch, write
-the array to a file and pass `--entries-file <path>`.
+sent. Report every one: what was saved, what was refused and why. For an entry printed as
+`NOT SAVED`, ask the customer the question it carries, wait for their answer, and send that entry
+again with their answer as `visibility` and the printed `questionId`. At most 25 entries at a time;
+for a long batch, write the array to a file and pass `--entries-file <path>`.
 
 ### history
 
