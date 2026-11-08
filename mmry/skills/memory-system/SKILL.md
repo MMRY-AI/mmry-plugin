@@ -298,6 +298,11 @@ To save or update several entries in one database, use `save-entries.sh` instead
 thirteen. Each entry takes the same names as one entry save: `content` (required, the user's own
 words), `fields`, and optionally `topic`, `scope`, `entryId` to update that entry, `entryName`,
 `visibility`, `group`, `personal` and `questionId`. An update changes only the fields you send.
+An entry is seen by whoever can see its database unless it is given its own visibility. Pass
+`visibility` only when the user has said who may see the entry. Otherwise leave it out, and if an
+entry reads personal (health, pay or finances, a personnel matter, a private opinion about someone,
+or what privacy law treats as sensitive), also pass `"personal": true` on that entry. Do not ask
+before sending, and never choose for the user.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-entries.sh" --database-id 42 --entries   '[{"entryId":9137,"content":"Item 3 is now number 4","fields":{"number":4}},{"entryId":9138,"content":"Item 4 is now number 3","fields":{"number":3}}]'

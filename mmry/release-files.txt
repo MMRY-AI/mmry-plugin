@@ -195,6 +195,7 @@ tests/structural/codex-tools-first.bats
 tests/structural/codex-windows-commands.bats
 tests/structural/cross-platform.bats
 tests/structural/database-names-check.bats
+tests/structural/entry-batch-privacy.bats
 tests/structural/entry-surface.bats
 tests/structural/file-integrity.bats
 tests/structural/formation-agent-scoped.bats

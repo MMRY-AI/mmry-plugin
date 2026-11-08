@@ -400,8 +400,12 @@ one, and `text.degraded` means the words were kept but the fields were not. An u
 the fields you send. To save or update several entries in one database, use `save-entries.sh`
 instead of running `save-entry.sh` once per entry: each entry is saved or refused on its own and
 printed on its own line in the order sent, so report every one, including the ones refused and why.
-For an entry printed as `NOT SAVED`, ask the customer the question it carries and send that entry
-again with their answer as `visibility` and the printed `questionId`. A batch holds at most 25
+Pass `visibility` only when the customer has said who may see the entry. Otherwise leave it
+out, and if an entry reads personal (health, pay or finances, a personnel matter, a private opinion
+about someone, or what privacy law treats as sensitive), also pass `"personal": true` on that entry.
+Do not ask before sending, and never choose for the customer. For an entry printed as `NOT SAVED`,
+ask the customer the question it carries, wait for their answer, and send that entry again with
+their answer as `visibility` and the printed `questionId`. A batch holds at most 25
 entries and 100,000 characters; for a long batch, write the array to a file and pass
 `--entries-file <path>` instead of `--entries`. `query-entries.sh` answers how many, which ones and in what order from the
 values; on a database with many fields, add `--fields key,key` to get only the fields the question
