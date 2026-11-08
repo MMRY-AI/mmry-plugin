@@ -1284,6 +1284,28 @@ mmry_save_entry() {
     _mmry_request POST "/api/databases/${database_id}/entries" "$body"
 }
 
+mmry_save_entries() {
+    # Usage: mmry_save_entries DATABASE_ID ENTRIES_JSON
+    #
+    # SEVERAL ENTRIES IN ONE REQUEST (#33317): POST /api/databases/{id}/entries/batch, the plugin's
+    # front door to the connector's mmry_entry_save_batch (#32943), answered by the same server code.
+    # ENTRIES_JSON is a JSON array of objects, each taking the connector's names (content, fields,
+    # topic, scope, entryId, entryName, visibility, group, personal, questionId).
+    #
+    # Sent as a JSON STRING CONTAINING the array, as the connector carries it, so the server counts
+    # exactly the characters the caller wrote and a malformed array reaches the server's own plain
+    # refusal instead of failing to bind. The body travels in a file (see _mmry_request), so no
+    # command-line limit applies to it.
+    #
+    # The reply lists every entry in the order sent: saved (with its outcome), "not saved" (with
+    # the privacy question to put to the user), or refused (with its reason). A 400 means the batch
+    # was refused whole and nothing was saved.
+    local database_id="$1" entries="$2"
+    local body
+    body="{\"entries\":$(_mmry_json_string "$entries")}"
+    _mmry_request POST "/api/databases/${database_id}/entries/batch" "$body"
+}
+
 mmry_get_entries() {
     # Usage: mmry_get_entries DATABASE_ID [FILTER_QUERY] [ORDER] [PAGE] [PAGE_SIZE] [ENTRY_CHARACTERS]
     #        [FIELDS] [NOTE]

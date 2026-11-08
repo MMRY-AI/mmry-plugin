@@ -80,10 +80,10 @@ _missing() {
     [[ "$output" == *"formation subcommand zzfake"* ]] || { echo "not named: $output"; return 1; }
 }
 
-@test "help: the database page's headings are exactly its eight subcommands (#32443)" {
+@test "help: the database page's headings are exactly its nine subcommands (#32443, batch #33317)" {
     local root list; root="$(_root)"
     list="$(_subcommands "$root" database | tr '\n' ' ')"
-    [ "$list" = "create list add find correct history retire restore " ] || { echo "got: $list"; return 1; }
+    [ "$list" = "create list add find correct batch history retire restore " ] || { echo "got: $list"; return 1; }
 }
 
 @test "help: every database subcommand on the page is one database.sh accepts, and no other (#32443)" {

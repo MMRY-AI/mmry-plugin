@@ -37,6 +37,7 @@ The plugin includes pre-built bash scripts for common memory operations. Each is
 | `retire-database.sh` | Retire a database (it stops collecting; nothing is deleted) |
 | `reinstate-database.sh` | Start a retired database collecting again |
 | `save-entry.sh` | Save an entry in a database, or update one |
+| `save-entries.sh` | Save or update several entries in one database in one request |
 | `query-entries.sh` | Read entries, filtered on their FIELDS |
 | `entry-history.sh` | What an entry used to hold, oldest change first |
 | `database.sh` | What `/mmry:database` runs: one subcommand, handed to the script above that does it |
@@ -61,7 +62,7 @@ mmry_get_active_sessions
 echo "$MMRY_RESPONSE"
 ```
 
-Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_databases`, `mmry_get_database`, `mmry_create_database`, `mmry_revise_database`, `mmry_rename_database`, `mmry_retire_database`, `mmry_reinstate_database`, `mmry_save_entry`, `mmry_get_entries`, `mmry_get_entry_history`.
+Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_databases`, `mmry_get_database`, `mmry_create_database`, `mmry_revise_database`, `mmry_rename_database`, `mmry_retire_database`, `mmry_reinstate_database`, `mmry_save_entry`, `mmry_save_entries`, `mmry_get_entries`, `mmry_get_entry_history`.
 
 After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
 
@@ -289,6 +290,32 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-entry.sh" --database-id 42 --ent
 ```
 
 The outcome must read `structured.updated`. Anything else, report what it says.
+
+### Several entries in one request
+
+To save or update several entries in one database, use `save-entries.sh` instead of running
+`save-entry.sh` once per entry: correcting or renumbering a set of entries is one request, not
+thirteen. Each entry takes the same names as one entry save: `content` (required, the user's own
+words), `fields`, and optionally `topic`, `scope`, `entryId` to update that entry, `entryName`,
+`visibility`, `group`, `personal` and `questionId`. An update changes only the fields you send.
+An entry is seen by whoever can see its database unless it is given its own visibility. Pass
+`visibility` only when the user has said who may see the entry. Otherwise leave it out, and if an
+entry reads personal (health, pay or finances, a personnel matter, a private opinion about someone,
+or what privacy law treats as sensitive), also pass `"personal": true` on that entry. Do not ask
+before sending, and never choose for the user.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-entries.sh" --database-id 42 --entries   '[{"entryId":9137,"content":"Item 3 is now number 4","fields":{"number":4}},{"entryId":9138,"content":"Item 4 is now number 3","fields":{"number":3}}]'
+```
+
+Each entry is handled on its own: one that is refused does not stop the others, and nothing is
+undone. The script prints one line per entry, in the order sent: `saved` with its outcome,
+`refused` with the reason, or `NOT SAVED` with a question about who may see it. Report what
+happened to each one, including the ones refused and why. For a `NOT SAVED` entry, ask the user the
+question, wait for their answer, and send that entry again unchanged with `visibility` set to their
+answer and the `questionId` it printed. A batch holds at most 25 entries and 100,000 characters;
+send more in several batches. For a batch too long for one command line, write the array to a file
+and pass `--entries-file <path>` instead of `--entries`.
 
 ### What an entry used to hold
 

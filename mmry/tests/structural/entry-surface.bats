@@ -20,6 +20,7 @@ ENTRY_HANDLERS=(
     create-database.sh
     revise-database.sh
     save-entry.sh
+    save-entries.sh
     query-entries.sh
     entry-history.sh
 )
@@ -78,7 +79,7 @@ ENTRY_HANDLERS=(
     local missing=""
     for fn in mmry_list_databases mmry_get_database mmry_create_database mmry_revise_database \
               mmry_rename_database mmry_retire_database mmry_reinstate_database \
-              mmry_save_entry mmry_get_entries mmry_get_entry_history \
+              mmry_save_entry mmry_save_entries mmry_get_entries mmry_get_entry_history \
               _mmry_json_string _mmry_database_name; do
         grep -q "^${fn}() {" "$lib" || missing+=" $fn"
     done
@@ -90,6 +91,7 @@ ENTRY_HANDLERS=(
     grep -q '"/api/databases"' "$lib" || fail "no POST/GET /api/databases"
     grep -q '/api/databases/\${id}/versions' "$lib" || fail "no revise route"
     grep -q '/api/databases/\${database_id}/entries' "$lib" || fail "no entries route"
+    grep -q '/api/databases/\${database_id}/entries/batch' "$lib" || fail "no batch entries route (#33317)"
 }
 
 @test "save-memory.sh accepts the three entry flags" {
