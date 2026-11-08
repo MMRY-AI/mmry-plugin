@@ -660,3 +660,163 @@ _mmry_no_jq() {
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
     grep -q "GET http://localhost:5291/api/databases/42/entries/7/history" "$LOG" || { cat "$LOG"; return 1; }
 }
+
+# --- save-entries: several entries in one request (#33317) ---------------------------------------
+#
+# The plugin's front door to the connector's mmry_entry_save_batch (#32943): POST
+# /api/databases/{id}/entries/batch, one request for up to 25 entries, each reported on its own in
+# the order sent. The caps are checked here too, so a batch the server would refuse whole never
+# leaves the machine; the words are the server's own.
+
+# Thirteen updates by entry id, the feedback #42 shape; the seventh carries a choice that is not one
+# of the options.
+_thirteen() {
+    jq -cn '[range(1;14) | {entryId: (500 + .), content: "Product fact \(.), renumbered to \(. + 100)",
+             fields: {number: (. + 100), status: (if . == 7 then "Withdrawn" else "Final" end)}}]' | tr -d '\r'
+}
+
+# The reply the route gives for _thirteen: twelve saved, the seventh refused with its reason.
+_thirteen_reply() {
+    jq -cn --arg reason "'Withdrawn' is not one of the options for the field Status (status). The options are: Draft, Final." \
+        '{databaseId: 42, entries: 13, saved: 12, refused: 1, notSaved: 0,
+          summary: "12 of 13 entries were saved; 1 was refused, each with its reason. Tell the user what happened to each entry.",
+          results: [range(1;14) | if . == 7
+              then {position: ., status: "refused", reason: $reason}
+              else {position: ., status: "saved", entry: {MemoryId: (500 + .), Outcome: "structured.updated", EntryKey: null, DatabaseId: 42, RootDatabaseId: 42, Revision: 2, Visibility: "Private"}}
+              end]}' | tr -d '\r'
+}
+
+# The body of the last request the mock saw.
+_last_body() { tail -1 "$LOG" | sed 's/^[A-Z]* [^ ]* //'; }
+
+@test "save-entries: requires --database-id and the entries" {
+    run bash "$HANDLERS/save-entries.sh" --database-id 42
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"--database-id and --entries (or --entries-file) are required"* ]] || { echo "$output"; return 1; }
+    [[ ! -s "$LOG" ]] || { cat "$LOG"; return 1; }
+}
+
+@test "save-entries: 13 updates with one invalid in ONE request: 12 reported saved, 1 refused with its reason, in the order sent" {
+    local entries; entries="$(_thirteen)"
+    export MOCK_CURL_HTTP_CODE=200
+    MOCK_CURL_RESPONSE="$(_thirteen_reply)"; export MOCK_CURL_RESPONSE
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries "$entries"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+
+    # ONE request, to the batch route, carrying all thirteen entries exactly as given.
+    [[ "$(grep -c '' "$LOG")" -eq 1 ]] || { cat "$LOG"; return 1; }
+    grep -q "^POST http://localhost:5291/api/databases/42/entries/batch " "$LOG" || { cat "$LOG"; return 1; }
+    [[ "$(_last_body | jq -r '.entries | fromjson | length' | tr -d '\r')" == "13" ]] || { _last_body; return 1; }
+    [[ "$(_last_body | jq -c '.entries | fromjson' | tr -d '\r')" == "$entries" ]] || { _last_body; return 1; }
+
+    [[ "$output" == *"12 of 13 entries were saved; 1 was refused, each with its reason."* ]] || { echo "$output"; return 1; }
+    # Every entry on its own line, in the order sent.
+    local order
+    order="$(printf '%s\n' "$output" | sed -n 's/^Entry \([0-9]*\): .*/\1/p' | tr '\n' ' ')"
+    [[ "$order" == "1 2 3 4 5 6 7 8 9 10 11 12 13 " ]] || { echo "order: $order"; echo "$output"; return 1; }
+    [[ "$(printf '%s\n' "$output" | grep -c '^Entry [0-9]*: saved, structured.updated')" -eq 12 ]] || { echo "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q "^Entry 1: saved, structured.updated (entry 501, visibility Private)$" || { echo "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q "^Entry 7: refused. Reason: 'Withdrawn' is not one of the options for the field Status (status)." \
+        || { echo "$output"; return 1; }
+}
+
+@test "save-entries: a batch over the entry cap is refused with a plain message before any request" {
+    local entries
+    entries="$(jq -cn '[range(0;26) | {content: "Overflow \(.)"}]' | tr -d '\r')"
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries "$entries"
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"Nothing was saved: a batch may hold at most 25 entries and this one holds 26. Send them in batches of 25 or fewer."* ]] \
+        || { echo "$output"; return 1; }
+    [[ ! -s "$LOG" ]] || { echo "a request left the machine:"; cat "$LOG"; return 1; }
+
+    # 25 is the cap, not over it: it is sent.
+    entries="$(jq -cn '[range(0;25) | {content: "Within \(.)"}]' | tr -d '\r')"
+    export MOCK_CURL_HTTP_CODE=200
+    export MOCK_CURL_RESPONSE='{"databaseId":42,"entries":25,"saved":25,"refused":0,"notSaved":0,"summary":"25 of 25 entries were saved. Tell the user what happened to each entry.","results":[]}'
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries "$entries"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "entries/batch" "$LOG" || { cat "$LOG"; return 1; }
+}
+
+# One entry padded so the array's text is exactly N characters.
+_of_length() {
+    local n="$1" bare pad
+    bare='[{"content":""}]'
+    pad=$(( n - ${#bare} ))
+    printf '[{"content":"%s"}]' "$(printf '%*s' "$pad" '' | tr ' ' 'w')"
+}
+
+@test "save-entries: a batch over 100,000 characters is refused before any request; exactly 100,000 is sent" {
+    local over; over="$(_of_length 100001)"
+    [[ "${#over}" -eq 100001 ]] || { echo "CONTROL: ${#over}"; return 1; }
+    printf '%s' "$over" > "$TEST_TMPDIR/over.json"
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries-file "$TEST_TMPDIR/over.json"
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"Nothing was saved: this batch is 100,001 characters and a batch may be at most 100,000. Send the entries in smaller batches."* ]] \
+        || { echo "$output" | head -c 400; return 1; }
+    [[ ! -s "$LOG" ]] || { echo "a request left the machine"; return 1; }
+
+    local exact; exact="$(_of_length 100000)"
+    [[ "${#exact}" -eq 100000 ]] || { echo "CONTROL: ${#exact}"; return 1; }
+    printf '%s' "$exact" > "$TEST_TMPDIR/exact.json"
+    export MOCK_CURL_HTTP_CODE=200
+    export MOCK_CURL_RESPONSE='{"databaseId":42,"entries":1,"saved":1,"refused":0,"notSaved":0,"summary":"1 of 1 entries were saved. Tell the user what happened to each entry.","results":[{"position":1,"status":"saved","entry":{"MemoryId":9,"Outcome":"structured.created","Visibility":"Private"}}]}'
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries-file "$TEST_TMPDIR/exact.json"
+    [[ "$status" -eq 0 ]] || { echo "$output" | head -c 400; return 1; }
+    [[ "$(_last_body | jq -r '.entries | length' | tr -d '\r')" == "100000" ]] || return 1
+}
+
+@test "save-entries: --entries-file sends the same request as --entries, for a batch too long for a command line" {
+    local entries; entries="$(_thirteen)"
+    printf '%s' "$entries" > "$TEST_TMPDIR/batch.json"
+    export MOCK_CURL_HTTP_CODE=200
+    MOCK_CURL_RESPONSE="$(_thirteen_reply)"; export MOCK_CURL_RESPONSE
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries-file "$TEST_TMPDIR/batch.json"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    [[ "$(_last_body | jq -c '.entries | fromjson' | tr -d '\r')" == "$entries" ]] || { _last_body; return 1; }
+
+    : > "$LOG"
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries-file "$TEST_TMPDIR/no-such-file.json"
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"no-such-file.json"* ]] || { echo "$output"; return 1; }
+    [[ ! -s "$LOG" ]] || { cat "$LOG"; return 1; }
+}
+
+@test "save-entries: an entry held for the privacy question prints the question and its questionId, and says nothing is stored" {
+    export MOCK_CURL_HTTP_CODE=200
+    export MOCK_CURL_RESPONSE='{"databaseId":42,"entries":2,"saved":1,"refused":0,"notSaved":1,"summary":"1 of 2 entries were saved; 1 was not saved until the user answers a question. Tell the user what happened to each entry.","results":[{"position":1,"status":"saved","entry":{"MemoryId":77,"Outcome":"structured.created","Visibility":"Global"}},{"position":2,"status":"not saved","question":{"saved":false,"outcome":"visibility-required","recognised":"health","recognisedBy":"service","questionId":"Qx7_abcdefghijklmnopqr","ask":"This entry looks like a health matter, and the database is shared with everyone on your account. Should I keep this entry private, or share it like the rest of the database?","then":"Call mmry_entry_save again with the same arguments.","message":"NOT SAVED."}}]}'
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries '[{"content":"a"},{"content":"b"}]'
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q "^Entry 1: saved, structured.created (entry 77, visibility Global)$" || { echo "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q "^Entry 2: NOT SAVED. Ask the user: This entry looks like a health matter" || { echo "$output"; return 1; }
+    [[ "$output" == *"questionId Qx7_abcdefghijklmnopqr"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"Call mmry_entry_save again"* ]] || { echo "the connector's instruction leaked: $output"; return 1; }
+}
+
+@test "save-entries: a degraded entry says its fields were NOT stored" {
+    export MOCK_CURL_HTTP_CODE=200
+    export MOCK_CURL_RESPONSE='{"databaseId":42,"entries":1,"saved":1,"refused":0,"notSaved":0,"summary":"1 of 1 entries were saved. Tell the user what happened to each entry.","results":[{"position":1,"status":"saved","entry":{"MemoryId":5,"Outcome":"text.degraded","Detail":"no field named severty","Visibility":"Private"}}]}'
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries '[{"content":"x","fields":{"severty":7}}]'
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Entry 1: saved, text.degraded (entry 5, visibility Private). The words were saved; the fields were NOT. Reason: no field named severty"* ]] \
+        || { echo "$output"; return 1; }
+}
+
+@test "save-entries: a batch the server refuses whole is an error carrying the server's own words" {
+    export MOCK_CURL_HTTP_CODE=400
+    export MOCK_CURL_RESPONSE='{"error":"Nothing was saved: entries must be a JSON array of objects, each with at least content.","detail":null}'
+    run bash "$HANDLERS/save-entries.sh" --database-id 42 --entries '{"content":"not an array"}'
+    [[ "$status" -ne 0 ]] || return 1
+    [[ "$output" == *"Nothing was saved: entries must be a JSON array of objects, each with at least content."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *'"detail"'* ]] || { echo "raw JSON shown: $output"; return 1; }
+}
+
+@test "database batch: dispatches to save-entries.sh and ends with the account page" {
+    export MOCK_CURL_HTTP_CODE=200
+    MOCK_CURL_RESPONSE="$(_thirteen_reply)"; export MOCK_CURL_RESPONSE
+    run bash "$HANDLERS/database.sh" batch --database-id 42 --entries "$(_thirteen)"
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    grep -q "POST http://localhost:5291/api/databases/42/entries/batch" "$LOG" || { cat "$LOG"; return 1; }
+    [[ "$output" == *"Entry 13: saved"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"https://mmryai.com/databases"* ]] || { echo "$output"; return 1; }
+}
