@@ -87,6 +87,7 @@ Everything with a tool in brackets above is a call to that `mmry_plugin` tool: c
 |---|---|
 | Who sees a memory | `hooks-handlers/visibility.sh`, `hooks-handlers/make-private.sh`, `hooks-handlers/list-groups.sh` |
 | AI database (Claude Code only: in Codex the customer uses the MMRY connector, so do not run these from Codex) | `hooks-handlers/list-databases.sh`, `hooks-handlers/create-database.sh`, `hooks-handlers/save-entry.sh`, `hooks-handlers/query-entries.sh`, `hooks-handlers/entry-history.sh`, `hooks-handlers/revise-database.sh` |
+| Several entries in one database in one request | `hooks-handlers/save-entries.sh` |
 | Listing Formations, claiming an area | `hooks-handlers/formation-list.sh`, `hooks-handlers/formation-claim.sh` |
 | Foundation status check | `hooks-handlers/foundation-status.sh` |
 | Setup | `setup/mmry-setup.sh` |

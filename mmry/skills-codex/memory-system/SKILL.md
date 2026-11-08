@@ -386,6 +386,7 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/create-database.sh" --name
   --mode append --match-hints "expense, spent, paid"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-entry.sh" --database-id 42 \
   --content "the customer's own words" --fields '{"amount":25,"category":"travel"}'
+bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/save-entries.sh" --database-id 42   --entries '[{"entryId":9137,"content":"Item 3 is now number 4","fields":{"number":4}}]'
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/query-entries.sh" --database-id 42 --filter category=travel
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/entry-history.sh" --database-id 42 --entry-id 9137
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/revise-database.sh" --id 42 --retire
@@ -396,7 +397,13 @@ customer's own words. `--mode keyed --identity-field <key>` is for a list of nam
 each change on their own (leads, tasks); `append` is a log where every entry is new. Report the
 outcome `save-entry.sh` prints: `structured.created` is a new entry, `structured.updated` changed
 one, and `text.degraded` means the words were kept but the fields were not. An update changes only
-the fields you send. `query-entries.sh` answers how many, which ones and in what order from the
+the fields you send. To save or update several entries in one database, use `save-entries.sh`
+instead of running `save-entry.sh` once per entry: each entry is saved or refused on its own and
+printed on its own line in the order sent, so report every one, including the ones refused and why.
+For an entry printed as `NOT SAVED`, ask the customer the question it carries and send that entry
+again with their answer as `visibility` and the printed `questionId`. A batch holds at most 25
+entries and 100,000 characters; for a long batch, write the array to a file and pass
+`--entries-file <path>` instead of `--entries`. `query-entries.sh` answers how many, which ones and in what order from the
 values; on a database with many fields, add `--fields key,key` to get only the fields the question
 needs and `--no-note` to leave out each entry's words, and a page then holds more entries (a key the
 database does not declare is refused with the keys it does declare; filters and `--order` may use

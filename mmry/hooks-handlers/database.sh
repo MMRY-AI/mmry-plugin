@@ -12,6 +12,7 @@
 #   add      save-entry.sh          save a new entry
 #   find     query-entries.sh       read entries, filtered on their fields
 #   correct  save-entry.sh          change an entry already saved (needs --entry-id)
+#   batch    save-entries.sh        save or change several entries in one request (#33317)
 #   history  entry-history.sh       what an entry held before, and when it changed
 #   retire   retire-database.sh     stop a database collecting; nothing is deleted
 #   restore  reinstate-database.sh  start a retired database collecting again
@@ -30,7 +31,7 @@ PORTAL_URL="https://mmryai.com/databases"
 
 usage() {
     echo "Usage: database.sh <subcommand> [arguments]" >&2
-    echo "Subcommands: create, list, add, find, correct, history, retire, restore." >&2
+    echo "Subcommands: create, list, add, find, correct, batch, history, retire, restore." >&2
 }
 
 if [[ $# -eq 0 ]]; then
@@ -67,6 +68,7 @@ case "$SUB" in
             exit 1
         fi
         SCRIPT="save-entry.sh" ;;
+    batch)   SCRIPT="save-entries.sh" ;;
     history) SCRIPT="entry-history.sh" ;;
     retire)  SCRIPT="retire-database.sh" ;;
     restore) SCRIPT="reinstate-database.sh" ;;

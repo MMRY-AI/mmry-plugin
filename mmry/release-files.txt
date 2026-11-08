@@ -62,6 +62,7 @@ hooks-handlers/reinstate-database.sh
 hooks-handlers/rename-database.sh
 hooks-handlers/retire-database.sh
 hooks-handlers/revise-database.sh
+hooks-handlers/save-entries.sh
 hooks-handlers/save-entry.sh
 hooks-handlers/save-memory.sh
 hooks-handlers/search-memories.sh

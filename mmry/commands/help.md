@@ -47,6 +47,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:database add <database> "the entry"` saves a new entry.
   - `/mmry:database find <database> [field=value]` finds entries by the values in their fields.
   - `/mmry:database correct <database> <entry> "what changes"` corrects an entry already saved.
+  - `/mmry:database batch <database> "what changes"` adds or corrects several entries in one request, up to 25 at a time. Each entry is saved or refused on its own, and Claude tells you which.
   - `/mmry:database history <database> <entry>` shows what an entry held before, and when it changed.
   - `/mmry:database retire <database>` stops a database collecting new entries. Nothing is deleted.
   - `/mmry:database restore <database>` starts a retired database collecting again.
@@ -60,6 +61,7 @@ Claude can keep a database for anything you track again and again, such as your 
 - **Add an entry:** "I spent $42 on lunch with a client today." Claude saves it as an entry and tells you what it saved. Or: `/mmry:database add <database> "Applied to Globex for Senior Analyst on Monday"`.
 - **Ask about your entries:** "Which of my expenses were over $20?" Claude answers from the values in your entries. Or: `/mmry:database find <database> status=interviewing`.
 - **Correct an entry:** "That lunch was actually $48, not $42." Claude changes that entry, and the values you do not mention stay as they are. Or: `/mmry:database correct <database> <entry> "Globex invited me to interview"`.
+- **Add or correct several entries at once:** "Renumber these thirteen entries." Each entry is saved or refused on its own, and Claude tells you which. Or: `/mmry:database batch <database> "renumber these entries so they run 1 to 13"`.
 - **See an entry's history:** "Show me the history of the lunch entry." Claude lists every change, oldest first, with when it was made. Or: `/mmry:database history <database> <entry>`.
 - **Stop a database:** "Stop keeping my expenses for now." Nothing is deleted: every entry stays readable and in your export. Or: `/mmry:database retire <database>`.
 - **Start it again:** "Start keeping my expenses again." Or: `/mmry:database restore <database>`.
