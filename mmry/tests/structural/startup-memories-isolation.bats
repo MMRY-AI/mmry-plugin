@@ -517,13 +517,17 @@ _write_large_set() {
     out="$(_claude_prompt_nosid "$INT_URL" "$INT_KEY")"
     [[ "$(_umsg "$out")" != *"no Foundation directives"* ]] || { echo "B's user was told twice"; return 1; }
     [[ ! -e "$TEST_TMPDIR/.mmry-foundation-empty-told" ]] || { echo "the shared marker .mmry-foundation-empty-told was written"; return 1; }
-    # With a session id the marker is named by the id alone, as it always was, and still no shared one.
+    # With a session id the marker is the account's own as well (#33363: a real id can be shared by
+    # two accounts), under the keyed name the hook reads, and still no shared one.
     _claude_start claude-empty-01 "$PROD_URL" "$PROD_KEY" "$PROD_DIRECTIVE" "$PROD_NOTE" >/dev/null
     printf '{"session_id":"claude-empty-02","hook_event_name":"SessionStart","cwd":"/w"}' \
         | env MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY" MMRY_AUTH_METHOD=apikey \
               MOCK_CURL_RESPONSE='[{"id":2,"topic":"Note","content":"an ordinary memory","memoryTier":"Experience","scope":"global","category":"Fact"}]' \
               bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" >/dev/null 2>&1
-    [[ -f "$TEST_TMPDIR/.mmry-foundation-empty-told.claude-empty-02" ]] || { echo "the id-named told marker was not written"; return 1; }
+    export MMRY_API_URL="$PROD_URL" MMRY_API_KEY="$PROD_KEY"; ea="$(fnd_empty_told_file claude-empty-02)"; unset MMRY_API_URL MMRY_API_KEY
+    [[ "${ea##*/}" == .mmry-foundation-empty-told.*.claude-empty-02 ]] || { echo "the id-form name is not keyed: ${ea##*/}"; return 1; }
+    [[ -f "$ea" ]] || { echo "the id-named told marker was not written at ${ea##*/}: $(ls -a "$TEST_TMPDIR" | grep told | tr '\n' ' ')"; return 1; }
+    [[ ! -e "$TEST_TMPDIR/.mmry-foundation-empty-told.claude-empty-02" ]] || { echo "the bare id-named told marker was written"; return 1; }
     [[ ! -e "$TEST_TMPDIR/.mmry-foundation-empty-told" ]] || { echo "the shared marker .mmry-foundation-empty-told was written by a start WITH an id"; return 1; }
 }
 

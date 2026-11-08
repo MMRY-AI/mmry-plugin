@@ -56,7 +56,7 @@ _fire() {
 # it started with the other parts of the most recent prompt.
 _fire_all() { local k; for k in 1 2 3 4 5 6; do _fire "$k" "${1:-}" & done; wait; }
 
-_outcome_file() { printf '%s/mmry-foundation.outcome.%s%s' "$TEST_TMPDIR" "$1" "$( (( $2 > 1 )) && printf '.%s' "$2")"; }
+_outcome_file() { fnd_outcome_file "$1" "$2"; }
 
 # Fire part $1 with the payload $2, exactly as given.
 _fire_payload() { printf '%s' "$2" | bash "$HOOK" --part "$1" > "$TEST_TMPDIR/part$1.json" 2>/dev/null; }
@@ -78,7 +78,7 @@ _slow_cksum_dir() {
 # The records of session $1, parts 1 to 6, whichever exist.
 _records() {
     local f
-    for f in "$TEST_TMPDIR/mmry-foundation.outcome.$1" "$TEST_TMPDIR"/mmry-foundation.outcome."$1".[2-6]; do
+    for f in "$(fnd_outcome_file "$1")" "$(fnd_outcome_file "$1")".[2-6]; do
         [[ -f "$f" ]] && printf '%s\n' "$f"
     done
 }
@@ -318,7 +318,7 @@ _pointed() {
     _seed_lines 380
     _fire_all S3
     # What a killed firing leaves behind: its in-flight marker.
-    : > "$TEST_TMPDIR/.mmry-foundation-inflight.S3.4"
+    : > "$(fnd_inflight_file S3 4)"
     CLAUDE_CODE_SESSION_ID=S3 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    PARTLY on the most recent prompt - 3 of 4 parts arrived; part 4 was stopped before it finished."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
@@ -342,7 +342,7 @@ _pointed() {
     # #31893: a prompt that runs out of time tells the assistant only, so the control reads what it was told.
     grep -q 'cut short' "$TEST_TMPDIR/part1.json" || { echo "control: the slow firing did not fail: $(head -c 300 "$TEST_TMPDIR/part1.json")"; return 1; }
     # The delivery record made to look newer than the failure.
-    touch "$TEST_TMPDIR/mmry-foundation.status.S4"
+    touch "$(fnd_status_file S4)"
     CLAUDE_CODE_SESSION_ID=S4 run bash "$STATUSCMD"
     [[ "$output" == *"Delivered:    NOT on the most recent prompt - loading them took longer than the 1s limit and was stopped."* ]] || { echo "after the failure: $output"; return 1; }
 
@@ -549,7 +549,7 @@ _ctx_raw() {
     _fire 2 S8
     _ctx 2
     local plain; plain="$(_units "$PART_TEXT")"
-    : > "$TEST_TMPDIR/.mmry-foundation-inflight.S8.2"
+    : > "$(fnd_inflight_file S8 2)"
     _fire 2 S8
     _ctx 2
     [[ "$PART_TEXT" == *'PREVIOUS turn'* ]] || { echo "control: the cut-short note was not added"; return 1; }
@@ -649,7 +649,7 @@ _version() { local v; v="$(fnd_set_record)"; v="${v##*cksum=}"; printf '%s' "${v
 @test "parts: #31583 a marker that is not a regular file is still a marker: the part was cut short" {
     _seed_lines 380
     _fire_all S14
-    mkdir -p "$TEST_TMPDIR/.mmry-foundation-inflight.S14.3"
+    mkdir -p "$(fnd_inflight_file S14 3)"
     CLAUDE_CODE_SESSION_ID=S14 run bash "$STATUSCMD"
     [[ "$output" == *"PARTLY on the most recent prompt - 3 of 4 parts arrived; part 3 was stopped before it finished"* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"IN FULL"* ]]
@@ -747,7 +747,7 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     # QA round 3: by reference records that the customer has been told this session. A FIFO planted
     # at that marker blocked the write, and with it the whole hook, outside any deadline.
     _seed_lines 800
-    local fifo="$TEST_TMPDIR/.mmry-foundation-byref-told.N2S"
+    local fifo; fifo="$(fnd_byref_told_file N2S)"
     mkfifo "$fifo"
     _finishes_within 25 _fire 1 N2S || { _release_fifo "$fifo"; echo "the hook hung on the FIFO"; return 1; }
     _ctx 1
@@ -777,10 +777,10 @@ _release_fifo() { [[ -p "$1" ]] && { exec 9<>"$1"; exec 9>&-; } ; rm -f "$1"; }
     # Claude Code and Codex send ids without one.
     _seed_lines 3
     _fire 1 S7.2
-    [ ! -e "$TEST_TMPDIR/mmry-foundation.outcome.S7.2" ] || { echo "S7.2 wrote S7's part-2 record"; return 1; }
+    [ ! -e "$(fnd_outcome_file S7 2)" ] || { echo "S7.2 wrote S7's part-2 record"; return 1; }
     # CONTROL: an ordinary id names its own record.
     _fire 1 S7
-    [ -f "$TEST_TMPDIR/mmry-foundation.outcome.S7" ] || { echo "control: S7 did not write its own record"; return 1; }
+    [ -f "$(fnd_outcome_file S7)" ] || { echo "control: S7 did not write its own record"; return 1; }
     # And the shared helper agrees.
     run bash -c 'source "$1/hooks-handlers/mmry-client.sh" >/dev/null 2>&1; printf "[%s][%s]" "$(mmry_foundation_sid S7.2)" "$(mmry_foundation_sid S7)"' _ "$PLUGIN_ROOT"
     [ "$output" = "[][S7]" ] || { echo "mmry_foundation_sid gave $output"; return 1; }

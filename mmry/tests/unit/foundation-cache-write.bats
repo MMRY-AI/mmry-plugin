@@ -191,7 +191,7 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
 @test "write_foundation_cache: #31597 r2 a successful write records the set as stored for the session it was given" {
     run mmry_write_foundation_cache "$(_resp)" "$CACHE" sess-w1
     [ "$status" -eq 0 ]
-    [ -f "$TEST_TMPDIR/mmry-foundation.stored.sess-w1" ] || { ls -a "$TEST_TMPDIR"; return 1; }
+    [ -f "$(fnd_stored_file sess-w1)" ] || { ls -a "$TEST_TMPDIR"; return 1; }
     run mmry_foundation_stored_entries "$TEST_TMPDIR" sess-w1
     [ "$status" -eq 0 ] && [ "$output" = "2" ]
 }
@@ -199,7 +199,7 @@ _body() { fnd_set_body "$CACHE" | tr -d '\r'; }
 @test "write_foundation_cache: #31597 r2 a failed write records nothing as stored" {
     run mmry_write_foundation_cache 'not json' "$CACHE" sess-w2
     [ "$status" -ne 0 ]
-    [ ! -e "$TEST_TMPDIR/mmry-foundation.stored.sess-w2" ]
+    [ ! -e "$(fnd_stored_file sess-w2)" ]
 }
 
 @test "write_foundation_cache: #31597 r2 the refresh passes its session on to the writer" {

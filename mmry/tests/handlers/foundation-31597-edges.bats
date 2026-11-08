@@ -111,7 +111,7 @@ _show() { echo "expected: $(od -c "$1" | tail -4)"; echo "received: $(od -c "$2"
     _prompt r3a
     _await_set || return 1
     unset MOCK_CURL_DELAY
-    [ -f "$TEST_TMPDIR/mmry-foundation.stored.r3a" ] || { echo "no marker for session a"; ls -a "$TEST_TMPDIR"; return 1; }
+    [ -f "$(fnd_stored_file r3a)" ] || { echo "no marker for session a"; ls -a "$TEST_TMPDIR"; return 1; }
 
     rm -f "$SET"
     _prompt r3a
@@ -145,7 +145,7 @@ _THREE='[{"memoryTier":"Foundation","topic":"One","content":"first"},{"memoryTie
 @test "#31597 R3 (B2): SessionStart stores an empty set, /mmry:load-memories stores 3, the set is removed: reported missing" {
     export MOCK_CURL_HTTP_CODE="200" MOCK_CURL_RESPONSE='[{"memoryTier":"Strategic","topic":"Plan","content":"not a directive"}]'
     _start lm2
-    [ "$(cat "$TEST_TMPDIR/mmry-foundation.stored.lm2")" = "0" ] || { echo "control: SessionStart's marker is not 0"; return 1; }
+    [ "$(cat "$(fnd_stored_file lm2)")" = "0" ] || { echo "control: SessionStart's marker is not 0"; return 1; }
 
     export MOCK_CURL_RESPONSE="$_THREE"
     _load_memories lm2
@@ -348,11 +348,11 @@ _EMPTY_WORDS='this account has no Foundation directives'
 # The marker is believed only when it is digits. Anything else must not reach the customer's words,
 # and must never reach arithmetic, where bash would evaluate it.
 @test "#31597 TC6: a stored marker that is not digits is ignored, and never evaluated" {
-    printf '%s' '1+1' > "$TEST_TMPDIR/mmry-foundation.stored.tc6m"
+    printf '%s' '1+1' > "$(fnd_stored_file tc6m)"
     _prompt tc6m
     [[ "$(cat "$TEST_TMPDIR/prompt.json")" != *'records 1+1'* ]] || return 1
     [[ "$(cat "$TEST_TMPDIR/prompt.json")" != *'records 2 '* ]] || return 1
-    printf '%s' 'x[$(touch '"$TEST_TMPDIR"'/evaluated)]' > "$TEST_TMPDIR/mmry-foundation.stored.tc6m"
+    printf '%s' 'x[$(touch '"$TEST_TMPDIR"'/evaluated)]' > "$(fnd_stored_file tc6m)"
     _prompt tc6m
     [ ! -e "$TEST_TMPDIR/evaluated" ] || { echo "the marker's contents were executed"; return 1; }
 }

@@ -193,7 +193,7 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
 @test "in-time R4: a prepared copy that no longer matches, or cuts that no longer fit, are prepared again, never served" {
     _seed_lines 600
     _fire_all
-    local f="$TEST_TMPDIR/.mmry-foundation-prepared.S1" p idx
+    local f="$(fnd_prepared_file S1)" p idx
     [ -f "$f" ] || { echo "no prepared copy was written"; ls -la "$TEST_TMPDIR"; return 1; }
     # 1. The copy altered under an intact record line, the same length: it no longer reads as the set.
     p="$(cat "$f")"
@@ -270,7 +270,7 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     _seed_lines 600
     # Another firing of this prompt holds the claim and is alive, and never writes anything.
     sleep 120 & local holder=$!
-    printf '%s %s' "$holder" "$(date +%s)" > "$TEST_TMPDIR/.mmry-foundation-claim.S1"
+    printf '%s %s' "$holder" "$(date +%s)" > "$(fnd_claim_file S1)"
     local start=$SECONDS
     MMRY_FOUNDATION_DEADLINE_SECS=3 _fire 2
     local elapsed=$(( SECONDS - start ))
@@ -285,7 +285,7 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     _seed_lines 600
     # A pid that is not running, on a claim stamped now.
     sleep 0 & local gone=$!; wait "$gone" 2>/dev/null
-    printf '%s %s' "$gone" "$(date +%s)" > "$TEST_TMPDIR/.mmry-foundation-claim.S1"
+    printf '%s %s' "$gone" "$(date +%s)" > "$(fnd_claim_file S1)"
     local start=$SECONDS
     MMRY_FOUNDATION_DEADLINE_SECS=8 _fire_all
     (( SECONDS - start < 8 )) || { echo "waited out the deadline: $(( SECONDS - start ))s"; return 1; }
@@ -296,9 +296,9 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
 @test "in-time R4: each session prepares its own copy, so two sessions never read each other's parts" {
     _seed_lines 600
     _fire_all S1
-    [ -f "$TEST_TMPDIR/.mmry-foundation-prepared.S1" ] || { echo "no parts for S1"; return 1; }
+    [ -f "$(fnd_prepared_file S1)" ] || { echo "no parts for S1"; return 1; }
     _fire_all S2
-    [ -f "$TEST_TMPDIR/.mmry-foundation-prepared.S2" ] || { echo "S2 read S1's parts"; return 1; }
+    [ -f "$(fnd_prepared_file S2)" ] || { echo "S2 read S1's parts"; return 1; }
     _rejoin; _want
     [ "$JOINED" = "$WANT" ]
 }
@@ -311,18 +311,18 @@ _setid() { fnd_set_record "$SET" | sed -n 's/.*cksum=\([0-9]*\).*/\1/p'; }
     printf '{"session_id":"S1","hook_event_name":"UserPromptSubmit","prompt":"MMRY TEST DATA"}' \
         | bash "$HOOK" --part 1 >/dev/null 2>&1 &
     local victim=$! i
-    for (( i = 0; i < 300; i++ )); do [[ -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ]] && break; sleep 0.1; done
+    for (( i = 0; i < 300; i++ )); do [[ -f "$(fnd_inflight_file S1)" ]] && break; sleep 0.1; done
     sleep 1
     kill -9 "$victim" 2>/dev/null || true
     wait "$victim" 2>/dev/null || true
-    [ -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ] || { echo "the kill left no marker"; return 1; }
+    [ -f "$(fnd_inflight_file S1)" ] || { echo "the kill left no marker"; return 1; }
     _cksum_shim 0
     _fire 1
     _ctx 1
     [[ "$PART_TEXT" == *"PREVIOUS turn"* ]] || { echo "the next turn was not told: ${PART_TEXT:0:200}"; return 1; }
     [[ "$PART_TEXT" == *"never overstate evidence"* ]] || { echo "the next turn did not deliver"; return 1; }
     [ -z "$(_sysmsg 1)" ] || { echo "the person was shown: $(_sysmsg 1)"; return 1; }
-    [ ! -f "$TEST_TMPDIR/.mmry-foundation-inflight.S1" ]
+    [ ! -f "$(fnd_inflight_file S1)" ]
 }
 
 # A shim for $1 that logs each call and then runs the real one, so a count is what the hook started.
@@ -360,13 +360,13 @@ _logging_shim() {
     # One rename a part, the outcome record. Part 1's first delivery record of the session is created
     # in place: there is none to replace.
     [ "$mv" -le 6 ] || { echo "mv started $mv times on the preparing prompt, more than one a part"; return 1; }
-    [ -s "$TEST_TMPDIR/mmry-foundation.status.S1" ] || { echo "no delivery record"; return 1; }
+    [ -s "$(fnd_status_file S1)" ] || { echo "no delivery record"; return 1; }
     if [ "$(bash -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]; then
         [ "$sl" -le 5 ] || { echo "an external sleep was started $sl times while five parts waited: one a poll, not one a wait"; return 1; }
     fi
     # The next prompt is served: no cksum, no rm, and one rename a part. Part 1's delivery record is
     # unchanged, so it is renewed in place, with no process: its time moves on and its line does not.
-    local st="$TEST_TMPDIR/mmry-foundation.status.S1" line
+    local st="$(fnd_status_file S1)" line
     line="$(cat "$st")"
     touch -t 202501010000 "$st"
     : > "$CALLS"
@@ -418,7 +418,7 @@ _logging_shim() {
     _seed_lines 600
     # The claimant died long ago and an unrelated process has its pid: kill -0 says alive.
     sleep 300 & local other=$!
-    printf '%s %s' "$other" "$(( $(date +%s) - 600 ))" > "$TEST_TMPDIR/.mmry-foundation-claim.S1"
+    printf '%s %s' "$other" "$(( $(date +%s) - 600 ))" > "$(fnd_claim_file S1)"
     local start=$SECONDS
     MMRY_FOUNDATION_DEADLINE_SECS=8 _fire_all
     local elapsed=$(( SECONDS - start ))

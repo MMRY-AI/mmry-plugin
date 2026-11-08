@@ -438,10 +438,11 @@ mmry_foundation_session_key() {
     mmry_foundation_session_token "$dir"
 }
 
-# Where this session's delivery record lives: mmry-foundation.status.<session id>, and with no id
-# mmry-foundation.status.<account key>.none (#32915, QA round 1, requirement 2). It was the bare
-# mmry-foundation.status with no id, one name for every id-less session on the machine whatever its
-# account. The per-prompt hook spells the same name from the same routine.
+# Where this session's delivery record lives: mmry-foundation.status.<account key>.<session id>, and
+# with no id mmry-foundation.status.<account key>.none (#32915, QA round 1, requirement 2; #33363).
+# It was the bare mmry-foundation.status with no id, one name for every id-less session on the
+# machine whatever its account, and the id alone with one, which two accounts share when a session
+# is resumed under the second. The per-prompt hook spells the same name from the same routine.
 mmry_foundation_record_path() {
     local dir="${1:-${MMRY_TMPDIR:-${TMPDIR:-/tmp}}}" sid
     sid="$(mmry_foundation_sid "${2:-}")"
@@ -788,8 +789,8 @@ mmry_write_foundation_cache() {
         # the token "unknown", which SessionStart leaves for a session with no id, passes this regex,
         # and spelled as the id it made one bare mmry-foundation.stored.unknown for every Codex account
         # with no session id, while the per-prompt hook looked for the keyed name. The session part
-        # routine is builtins only (a real id stands alone; "unknown" becomes <account key>.unknown),
-        # so Codex's start pays no process for it.
+        # routine is builtins only (<account key>.<id>, or <account key>.unknown; #33363 keyed the
+        # real id too), so Codex's start pays no process for it.
         if [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
             mmry_foundation_session_part_v "$sid"
             printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
