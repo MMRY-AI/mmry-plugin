@@ -190,7 +190,7 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
 @test "no subcommand, or an unknown one, prints the usage and sends nothing" {
     run db
     [[ "$status" -ne 0 ]] || return 1
-    [[ "$output" == *"Subcommands: create, list, add, find, correct, history, retire, restore."* ]] || return 1
+    [[ "$output" == *"Subcommands: create, list, add, find, correct, batch, history, retire, restore."* ]] || return 1
     run db delete --id 42
     [[ "$status" -ne 0 ]] || return 1
     [[ "$output" == *"unknown subcommand 'delete'"* ]] || return 1
