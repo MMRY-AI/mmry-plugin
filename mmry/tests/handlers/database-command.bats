@@ -32,7 +32,7 @@ _last_line() { printf '%s\n' "$output" | tr -d '\r' | grep -v '^$' | tail -1; }
 
 @test "database page: every subcommand section runs database.sh with that subcommand" {
     local page="$PLUGIN_ROOT/commands/database.md" sub section
-    for sub in create list add find correct history retire restore; do
+    for sub in create list add find correct batch history retire restore; do
         # The section is everything from "### sub" to the next "### " heading.
         section="$(tr -d '\r' < "$page" | awk -v h="### $sub" '$0 == h {on=1; next} on && /^### / {exit} on {print}')"
         [[ -n "$section" ]] || { echo "no section for $sub"; return 1; }
