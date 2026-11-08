@@ -8,7 +8,9 @@
 # three things: pass visibility only when the user has said who may see the entry, pass
 # personal=true when the entry reads personal, and never choose for the user. An assistant taught
 # from a skill without them may fill in visibility itself, which skips the question on both doors.
-# Codex is also told to wait for the user's answer before sending the entry again.
+# Codex is also told to wait for the user's answer before sending the entry again. The
+# /mmry:database batch path (commands/database.md, ### batch) is a third door and carries the same
+# instructions (#33317, QA r2 finding (b)4).
 #
 # Structural on purpose: no network, no mock. Each assertion names the instruction it looks for,
 # so removing any one of them turns this file red. Wrapped lines are joined before matching.
@@ -17,6 +19,7 @@ load '../helpers/test-helper'
 
 CC_SKILL="skills/memory-system/SKILL.md"
 CODEX_SKILL="skills-codex/memory-system/SKILL.md"
+DB_COMMAND="commands/database.md"
 
 # Print the section that starts with the heading $2 in file $1, up to the next ### or ## heading,
 # as one line with runs of white space collapsed, so a sentence wrapped over lines still matches.
@@ -95,4 +98,38 @@ must_say() {
     local t
     t="$(section_text "$CODEX_SKILL" '### Your AI database')"
     must_say "$t" 'wait for their answer' 'wait for the answer before sending the entry again' "$CODEX_SKILL"
+}
+
+@test "/mmry:database batch section exists and teaches the batch command" {
+    local t
+    t="$(section_text "$DB_COMMAND" '### batch')"
+    [[ -n "$t" ]] || fail "$DB_COMMAND has no '### batch' section"
+    must_say "$t" 'database.sh" batch' 'run database.sh batch for a batch' "$DB_COMMAND"
+}
+
+@test "/mmry:database batch: pass visibility only when the customer has said who may see the entry" {
+    local t
+    t="$(section_text "$DB_COMMAND" '### batch')"
+    must_say "$t" 'pass `visibility` only when the customer has said who may see'         'pass visibility only when the customer has said who may see the entry' "$DB_COMMAND"
+}
+
+@test "/mmry:database batch: pass personal true when an entry reads personal" {
+    local t
+    t="$(section_text "$DB_COMMAND" '### batch')"
+    must_say "$t" 'reads personal' 'recognise an entry that reads personal' "$DB_COMMAND"
+    must_say "$t" 'pass `"personal": true`' 'pass personal true for it' "$DB_COMMAND"
+}
+
+@test "/mmry:database batch: never choose for the customer" {
+    local t
+    t="$(section_text "$DB_COMMAND" '### batch')"
+    must_say "$t" 'never choose for the customer' 'never choose for the customer' "$DB_COMMAND"
+}
+
+@test "/mmry:database batch: ask the question, wait for their answer, send again with visibility and questionId" {
+    local t
+    t="$(section_text "$DB_COMMAND" '### batch')"
+    must_say "$t" 'ask the customer the question it carries' 'ask the customer the question a NOT SAVED entry carries' "$DB_COMMAND"
+    must_say "$t" 'wait for their answer' 'wait for the answer before sending the entry again' "$DB_COMMAND"
+    must_say "$t" 'with their answer as `visibility` and the printed `questionId`'         'send the entry again with the answer as visibility and the printed questionId' "$DB_COMMAND"
 }
