@@ -144,6 +144,34 @@ _keep()  { printf '%s' "$2" > "$BATS_FILE_TMPDIR/$1"; }
     [[ "$output" == *"'colour'"* && "$output" == *"amount"* && "$output" == *"merchant"* ]] || fail "$output"
 }
 
+@test "entries live: several entries saved in ONE request, each reported, and read back (#33317)" {
+    [[ -z "${MMRY_INTEGRATION_API_KEY:-}" ]] && skip "No API key"
+    # A database of its own, so the counts the other tests read are not moved.
+    local name="Batch 33317 $(date +%s)" id
+    _plugin create-database.sh --name "$name" --description "Several entries in one request, from bats" \
+        --fields '[{"key":"amount","label":"Amount","type":"number"},{"key":"merchant","label":"Merchant","type":"text"}]' \
+        --mode append
+    [[ "$status" -eq 0 ]] || fail "create-database.sh failed: $output"
+    id="$(printf '%s' "$output" | grep -o 'id [0-9]*' | head -1 | sed 's/id //')"
+    [[ -n "$id" ]] || fail "no database id in: $output"
+
+    _plugin save-entries.sh --database-id "$id" --entries \
+        '[{"content":"Coffee at Blue Bottle, 5 dollars.","fields":{"amount":5,"merchant":"Blue Bottle"}},{"content":"Train ticket, 12 dollars.","fields":{"amount":12,"merchant":"Metro rail"}},{"content":"Lunch at Rosie'"'"'s, 18 dollars.","fields":{"amount":18,"merchant":"Rosie'"'"'s diner"}}]'
+    [[ "$status" -eq 0 ]] || fail "save-entries.sh failed: $output"
+    [[ "$output" == *"3 of 3 entries were saved."* ]] || fail "not all three saved: $output"
+    local order
+    order="$(printf '%s\n' "$output" | sed -n 's/^Entry \([0-9]*\): saved, structured.created (entry [0-9]*.*/\1/p' | tr '\n' ' ')"
+    [[ "$order" == "1 2 3 " ]] || fail "each entry not reported in order as created: $output"
+
+    # Read back: the three entries, with the values sent.
+    _plugin query-entries.sh --database-id "$id" --order "amount asc"
+    [[ "$status" -eq 0 ]] || fail "query failed: $output"
+    [[ "$output" == *"3 entries in"* ]] || fail "expected three entries: $output"
+    [[ "$output" == *"merchant: Blue Bottle"* && "$output" == *"merchant: Metro rail"* && "$output" == *"merchant: Rosie's diner"* ]] \
+        || fail "a value did not come back: $output"
+    [[ "$output" == *"words: Train ticket, 12 dollars."* ]] || fail "the words are missing: $output"
+}
+
 # ---- requirement 2 ----------------------------------------------------------------------------
 
 _b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
