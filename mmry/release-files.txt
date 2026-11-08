@@ -99,6 +99,7 @@ tests/fixtures/formation-render-2.9.1.jq
 tests/fixtures/self-update-2.15.2.sh
 tests/fixtures/session-init-2.15.2.sh
 tests/handlers/agent-name.bats
+tests/handlers/codex-entry-batch.bats
 tests/handlers/codex-formation-lead.bats
 tests/handlers/codex-foundation-parts.bats
 tests/handlers/codex-hook-trust.bats
