@@ -138,8 +138,8 @@ add readme-every-op "the repository README claims every formation operation on C
     '| Coordination-group messages delivered as you work | yes | yes |
 | Every formation operation, including listing and claiming | yes | yes |'
 add plugin-readme-claims "the plugin README claims listing and claiming formations on Codex" "mmry/README.md" "$S_DOCS" \
-    'the Foundation memories restated each prompt and coordination-group messages all work;' \
-    'the Foundation memories restated each prompt, coordination-group messages, and listing and claiming in a formation all work;'
+    'Foundation memories sent on the moments your account chooses and Formation messages all work;' \
+    'Foundation memories sent on the moments your account chooses, Formation messages, and listing and claiming in a formation all work;'
 
 # Round 3 (#31789 QA round 2): live, the lead's reply after formation_assign dropped the next-action
 # line. The skill now tells the model to relay it, and the tool labels it for the customer.

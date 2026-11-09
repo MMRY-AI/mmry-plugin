@@ -114,7 +114,7 @@ if MMRY_FOUNDATION_REINJECT="$_MMRY_ENV_REINJECT" _mmry_reinject_is_off_here; th
 fi
 # Not "re-sent on every prompt" (#31411 QA round 3): a set too large to show is not sent at all,
 # the assistant is pointed to a copy of it. How the most recent prompt went is the Delivered line.
-echo "Re-injection: ON - your directives are applied to every prompt; the most recent one is below."
+echo "Re-injection: ON - the directives chosen for every message are sent with each prompt; the most recent one is below."
 
 # 1b. WHICH DIRECTIVES ARE CHOSEN FOR WHICH MOMENT, AS MMRY AI LAST SAID (#33480, DD-172).
 #
