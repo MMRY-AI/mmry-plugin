@@ -65,13 +65,15 @@ esac
 # exactly when a start was already too slow, so it is sourced before the lines below start their
 # subshells and their library, and without a second bash. Measured on a heavily loaded Windows machine
 # (110 to 158 bash processes), the path through them took it past its limit.
+# This file's own folder, with builtins, for the two early paths below, which run before HANDLER_DIR is
+# resolved. Forward slashes first: codex-hook.cmd starts this file by its Windows path, C:\...\codex-hook.sh
+# (measured: without this the late memories were never delivered on Windows). Only when there is a
+# backslash: bash 3.2 (macOS sh) does not read that expansion the same way.
+_mmry_self="${BASH_SOURCE[0]}"
+case "$_mmry_self" in *\\*) _mmry_self="${_mmry_self//\\//}" ;; esac
+[[ "$_mmry_self" == */* ]] || _mmry_self="./${_mmry_self}"
+
 if [[ "$HANDLER_NAME" == "codex-first-prompt" ]]; then
-    # Forward slashes first: codex-hook.cmd starts this file by its Windows path, C:\...\codex-hook.sh
-    # (measured: without this the late memories were never delivered on Windows).
-    # Only when there is a backslash: bash 3.2 (macOS sh) does not read that expansion the same way.
-    _mmry_self="${BASH_SOURCE[0]}"
-    case "$_mmry_self" in *\\*) _mmry_self="${_mmry_self//\\//}" ;; esac
-    [[ "$_mmry_self" == */* ]] || _mmry_self="./${_mmry_self}"
     # Not found that way: carry on to the ordinary dispatch below, which also runs it, only slower.
     if [[ -f "${_mmry_self%/*}/codex-first-prompt.sh" ]]; then
         set +e
@@ -82,7 +84,7 @@ if [[ "$HANDLER_NAME" == "codex-first-prompt" ]]; then
 fi
 
 # THE SESSION START ARMS ITS HAND-OFF BEFORE ANYTHING ELSE (#33062 fix round 2). The payload is read
-# here, with builtins, and the late marker, .mmry-codex-late.<session>, is written at once, holding this
+# here, with builtins, and the late marker, .mmry-codex-late.<key>.<session>, is written at once, holding this
 # hook's pid: "the memories may come with the first prompt". It used to be written only when the
 # reader below gave up, at the budget, and measured on a real Codex at 112 to 177 bash processes that
 # was within a fraction of a second of Codex's own 30 s, after which Codex stops waiting for this hook
@@ -99,14 +101,30 @@ if [[ "$HANDLER_NAME" == "session-init" && ! -t 0 ]]; then
     # so an id cannot reach outside the temp directory or name another conversation's file.
     _mmry_re_sid='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"'
     if [[ "$_mmry_payload" =~ $_mmry_re_sid ]]; then
-        _mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${BASH_REMATCH[1]}.$$"
-        _mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${BASH_REMATCH[1]}"
-        # The pid ends with a newline, so every bash reads it back as a whole line.
-        if printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
-            _mmry_armed=1
-            trap '(( _mmry_armed == 1 )) && printf "%s\nnone\n" "$$" > "$_mmry_late_file" 2>/dev/null; :' EXIT
-        else
-            _mmry_hand="" _mmry_late_file=""
+        # THE NAMES CARRY THE ACCOUNT, <key>.<session>, NOT THE ID ALONE (#33617, DD-179). Two accounts on
+        # one machine can share a session id (a conversation resumed under a second account, an id passed
+        # by hand), and the independent QA of #33363 (S1) saw account B's first prompt handed account A's
+        # memories path through a hand-off named by the id alone, and A's hand-off consumed. The key is
+        # the Foundation account key, the part every Foundation file already carries (#33363), resolved
+        # here, before lib-host.sh, by lib-codex-key.sh: the one place both early paths resolve the Codex
+        # credential, with builtins only. Without the helper there is no key, and then NO hand-off is
+        # armed and the start gives its old notice: a bare name is never written again.
+        _mmry_part=""
+        if [[ -f "${_mmry_self%/*}/lib-codex-key.sh" ]]; then
+            # shellcheck source=/dev/null
+            source "${_mmry_self%/*}/lib-codex-key.sh" 2>/dev/null || true
+            mmry_codex_session_part_v "${BASH_REMATCH[1]}" 2>/dev/null && _mmry_part="$_MMRY_CODEX_SESSION_PART"
+        fi
+        if [[ -n "$_mmry_part" ]]; then
+            _mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${_mmry_part}.$$"
+            _mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${_mmry_part}"
+            # The pid ends with a newline, so every bash reads it back as a whole line.
+            if printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
+                _mmry_armed=1
+                trap '(( _mmry_armed == 1 )) && printf "%s\nnone\n" "$$" > "$_mmry_late_file" 2>/dev/null; :' EXIT
+            else
+                _mmry_hand="" _mmry_late_file=""
+            fi
         fi
     fi
 fi
@@ -219,7 +237,7 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 #
 # THE HAND-OFF, AND WHY IT IS EXACTLY ONCE. This hook reads the SessionStart payload itself, with
 # builtins, for the session id, and gives session-start.sh the same bytes from a file written with a
-# plain redirection. The marker, .mmry-codex-late.<session> with this hook's pid, is armed at the top of
+# plain redirection. The marker, .mmry-codex-late.<key>.<session> with this hook's pid, is armed at the top of
 # this file (fix round 2), and the reader rewrites it "delivered" when it hands the answer over in time.
 # The first prompt delivers only when the marker exists and does not say so. So the memories are
 # delivered at the start or with the first prompt, never both, and never neither unless they never
@@ -227,7 +245,7 @@ TARGET="${HANDLER_DIR}/${HANDLER_NAME}.sh"
 #
 # THE HAND-OFF IS WRITTEN BY THE WORK, NOT BY THIS HOOK (#33062 fix round 2). With a session id, the
 # answer goes from session-start.sh through a drain, _mmry_codex_drain, started with the work: it
-# writes the answer to .mmry-codex-start.<session>.<pid>.out, then .ready, then passes it on to the
+# writes the answer to .mmry-codex-start.<key>.<session>.<pid>.out, then .ready, then passes it on to the
 # reader below. So the hand-off no longer waits on this hook getting past its budget, and nothing is
 # started after the budget, when the margin to Codex's limit is all that is left. Measured on a real
 # Codex at 157 to 177 bash processes, the drain started after the budget cost 2.3 s of that margin and

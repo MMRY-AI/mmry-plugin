@@ -21,6 +21,11 @@
 
 load '../helpers/test-helper'
 load '../helpers/mock-config'
+load '../helpers/foundation-set'
+
+# The session part of a late marker or hand-off name for the Codex account in $CX: <key>.<sid>, the
+# account key in front since #33617 (DD-179), as the plugin spells it.
+_cx_part() { FND_CONFIG_OVERRIDE="$CX/mmry-config.json" fnd_session_part "$1"; }
 
 setup() {
     setup_mock_curl
@@ -425,7 +430,7 @@ EOF
     _slow_curl "/api/memories/startup" 30
     _codex_start 23
     local pf
-    pf="$(ls "${TMPDIR:-/tmp}"/.mmry-codex-start.budget-23.*.pid 2>/dev/null | head -1)"
+    pf="$(ls "${TMPDIR:-/tmp}"/.mmry-codex-start."$(_cx_part budget-23)".*.pid 2>/dev/null | head -1)"
     [ -s "$pf" ] || { echo "the session start recorded no work for the first prompt to watch: $(ls -a "${TMPDIR:-/tmp}" | grep mmry-codex | tr '\n' ' ')"; return 1; }
     kill "$(cat "$pf")"
     _codex_prompt 23
@@ -518,9 +523,10 @@ EOF
     # hand-off, and had not yet marked "delivered" when the first prompt looked. Nothing is to be said
     # twice, and a claim already taken must not end the hook's shell: under sh (bash in POSIX mode on
     # Windows and macOS) a failed redirection on `:` would, and Codex reports that as a failed hook.
-    local t="${TMPDIR:-/tmp}"
-    printf '4242\n' > "$t/.mmry-codex-late.budget-27"
-    printf '4242\n' > "$t/.mmry-codex-start.budget-27.4242.claim"
+    local t="${TMPDIR:-/tmp}" part
+    part="$(_cx_part budget-27)"
+    printf '4242\n' > "$t/.mmry-codex-late.$part"
+    printf '4242\n' > "$t/.mmry-codex-start.$part.4242.claim"
     export MMRY_CODEX_FIRST_PROMPT_BUDGET=2
     _codex_prompt 27
     assert_success
@@ -575,12 +581,15 @@ EOF
     # The way Codex runs it on Windows: cmd.exe, the launcher, Git's bash, and codex-hook.sh started by
     # its Windows path (C:\...\codex-hook.sh). A late start and its finished hand-off are waiting.
     case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
-    local g="$TEST_TMPDIR/gate-tmp" wtmp
+    local g="$TEST_TMPDIR/gate-tmp" wtmp part key
     mkdir -p "$g"; wtmp="$(cygpath -w "$g")"
-    printf '4242' > "$g/.mmry-codex-late.win-1"
-    printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI loaded 3 memories. Read them now: C:\\x\\mmry-memories.md"}}' > "$g/.mmry-codex-start.win-1.4242.out"
-    : > "$g/.mmry-codex-start.win-1.4242.ready"
-    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env TMPDIR="$1" cmd //d //c "$2" codex-first-prompt 3>&-' _ "$wtmp" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")"
+    # The account's own keyed names (#33617), and its own memories file in the answer, as on a real
+    # Windows Codex, where CODEX_HOME names the home the credential sits in.
+    part="$(_cx_part win-1)"; key="${part%.win-1}"
+    printf '4242' > "$g/.mmry-codex-late.$part"
+    printf '%s' "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"MMRY AI loaded 3 memories. Read them now: C:\\\\x\\\\mmry-memories.${key}.win-1.md\"}}" > "$g/.mmry-codex-start.$part.4242.out"
+    : > "$g/.mmry-codex-start.$part.4242.ready"
+    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env -u MMRY_CONFIG_FILE CODEX_HOME="$3" TMPDIR="$1" cmd //d //c "$2" codex-first-prompt 3>&-' _ "$wtmp" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" "$(cygpath -w "$CX")"
     assert_success
     JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
     printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || {
@@ -589,7 +598,7 @@ EOF
     }
     run _context
     assert_output --regexp '^MMRY AI loaded 3 memories\. Read them now: '
-    [ ! -e "$g/.mmry-codex-late.win-1" ] || { echo "the late marker was left behind"; return 1; }
+    [ ! -e "$g/.mmry-codex-late.$part" ] || { echo "the late marker was left behind"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
