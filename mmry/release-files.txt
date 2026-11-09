@@ -56,6 +56,7 @@ hooks-handlers/mcp-server.sh
 hooks-handlers/mmry-client.sh
 hooks-handlers/plan-accepted-check.sh
 hooks-handlers/precompact-check.sh
+hooks-handlers/precompact-foundation.sh
 hooks-handlers/process-context.sh
 hooks-handlers/query-entries.sh
 hooks-handlers/reinstate-database.sh
@@ -122,6 +123,7 @@ tests/handlers/foundation-31597-edges.bats
 tests/handlers/foundation-both-paths.bats
 tests/handlers/foundation-cross-surface.bats
 tests/handlers/foundation-in-time.bats
+tests/handlers/foundation-moments.bats
 tests/handlers/foundation-parts.bats
 tests/handlers/foundation-status.bats
 tests/handlers/list-groups.bats
