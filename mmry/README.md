@@ -1,6 +1,6 @@
 # MMRY AI
 
-Persistent memory for Claude Code and OpenAI Codex. On Claude Code it loads memories at session start and prompts to save at session end, before context compression, and when plans are accepted. On Codex the session-start load, the Foundation memories restated each prompt and coordination-group messages all work; the save prompt arrives with your next message when something is unsaved, and there is no prompt at context compression or plan acceptance because Codex gives a plugin no moment for either. See [docs/codex.md](../docs/codex.md).
+Persistent memory for Claude Code and OpenAI Codex. On Claude Code it loads memories at session start and prompts to save at session end, before context compression, and when plans are accepted. On Codex the session-start load, Foundation memories sent on the moments your account chooses and Formation messages all work; the save prompt arrives with your next message when something is unsaved, and there is no prompt at context compression or plan acceptance because Codex gives a plugin no moment for either. See [docs/codex.md](../docs/codex.md).
 
 Claude Code: Windows (Git Bash), macOS and Linux. OpenAI Codex: MMRY has been tested in the Codex command-line tool, in live sessions on Windows and Mac; installation and hooks verified on Linux. MMRY has also been tested in the Codex desktop app on a Mac and on Windows, where MMRY's hooks run: memories load, and saving, searching and retiring memories and formation messages work. On a Mac, Foundation memories are also re-stated on each later turn. On Windows the desktop app works through MMRY's own tools. Trust MMRY's hooks in the Codex CLI review; in our testing, hooks trusted in the Codex CLI review also ran in the desktop app. The desktop app's hook settings page can stay on "Loading hooks..."; that does not stop MMRY working.
 
@@ -98,7 +98,7 @@ longer name is not sent, and the memory is saved without one.
 
 ### Foundation re-injection (optional)
 
-Foundation memories are restated to Claude on every prompt so they consistently guide responses. These optional keys tune that behavior:
+Foundation memories are sent to Claude on the moments your account chooses for each one, such as when a conversation starts and with every message, so they keep guiding responses. These optional keys tune that behavior:
 
 | Key | Default | Purpose |
 |-----|---------|---------|
@@ -118,7 +118,7 @@ A Claude Code session in a formation keeps listening for messages while it sits 
 
 Env override: `MMRY_FORMATION_LISTEN_MINUTES`.
 
-**Your Foundation set is never trimmed or cut.** Before MMRY 2.9.2 the set was cut at roughly 6,000 characters, as a raw substring, so the cut landed wherever that character fell: mid-sentence, mid-directive. Anything after it never reached the assistant and you were never told. Now, in Claude Code, a set of up to about 57,000 characters is delivered in full with every prompt, in up to six labelled parts, because Claude Code shows a plugin at most 10,000 characters at a time. A larger set is more than six parts hold, so instead your assistant is pointed to a copy of it, made for that turn, and asked to read it before answering; you are told when that happens, and the assistant may need your permission to read the file. The tokens are spent in your own session, so the cost of a large set is yours to weigh.
+**Your Foundation set is never trimmed or cut.** Before MMRY 2.9.2 the set was cut at roughly 6,000 characters, as a raw substring, so the cut landed wherever that character fell: mid-sentence, mid-directive. Anything after it never reached the assistant and you were never told. Now, in Claude Code, the Foundation memories chosen for a moment are delivered in full, up to about 57,000 characters, in up to six labeled parts, because Claude Code shows a plugin at most 10,000 characters at a time. When the memories chosen for a moment are more than six parts hold, your assistant is instead pointed to a copy of them, made for that turn, and asked to read it before answering; you are told when that happens, and the assistant may need your permission to read the file. The tokens are spent in your own session, so the cost of a large set is yours to weigh.
 
 **Your local copy is verified before it is used.** Your directives are stored in one file whose first line records their exact byte count and checksum, and the whole file is replaced in a single step, so a prompt that arrives while your directives are being refreshed sees either the old set or the new one, never half of each. On every prompt the hook reads that file once and checks the directives against the record on its first line, and if the two do not agree (damaged, truncated, or replaced without its record) the copy is refused rather than sent to the assistant as your guidance. This is a consistency check, not a signature: it proves the copy is the one its record describes, and it cannot tell MMRY's writing from another program on your machine that deliberately rewrites the whole file. You are told on that turn, in your own terminal, with the remedy: run `/mmry:load-memories` to rebuild it. A valid copy is silent. An account with genuinely no Foundation memories is told so once a session, when the session starts or on its first prompt, rather than warned on every prompt.
 
@@ -139,7 +139,7 @@ Both failures are recorded in your temp directory, in a `mmry-foundation.<accoun
 | When | What Happens |
 |------|-------------|
 | **Session starts** | Your memories load automatically via API (Foundation + directory-matched) |
-| **Every prompt** | Foundation memories are re-injected so they consistently guide responses (configurable; see Configuration) |
+| **Every prompt** | The Foundation memories your account chose to send with every message are sent again, so they keep guiding responses (configurable; see Configuration) |
 | **Session ends** | Claude is prompted to save any decisions, issues, or notes before exiting. Claude Code only: on Codex this prompt arrives with your next message instead, and only when something is unsaved |
 | **Context compresses** | Claude saves a "Session Continuity" memory so nothing is lost. Claude Code only: Codex gives a plugin no channel at that moment |
 | **Plan accepted** | Claude saves the accepted plan as a Decision memory. Claude Code only: Codex has no plan-accepted tool to trigger on |
