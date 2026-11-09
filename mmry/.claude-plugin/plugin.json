@@ -1,7 +1,7 @@
 {
   "name": "mmry",
   "description": "Persistent memory for Claude Code that follows you across sessions, computers and teams.",
-  "version": "2.15.7",
+  "version": "2.16.0",
   "author": {
     "name": "MMRY AI"
   }
