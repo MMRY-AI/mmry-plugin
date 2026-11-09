@@ -10,12 +10,20 @@
 # and writes its finished answer to a hand-off file. Codex runs UserPromptSubmit hooks before the
 # model answers the prompt, so this delivers them before the first answer.
 #
-# EXACTLY ONCE. codex-hook.sh writes .mmry-codex-late.<session> (holding its pid) as the session start
-# begins, and rewrites it "delivered" when it gave the memories in time (fix round 2; it used to write it
-# only when it gave the notice INSTEAD of the memories). Without that marker for this conversation, or
-# with it saying "delivered" or "none", this says nothing. Otherwise it waits for the hand-off the same
-# start writes (.mmry-codex-start.<session>.<pid>.ready), hands it over, and removes the marker, so a
-# later prompt does not hand it over again.
+# EXACTLY ONCE. codex-hook.sh writes .mmry-codex-late.<key>.<session> (holding its pid) as the session
+# start begins, and rewrites it "delivered" when it gave the memories in time (fix round 2; it used to
+# write it only when it gave the notice INSTEAD of the memories). Without that marker for this
+# conversation, or with it saying "delivered" or "none", this says nothing. Otherwise it waits for the
+# hand-off the same start writes (.mmry-codex-start.<key>.<session>.<pid>.ready), hands it over, and
+# removes the marker, so a later prompt does not hand it over again.
+#
+# AND ONLY TO ITS OWN ACCOUNT (#33617, DD-179). <key> is the account key every Foundation file carries
+# (#33363), computed before anything else is loaded by lib-codex-key.sh, the same helper codex-hook.sh
+# names the files with. Two accounts on one machine can share a session id, and the independent QA of
+# #33363 (S1) saw account B's first prompt handed account A's memories through a hand-off named by the id
+# alone. The name keeps the hand-offs apart; a second guard below refuses an answer whose memories file
+# is not this account's, whatever name it came under. The bare names an older plugin left are never
+# read again, by any account: nothing in them proves whose they are. They go with the sweep below.
 #
 # AND IF THEY STILL HAVE NOT ARRIVED, IT SAYS SO. The start's notice told the assistant they were on
 # their way; at the budget this tells it they were not loaded, to load them with the memory_load tool
@@ -63,7 +71,20 @@ _sweep() {
 }
 
 [[ -n "$_sid" ]] || { _log "no session id in the payload"; _sweep; exit 0; }
-_late="${_T}/.mmry-codex-late.${_sid}"
+# The account key, from lib-codex-key.sh beside this file, builtins only (#33617). Forward slashes first
+# and only when there is a backslash, as codex-hook.sh does: this file is found from a Windows path when
+# codex-hook.cmd started it. Without a key nothing is read: a bare name is never looked for.
+_self="${BASH_SOURCE[0]}"
+case "$_self" in *\\*) _self="${_self//\\//}" ;; esac
+[[ "$_self" == */* ]] || _self="./${_self}"
+_part="" _key=""
+if [[ -f "${_self%/*}/lib-codex-key.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${_self%/*}/lib-codex-key.sh" 2>/dev/null || true
+    mmry_codex_session_part_v "$_sid" 2>/dev/null && _part="$_MMRY_CODEX_SESSION_PART" _key="$_MMRY_CODEX_KEY"
+fi
+[[ -n "$_part" && -n "$_key" ]] || { _log "no account key could be computed: nothing is read"; exit 0; }
+_late="${_T}/.mmry-codex-late.${_part}"
 [[ -f "$_late" ]] || { _log "nothing late for this session"; _sweep; exit 0; }
 
 _pid="" _state=""
@@ -76,7 +97,7 @@ if ! [[ "$_pid" =~ $_re_pid ]] || (( ${#_pid} > 10 )); then
     rm -f "$_late" 2>/dev/null
     exit 0
 fi
-_hand="${_T}/.mmry-codex-start.${_sid}.${_pid}"
+_hand="${_T}/.mmry-codex-start.${_part}.${_pid}"
 # The session start arms the marker as it begins (fix round 2) and settles it: "delivered" when the
 # memories went out in time, "none" when it started no work. Either way there is nothing to hand over.
 if [[ "$_state" == delivered || "$_state" == none ]]; then
@@ -166,9 +187,22 @@ while [[ ! -f "${_hand}.ready" ]] && (( SECONDS + _spent0 < _ceiling )); do
     sleep 1
 done
 
+_ans="" _refused=0
 if [[ -f "${_hand}.ready" ]]; then
-    _ans=""
     IFS= read -r -d '' _ans < "${_hand}.out" 2>/dev/null || true
+    # THE SECOND GUARD (#33617, DD-179): an answer that names a memories file names THIS account's, or it
+    # is refused. The file is mmry-memories.<key>.<session>.md (lib-foundation-key.sh), so a path under
+    # another key is another account's memories, whatever name the hand-off came under. Cheap, and it
+    # holds even if a writer forgets the key. A refused hand-off is cleared below with the marker, and the
+    # person is told as for memories that never arrived, which for this account they did not.
+    _mark='Read them now: '
+    if [[ "$_ans" == *"$_mark"* && "$_ans" != *"mmry-memories.${_key}."* ]]; then
+        _refused=1
+        _log "refused the late start ${_pid}: its memories file is not this account's"
+    fi
+fi
+
+if [[ -f "${_hand}.ready" ]] && (( _refused == 0 )); then
     # The session start's own answer, word for word, as this event's: Codex reads hookSpecificOutput
     # by its hookEventName. An answer with no JSON (no account set up says so in plain text) is
     # context as it stands on this event too.
@@ -196,7 +230,9 @@ if [[ -f "${_hand}.ready" ]]; then
     printf '%s' "$_out"
     _log "delivered the late start ${_pid} (${#_ans} bytes) after ${SECONDS}s"
 else
-    if (( _gone == 1 )); then
+    if (( _refused == 1 )); then
+        :
+    elif (( _gone == 1 )); then
         _log "the late start ${_pid} stopped without an answer after ${SECONDS}s; said they were not loaded"
     else
         _log "the late start ${_pid} had not finished after ${SECONDS}s; said they were not loaded"
