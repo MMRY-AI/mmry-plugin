@@ -286,69 +286,92 @@ fi
 #       to M, or without M to conversation-start or every-message (a plugin released before #33480)
 # $TEST_TMPDIR/mock-override-foundation-<M>-code makes one moment's request answer that HTTP code.
 _mm_src="${TEST_TMPDIR:-/tmp}/mock-moments.json"
+# ONE jq PER ANSWER, WRITING STRAIGHT TO THE OUTPUT FILE, AND NONE WHERE NOTHING CHANGES. Codex's session
+# start is held to a process count (codex-start-budget.bats), and this mock's processes are counted with
+# the plugin's: a jq in a command substitution is two. A derived startup answer for conversation-start,
+# every-message or no moment is the startup set unchanged (every Foundation memory has both), so it is
+# sent as it is. _mm_written=1 when jq wrote the answer; a jq that fails leaves the old answer to be sent.
+_mm_written=0
+# jq over the account: the fixture file, or the derived startup set by here-string (no process).
+_mm_jq() { if [[ "$_mm_derived" == true ]]; then jq "$@" <<<"$_mm_startup"; else jq "$@" "$_mm_src"; fi; }
+_mm_prelude='def data: if $derived then (if type == "array" then map(if .memoryTier == "Foundation" then . + {moments: ["conversation-start","every-message"]} else . end) else error("not an array") end) else . end;
+  def chars($s): (if ($s | length) == 0 then 0 else ([$s[] | (.topic | length) + (.content | length) + 5] | add) - 1 end);'
 case "$URL" in
     */api/memories/foundation*|*/api/memories/startup*)
-        if [[ "$HTTP_CODE" =~ ^2 ]]; then
-            _mm_data=""
-            if [[ -f "$_mm_src" ]]; then
-                _mm_data="$(cat "$_mm_src")"
-            else
+        if [[ "$HTTP_CODE" =~ ^2 && -n "$OUTPUT_FILE" ]]; then
+            _mm_derived=false _mm_startup=""
+            if [[ ! -f "$_mm_src" ]]; then
                 # The startup set this mock sends: MOCK_CURL_RESPONSE, else the default startup body above.
                 # Not RESPONSE_BODY, which for /api/memories/foundation is whatever route the case above
                 # matched (the single-memory one).
+                _mm_derived=true
                 _mm_startup='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
                 [[ -n "${MOCK_CURL_RESPONSE:-}" ]] && _mm_startup="$MOCK_CURL_RESPONSE"
-                _mm_data="$(printf '%s' "$_mm_startup" | jq -c 'if type == "array" then map(if .memoryTier == "Foundation" then . + {moments: ["conversation-start","every-message"]} else . end) else empty end' 2>/dev/null)"
             fi
             _mm_moment="" _mm_start=""
             _mm_re1='[?&]moment=([A-Za-z-]+)' _mm_re2='[?&]foundationMoment=([A-Za-z-]+)'
             [[ "$URL" =~ $_mm_re1 ]] && _mm_moment="${BASH_REMATCH[1]}"
             [[ "$URL" =~ $_mm_re2 ]] && _mm_start="${BASH_REMATCH[1]}"
-            if [[ -n "$_mm_data" ]]; then
-                case "$URL" in
-                    */api/memories/foundation/moments*)
-                        RESPONSE_BODY="$(printf '%s' "$_mm_data" | jq -c '
-                            [.[] | select(.memoryTier == "Foundation")] as $f
-                            | def set($m): [$f[] | select(.moments | index($m))];
-                              def chars($s): (if ($s | length) == 0 then 0 else ([$s[] | (.topic | length) + (.content | length) + 5] | add) - 1 end);
-                            {moments: [("conversation-start","every-message","reload","before-shortening") as $m
-                                       | set($m) as $s | {moment: $m, count: ($s | length), characters: chars($s), overReportedSize: (chars($s) > 57000)}],
-                             memories: [$f[] | {id: .id, moments: .moments}], reportAboveCharacters: 57000}')"
-                        ;;
-                    */api/memories/foundation*)
-                        if [[ -f "${TEST_TMPDIR:-/tmp}/mock-override-foundation-${_mm_moment}-code" ]]; then
-                            HTTP_CODE="$(cat "${TEST_TMPDIR}/mock-override-foundation-${_mm_moment}-code")"
-                            RESPONSE_BODY='{"error":"overridden by the test"}'
-                        else
-                            case "$_mm_moment" in
-                                conversation-start|every-message|reload|before-shortening)
-                                    RESPONSE_BODY="$(printf '%s' "$_mm_data" | jq -c --arg m "$_mm_moment" '
-                                        [.[] | select(.memoryTier == "Foundation" and (.moments | index($m))) | del(.moments)] as $s
-                                        | (if ($s | length) == 0 then 0 else ([$s[] | (.topic | length) + (.content | length) + 5] | add) - 1 end) as $c
-                                        | {moment: $m, label: $m, memories: $s, count: ($s | length), characters: $c,
-                                           reportAboveCharacters: 57000, overReportedSize: ($c > 57000)}')"
-                                    ;;
-                                *)
-                                    HTTP_CODE="400"
-                                    RESPONSE_BODY='{"errors":{"moment":["Name one of the moments: conversation-start, every-message, reload, before-shortening."]}}'
-                                    ;;
-                            esac
-                        fi
-                        ;;
-                    */api/memories/startup*)
-                        RESPONSE_BODY="$(printf '%s' "$_mm_data" | jq -c --arg m "$_mm_start" '
-                            [.[] | select(.memoryTier != "Foundation"
+            case "$URL" in
+                */api/memories/foundation/moments*)
+                    _mm_jq -c --argjson derived "$_mm_derived" "$_mm_prelude"'
+                        data | [.[] | select(.memoryTier == "Foundation")] as $f
+                        | def set($m): [$f[] | select(.moments | index($m))];
+                        {moments: [("conversation-start","every-message","reload","before-shortening") as $m
+                                   | set($m) as $s | {moment: $m, count: ($s | length), characters: chars($s), overReportedSize: (chars($s) > 57000)}],
+                         memories: [$f[] | {id: .id, moments: .moments}], reportAboveCharacters: 57000}' \
+                        > "$OUTPUT_FILE" 2>/dev/null && _mm_written=1
+                    ;;
+                */api/memories/foundation*)
+                    if [[ -f "${TEST_TMPDIR:-/tmp}/mock-override-foundation-${_mm_moment}-code" ]]; then
+                        HTTP_CODE="$(cat "${TEST_TMPDIR}/mock-override-foundation-${_mm_moment}-code")"
+                        RESPONSE_BODY='{"error":"overridden by the test"}'
+                    else
+                        case "$_mm_moment" in
+                            conversation-start|every-message|reload|before-shortening)
+                                # The default account, derived, is known without jq: the one default memory
+                                # for the two migrated moments, none for the others.
+                                if [[ "$_mm_derived" == true && -z "${MOCK_CURL_RESPONSE:-}" ]]; then
+                                    _mm_mem='{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}'
+                                    case "$_mm_moment" in
+                                        conversation-start|every-message)
+                                            printf '{"moment":"%s","label":"%s","memories":[%s],"count":1,"characters":27,"reportAboveCharacters":57000,"overReportedSize":false}' "$_mm_moment" "$_mm_moment" "$_mm_mem" > "$OUTPUT_FILE" ;;
+                                        *)
+                                            printf '{"moment":"%s","label":"%s","memories":[],"count":0,"characters":0,"reportAboveCharacters":57000,"overReportedSize":false}' "$_mm_moment" "$_mm_moment" > "$OUTPUT_FILE" ;;
+                                    esac
+                                    _mm_written=1
+                                else
+                                _mm_jq -c --argjson derived "$_mm_derived" --arg m "$_mm_moment" "$_mm_prelude"'
+                                    data | [.[] | select(.memoryTier == "Foundation" and (.moments | index($m))) | del(.moments)] as $s
+                                    | chars($s) as $c
+                                    | {moment: $m, label: $m, memories: $s, count: ($s | length), characters: $c,
+                                       reportAboveCharacters: 57000, overReportedSize: ($c > 57000)}' \
+                                    > "$OUTPUT_FILE" 2>/dev/null && _mm_written=1
+                                fi
+                                ;;
+                            *)
+                                HTTP_CODE="400"
+                                RESPONSE_BODY='{"errors":{"moment":["Name one of the moments: conversation-start, every-message, reload, before-shortening."]}}'
+                                ;;
+                        esac
+                    fi
+                    ;;
+                */api/memories/startup*)
+                    if [[ "$_mm_derived" == false || ( -n "$_mm_start" && "$_mm_start" != conversation-start && "$_mm_start" != every-message ) ]]; then
+                        _mm_jq -c --argjson derived "$_mm_derived" --arg m "$_mm_start" "$_mm_prelude"'
+                            data | [.[] | select(.memoryTier != "Foundation"
                                           or (if $m == "" then ((.moments | index("conversation-start")) or (.moments | index("every-message")))
-                                              else (.moments | index($m)) end)) | del(.moments)]')"
-                        ;;
-                esac
-            fi
+                                              else (.moments | index($m)) end)) | del(.moments)]' \
+                            > "$OUTPUT_FILE" 2>/dev/null && _mm_written=1
+                    fi
+                    ;;
+            esac
         fi
         ;;
 esac
 
-# Write response body to output file if specified
-if [[ -n "$OUTPUT_FILE" ]]; then
+# Write response body to output file if specified (unless a moment answer above already did)
+if [[ -n "$OUTPUT_FILE" && "$_mm_written" != 1 ]]; then
     printf '%s' "$RESPONSE_BODY" > "$OUTPUT_FILE"
 fi
 

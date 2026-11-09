@@ -933,9 +933,10 @@ mmry_store_every_message_set() {
 }
 
 # Usage: mmry_foundation_note_moment <moment> "<count> <characters> <true|false>" [account foundation count]
-# Writes the moment's report file, "count=N characters=C over=true|false foundation=T|-", by temp and
-# rename so a reader never sees half a line. Best effort: a report that cannot be written changes
-# nothing about what is sent.
+# Writes the moment's report file, "count=N characters=C over=true|false foundation=T|-". One short line
+# by one redirect, with no temp and rename: that would be a process on Codex's session start, and a
+# reader that ever met half a line would find a field missing and say it does not know. Best effort: a
+# report that cannot be written changes nothing about what is sent.
 mmry_foundation_note_moment() {
     local moment="$1" rep="${2:-}" fnd="${3:-}" c="-" ch="-" ov="-" dir="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
     read -r c ch ov <<<"$rep" || true
@@ -944,11 +945,8 @@ mmry_foundation_note_moment() {
     [[ "$ov" == true || "$ov" == false ]] || ov="-"
     [[ "$fnd" =~ ^[0-9]+$ ]] || fnd="-"
     mmry_foundation_moment_report_name_v "$dir" "$moment"
-    if printf 'count=%s characters=%s over=%s foundation=%s\n' "$c" "$ch" "$ov" "$fnd" \
-            > "${_MMRY_FND_MOMENT_REPORT_NAME}.w.$$" 2>/dev/null; then
-        mv -f "${_MMRY_FND_MOMENT_REPORT_NAME}.w.$$" "$_MMRY_FND_MOMENT_REPORT_NAME" 2>/dev/null \
-            || rm -f "${_MMRY_FND_MOMENT_REPORT_NAME}.w.$$" 2>/dev/null || true
-    fi
+    printf 'count=%s characters=%s over=%s foundation=%s\n' "$c" "$ch" "$ov" "$fnd" \
+        > "$_MMRY_FND_MOMENT_REPORT_NAME" 2>/dev/null || true
     return 0
 }
 
@@ -1003,6 +1001,30 @@ _mmry_get_auth_header() {
 # 4. CORE HTTP
 # ============================================================================
 
+# A NEW, EMPTY FILE OF ONE'S OWN FOR A REQUEST, WITH NO PROCESS (#33480), into _MMRY_TMPF:
+# <prefix>-<pid>-<random>. `$(mktemp)` was two processes on Windows for every request, and #33480 adds a
+# request to Codex's session start, which is held to a process count (codex-start-budget.bats). The
+# guarantee is mktemp's: the file is created only if nothing is at that name (noclobber opens it with
+# O_EXCL), so nothing put there first, a symlink included, is ever written through; a name that is
+# taken is tried again with another number. noclobber is set only for the one redirect, and left as
+# the caller had it. If no name can be had, mktemp is used, as before.
+_mmry_mktemp_v() {
+    local base="$1" i f had_c=0
+    case "$-" in *C*) had_c=1 ;; esac
+    _MMRY_TMPF=""
+    set -C
+    for i in 1 2 3 4 5 6 7 8; do
+        f="${base}-$$-${RANDOM}${RANDOM}"
+        if { : > "$f"; } 2>/dev/null; then
+            _MMRY_TMPF="$f"
+            break
+        fi
+    done
+    (( had_c == 1 )) || set +C
+    [[ -n "$_MMRY_TMPF" ]] || _MMRY_TMPF="$(mktemp "${base}-XXXXXX")"
+    return 0
+}
+
 _mmry_request() {
     # Usage: _mmry_request METHOD PATH [BODY]
     # Sets MMRY_HTTP_CODE and MMRY_RESPONSE globals
@@ -1031,7 +1053,7 @@ _mmry_request() {
     [[ "$max_time" =~ ^[1-9][0-9]*$ ]] || max_time=25
 
     local tmp_resp
-    tmp_resp="$(mktemp "${MMRY_TMPDIR}/mmry-resp-XXXXXX")"
+    _mmry_mktemp_v "${MMRY_TMPDIR}/mmry-resp"; tmp_resp="$_MMRY_TMPF"
 
     local curl_args=(-s -o "$tmp_resp" -w '%{http_code}'
         --connect-timeout "$connect_timeout" --max-time "$max_time"
@@ -1041,7 +1063,7 @@ _mmry_request() {
 
     local tmp_body=""
     if [[ -n "$body" ]]; then
-        tmp_body="$(mktemp "${MMRY_TMPDIR}/mmry-body-XXXXXX")"
+        _mmry_mktemp_v "${MMRY_TMPDIR}/mmry-body"; tmp_body="$_MMRY_TMPF"
         printf '%s' "$body" > "$tmp_body"
         curl_args+=(--data-binary "@${tmp_body}")
     fi

@@ -426,10 +426,18 @@ _mmry_jqb_v
 
 # Count memories. Here, from the startup answer, on both hosts (#33480): the Foundation writer below
 # is now given the every-message answer, so its jq can no longer report this length for Codex as it
-# did (#33062 fix round 7). On Codex by here-string, which is a process fewer than the pipe.
+# did (#33062 fix round 7). ON CODEX WITH NO PROCESS: every memory in the answer is one object with one
+# "memoryTier" key, and that sequence cannot occur anywhere else in the JSON, because a quote inside a
+# string value is escaped. So the count is the number of times it occurs, found with builtins. An
+# answer that is not an array, or where that finds none but the array is not empty, is counted by jq.
 if (( _mmry_codex == 1 )); then
-    count="$("$MMRY_JQ" 'length' <<<"$MMRY_RESPONSE" 2>/dev/null || echo 0)"
-    count="${count%$'\r'}"
+    # In bytes (LC_ALL=C): a multibyte locale makes the same work far slower on a large answer.
+    _mmry_count_tier() { local LC_ALL=C; local r="${MMRY_RESPONSE//\"memoryTier\":/}"; count=$(( (${#MMRY_RESPONSE} - ${#r}) / 13 )); }
+    _mmry_count_tier
+    if [[ "$MMRY_RESPONSE" != \[* ]] || { (( count == 0 )) && [[ ! "$MMRY_RESPONSE" =~ ^\[[[:space:]]*\]$ ]]; }; then
+        count="$("$MMRY_JQ" 'length' <<<"$MMRY_RESPONSE" 2>/dev/null || echo 0)"
+        count="${count%$'\r'}"
+    fi
 else
     count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
 fi
