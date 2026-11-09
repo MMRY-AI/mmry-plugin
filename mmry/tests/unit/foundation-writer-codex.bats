@@ -38,7 +38,7 @@ _both() {
 _same_files() {
     [ "$RC_A" = "$RC_B" ] || { echo "classic returned $RC_A, Codex returned $RC_B"; return 1; }
     cmp "$A" "$B" || { echo "the set files differ"; od -c "$A" | head -5; od -c "$B" | head -5; return 1; }
-    cmp "$TEST_TMPDIR/classic/mmry-foundation.stored.${1:-sess-1}" "$TEST_TMPDIR/codex/mmry-foundation.stored.${1:-sess-1}" \
+    cmp "$(fnd_stored_file "${1:-sess-1}" "$TEST_TMPDIR/classic")" "$(fnd_stored_file "${1:-sess-1}" "$TEST_TMPDIR/codex")" \
         || { echo "the stored markers differ"; return 1; }
 }
 
@@ -110,7 +110,7 @@ _same_files() {
     [[ "$part" == *.unknown && "$part" != unknown ]] || { echo "the session part for the token is $part"; return 1; }
     _both '[{"memoryTier":"Foundation","topic":"T","content":"c"}]' 'unknown'
     [ "$RC_B" = "0" ]
-    _same_files "$part"
+    _same_files unknown
     [ ! -e "$TEST_TMPDIR/codex/mmry-foundation.stored.unknown" ] || { echo "the Codex road wrote the bare shared marker"; return 1; }
     [ ! -e "$TEST_TMPDIR/classic/mmry-foundation.stored.unknown" ] || { echo "the classic road wrote the bare shared marker"; return 1; }
 }

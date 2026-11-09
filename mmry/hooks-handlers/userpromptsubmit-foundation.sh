@@ -280,13 +280,15 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     fi
     export MMRY_FND_SID
 fi
-# THE DELIVERY RECORD AND THE OUTCOME RECORDS ARE NAMED BY THIS SESSION'S ID, and with no id by this
-# session's ACCOUNT (#32915, QA round 1, requirement 2): mmry-foundation.status.<part> and
-# mmry-foundation.outcome.<part>[.<part number>], where <part> is the id, else <account key>.none
-# (lib-foundation-key.sh, mmry_foundation_session_part_v). With no id these were one bare name for
-# every session on the machine, whatever its account. Computed once here, where the id is settled,
-# for the supervisor and the worker alike; the client's mmry_foundation_record_path and
-# mmry_foundation_outcome_path spell the same names for the status command.
+# THE DELIVERY RECORD AND THE OUTCOME RECORDS ARE NAMED BY THIS SESSION'S ACCOUNT AND ID (#32915, QA
+# round 1, requirement 2; #33363): mmry-foundation.status.<part> and
+# mmry-foundation.outcome.<part>[.<part number>], where <part> is <account key>.<id>, else
+# <account key>.none (lib-foundation-key.sh, mmry_foundation_session_part_v). With no id these were
+# one bare name for every session on the machine, whatever its account; with an id they were the
+# id alone, which two accounts share when a session is resumed under a second account (#33363).
+# Computed once here, where the id is settled, for the supervisor and the worker alike; the
+# client's mmry_foundation_record_path and mmry_foundation_outcome_path spell the same names for
+# the status command.
 mmry_foundation_session_part_v "${MMRY_FND_SID:-}"
 _FND_SIDPART="$_MMRY_FND_SESSION_PART"
 _FND_OUTF="${_FOUND_TMPDIR}/mmry-foundation.outcome.${_FND_SIDPART}"
@@ -759,7 +761,9 @@ _mmry_fnd_key() {
     fi
     # The account key goes in front of "unknown" and of no id at all (#32915, QA round 1, requirement
     # 2): both are names every id-less session would use, so two accounts overwrote each other's
-    # prepared copy at .mmry-foundation-prepared.unknown. A real id stands alone, as it always did.
+    # prepared copy at .mmry-foundation-prepared.unknown. And in front of a real id (#33363): two
+    # accounts share one when a session is resumed under the second, and QA saw the same overwrite
+    # at .mmry-foundation-prepared.<sid>.
     mmry_foundation_session_part_v "$_FND_STAMP"
     _FND_KEY="$_MMRY_FND_SESSION_PART"
 }

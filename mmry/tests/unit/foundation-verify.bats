@@ -232,11 +232,11 @@ _state()  { printf '%s' "${1%%|*}"; }
 @test "verify: #31597 a stored marker that is not digits is no marker" {
     local m
     for m in '1+1' 'abc' '2 3' '-4' 'x[0]' ''; do
-        printf '%s' "$m" > "$TEST_TMPDIR/mmry-foundation.stored.sidx"
+        printf '%s' "$m" > "$(fnd_stored_file sidx)"
         run mmry_foundation_stored_entries "$TEST_TMPDIR" sidx
         [ "$status" -eq 1 ] || { echo "believed [$m] as [$output]"; return 1; }
     done
-    printf '%s' '7' > "$TEST_TMPDIR/mmry-foundation.stored.sidx"
+    printf '%s' '7' > "$(fnd_stored_file sidx)"
     run mmry_foundation_stored_entries "$TEST_TMPDIR" sidx
     [ "$status" -eq 0 ] && [ "$output" = "7" ]
 }
