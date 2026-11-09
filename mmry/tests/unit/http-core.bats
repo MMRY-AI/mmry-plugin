@@ -79,22 +79,23 @@ setup() {
     RANDOM=4242; a=$RANDOM; b=$RANDOM
     taken="${base}-$$-${a}${b}"
     ln -s /dev/null "$taken"
-    [[ -L "$taken" ]]
+    [[ -L "$taken" ]] || { echo "the link was not made"; return 1; }
     RANDOM=4242
     _mmry_mktemp_v "$base"
-    [[ -n "$_MMRY_TMPF" ]]
-    [[ "$_MMRY_TMPF" != "$taken" ]]
-    [[ -f "$_MMRY_TMPF" && ! -L "$_MMRY_TMPF" ]]
-    [[ ! -s "$_MMRY_TMPF" ]]
+    [[ -n "$_MMRY_TMPF" ]] || { echo "no name was returned"; return 1; }
+    [[ "$_MMRY_TMPF" != "$taken" ]] || { echo "the name holding the link was used: $_MMRY_TMPF"; return 1; }
+    [[ -f "$_MMRY_TMPF" && ! -L "$_MMRY_TMPF" ]] || { echo "not a regular file of its own: $_MMRY_TMPF"; return 1; }
+    [[ ! -s "$_MMRY_TMPF" ]] || { echo "the new file is not empty"; return 1; }
     [[ -L "$taken" ]]
 }
 
 @test "request temp file: noclobber is left as the caller had it" {
     set +C
     _mmry_mktemp_v "$TEST_TMPDIR/mmry-resp"
-    [[ "$-" != *C* ]]
+    [[ "$-" != *C* ]] || { set +C; echo "noclobber was left on"; return 1; }
     set -C
     _mmry_mktemp_v "$TEST_TMPDIR/mmry-resp"
-    [[ "$-" == *C* ]]
+    local kept=0; [[ "$-" == *C* ]] && kept=1
     set +C
+    [[ "$kept" == 1 ]]
 }
