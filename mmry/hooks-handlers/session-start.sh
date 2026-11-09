@@ -492,11 +492,7 @@ elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     # An account with Foundation memories, none chosen for every message, is told that, not that it
     # has none (#33480): the service said how many it has (MMRY_FND_ACCOUNT_FOUNDATION).
     if [[ "${MMRY_FND_ACCOUNT_FOUNDATION:-}" =~ ^[1-9][0-9]*$ ]]; then
-        if [[ "$(mmry_host)" == "codex" ]]; then
-            _mmry_fnd_set_empty_notice "$(mmry_host_command_ref foundation-status)" "$MMRY_FND_ACCOUNT_FOUNDATION"
-        else
-            _mmry_fnd_set_empty_notice "/mmry:foundation-status" "$MMRY_FND_ACCOUNT_FOUNDATION"
-        fi
+        _mmry_fnd_set_empty_notice "$(mmry_host_command_ref foundation-status)" "$MMRY_FND_ACCOUNT_FOUNDATION"
     fi
     EMPTY_SYSMSG=",\"systemMessage\":\"$(_mmry_json_escape "$MMRY_FND_EMPTY_NOTICE")\""
     _fnd_esid="$(mmry_foundation_sid "$SESSION_ID")"

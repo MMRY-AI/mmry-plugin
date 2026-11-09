@@ -145,6 +145,10 @@ _allowed_reason() {
         "foundation-status.sh|_FS_HOST='Claude Code'") printf 'F'; return 0 ;;
         # (F) develop's #31597 empty-set notice: the default when no host command is passed or derived.
         "lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE=\"MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run \${1:-/mmry:foundation-status} at any time to check.\"") printf 'F'; return 0 ;;
+        # (F) #33480's two forms of the same notice, for an account with Foundation directives none of
+        # which is chosen for every message: the same default when no host command is passed.
+        "lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE=\"MMRY AI: this account's one Foundation directive is not chosen to be sent with every message, so there is none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run \${1:-/mmry:foundation-status} at any time to check.\"") printf 'F'; return 0 ;;
+        "lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE=\"MMRY AI: none of this account's \${n} Foundation directives is chosen to be sent with every message, so there are none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run \${1:-/mmry:foundation-status} at any time to check.\"") printf 'F'; return 0 ;;
         "stop-check.sh|mmry_host_label() { printf 'Claude Code'; }") printf 'F'; return 0 ;;
         # (B) the Claude branch of the Foundation-store fault hint.
         "session-start.sh|_mmry_fnd_retry_hint=\"ask them to run /mmry:load-memories to try again, or /mmry:foundation-status to check\"") printf 'B'; return 0 ;;
@@ -289,6 +293,8 @@ lib-foundation-switch.sh|elif _mmry_claude_config_fallback_ok && [[ -f "${HOME:-
 lib-foundation-switch.sh|cfg="${HOME}/.claude/mmry-config.json"
 lib-foundation-key.sh|elif _mmry_claude_config_fallback_ok && [[ -n "${HOME:-}" && -f "${HOME}/.claude/mmry-config.json" ]]; then
 lib-foundation-key.sh|_MMRY_FND_CFG="${HOME}/.claude/mmry-config.json"
+lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE="MMRY AI: this account's one Foundation directive is not chosen to be sent with every message, so there is none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE="MMRY AI: none of this account's ${n} Foundation directives is chosen to be sent with every message, so there are none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
 KEYS
 
     [ -z "$missing" ] || {
