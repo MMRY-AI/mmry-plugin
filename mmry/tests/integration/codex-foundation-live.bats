@@ -201,6 +201,10 @@ _exactly() {
     done
 }
 
+# The "delivered nowhere" checks search, besides Codex's record and the temp folder, the copies of the
+# memories files kept as each turn ended: the start and the reload share one file, which a later
+# turn rewrites, so a memory sent there and not opened by the model is found only in the copy.
+
 # _prompt_context N - what the UserPromptSubmit hooks put before the model on turn N: the turn's
 # developer messages other than the start-up one (which names the memories file).
 _prompt_context() {
@@ -250,20 +254,20 @@ _prompt_context() {
     refute_output --regexp '[Cc]ompact'
     local marker
     marker="$(cat "$(_s)/marker-SHORTEN")"
-    run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$(_s)"/turn*.dev "$(_s)"/turn*.tools "$BATS_FILE_TMPDIR/tmp" "$CODEX_HOME/sessions"
+    run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$(_s)"/turn*.dev "$(_s)"/turn*.tools "$(_s)"/*.memories "$BATS_FILE_TMPDIR/tmp" "$CODEX_HOME/sessions"
     assert_failure 1
 }
 
 @test "J-016 codex: a memory with no moment chosen is delivered nowhere" {
     local marker
     marker="$(cat "$(_s)/marker-NONE")"
-    run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$(_s)"/turn*.dev "$(_s)"/turn*.tools "$BATS_FILE_TMPDIR/tmp" "$BATS_FILE_TMPDIR/home" "$CODEX_HOME/sessions"
+    run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$(_s)"/turn*.dev "$(_s)"/turn*.tools "$(_s)"/*.memories "$BATS_FILE_TMPDIR/tmp" "$BATS_FILE_TMPDIR/home" "$CODEX_HOME/sessions"
     assert_failure 1
 }
 
 @test "J-016 codex: nothing of another account is delivered on any moment" {
     local marker
     marker="$(cat "$(_s)/marker-OTHER")"
-    run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$BATS_FILE_TMPDIR/tmp" "$CODEX_HOME/sessions"
+    run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$(_s)"/*.memories "$BATS_FILE_TMPDIR/tmp" "$CODEX_HOME/sessions"
     assert_failure 1
 }
