@@ -293,7 +293,12 @@ case "$URL" in
             if [[ -f "$_mm_src" ]]; then
                 _mm_data="$(cat "$_mm_src")"
             else
-                _mm_data="$(printf '%s' "$RESPONSE_BODY" | jq -c 'if type == "array" then map(if .memoryTier == "Foundation" then . + {moments: ["conversation-start","every-message"]} else . end) else empty end' 2>/dev/null)"
+                # The startup set this mock sends: MOCK_CURL_RESPONSE, else the default startup body above.
+                # Not RESPONSE_BODY, which for /api/memories/foundation is whatever route the case above
+                # matched (the single-memory one).
+                _mm_startup='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
+                [[ -n "${MOCK_CURL_RESPONSE:-}" ]] && _mm_startup="$MOCK_CURL_RESPONSE"
+                _mm_data="$(printf '%s' "$_mm_startup" | jq -c 'if type == "array" then map(if .memoryTier == "Foundation" then . + {moments: ["conversation-start","every-message"]} else . end) else empty end' 2>/dev/null)"
             fi
             _mm_moment="" _mm_start=""
             _mm_re1='[?&]moment=([A-Za-z-]+)' _mm_re2='[?&]foundationMoment=([A-Za-z-]+)'
