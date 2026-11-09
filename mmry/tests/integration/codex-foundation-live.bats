@@ -87,10 +87,15 @@ _turn() {
 }
 
 # _memfile CTXFILE - the memories file a "MMRY AI loaded N memories. Read them now: PATH" names.
+# The model decides how a tool's answer reaches its record: as the text, or as the whole MCP result
+# printed as JSON (seen both ways). In the second the path is JSON-escaped and followed by '"}]...',
+# so it is cut at the first quote and doubled backslashes are folded; a path has neither.
 _memfile() {
-    local line p
+    local line p q='"' b='\'
     line="$(grep -a -m1 'Read them now: ' "$1" 2>/dev/null | tr -d '\r')"
     p="${line##*Read them now: }"
+    p="${p%%"$q"*}"
+    p="${p//"$b$b"/"$b"}"
     [[ -n "$line" && "$p" != "$line" ]] || return 1
     live_unix_path "$p"
 }
@@ -159,18 +164,20 @@ setup_file() {
     thread="$("$LIVE_JQ" -r 'select(.type=="thread.started") | .thread_id' "$S/state/turn1.jsonl" | head -1)"
     [[ -n "$thread" ]] || { echo "codex exec reported no thread id: $(tail -5 "$S/state/turn1.err")" >&2; return 1; }
     printf '%s' "$thread" > "$S/state/thread"
+    # The start and the reload write the same per-conversation memories file, and every resumed turn
+    # starts with SessionStart again, so each is kept as soon as its own turn ends.
+    _memfile "$S/state/turn1.dev" > "$S/state/start.file" || true
+    if [[ -s "$S/state/start.file" ]]; then cp "$(cat "$S/state/start.file")" "$S/state/start.memories" 2>/dev/null || true; fi
     # Turn 2: the assistant reloads memories with MMRY's own tool.
     _turn 2 "$CX_BIN" exec resume "${exec_opts[@]}" -o "$S/state/turn2.last" "$thread" \
         "Call the memory_load tool from the mmry_plugin MCP server exactly once, with no arguments. Do not run any shell commands. Then reply with the single word OK." || return 1
+    _memfile "$S/state/turn2.tools" > "$S/state/reload.file" || true
+    if [[ -s "$S/state/reload.file" ]]; then cp "$(cat "$S/state/reload.file")" "$S/state/reload.memories" 2>/dev/null || true; fi
     # Turn 3: a message after the reload.
     _turn 3 "$CX_BIN" exec resume "${exec_opts[@]}" -o "$S/state/turn3.last" "$thread" \
         "Reply with the single word OK. Do not run any commands and do not call any tools." || return 1
 
     cat "$S/state"/turn*.rollout > "$S/state/rollout.jsonl"
-    _memfile "$S/state/turn1.dev" > "$S/state/start.file" || true
-    if [[ -s "$S/state/start.file" ]]; then cp "$(cat "$S/state/start.file")" "$S/state/start.memories" 2>/dev/null || true; fi
-    _memfile "$S/state/turn2.tools" > "$S/state/reload.file" || true
-    if [[ -s "$S/state/reload.file" ]]; then cp "$(cat "$S/state/reload.file")" "$S/state/reload.memories" 2>/dev/null || true; fi
     return 0
 }
 
