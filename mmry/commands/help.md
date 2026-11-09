@@ -11,7 +11,7 @@ MMRY AI is your memory. It remembers your decisions, conventions, preferences, a
 You don't need to do anything special. MMRY AI runs quietly in the background:
 
 - **When a session starts**, your memories load automatically. Claude already knows your context.
-- **On the moments your account chooses**, your Foundation memories - your identity, values, and standards - are sent to Claude: when a session starts, with every message, when you reload your memories, and before a long conversation is shortened. An account administrator ticks the moments for each one on the Foundation Memories page in the MMRY AI portal. One with nothing ticked is kept, but not sent.
+- **On the moments your account chooses**, your Foundation memories - your identity, values, and standards - are sent to Claude: when a conversation starts, with every message, when the assistant reloads memories, and before a long conversation is shortened. An account administrator ticks the moments for each one on the Foundation Memories page in the MMRY AI portal. One with nothing ticked is kept, but not sent.
 - **When a session ends**, Claude is prompted to save anything important before closing.
 - **When context gets compressed**, Claude saves a continuity note so nothing is lost.
 - **When a plan is accepted**, Claude saves it as a decision record.
@@ -21,7 +21,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
 - `/mmry:help` shows this page.
 - `/mmry:save [what to remember]` saves a memory, either what you describe or the most important takeaway from the conversation.
 - `/mmry:search <keywords> [scope]` searches your memories and lists the matches.
-- `/mmry:load-memories` reloads your memories into this session, with the Foundation memories chosen for when the assistant reloads memories.
+- `/mmry:load-memories` reloads your memories into this session, with the Foundation memories chosen for "When the assistant reloads memories".
 - `/mmry:foundation-status` reports whether your Foundation directives are reaching this assistant right now.
 - `/mmry:visibility [global | private | group ["NAME"]]` sets who can see the memories you save: your organization, only you, or one of your groups.
 - `/mmry:feedback` sends a bug report or feature request to the MMRY AI team.

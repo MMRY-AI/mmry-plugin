@@ -1,8 +1,8 @@
 Manually reload memories from the MMRY AI API into your current context. This is equivalent to the automatic session-start load but can be run mid-session to refresh.
 
-It loads the Foundation memories your account chose for "when the assistant reloads memories", not the ones chosen for when a conversation starts.
+It loads the Foundation memories your account chose for "When the assistant reloads memories", not the ones chosen for "When a conversation starts".
 
-This also **immediately refreshes the Foundation re-injection cache** (the memories chosen for "with every message"). Foundation memories are otherwise refreshed on a daily cycle, so if an administrator has just added or changed a Foundation memory and wants it to take effect right now, running this command (or restarting Claude Code) is the way to pick it up without waiting for the daily refresh.
+This also **immediately refreshes the Foundation re-injection cache** (the memories chosen for "With every message"). Foundation memories are otherwise refreshed on a daily cycle, so if an administrator has just added or changed a Foundation memory and wants it to take effect right now, running this command (or restarting Claude Code) is the way to pick it up without waiting for the daily refresh.
 
 **Steps:**
 1. Run the plugin's session-start bash script directly:

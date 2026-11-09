@@ -124,7 +124,7 @@ if (( _pcf_n == 0 || _pcf_n > _PCF_PARTS_MAX )) || [[ "$_pcf_over" == "true" ]];
     _pcf_file="$_MMRY_FND_SHORTENING_NAME"
     if ! { printf '%s\n' "$_pcf_set" > "${_pcf_file}.w.$$" && mv -f "${_pcf_file}.w.$$" "$_pcf_file"; } 2>/dev/null; then
         rm -f "${_pcf_file}.w.$$" 2>/dev/null
-        printf '%s\n' "MMRY AI: the Foundation directives this account chose to keep when a long conversation is shortened come to ${_pcf_chars} characters, more than about 57,000, and could not be written to a file for this session, so none were added to this summary. MMRY never shortens them."
+        printf '%s\n' "MMRY AI: the Foundation directives this account chose to keep when a long conversation is shortened come to ${_pcf_chars} characters, more than about 57,000, and could not be written to a file for this session, so none were added to this summary. MMRY AI never shortens them."
         exit 0
     fi
     _pcf_path="$(mmry_host_path_for_model "$_pcf_file" 2>/dev/null)"
