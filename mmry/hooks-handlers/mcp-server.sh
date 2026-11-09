@@ -179,7 +179,7 @@ MMRY_MCP_TOOLS='[
   {
     "name": "memory_load",
     "title": "Reload memories",
-    "description": "Reload this conversation'"'"'s memories now and refresh the Foundation memories restated each turn: after an administrator changed a Foundation memory, after moving to another project directory, or when MMRY reported Foundation directives could not be applied. Returns where the loaded memories were written; read that file.",
+    "description": "Reload this conversation'"'"'s memories now, with the Foundation memories chosen for when the assistant reloads memories, and refresh those chosen for every message: after an administrator changed a Foundation memory, after moving to another project directory, or when MMRY AI reported Foundation directives could not be applied. Returns where the loaded memories were written; read that file.",
     "inputSchema": {
       "type": "object",
       "properties": {"working_dir": {"type": "string", "description": "Absolute path of the project directory, so memories matching it are loaded."}}

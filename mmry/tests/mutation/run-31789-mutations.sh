@@ -134,8 +134,8 @@ add skill-scripts-untold "the skill's script section stops saying listing and cl
 from Codex yet. If a customer asks for one, run it and tell them it has not been tested on Codex:' \
     'Listing the active formations and claiming an area have no tool:'
 add readme-every-op "the repository README claims every formation operation on Codex" "README.md" "$S_DOCS" \
-    '| Coordination-group messages delivered as you work | yes | yes |' \
-    '| Coordination-group messages delivered as you work | yes | yes |
+    '| Formation messages delivered as you work | yes | yes |' \
+    '| Formation messages delivered as you work | yes | yes |
 | Every formation operation, including listing and claiming | yes | yes |'
 add plugin-readme-claims "the plugin README claims listing and claiming formations on Codex" "mmry/README.md" "$S_DOCS" \
     'Foundation memories sent on the moments your account chooses and Formation messages all work;' \

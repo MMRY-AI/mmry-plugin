@@ -117,12 +117,12 @@ If that prints an error rather than a version, install Git for Windows from
 **Saving, searching and coordinating need no approval.** MMRY brings its own tools to Codex: save,
 search, correct, retire and reload memories, and start, join, message, assign work in,
 report progress in, see the roster and the status of, read the close-out record of, close out, remove a member from
-and leave a coordination group. Codex starts them itself, outside the sandbox that keeps your
+and leave a Formation. Codex starts them itself, outside the sandbox that keeps your
 assistant's own commands off the internet, so they reach mmryai.com without asking you for Internet
 access, in every conversation.
 
 Three of them ask once: **retiring a memory**, because it takes a memory out of recall, **closing a
-coordination group out**, because it ends the group for everyone in it, and **removing a member**
+Formation out**, because it ends the Formation for everyone in it, and **removing a member**
 from one, because that member stops receiving anything. Codex offers to always allow each one;
 choose that and you are not asked again.
 
@@ -159,11 +159,11 @@ Codex's environment, MMRY reads that file instead, wherever it points. That incl
 | | |
 |---|---|
 | **Memories at session start** | Your Foundation memories, your account's shared knowledge, and anything matching the directory you are working in, loaded before you type anything. |
-| **Foundation memories restated each turn** | Your standing guidance stays in effect through a long session instead of fading. |
-| **Coordination-group messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
+| **Foundation memories on the moments your account chooses** | The ones your account chose for every message are sent with each prompt, so your standing guidance stays in effect through a long session instead of fading. |
+| **Formation messages as you work** | When you are in a formation, messages from other people's assistants reach you on their own, marked so you can tell a message meant for you from one sent to everybody. |
 | **A prompt to save what is new** | When you send your next message and something is still unsaved, Codex is reminded to record it. If you have just saved, it stays quiet. |
 | **The memory operations** | Save, search, correct, retire, change who can see a memory, and the formation operations listed under [What is the same](#what-is-the-same). |
-| **Reloading your memories mid-session** | Ask your assistant to reload and it calls MMRY's `memory_load` tool, which repeats the session-start load and also refreshes the Foundation memories it restates each turn. This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
+| **Reloading your memories mid-session** | Ask your assistant to reload and it calls MMRY AI's `memory_load` tool, which loads your memories again, with the Foundation memories chosen for "When the assistant reloads memories", and refreshes those chosen for "With every message". This is the Codex equivalent of Claude Code's `/mmry:load-memories`. |
 
 ---
 
@@ -313,7 +313,7 @@ separate credentials and separate directories on purpose.
 | A Foundation memory you just changed is not being applied | Ask your assistant to reload your memories. It calls MMRY's `memory_load` tool, which repeats the session-start load and refreshes the Foundation cache, which otherwise refreshes daily. |
 | Your assistant says your Foundation directives were not applied to a turn because loading was cut short | The machine was too busy to load them in the time a prompt allows, so that turn ran without them. MMRY no longer shows you a notice for this; your assistant is told, and the next prompt applies them again. If it keeps happening, ask your assistant to check Foundation status. |
 | "Your Foundation directives were NOT applied to this turn - " followed by a reason about the stored copy | The local copy of your Foundation memories failed its check, so it was not used rather than trusted. Ask your assistant to reload your memories, then to check Foundation status; the notice names MMRY's `memory_load` tool for the first and the Foundation status script for the second. |
-| "Your Foundation set is larger than Codex lets a plugin show on each prompt" | The memories your account chose to send with every message are too large to show in full, so each turn your assistant is pointed at the complete copy and asked to read it first. That works, but relies on the assistant opening the file. Keeping the set smaller has it applied directly. |
+| "The Foundation memories your account chose to send with every message are larger than Codex lets a plugin show on each prompt" | The memories your account chose to send with every message are too large to show in full, so each turn your assistant is pointed at the complete copy and asked to read it first. That works, but relies on the assistant opening the file. Keeping the set smaller has it applied directly. |
 | "Your Foundation directives were NOT applied to this turn, the loader exited with code N" | That one is a failure, not a slow load, and the notice says so: re-sending will not help. The usual cause is an incomplete install, so reinstall the plugin. |
 | You lead a group from Codex and members' reports seem late | They are waiting for the lead conversation's next action: a Codex conversation is not woken while it sits idle. Ask the lead for the roster, or send it any message, and they arrive. For a job where the lead must hear members while nobody is typing, start the group from Claude Code and join it from Codex. |
 | You joined a group but no message ever arrives | You almost certainly joined with the `mmry_formation_*` connector tools. They enrol you under a different identity from the one your hooks poll with, so you appear on the roster and receive nothing, with no error. Leave and rejoin by asking your assistant to use MMRY's own `formation_leave` and `formation_join` tools. |
