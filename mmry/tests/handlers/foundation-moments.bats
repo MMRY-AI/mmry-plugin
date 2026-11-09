@@ -56,9 +56,11 @@ _write_account() {
     ]' > "$TEST_TMPDIR/mock-moments.json"
 }
 
-# The exact text of memory $1 as the account stored it, and its "- topic: content" line.
-_content() { jq -j --argjson i "$1" '.[] | select(.id == $i) | .content' "$TEST_TMPDIR/mock-moments.json"; printf .; }
-_line() { jq -j --argjson i "$1" '.[] | select(.id == $i) | "- \(.topic): \(.content)"' "$TEST_TMPDIR/mock-moments.json"; printf .; }
+# The exact text of memory $1 as the account stored it, and its "- topic: content" line. No memory in
+# the fixture ends in a newline (each ends in spaces), so command substitution keeps every byte; -b so
+# a native Windows jq writes the bytes as they are.
+_content() { jq -b -j --argjson i "$1" '.[] | select(.id == $i) | .content' "$TEST_TMPDIR/mock-moments.json"; }
+_line() { jq -b -j --argjson i "$1" '.[] | select(.id == $i) | "- \(.topic): \(.content)"' "$TEST_TMPDIR/mock-moments.json"; }
 
 # Holds "$2" exactly, byte for byte, somewhere in "$1".
 _holds() { [[ "$1" == *"$2"* ]]; }

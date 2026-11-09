@@ -116,6 +116,49 @@ fi
 # the assistant is pointed to a copy of it. How the most recent prompt went is the Delivered line.
 echo "Re-injection: ON - your directives are applied to every prompt; the most recent one is below."
 
+# 1b. WHICH DIRECTIVES ARE CHOSEN FOR WHICH MOMENT, AS MMRY AI LAST SAID (#33480, DD-172).
+#
+# The account chooses, per Foundation directive, the moments it is sent on. The set above is the one
+# chosen for "with every message", which the plugin asks MMRY AI for at session start, on a reload and
+# on the daily refresh, and which MMRY AI describes as it answers: how many, how large, and whether
+# that is over the size it reports above. The plugin keeps that description beside the set
+# (mmry-foundation-moment.<account key>.<moment>), so this answers without the network, as it always
+# has. "Before a long conversation is shortened" is described the same way, after a compaction asked
+# for it. A size over the line is said here, never solved by cutting anything.
+_FS_N_FOUNDATION=""
+_fs_moment_line() {
+    # $1 moment, $2 label as the Foundation Memories page names it. Prints this command's lines for it.
+    local f line c="" ch="" ov="" fnd="" what
+    mmry_foundation_moment_report_name_v "$MMRY_TMPDIR" "$1"
+    f="$_MMRY_FND_MOMENT_REPORT_NAME"
+    [[ -f "$f" && -r "$f" ]] || return 0
+    IFS= read -r line < "$f" 2>/dev/null || return 0
+    [[ "$line" =~ count=([0-9]+) ]] && c="${BASH_REMATCH[1]}"
+    [[ "$line" =~ characters=([0-9]+) ]] && ch="${BASH_REMATCH[1]}"
+    [[ "$line" =~ over=(true|false) ]] && ov="${BASH_REMATCH[1]}"
+    [[ "$line" =~ foundation=([0-9]+) ]] && fnd="${BASH_REMATCH[1]}"
+    [[ -n "$c" ]] || return 0
+    [[ "$1" == every-message && -n "$fnd" ]] && _FS_N_FOUNDATION="$fnd"
+    if (( c == 0 )); then
+        if [[ "$fnd" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Moments:      ${2}: none chosen - your account has ${fnd} Foundation directives, but none is chosen to be sent ${3}."
+            echo "              An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal."
+        else
+            echo "Moments:      ${2}: none chosen."
+        fi
+        return 0
+    fi
+    what="directives"; (( c == 1 )) && what="directive"
+    echo "Moments:      ${2}: ${c} ${what}${ch:+, ${ch} characters}, as MMRY AI last reported them."
+    if [[ "$ov" == true ]]; then
+        echo "Size:         The directives chosen for \"${2}\" come to ${ch} characters, more than about 57,000. MMRY sends them whole and never shortens them, but an assistant may not take in that much at once."
+    fi
+}
+if declare -F mmry_foundation_moment_report_name_v >/dev/null 2>&1; then
+    _fs_moment_line every-message "With every message" "with every message"
+    _fs_moment_line before-shortening "Before a long conversation is shortened" "before a long conversation is shortened"
+fi
+
 # 2. What does the stored copy claim to be, and is it actually that?
 #
 # THROUGH THE SHARED VERIFIER (#31583 QA). This block used to re-implement the manifest
@@ -152,8 +195,14 @@ if (( _verdict == 1 )); then
             echo "Action:       run ${_FS_RELOAD}, or start a new session."
         fi
     else
-        echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
-        echo "              Nothing is being withheld; there is nothing to send."
+        if [[ "$_FS_N_FOUNDATION" =~ ^[1-9][0-9]*$ ]]; then
+            # The account has Foundation directives, none chosen for every message (#33480).
+            echo "Stored copy:  VALID and EMPTY - none of your Foundation directives is chosen to be sent with every message."
+            echo "              Nothing is being withheld; there is nothing chosen to send."
+        else
+            echo "Stored copy:  VALID and EMPTY - this account has no Foundation memories."
+            echo "              Nothing is being withheld; there is nothing to send."
+        fi
     fi
     exit 0
 fi

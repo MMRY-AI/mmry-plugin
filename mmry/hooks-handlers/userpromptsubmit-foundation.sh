@@ -1709,7 +1709,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
             if [[ "$_etok" != "$_etold_tok" ]]; then
                 _fnd_host_refs
-                _mmry_fnd_set_empty_notice "$_FOUND_STATUS_REF"
+                # How many Foundation memories the account has, as the service said beside this empty
+                # every-message set (#33480), so an account with some is told none is chosen.
+                _MMRY_FND_ACCOUNT_N=""
+                declare -F mmry_fnd_account_foundation_v >/dev/null 2>&1 && mmry_fnd_account_foundation_v "$_FOUND_TMPDIR" "$_FND_ACCT"
+                _mmry_fnd_set_empty_notice "$_FOUND_STATUS_REF" "$_MMRY_FND_ACCOUNT_N"
                 _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
             fi
         fi

@@ -349,7 +349,7 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "memory_search" then
       ["search-memories.sh", "--ids", (str("query") | need("query"))] + (if (str("scope") // "") != "" then [str("scope")] else [] end)
    elif $n == "memory_retire" then ["deactivate-memory.sh", (int("id") | need("id"))]
-   elif $n == "memory_load" then ["session-start.sh"]
+   elif $n == "memory_load" then ["session-start.sh", "--reload"]
    elif $n == "formation_join" then ["formation-join.sh", (int("formation_id") | need("formation_id"))]
       + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)
    elif $n == "formation_say" then ["formation-say.sh", (str("message") | need("message"))] + (if int("to_member_id") == null then [] else [int("to_member_id")] end)
