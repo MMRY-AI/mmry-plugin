@@ -68,3 +68,33 @@ setup() {
     _mmry_request POST "/api/memories" '{"topic":"hello"}'
     grep -q 'POST.*memories' "$TEST_TMPDIR/curl-log.txt"
 }
+
+# #33480: a request's temp file is made with a builtin exclusive create, not $(mktemp). Bash's
+# noclobber refuses only an existing REGULAR file: a name already holding a link to a device (or a
+# FIFO) is opened and written through. Such a name must be passed over, left as it was, and another
+# one used, so the response is never sent somewhere it cannot be read back. RANDOM is seeded so the
+# first name tried is known and can be taken first.
+@test "request temp file: a name already holding a link to a device is passed over, not written through" {
+    local base="$TEST_TMPDIR/mmry-resp" a b taken
+    RANDOM=4242; a=$RANDOM; b=$RANDOM
+    taken="${base}-$$-${a}${b}"
+    ln -s /dev/null "$taken"
+    [[ -L "$taken" ]]
+    RANDOM=4242
+    _mmry_mktemp_v "$base"
+    [[ -n "$_MMRY_TMPF" ]]
+    [[ "$_MMRY_TMPF" != "$taken" ]]
+    [[ -f "$_MMRY_TMPF" && ! -L "$_MMRY_TMPF" ]]
+    [[ ! -s "$_MMRY_TMPF" ]]
+    [[ -L "$taken" ]]
+}
+
+@test "request temp file: noclobber is left as the caller had it" {
+    set +C
+    _mmry_mktemp_v "$TEST_TMPDIR/mmry-resp"
+    [[ "$-" != *C* ]]
+    set -C
+    _mmry_mktemp_v "$TEST_TMPDIR/mmry-resp"
+    [[ "$-" == *C* ]]
+    set +C
+}
