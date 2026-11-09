@@ -1003,11 +1003,13 @@ _mmry_get_auth_header() {
 
 # A NEW, EMPTY FILE OF ONE'S OWN FOR A REQUEST, WITH NO PROCESS (#33480), into _MMRY_TMPF:
 # <prefix>-<pid>-<random>. `$(mktemp)` was two processes on Windows for every request, and #33480 adds a
-# request to Codex's session start, which is held to a process count (codex-start-budget.bats). The
-# guarantee is mktemp's: the file is created only if nothing is at that name (noclobber opens it with
-# O_EXCL), so nothing put there first, a symlink included, is ever written through; a name that is
-# taken is tried again with another number. noclobber is set only for the one redirect, and left as
-# the caller had it. If no name can be had, mktemp is used, as before.
+# request to Codex's session start, which is held to a process count (codex-start-budget.bats).
+# noclobber refuses an existing regular file, and a link to one, and creates a new file with O_EXCL.
+# It does NOT refuse an existing non-regular file: a FIFO, or a link to a device such as /dev/null, is
+# opened and written through. So a name is used only if, after the create, it is a regular file and
+# not a link: a regular file that was there first would have been refused, so this one is ours.
+# Anything else at the name is left as it was and another number is tried. noclobber is set only for
+# the one redirect, and left as the caller had it. If no name can be had, mktemp is used, as before.
 _mmry_mktemp_v() {
     local base="$1" i f had_c=0
     case "$-" in *C*) had_c=1 ;; esac
@@ -1015,7 +1017,7 @@ _mmry_mktemp_v() {
     set -C
     for i in 1 2 3 4 5 6 7 8; do
         f="${base}-$$-${RANDOM}${RANDOM}"
-        if { : > "$f"; } 2>/dev/null; then
+        if { : > "$f"; } 2>/dev/null && [[ -f "$f" && ! -L "$f" ]]; then
             _MMRY_TMPF="$f"
             break
         fi
