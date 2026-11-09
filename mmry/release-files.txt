@@ -40,6 +40,7 @@ hooks-handlers/formation-status.sh
 hooks-handlers/foundation-cut.awk
 hooks-handlers/foundation-status.sh
 hooks-handlers/hook-guard.sh
+hooks-handlers/lib-codex-key.sh
 hooks-handlers/lib-formation-prompts.sh
 hooks-handlers/lib-formation-roles.sh
 hooks-handlers/lib-foundation-key.sh
@@ -174,6 +175,7 @@ tests/mutation/run-32915-mutations.sh
 tests/mutation/run-33030-mutations.sh
 tests/mutation/run-33062-mutations.sh
 tests/mutation/run-33363-mutations.sh
+tests/mutation/run-33617-mutations.sh
 tests/mutation/run-mutations.sh
 tests/perf/foundation-process-count.sh
 tests/perf/foundation-split-latency.sh
@@ -189,6 +191,7 @@ tests/structural/codex-docs-and-eol.bats
 tests/structural/codex-formation-delivery.bats
 tests/structural/codex-formation-instructions.bats
 tests/structural/codex-formation-lead-docs.bats
+tests/structural/codex-late-handoff-isolation.bats
 tests/structural/codex-manifest.bats
 tests/structural/codex-mcp.bats
 tests/structural/codex-sandbox-access.bats
