@@ -343,3 +343,12 @@ _cx_prompt() {
     done
     [ -z "$bad" ] || { echo "named by the bare session id:$bad"; return 1; }
 }
+
+@test "#33480 CC status: an account with no Foundation directives is not told that none is chosen" {
+    jq '[.[] | select(.memoryTier != "Foundation")]' "$TEST_TMPDIR/mock-moments.json" > "$TEST_TMPDIR/m2" && mv "$TEST_TMPDIR/m2" "$TEST_TMPDIR/mock-moments.json"
+    _cc_start >/dev/null
+    export CLAUDE_CODE_SESSION_ID="cc-moments-1"
+    run bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
+    [[ "$output" != *"none chosen"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"With every message: none - this account has no Foundation directives"* ]] || { echo "$output"; return 1; }
+}

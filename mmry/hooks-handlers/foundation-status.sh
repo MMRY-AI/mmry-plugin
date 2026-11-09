@@ -143,8 +143,12 @@ _fs_moment_line() {
         if [[ "$fnd" =~ ^[1-9][0-9]*$ ]]; then
             echo "Moments:      ${2}: none chosen - your account has ${fnd} Foundation directives, but none is chosen to be sent ${3}."
             echo "              An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal."
+        elif [[ "$fnd" == "0" ]]; then
+            # The service said the account has no Foundation directives at all: "none chosen" would
+            # suggest some exist (#33480, seen live on an empty DEV account).
+            echo "Moments:      ${2}: none - this account has no Foundation directives."
         else
-            echo "Moments:      ${2}: none chosen."
+            echo "Moments:      ${2}: no directives are chosen for it."
         fi
         return 0
     fi
