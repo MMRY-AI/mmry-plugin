@@ -48,11 +48,21 @@ _host() {
         bash -c "$2" )
 }
 
+# _said OUT - what the model is given from one command's stdout: the additionalContext and
+# systemMessage of JSON output, or the plain text as printed (a PreCompact hook prints plain text).
+_said() {
+    if "$LIVE_JQ" -e . "$1" >/dev/null 2>&1; then
+        "$LIVE_JQ" -b -j '((.hookSpecificOutput.additionalContext // "") + "\n" + (.systemMessage // "") + "\n")' "$1"
+    else
+        cat "$1"
+    fi
+}
+
 # _event NAME OUT - runs every command hooks.json registers for NAME, in order, with that event's
 # payload; OUT.N holds command N's stdout, OUT.rc its exit codes, OUT.ctx what the model is given
 # (additionalContext and systemMessage of JSON output, or the plain text a PreCompact hook prints).
 _event() {
-    local name="$1" out="$2" payload n i cmd o rc
+    local name="$1" out="$2" payload n i cmd rc
     case "$name" in
         SessionStart) payload="$("$LIVE_JQ" -cn --arg s "$SID" --arg c "$BATS_FILE_TMPDIR/work" '{session_id:$s,transcript_path:"",cwd:$c,hook_event_name:"SessionStart",source:"startup"}')" ;;
         UserPromptSubmit) payload="$("$LIVE_JQ" -cn --arg s "$SID" --arg c "$BATS_FILE_TMPDIR/work" '{session_id:$s,transcript_path:"",cwd:$c,hook_event_name:"UserPromptSubmit",prompt:"What should I do next?"}')" ;;
@@ -64,12 +74,7 @@ _event() {
         cmd="$("$LIVE_JQ" -r --arg e "$name" --argjson i "$i" '[.hooks[$e][]?.hooks[]?.command][$i]' "$PLUGIN_ROOT/hooks/hooks.json")"
         rc=0; _host "$payload" "$cmd" > "$out.$i" 2> "$out.$i.err" || rc=$?
         printf '%s\n' "$rc" >> "$out.rc"
-        o="$out.$i"
-        if "$LIVE_JQ" -e . "$o" >/dev/null 2>&1; then
-            "$LIVE_JQ" -b -j '((.hookSpecificOutput.additionalContext // "") + "\n" + (.systemMessage // "") + "\n")' "$o" >> "$out.ctx"
-        else
-            cat "$o" >> "$out.ctx"
-        fi
+        _said "$out.$i" >> "$out.ctx"
     done
     printf '%s' "$n" > "$out.count"
 }
@@ -115,7 +120,8 @@ setup_file() {
     printf '%s' "$reload" > "$S/state/reload-command"
     local rrc=0; _host "" "$reload" < /dev/null > "$O/reload.out" 2> "$O/reload.err" || rrc=$?
     printf '%s\n' "$rrc" > "$O/reload.rc"
-    _memfile "$O/reload.out" > "$O/reload.file" || true
+    _said "$O/reload.out" > "$O/reload.ctx"
+    _memfile "$O/reload.ctx" > "$O/reload.file" || true
     if [[ -s "$O/reload.file" ]]; then cp "$(cat "$O/reload.file")" "$O/reload.memories" 2>/dev/null || true; fi
 
     # 4. A message after the reload: still exactly the every-message memories.
@@ -167,7 +173,7 @@ _exactly() {
 @test "J-016 claude-code: when the assistant reloads memories, exactly the memories chosen for it arrive, word for word" {
     run cat "$(_s)/reload-command"
     assert_output --partial 'session-start.sh" --reload'
-    run cat "$(_o)/reload.out"
+    run cat "$(_o)/reload.ctx"
     assert_output --regexp 'MMRY AI loaded [0-9]+ memories\. Read them now: '
     _exactly "$(_o)/reload.memories" RELOAD
 }
