@@ -207,6 +207,26 @@ _cc_precompact() {
     done
 }
 
+# Claude Code runs the six PreCompact parts side by side and each asks the service on its own. A set
+# over one part's 9,500 characters is cut across parts, so a part whose own request fails while
+# another's succeeds leaves a slice out of a summary told "the parts together are the whole set". The
+# failed part must say so, as part 1 does; it must not go silent.
+@test "#33480 CC PreCompact: a part whose own request fails says so, so a slice is never silently missing" {
+    jq --arg f "$(printf 'y%.0s' $(seq 1 6000))" '[.[] | select(.id != 14)] + [range(1;3) | {id: (200 + .), memoryTier: "Foundation", scope: "global", topic: "Half \(.)", content: "HALF-\(.)-START \($f) HALF-\(.)-END", moments: ["before-shortening"]}]' \
+        "$TEST_TMPDIR/mock-moments.json" > "$TEST_TMPDIR/m2" && mv "$TEST_TMPDIR/m2" "$TEST_TMPDIR/mock-moments.json"
+    local p1 p2
+    p1="$(printf '{"session_id":"cc-moments-1","hook_event_name":"PreCompact","trigger":"auto"}' \
+        | bash "$PLUGIN_ROOT/hooks-handlers/precompact-foundation.sh" --part 1 2>/dev/null)"
+    [[ "$p1" == *"This is part 1 of 2"* ]] || { echo "the control set is not two parts: ${p1:0:300}"; return 1; }
+    printf '503' > "$TEST_TMPDIR/mock-override-foundation-before-shortening-code"
+    p2="$(printf '{"session_id":"cc-moments-1","hook_event_name":"PreCompact","trigger":"auto"}' \
+        | bash "$PLUGIN_ROOT/hooks-handlers/precompact-foundation.sh" --part 2; echo "rc=$?")"
+    [[ "$p2" == *"rc=0" ]] || { echo "part 2 did not exit 0: $p2"; return 1; }
+    [[ "$p2" == *"could not be fetched (HTTP 503)"* ]] || { echo "part 2 failed in silence: [$p2]"; return 1; }
+    [[ "$p2" == *"may not be the whole set"* ]] || { echo "part 2 did not say the others are not the whole set: $p2"; return 1; }
+    [[ "$p2" != *"none were added"* ]]
+}
+
 @test "#33480 CC: an oversized every-message set is reported by the status check, and sent whole" {
     jq --arg f "$(printf 'q%.0s' $(seq 1 8000))" '[.[] | select(.id != 12)] + [range(1;9) | {id: (200 + .), memoryTier: "Foundation", scope: "global", topic: "Huge \(.)", content: "HUGE-\(.)-START \($f) HUGE-\(.)-END", moments: ["every-message"]}]' \
         "$TEST_TMPDIR/mock-moments.json" > "$TEST_TMPDIR/m2" && mv "$TEST_TMPDIR/m2" "$TEST_TMPDIR/mock-moments.json"
