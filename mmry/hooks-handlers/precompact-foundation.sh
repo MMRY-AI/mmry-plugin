@@ -73,9 +73,15 @@ export MMRY_HTTP_CONNECT_TIMEOUT=4 MMRY_HTTP_MAX_TIME=10
 _PCF_LABEL='Before a long conversation is shortened'
 _PCF_HEAD='MMRY AI: these are Foundation directives this account chose to keep when a long conversation is shortened. Keep each of them in the summary word for word, exactly as written below, so they stay in force after it.'
 
+# EVERY PART THAT FAILS SAYS SO (#33480). Claude Code runs the parts side by side and each asks the
+# service on its own, so one part's request can fail while another's succeeds. A part that then went
+# silent would leave a slice out of a summary told the parts are the whole set. A part other than 1
+# cannot know whether the set would have reached it, so it says the others MAY not be the whole set.
 if ! mmry_get_foundation_moment before-shortening >/dev/null 2>&1; then
     if (( MMRY_FND_PART == 1 )); then
         printf '%s\n' "MMRY AI: the Foundation directives this account chose to keep when a long conversation is shortened could not be fetched (HTTP ${MMRY_HTTP_CODE:-000}), so none were added to this summary. Nothing was guessed at."
+    else
+        printf '%s\n' "MMRY AI: part ${MMRY_FND_PART} of the Foundation directives this account chose to keep when a long conversation is shortened could not be fetched (HTTP ${MMRY_HTTP_CODE:-000}), so those given here may not be the whole set. Nothing was guessed at."
     fi
     exit 0
 fi
