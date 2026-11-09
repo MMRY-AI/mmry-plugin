@@ -1709,7 +1709,11 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
             [[ -f "$_etold" ]] && { _etold_tok="$(<"$_etold")" 2>/dev/null || _etold_tok=""; }
             if [[ "$_etok" != "$_etold_tok" ]]; then
                 _fnd_host_refs
-                _mmry_fnd_set_empty_notice "$_FOUND_STATUS_REF"
+                # How many Foundation memories the account has, as the service said beside this empty
+                # every-message set (#33480), so an account with some is told none is chosen.
+                _MMRY_FND_ACCOUNT_N=""
+                declare -F mmry_fnd_account_foundation_v >/dev/null 2>&1 && mmry_fnd_account_foundation_v "$_FOUND_TMPDIR" "$_FND_ACCT"
+                _mmry_fnd_set_empty_notice "$_FOUND_STATUS_REF" "$_MMRY_FND_ACCOUNT_N"
                 _mmry_emit "" "$MMRY_FND_EMPTY_NOTICE" && { _mmry_fnd_write "$_etold" "$_etok" || true; }
             fi
         fi
@@ -1753,7 +1757,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         [[ -f "$_told" ]] && { _told_tok="$(<"$_told")" 2>/dev/null || _told_tok=""; }
         if [[ -z "$_tok" || "$_tok" != "$_told_tok" ]]; then
             _fnd_host_refs
-            USERMSG="MMRY AI: your Foundation set is larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have the set applied directly, keep it under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
+            USERMSG="MMRY AI: the Foundation memories your account chose to send with every message are larger than ${_FOUND_HOST_LABEL} lets a plugin show on each prompt (${MMRY_FND_PARTS_MAX} parts of under 10,000 characters), so each turn your assistant is pointed to a full copy and asked to read it before answering. That works, but it relies on the assistant opening the file, and it may need your permission to read it. To have them applied directly, keep them under about ${_FND_CAPACITY_TEXT} characters. ${USERMSG}"
             # Written to a temporary file and renamed into place (#31411 QA round 3, N2): writing
             # straight to it blocked on a FIFO planted at this name, and the rename replaces one.
             _mmry_fnd_write "$_told" "$_tok" || true

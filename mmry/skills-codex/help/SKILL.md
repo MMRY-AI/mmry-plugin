@@ -14,7 +14,7 @@ MMRY AI is your memory. It remembers your decisions, conventions, preferences an
 ## How it works on Codex
 
 - **When a session starts**, your memories load on their own.
-- **On every prompt**, your Foundation directives, the standing instructions your account administrator keeps for everyone, are sent to your assistant again.
+- **On the moments your account chooses**, your Foundation directives, the standing instructions your account administrator keeps for everyone, are sent to your assistant: when a conversation starts, with every message, and when the assistant reloads memories. Your account administrator ticks the moments for each one on the Foundation Memories page in the MMRY AI portal.
 - **While you work**, messages from a Formation you are in arrive after your assistant's next action.
 - **When there is unsaved work**, your assistant is prompted to save what is new.
 
@@ -73,7 +73,7 @@ A Formation is several assistants working on one job together. We recommend lead
 
 ## What Codex does not have
 
-Typed slash commands, a save prompt before your conversation is trimmed, waking an idle session with a Formation message, and a prompt when you accept a plan. The full statement is at https://github.com/MMRY-AI/mmry-plugin/blob/master/docs/codex.md.
+Typed slash commands, a save prompt before your conversation is trimmed, Foundation directives sent "Before a long conversation is shortened" (Codex gives MMRY AI no signal for that moment), waking an idle session with a Formation message, and a prompt when you accept a plan. The full statement is at https://github.com/MMRY-AI/mmry-plugin/blob/master/docs/codex.md.
 
 More help: https://mmryai.com/help
 

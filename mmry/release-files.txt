@@ -56,6 +56,7 @@ hooks-handlers/mcp-server.sh
 hooks-handlers/mmry-client.sh
 hooks-handlers/plan-accepted-check.sh
 hooks-handlers/precompact-check.sh
+hooks-handlers/precompact-foundation.sh
 hooks-handlers/process-context.sh
 hooks-handlers/query-entries.sh
 hooks-handlers/reinstate-database.sh
@@ -122,6 +123,7 @@ tests/handlers/foundation-31597-edges.bats
 tests/handlers/foundation-both-paths.bats
 tests/handlers/foundation-cross-surface.bats
 tests/handlers/foundation-in-time.bats
+tests/handlers/foundation-moments.bats
 tests/handlers/foundation-parts.bats
 tests/handlers/foundation-status.bats
 tests/handlers/list-groups.bats
@@ -148,6 +150,7 @@ tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
 tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
+tests/helpers/live-foundation.bash
 tests/helpers/live-journey.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
@@ -155,10 +158,12 @@ tests/helpers/self-update-release.bash
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
 tests/integration/api-health.bats
+tests/integration/codex-foundation-live.bats
 tests/integration/codex-hook-trust-live.bats
 tests/integration/codex-session-live.bats
 tests/integration/database-command.bats
 tests/integration/entries.bats
+tests/integration/foundation-live.bats
 tests/integration/memory-lifecycle.bats
 tests/integration/search.bats
 tests/integration/session-registration.bats

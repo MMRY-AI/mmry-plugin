@@ -4,7 +4,7 @@ Usage: `/mmry:foundation-status`
 
 ## What This Does
 
-Foundation memories are your standing directives, applied to every prompt: sent with it, in up
+Foundation memories are your standing directives, sent on the moments your account chooses for each one. Those chosen for every message are sent with each prompt, in up
 to six parts, or, when the set is too large for Claude Code to show, pointed to as a copy the
 assistant is asked to read. This reports, in plain words, whether that is really happening:
 whether re-injection is switched on, whether the locally stored copy still matches the

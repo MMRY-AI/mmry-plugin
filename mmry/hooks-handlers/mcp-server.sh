@@ -179,7 +179,7 @@ MMRY_MCP_TOOLS='[
   {
     "name": "memory_load",
     "title": "Reload memories",
-    "description": "Reload this conversation'"'"'s memories now and refresh the Foundation memories restated each turn: after an administrator changed a Foundation memory, after moving to another project directory, or when MMRY reported Foundation directives could not be applied. Returns where the loaded memories were written; read that file.",
+    "description": "Reload this conversation'"'"'s memories now, with the Foundation memories chosen for when the assistant reloads memories, and refresh those chosen for every message: after an administrator changed a Foundation memory, after moving to another project directory, or when MMRY AI reported Foundation directives could not be applied. Returns where the loaded memories were written; read that file.",
     "inputSchema": {
       "type": "object",
       "properties": {"working_dir": {"type": "string", "description": "Absolute path of the project directory, so memories matching it are loaded."}}
@@ -349,7 +349,7 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "memory_search" then
       ["search-memories.sh", "--ids", (str("query") | need("query"))] + (if (str("scope") // "") != "" then [str("scope")] else [] end)
    elif $n == "memory_retire" then ["deactivate-memory.sh", (int("id") | need("id"))]
-   elif $n == "memory_load" then ["session-start.sh"]
+   elif $n == "memory_load" then ["session-start.sh", "--reload"]
    elif $n == "formation_join" then ["formation-join.sh", (int("formation_id") | need("formation_id"))]
       + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)
    elif $n == "formation_say" then ["formation-say.sh", (str("message") | need("message"))] + (if int("to_member_id") == null then [] else [int("to_member_id")] end)

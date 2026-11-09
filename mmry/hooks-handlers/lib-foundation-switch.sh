@@ -162,8 +162,33 @@ _mmry_reinject_is_off_here() {
 #
 # The command it names is the host's own (#31245 carried onto develop): on Codex there is nothing to
 # type, so it names the Codex script. With no argument it is the Claude Code literal, unchanged.
+#
+# THE SECOND ARGUMENT IS HOW MANY FOUNDATION MEMORIES THE ACCOUNT HAS (#33480, DD-172). The set sent
+# with every message is now only the memories chosen for that moment, so an empty set no longer means
+# the account has none. When the service said it has some, the notice says none of them is chosen,
+# and who chooses. Without it, or with 0, the words are the ones this notice always had.
 _mmry_fnd_set_empty_notice() {
-    MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+    local n="${2:-}"
+    if [[ "$n" == "1" ]]; then
+        MMRY_FND_EMPTY_NOTICE="MMRY AI: this account's one Foundation directive is not chosen to be sent with every message, so there is none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+    elif [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+        MMRY_FND_EMPTY_NOTICE="MMRY AI: none of this account's ${n} Foundation directives is chosen to be sent with every message, so there are none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+    else
+        MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+    fi
+}
+
+# How many Foundation memories the account has, as the service last said beside an empty
+# every-message set, from the moment's report file (mmry_foundation_note_moment in mmry-client.sh),
+# into _MMRY_FND_ACCOUNT_N; empty when not known. Builtins only: the per-prompt hook calls it.
+#   mmry_fnd_account_foundation_v <dir> <account key>
+mmry_fnd_account_foundation_v() {
+    local f="${1}/mmry-foundation-moment.${2}.every-message" line=""
+    _MMRY_FND_ACCOUNT_N=""
+    [[ -f "$f" && -r "$f" ]] || return 0
+    IFS= read -r line < "$f" 2>/dev/null || true
+    [[ "$line" =~ foundation=([0-9]+) ]] && _MMRY_FND_ACCOUNT_N="${BASH_REMATCH[1]}"
+    return 0
 }
 _mmry_fnd_set_empty_notice
 if declare -F mmry_host_command_ref >/dev/null 2>&1; then

@@ -56,7 +56,7 @@ you see it. Do not substitute a script for one of these operations.
 | Moment | What MMRY does |
 |---|---|
 | Session start | Loads your memories (Foundation, universals, and any matching this directory) and writes them to a file you are told to read |
-| Every prompt you receive | Re-states the account's Foundation memories so they stay in effect |
+| Every prompt you receive | Sends the Foundation memories the account chose for every message, so they stay in effect |
 | After a tool call | Delivers any new coordination-group messages |
 | The next prompt, when work is unsaved | Prompts you to save what is new since the last save, and stays silent when nothing is |
 

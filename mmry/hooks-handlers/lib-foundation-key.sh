@@ -269,6 +269,16 @@ mmry_foundation_byref_name_v() {
     _MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref.${_MMRY_FND_ACCT}${2:+.$2}.md"
 }
 
+# WHAT THE SERVICE LAST SAID ABOUT ONE MOMENT'S SET (#33480, DD-172), named by the account and server
+# like the set itself: "<dir>/mmry-foundation-moment.<key>.<moment>". One line, written when the
+# plugin asks for a moment's memories: how many, their size as the Foundation Memories page counts it,
+# whether that is over the size the service reports above, and, when none is chosen for the moment,
+# how many Foundation memories the account has. The status check reads it; it needs no network.
+mmry_foundation_moment_report_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_MOMENT_REPORT_NAME="${1}/mmry-foundation-moment.${_MMRY_FND_ACCT}.${2:-none}"
+}
+
 # THE SESSION PART OF A PER-SESSION MARKER'S NAME (#32915, independent QA of round 1, requirement 2;
 # #33363), into _MMRY_FND_SESSION_PART. The per-prompt hook's prepared copy, claim, result and stored
 # markers are named by the session: the payload's id, else the token SessionStart left, which is the
@@ -296,4 +306,12 @@ mmry_foundation_session_part_v() {
     [[ "$v" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || v=""
     mmry_foundation_account_key_v
     _MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"
+}
+
+# THE FULL BEFORE-SHORTENING SET, WHEN IT IS TOO LARGE TO PRINT IN PARTS (#33480). Per session, so its
+# name is built by mmry_foundation_session_part_v like every per-session name (#33363): never the bare
+# session id. "<dir>/mmry-foundation-shortening.<key>.<sid or none>.md".
+mmry_foundation_shortening_name_v() {
+    mmry_foundation_session_part_v "${2:-}"
+    _MMRY_FND_SHORTENING_NAME="${1}/mmry-foundation-shortening.${_MMRY_FND_SESSION_PART}.md"
 }

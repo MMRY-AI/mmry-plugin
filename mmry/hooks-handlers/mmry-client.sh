@@ -696,10 +696,51 @@ mmry_verify_foundation_cache() {
     return "$rc"
 }
 
+# THE ONE PREFIX BOTH WRITER PATHS READ A RESPONSE THROUGH (#33480). $m is the memories: the
+# "memories" of a moment's answer, or the response itself when it is a bare array, as before #33480.
+# An object without a "memories" array makes $m null, and iterating null fails the jq, so the write
+# fails rather than store an empty set the service never sent. $rep is the service's own report.
+_MMRY_FND_MOMENT_JQ='(if type == "object" then . else {memories: .} end) as $r
+  | $r.memories as $m
+  | "\($r.count // "-") \($r.characters // "-") \(if $r.overReportedSize == null then "-" else ($r.overReportedSize | tostring) end)" as $rep'
+
+# THE SWITCH THAT STOPS THIS jq WRITING CARRIAGE RETURNS THE SERVICE DID NOT SEND, into _MMRY_JQB:
+# "-b" for a jq that turns each newline it prints into CR LF (a native Windows jq), else empty. Asked
+# once per process and kept. Taken out of mmry_write_foundation_cache (#33480) so the memories file a
+# start or a reload writes is byte for byte what the service sent too: a memory's own newlines arrived
+# in it as CR LF on Windows.
+_mmry_jqb_v() {
+    local probe
+    if [[ -n "${_MMRY_JQB_FOR:-}" && "$_MMRY_JQB_FOR" == "$MMRY_JQ" ]]; then
+        return 0
+    fi
+    _MMRY_JQB=""
+    if [[ "${_MMRY_HOST_V:-}" == "codex" && "${_MMRY_JQ_CR_FOR:-}" == "$MMRY_JQ" ]]; then
+        # Asked already, of this jq, when it was chosen (_mmry_jq_codex_probe above).
+        probe=""
+        [[ "${_MMRY_JQ_CR:-0}" == "1" ]] && probe=$'\r'
+    elif [[ "${_MMRY_HOST_V:-}" == "codex" ]]; then
+        probe="$("$MMRY_JQ" -j . <<<'"x\ny"' 2>/dev/null)"
+    else
+        probe="$(printf '%s' '"x\ny"' | "$MMRY_JQ" -j . 2>/dev/null)"
+    fi
+    [[ "$probe" == *$'\r'* ]] && _MMRY_JQB="-b"
+    _MMRY_JQB_FOR="$MMRY_JQ"
+    return 0
+}
+
 mmry_write_foundation_cache() {
     # Usage: mmry_write_foundation_cache <response-json> <set-file> [session-id]
     # Writes the Foundation-tier memories (topic + content) as ONE file: the record line, the set,
     # the trailer. The hook applies framing at inject time, so the set holds just the data.
+    #
+    # THE RESPONSE IS THE SERVICE'S ANSWER FOR ONE MOMENT (#33480, DD-172): the object
+    # GET /api/memories/foundation?moment=every-message returns, whose "memories" are exactly the ones
+    # the account chose to send with every message, in the account's order. They are written as they
+    # came; nothing here chooses among them. A bare array (the shape this took before #33480) is still
+    # read the same way. An object with no "memories" array fails the write and leaves the existing
+    # file alone. The service's own report of the set (count, characters, over the reported size) is
+    # left in MMRY_FND_MOMENT_REPORT as "<count> <characters> <true|false>", "-" for what it did not say.
     #
     # Returns 0 only when the new file is in place. On any failure the EXISTING file is left
     # exactly as it was.
@@ -733,17 +774,9 @@ mmry_write_foundation_cache() {
     # wrote. jq's -b switches that off, but jq 1.6 and earlier on other platforms do not all accept
     # it, so it is used only when this jq is seen to convert: one probe, here, where the set is
     # written, never on the per-prompt path.
-    local jqb="" probe
-    if [[ "${_MMRY_HOST_V:-}" == "codex" && "${_MMRY_JQ_CR_FOR:-}" == "$MMRY_JQ" ]]; then
-        # Asked already, of this jq, when it was chosen (_mmry_jq_codex_probe above).
-        probe=""
-        [[ "${_MMRY_JQ_CR:-0}" == "1" ]] && probe=$'\r'
-    elif [[ "${_MMRY_HOST_V:-}" == "codex" ]]; then
-        probe="$("$MMRY_JQ" -j . <<<'"x\ny"' 2>/dev/null)"
-    else
-        probe="$(printf '%s' '"x\ny"' | "$MMRY_JQ" -j . 2>/dev/null)"
-    fi
-    [[ "$probe" == *$'\r'* ]] && jqb="-b"
+    local jqb=""
+    _mmry_jqb_v
+    jqb="$_MMRY_JQB"
 
     # ON CODEX, THE SAME FILE WITH FEWER PROCESSES (#33062 fix round 7). This writer runs inside Codex's
     # session start, before the memories are handed over, and below it is about twenty processes: on
@@ -756,20 +789,23 @@ mmry_write_foundation_cache() {
     # The same jq also gives the response's own length, first, into MMRY_FND_RESPONSE_LENGTH: Codex's
     # session start reports it as the number of memories loaded, and would otherwise start a jq for it.
     if [[ "${_MMRY_HOST_V:-}" == "codex" ]]; then
-        local set_text="" total=""
+        local set_text="" total="" report=""
         MMRY_FND_RESPONSE_LENGTH=""
-        if ! "$MMRY_JQ" ${jqb:+"$jqb"} -r 'length as $n | [.[] | select(.memoryTier == "Foundation")] | ($n | tostring), (length | tostring), (.[] | "- \(.topic): \(.content)")' <<<"$resp" \
+        MMRY_FND_MOMENT_REPORT=""
+        if ! "$MMRY_JQ" ${jqb:+"$jqb"} -r "${_MMRY_FND_MOMENT_JQ}"' | ($m | length | tostring), $rep, ([$m[] | select(.memoryTier == "Foundation")] | (length | tostring), (.[] | "- \(.topic): \(.content)"))' <<<"$resp" \
             | LC_ALL=C tr '\000' '\377' \
             > "$tmp" 2>/dev/null
         then
             rm -f "$tmp" 2>/dev/null
             return 1
         fi
-        { IFS= read -r total; IFS= read -r entries; IFS= read -r -d '' set_text; } < "$tmp" 2>/dev/null || true
+        { IFS= read -r total; IFS= read -r report; IFS= read -r entries; IFS= read -r -d '' set_text; } < "$tmp" 2>/dev/null || true
         total="${total%$'\r'}"
+        report="${report%$'\r'}"
         entries="${entries%$'\r'}"
         [[ "$total" =~ ^[0-9]+$ && "$entries" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
         MMRY_FND_RESPONSE_LENGTH="$total"
+        MMRY_FND_MOMENT_REPORT="$report"
         printf '%s' "$set_text" > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
         read -r sum count < <(cksum < "$tmp" 2>/dev/null)
         [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
@@ -800,8 +836,9 @@ mmry_write_foundation_cache() {
         return 0
     fi
 
+    MMRY_FND_MOMENT_REPORT=""
     if ! printf '%s' "$resp" \
-        | "$MMRY_JQ" ${jqb:+"$jqb"} -r '[.[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
+        | "$MMRY_JQ" ${jqb:+"$jqb"} -r "${_MMRY_FND_MOMENT_JQ}"' | [$m[] | select(.memoryTier == "Foundation")] | .[] | "- \(.topic): \(.content)"' \
         | LC_ALL=C tr '\000' '\377' \
         > "$body" 2>/dev/null
     then
@@ -810,8 +847,11 @@ mmry_write_foundation_cache() {
     fi
 
     # Count from the response, not from the file: content can itself hold lines beginning "- ".
-    entries="$(printf '%s' "$resp" | "$MMRY_JQ" -r '[.[] | select(.memoryTier == "Foundation")] | length' 2>/dev/null)"
+    local report=""
+    { IFS= read -r entries; IFS= read -r report; } < <(printf '%s' "$resp" | "$MMRY_JQ" -r "${_MMRY_FND_MOMENT_JQ}"' | ([$m[] | select(.memoryTier == "Foundation")] | length), $rep' 2>/dev/null)
+    entries="${entries%$'\r'}"
     [[ "$entries" =~ ^[0-9]+$ ]] || { rm -f "$body" 2>/dev/null; return 1; }
+    MMRY_FND_MOMENT_REPORT="${report%$'\r'}"
 
     read -r sum count < <(cksum < "$body" 2>/dev/null)
     [[ "$sum" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || { rm -f "$body" 2>/dev/null; return 1; }
@@ -853,17 +893,61 @@ mmry_foundation_restore_nul() {
 
 mmry_refresh_foundation_cache() {
     # Usage: mmry_refresh_foundation_cache <working-dir> <cache-file> [session-id]
-    # Re-fetches startup memories and rewrites the Foundation cache ONLY on a successful
-    # fetch, so an offline/failed refresh never clobbers a good cache. Returns 0 on refresh.
+    # Re-fetches the memories sent with every message and rewrites the Foundation cache ONLY on a
+    # successful fetch, so an offline/failed refresh never clobbers a good cache. Returns 0 on refresh.
     # Returns 0 only if the cache AND its manifest were actually rewritten (#31583). It
     # previously returned 0 whenever the FETCH succeeded, regardless of what the write did,
     # so a failed write was indistinguishable from a refreshed cache to every caller.
-    local workdir="$1" cache="$2" sid="${3:-}"
-    if mmry_get_startup_memories "$workdir" >/dev/null 2>&1; then
-        mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache" "$sid" || return 1
-        return 0
+    # The working directory is no longer used (#33480): the every-message set is the account's, not
+    # the directory's. It stays in the signature so every caller is unchanged.
+    local cache="$2" sid="${3:-}"
+    mmry_store_every_message_set "$cache" "$sid"
+}
+
+# THE MEMORIES SENT WITH EVERY MESSAGE ARE ASKED OF THE SERVICE, NEVER CHOSEN HERE (#33480, DD-172).
+#
+# Usage: mmry_store_every_message_set <cache-file> [session-id]
+# Asks GET /api/memories/foundation?moment=every-message and stores its memories as the set the
+# per-prompt hook sends, through the one writer, so the record, the verification, the parts and the
+# by-reference path are what they always were. Until #33480 this set was the Foundation memories of
+# the startup response, so it held every Foundation memory; now it holds exactly the ones the
+# account chose for every message. The plugin never filters a set it has cached: a failed request
+# stores nothing, leaves the existing file alone and returns 1, and the caller says so.
+#
+# What the service said about the set is kept in the moment's report file (see
+# mmry_foundation_note_moment). When none is chosen for every message, the service is asked once how
+# many Foundation memories the account has, so the person can be told "none is chosen" rather than
+# "you have none" (MMRY_FND_ACCOUNT_FOUNDATION, empty when it could not be learnt).
+mmry_store_every_message_set() {
+    local cache="$1" sid="${2:-}" total=""
+    MMRY_FND_ACCOUNT_FOUNDATION=""
+    mmry_get_foundation_moment every-message >/dev/null 2>&1 || return 1
+    mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache" "$sid" || return 1
+    if [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]] && mmry_get_foundation_overview >/dev/null 2>&1; then
+        total="$("$MMRY_JQ" -r '.memories | length' <<<"$MMRY_RESPONSE" 2>/dev/null)"
+        total="${total%$'\r'}"
+        [[ "$total" =~ ^[0-9]+$ ]] && MMRY_FND_ACCOUNT_FOUNDATION="$total"
     fi
-    return 1
+    mmry_foundation_note_moment every-message "${MMRY_FND_MOMENT_REPORT:-}" "$MMRY_FND_ACCOUNT_FOUNDATION"
+    return 0
+}
+
+# Usage: mmry_foundation_note_moment <moment> "<count> <characters> <true|false>" [account foundation count]
+# Writes the moment's report file, "count=N characters=C over=true|false foundation=T|-". One short line
+# by one redirect, with no temp and rename: that would be a process on Codex's session start, and a
+# reader that ever met half a line would find a field missing and say it does not know. Best effort: a
+# report that cannot be written changes nothing about what is sent.
+mmry_foundation_note_moment() {
+    local moment="$1" rep="${2:-}" fnd="${3:-}" c="-" ch="-" ov="-" dir="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
+    read -r c ch ov <<<"$rep" || true
+    [[ "$c" =~ ^[0-9]+$ ]] || c="-"
+    [[ "$ch" =~ ^[0-9]+$ ]] || ch="-"
+    [[ "$ov" == true || "$ov" == false ]] || ov="-"
+    [[ "$fnd" =~ ^[0-9]+$ ]] || fnd="-"
+    mmry_foundation_moment_report_name_v "$dir" "$moment"
+    printf 'count=%s characters=%s over=%s foundation=%s\n' "$c" "$ch" "$ov" "$fnd" \
+        > "$_MMRY_FND_MOMENT_REPORT_NAME" 2>/dev/null || true
+    return 0
 }
 
 # ============================================================================
@@ -917,6 +1001,32 @@ _mmry_get_auth_header() {
 # 4. CORE HTTP
 # ============================================================================
 
+# A NEW, EMPTY FILE OF ONE'S OWN FOR A REQUEST, WITH NO PROCESS (#33480), into _MMRY_TMPF:
+# <prefix>-<pid>-<random>. `$(mktemp)` was two processes on Windows for every request, and #33480 adds a
+# request to Codex's session start, which is held to a process count (codex-start-budget.bats).
+# noclobber refuses an existing regular file, and a link to one, and creates a new file with O_EXCL.
+# It does NOT refuse an existing non-regular file: a FIFO, or a link to a device such as /dev/null, is
+# opened and written through. So a name is used only if, after the create, it is a regular file and
+# not a link: a regular file that was there first would have been refused, so this one is ours.
+# Anything else at the name is left as it was and another number is tried. noclobber is set only for
+# the one redirect, and left as the caller had it. If no name can be had, mktemp is used, as before.
+_mmry_mktemp_v() {
+    local base="$1" i f had_c=0
+    case "$-" in *C*) had_c=1 ;; esac
+    _MMRY_TMPF=""
+    set -C
+    for i in 1 2 3 4 5 6 7 8; do
+        f="${base}-$$-${RANDOM}${RANDOM}"
+        if { : > "$f"; } 2>/dev/null && [[ -f "$f" && ! -L "$f" ]]; then
+            _MMRY_TMPF="$f"
+            break
+        fi
+    done
+    (( had_c == 1 )) || set +C
+    [[ -n "$_MMRY_TMPF" ]] || _MMRY_TMPF="$(mktemp "${base}-XXXXXX")"
+    return 0
+}
+
 _mmry_request() {
     # Usage: _mmry_request METHOD PATH [BODY]
     # Sets MMRY_HTTP_CODE and MMRY_RESPONSE globals
@@ -945,7 +1055,7 @@ _mmry_request() {
     [[ "$max_time" =~ ^[1-9][0-9]*$ ]] || max_time=25
 
     local tmp_resp
-    tmp_resp="$(mktemp "${MMRY_TMPDIR}/mmry-resp-XXXXXX")"
+    _mmry_mktemp_v "${MMRY_TMPDIR}/mmry-resp"; tmp_resp="$_MMRY_TMPF"
 
     local curl_args=(-s -o "$tmp_resp" -w '%{http_code}'
         --connect-timeout "$connect_timeout" --max-time "$max_time"
@@ -955,7 +1065,7 @@ _mmry_request() {
 
     local tmp_body=""
     if [[ -n "$body" ]]; then
-        tmp_body="$(mktemp "${MMRY_TMPDIR}/mmry-body-XXXXXX")"
+        _mmry_mktemp_v "${MMRY_TMPDIR}/mmry-body"; tmp_body="$_MMRY_TMPF"
         printf '%s' "$body" > "$tmp_body"
         curl_args+=(--data-binary "@${tmp_body}")
     fi
@@ -1391,19 +1501,36 @@ mmry_get_memories() {
 }
 
 mmry_get_startup_memories() {
-    # Usage: mmry_get_startup_memories [WORKING_DIR] [SCOPE] [PROJECT_ID]
-    local working_dir="${1:-}" scope="${2:-}" project_id="${3:-}"
+    # Usage: mmry_get_startup_memories [WORKING_DIR] [SCOPE] [PROJECT_ID] [FOUNDATION_MOMENT]
+    # FOUNDATION_MOMENT (#33480, DD-172) narrows the startup set's Foundation memories to the ones the
+    # account chose for that moment: conversation-start when a session starts, reload for the reload
+    # command. The service does the choosing; nothing here filters what it returns.
+    local working_dir="${1:-}" scope="${2:-}" project_id="${3:-}" moment="${4:-}"
 
     local query=""
     [[ -n "$working_dir" ]] && query+="workingDirectory=$(_mmry_urlencode "$working_dir")&" || true
     [[ -n "$scope" ]] && query+="scope=${scope}&" || true
     [[ -n "$project_id" ]] && query+="projectId=${project_id}&" || true
+    [[ "$moment" =~ ^[a-z-]+$ ]] && query+="foundationMoment=${moment}&" || true
     query="${query%&}"
 
     local path="/api/memories/startup"
     [[ -n "$query" ]] && path+="?${query}" || true
 
     _mmry_request GET "$path"
+}
+
+# The Foundation memories the account chose for ONE moment (#33480): conversation-start,
+# every-message, reload or before-shortening. Sets MMRY_RESPONSE to the service's answer,
+# {moment, label, memories, count, characters, reportAboveCharacters, overReportedSize}.
+mmry_get_foundation_moment() {
+    [[ "${1:-}" =~ ^[a-z-]+$ ]] || { MMRY_HTTP_CODE="000"; MMRY_RESPONSE="no moment named"; return 1; }
+    _mmry_request GET "/api/memories/foundation?moment=$1"
+}
+
+# The four moments, the moments chosen for each Foundation memory and each moment's size (#33480).
+mmry_get_foundation_overview() {
+    _mmry_request GET "/api/memories/foundation/moments"
 }
 
 mmry_get_memory_by_id() {

@@ -544,6 +544,13 @@ _plant_shared() {
 _cfg() {  # _cfg <file> <url> <auth> <key>
     printf '{\n  "apiUrl": "%s",\n  "authMethod": "%s",\n  "apiKey": "%s"\n}\n' "$2" "$3" "$4" > "$1"
 }
+# Requests for the account's memories: the startup set, and since #33480 the Foundation memories of a
+# moment (/api/memories/foundation?moment=...), which SessionStart and the daily refresh now ask for
+# the per-prompt set. Counting /startup alone stopped seeing the refresh worker's fetch, so a
+# fail-closed check that counted only it could no longer fail. With no log at all counting as none:
+# grep -c on a missing file prints nothing, not 0.
+_memory_fetches() { grep -cE 'api/memories/(startup|foundation)' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true; }
+
 # Nothing delivered: no instruction to read, no file with this account's memories, the planted file
 # untouched, and the Foundation set not stored either.
 _assert_nothing_delivered() {
@@ -556,8 +563,8 @@ _assert_nothing_delivered() {
     ! ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "$what: a Foundation set was stored: $(ls "$TEST_TMPDIR"/mmry-foundation-set.*.md)"; return 1; }
     # No request for them was even made. Counted, with no log at all counting as none: grep -c on a
     # missing file prints nothing, not 0.
-    local fetched; fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
-    [[ "${fetched:-0}" == "0" ]] || { echo "$what: the startup memories were fetched ($fetched requests)"; return 1; }
+    local fetched; fetched="$(_memory_fetches)"
+    [[ "${fetched:-0}" == "0" ]] || { echo "$what: memories were fetched ($fetched requests for the startup set or a Foundation moment)"; return 1; }
     [[ -n "$ctx" ]] || { echo "$what: the session was told nothing at all"; return 1; }
 }
 # THE PROMPTS AFTER A REFUSED START (QA round 1, probe3). SessionStart refused and stored nothing; the
@@ -573,8 +580,8 @@ _assert_prompts_deliver_nothing() {
         [[ "$ctx" != *"$PROD_DIRECTIVE"* && "$ctx" != *"FOUNDATION memories"* ]] || { echo "$what: prompt $i delivered directives: ${ctx:0:300}"; return 1; }
         sleep 6
         ! ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "$what: a Foundation set was stored by prompt $i: $(ls "$TEST_TMPDIR"/mmry-foundation-set.*.md)"; return 1; }
-        fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
-        [[ "${fetched:-0}" == "0" ]] || { echo "$what: prompt $i fetched the startup memories ($fetched requests)"; return 1; }
+        fetched="$(_memory_fetches)"
+        [[ "${fetched:-0}" == "0" ]] || { echo "$what: prompt $i fetched memories ($fetched requests for the startup set or a Foundation moment)"; return 1; }
     done
     [[ "$(_memories_files)" == "mmry-memories.md" ]] || { echo "$what: a memories file was written by a prompt: $(_memories_files | tr '\n' ' ')"; return 1; }
 }
@@ -669,13 +676,13 @@ _refresh_worker() {
     _cfg "$TEST_TMPDIR/cfg-nourl-w.json" "" apikey "$PROD_KEY"
     _refresh_worker "$TEST_TMPDIR/cfg-nourl-w.json"
     ! ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "the worker stored a Foundation set for an unidentified session: $(ls "$TEST_TMPDIR"/mmry-foundation-set.*.md)"; return 1; }
-    fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
-    [[ "${fetched:-0}" == "0" ]] || { echo "the worker fetched the startup memories for an unidentified session ($fetched requests)"; return 1; }
+    fetched="$(_memory_fetches)"
+    [[ "${fetched:-0}" == "0" ]] || { echo "the worker fetched memories for an unidentified session ($fetched requests for the startup set or a Foundation moment)"; return 1; }
     # Control: the same worker, the server named, fetches and stores.
     _cfg "$TEST_TMPDIR/cfg-whole-w.json" "$PROD_URL" apikey "$PROD_KEY"
     _refresh_worker "$TEST_TMPDIR/cfg-whole-w.json"
     ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "control: the worker stored no set once the server was named"; return 1; }
-    fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
+    fetched="$(_memory_fetches)"
     [[ "${fetched:-0}" != "0" ]] || { echo "control: the worker fetched nothing once the server was named"; return 1; }
 }
 
@@ -698,6 +705,9 @@ _refresh_worker() {
     ls "$TEST_TMPDIR"/mmry-foundation-set.*.md >/dev/null 2>&1 || { echo "control: the API-key session stored no set"; return 1; }
     out="$(_claude_prompt_cfg claude-apikey-05 "$TEST_TMPDIR/cfg-apikey5.json" 0)"; ctx="$(_ctx "$out")"
     [[ "$ctx" == *"$PROD_DIRECTIVE"* ]] || { echo "control: the API-key session's prompt delivered nothing: ${ctx:0:300}"; return 1; }
+    # Every request so far is the API-key session's own (its start asks the startup set and, since
+    # #33480, the every-message set). The OAuth session below must add none.
+    local before; before="$(_memory_fetches)"
     # The OAuth session on the same server and credential string: refused at SessionStart, and
     # nothing on any prompt or part after it, with the refresh on and the service ready to answer.
     out="$(_claude_start_cfg claude-oauth-05 "$TEST_TMPDIR/cfg-oauth5.json" "$PROD_DIRECTIVE" "$PROD_NOTE")"; ctx="$(_ctx "$out")"
@@ -712,6 +722,8 @@ _refresh_worker() {
     # The only request for startup memories was the API-key session's own start.
     fetched="$(grep -c 'api/memories/startup' "$TEST_TMPDIR/curl-log.txt" 2>/dev/null || true)"
     [[ "${fetched:-0}" == "1" ]] || { echo "startup memories were fetched $fetched times; the API-key start's one was expected"; return 1; }
+    fetched="$(_memory_fetches)"
+    [[ "${fetched:-0}" == "${before:-0}" ]] || { echo "the OAuth session fetched memories: $before requests before it, $fetched after"; return 1; }
     [[ "$(_file "$TEST_TMPDIR/mmry-memories.md")" == "$_PLANTED" ]] || { echo "the planted shared file was rewritten"; return 1; }
 }
 

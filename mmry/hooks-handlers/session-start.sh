@@ -130,6 +130,18 @@ fi
 
 WORK_DIR="$PWD"
 
+# WHICH MOMENT THIS RUN IS (#33480, DD-172). The account chooses, per Foundation memory, the moments
+# it is sent on. A session starting is "when a conversation starts"; the reload command
+# (/mmry:load-memories on Claude Code, the memory_load tool on Codex) runs this file with --reload,
+# which is "when the assistant reloads memories". Each asks the service for its own moment's
+# memories; nothing here chooses among them. Only the exact word --reload counts: on Codex this file
+# is read into codex-hook.sh's shell, whose own arguments ("session-init") are still in "$@".
+_mmry_moment="conversation-start"
+for _mmry_arg in "$@"; do
+    [[ "$_mmry_arg" == "--reload" ]] && _mmry_moment="reload"
+done
+unset _mmry_arg
+
 # Bug #9 (Intervals #29949): read session_id from the SessionStart hook stdin
 # payload (always present per the Claude Code hook spec). The CLAUDE_SESSION_ID
 # env var is not reliably exported across hook and Bash-tool environments, so
@@ -312,7 +324,7 @@ unset _mmry_idless_status
 # session's file, and the model is never pointed at it) but is left for an older plugin still running
 # here, until it too is a week old.
 _mmry_fnd_sweep() {
-    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' \) -mtime +7 -delete 2>/dev/null || true
+    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' -o -name 'mmry-foundation-moment.*' -o -name 'mmry-foundation-shortening.*' \) -mtime +7 -delete 2>/dev/null || true
 }
 # ON CODEX THE SWEEP RUNS AS THIS FILE ENDS, AFTER ITS OUTPUT IS CLOSED (#33062 fix round 7). It removes
 # week-old records and has nothing to do with the memories, and on Windows the find is two processes,
@@ -362,8 +374,8 @@ fi
 mmry_foundation_memories_name_v "$MMRY_TMPDIR" "$SESSION_ID"
 MEM_FILE="$_MMRY_FND_MEMORIES_NAME"
 
-# Load startup memories
-if ! mmry_get_startup_memories "$WORK_DIR"; then
+# Load startup memories, their Foundation memories the ones chosen for this moment (#33480).
+if ! mmry_get_startup_memories "$WORK_DIR" "" "" "$_mmry_moment"; then
     if [[ "${MMRY_HTTP_CODE:-}" == "403" ]]; then
         # #31195: this used to state the expired trial as fact. A 403 says access was refused; it
         # does not say which of the things gating access is the one that fired, and telling a
@@ -403,23 +415,41 @@ fi
 # Parse JSON response into markdown using the resolved jq (#30624).
 # Stamped with the account it was written for (#32915), as the Foundation set's record line is: a
 # file that somehow reaches the wrong name still says whose it is.
+# Byte for byte what the service sent (#33480): -b for a jq that would otherwise turn each newline it
+# writes, a memory's own included, into CR LF (_mmry_jqb_v; a native Windows jq).
+_mmry_jqb_v
 {
     echo "# MMRY AI — Loaded Memories (account ${_MMRY_FND_ACCT})"
     echo ""
-    "$MMRY_JQ" -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"' <<<"$MMRY_RESPONSE"
+    "$MMRY_JQ" ${_MMRY_JQB:+"$_MMRY_JQB"} -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"' <<<"$MMRY_RESPONSE"
 } > "$MEM_FILE" 2>/dev/null
 
-# Count memories
-# On Codex it is counted below, after the Foundation writer, whose one jq reports the length too
-# (#33062 fix round 7: a jq fewer on Windows). Nothing between here and there reads it.
+# Count memories. Here, from the startup answer, on both hosts (#33480): the Foundation writer below
+# is now given the every-message answer, so its jq can no longer report this length for Codex as it
+# did (#33062 fix round 7). ON CODEX WITH NO PROCESS: every memory in the answer is one object with one
+# "memoryTier" key, and that sequence cannot occur anywhere else in the JSON, because a quote inside a
+# string value is escaped. So the count is the number of times it occurs, found with builtins. An
+# answer that is not an array, or where that finds none but the array is not empty, is counted by jq.
 if (( _mmry_codex == 1 )); then
-    count=""
+    # In bytes (LC_ALL=C): a multibyte locale makes the same work far slower on a large answer.
+    _mmry_count_tier() { local LC_ALL=C; local r="${MMRY_RESPONSE//\"memoryTier\":/}"; count=$(( (${#MMRY_RESPONSE} - ${#r}) / 13 )); }
+    _mmry_count_tier
+    if [[ "$MMRY_RESPONSE" != \[* ]] || { (( count == 0 )) && [[ ! "$MMRY_RESPONSE" =~ ^\[[[:space:]]*\]$ ]]; }; then
+        count="$("$MMRY_JQ" 'length' <<<"$MMRY_RESPONSE" 2>/dev/null || echo 0)"
+        count="${count%$'\r'}"
+    fi
 else
     count="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" 'length' 2>/dev/null || echo 0)"
 fi
 
 # Write the Foundation-only cache the UserPromptSubmit hook re-injects each turn (#30579).
 # Presentation/framing is applied at inject time; this file holds just the data.
+#
+# IT HOLDS THE MEMORIES CHOSEN FOR EVERY MESSAGE, ASKED OF THE SERVICE FOR THAT MOMENT (#33480,
+# DD-172). It used to be the Foundation memories of the startup answer above. They are now the ones
+# chosen for this run's own moment, so the set the per-prompt hook sends is asked for separately
+# (mmry_store_every_message_set), on a start and on a reload alike, and never filtered here. A failed
+# request stores nothing and is reported below exactly as a failed write always was.
 #
 # GUARDED, AND REPORTED (#31411 QA). This call used to be bare, and the comment here used to
 # say "Best-effort", which was true while mmry_write_foundation_cache ended in `|| true` and
@@ -445,7 +475,7 @@ if (( _mmry_codex == 1 )); then
 else
     _mmry_set_file="$(mmry_foundation_set_path "$MMRY_TMPDIR")"
 fi
-if ! mmry_write_foundation_cache "$MMRY_RESPONSE" "$_mmry_set_file" "$SESSION_ID"; then
+if ! mmry_store_every_message_set "$_mmry_set_file" "$SESSION_ID"; then
     # The remedy is the host's own (#31245 merged onto #31411): on Codex there is nothing to type,
     # so the assistant is told it can run the script itself, as the other Codex hints here do.
     if [[ "$(mmry_host)" == "codex" ]]; then
@@ -467,6 +497,11 @@ elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     # reads it. The id-less form is written first; the #32915 mutation runner names that line.
     # shellcheck source=/dev/null
     source "${PLUGIN_ROOT}/hooks-handlers/lib-foundation-switch.sh"
+    # An account with Foundation memories, none chosen for every message, is told that, not that it
+    # has none (#33480): the service said how many it has (MMRY_FND_ACCOUNT_FOUNDATION).
+    if [[ "${MMRY_FND_ACCOUNT_FOUNDATION:-}" =~ ^[1-9][0-9]*$ ]]; then
+        _mmry_fnd_set_empty_notice "$(mmry_host_command_ref foundation-status)" "$MMRY_FND_ACCOUNT_FOUNDATION"
+    fi
     EMPTY_SYSMSG=",\"systemMessage\":\"$(_mmry_json_escape "$MMRY_FND_EMPTY_NOTICE")\""
     _fnd_esid="$(mmry_foundation_sid "$SESSION_ID")"
     _fnd_ekey="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$SESSION_ID" || true)"
@@ -475,16 +510,6 @@ elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     if [[ -n "$_fnd_esid" ]]; then
         mmry_foundation_session_part_v "$_fnd_esid"
         printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
-    fi
-fi
-
-# On Codex the count, from the writer's jq when it got that far, else as Claude Code counts it but on a
-# here-string (jq ignores the newline it adds; two processes fewer on Windows).
-if (( _mmry_codex == 1 )); then
-    if [[ "${MMRY_FND_RESPONSE_LENGTH:-}" =~ ^[0-9]+$ ]]; then
-        count="$MMRY_FND_RESPONSE_LENGTH"
-    else
-        count="$("$MMRY_JQ" 'length' <<<"$MMRY_RESPONSE" 2>/dev/null || echo 0)"
     fi
 fi
 
@@ -538,7 +563,14 @@ fi
 # First-session onboarding: detect zero memories
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it
 # would be read after the model has already decided what to do with the turn (#31385).
-if [[ "$count" == "0" ]]; then
+# A FRESH START IS AN ACCOUNT WITH NO MEMORIES, NOT A MOMENT WITH NONE (#33480). The startup answer now
+# holds only the Foundation memories chosen for this moment, so it can be empty for an account whose
+# Foundation memories are all chosen for other moments. Such an account is not welcomed as new.
+_mmry_fresh=0
+if [[ "$count" == "0" && "${MMRY_FND_WRITTEN_ENTRIES:-0}" == "0" && ! "${MMRY_FND_ACCOUNT_FOUNDATION:-}" =~ ^[1-9] ]]; then
+    _mmry_fresh=1
+fi
+if (( _mmry_fresh == 1 )); then
     # #31245: the closing hint differs by host. There is no slash command to type on Codex.
     # #31743: and so does the way to save. A fresh Codex account is exactly the one a first "remember
     # this" lands on, and naming the script here sent the model to the sandboxed script, which fails
