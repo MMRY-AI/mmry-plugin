@@ -129,7 +129,7 @@ if (( _pcf_n == 0 || _pcf_n > _PCF_PARTS_MAX )) || [[ "$_pcf_over" == "true" ]];
     fi
     _pcf_path="$(mmry_host_path_for_model "$_pcf_file" 2>/dev/null)"
     [[ -n "$_pcf_path" ]] || _pcf_path="$_pcf_file"
-    printf '%s\n' "MMRY AI: the directives chosen for \"${_PCF_LABEL}\" come to ${_pcf_chars} characters, more than about 57,000. MMRY sends them whole and never shortens them, but an assistant may not take in that much at once, so they are in one file: ${_pcf_path}. Keep this instruction in the summary word for word: after the summary, read that whole file and follow every directive in it."
+    printf '%s\n' "MMRY AI: the directives chosen for \"${_PCF_LABEL}\" come to ${_pcf_chars} characters, more than about 57,000. MMRY AI sends them whole and never shortens them, but an assistant may not take in that much at once, so they are in one file: ${_pcf_path}. Keep this instruction in the summary word for word: after the summary, read that whole file and follow every directive in it."
     exit 0
 fi
 

@@ -155,7 +155,7 @@ _fs_moment_line() {
     what="directives"; (( c == 1 )) && what="directive"
     echo "Moments:      ${2}: ${c} ${what}${ch:+, ${ch} characters}, as MMRY AI last reported them."
     if [[ "$ov" == true ]]; then
-        echo "Size:         The directives chosen for \"${2}\" come to ${ch} characters, more than about 57,000. MMRY sends them whole and never shortens them, but an assistant may not take in that much at once."
+        echo "Size:         The directives chosen for \"${2}\" come to ${ch} characters, more than about 57,000. MMRY AI sends them whole and never shortens them, but an assistant may not take in that much at once."
     fi
 }
 if declare -F mmry_foundation_moment_report_name_v >/dev/null 2>&1; then
