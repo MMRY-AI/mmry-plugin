@@ -18,11 +18,14 @@
 
 load '../helpers/test-helper'
 
-# The library in a fresh bash, so each case starts with no cached key.
+# The library in a fresh bash, so each case starts with no cached key. The printing form carries
+# the verdict: it prints the key and exits 0, or prints nothing and exits 1 for a refused identity.
+# (The _v form every handler calls as a bare statement under set -e never fails; it leaves the key
+# empty instead. The last test below holds that contract.)
 #   _key <url> <sign-in>   -> prints the key, exits with the library's verdict (0 key, 1 refused)
 _key() {
     MMRY_API_URL="$1" MMRY_API_KEY="$2" MMRY_AUTH_METHOD=apikey MMRY_CONFIG_FILE="" \
-        bash -c 'source "$1/hooks-handlers/lib-foundation-key.sh"; mmry_foundation_account_key_v; rc=$?; printf "%s" "$_MMRY_FND_ACCT"; exit $rc' _ "$PLUGIN_ROOT"
+        bash -c 'source "$1/hooks-handlers/lib-foundation-key.sh"; mmry_foundation_account_key' _ "$PLUGIN_ROOT"
 }
 _known() {
     MMRY_API_URL="$1" MMRY_API_KEY="$2" MMRY_AUTH_METHOD=apikey MMRY_CONFIG_FILE="" \
@@ -96,12 +99,21 @@ _known() {
     # break there. The environment names nothing, so the file decides.
     printf '{\n  "apiUrl": "https://mmryai.com",\n  "authMethod": "apikey",\n  "apiKey": "abc\ndef"\n}\n' > "$TEST_TMPDIR/cfg.json"
     run env MMRY_API_URL="" MMRY_API_KEY="" MMRY_AUTH_METHOD="" MMRY_CONFIG_FILE="$TEST_TMPDIR/cfg.json" \
-        bash -c 'source "$1/hooks-handlers/lib-foundation-key.sh"; mmry_foundation_account_key_v; rc=$?; printf "%s" "$_MMRY_FND_ACCT"; exit $rc' _ "$PLUGIN_ROOT"
+        bash -c 'source "$1/hooks-handlers/lib-foundation-key.sh"; mmry_foundation_account_key' _ "$PLUGIN_ROOT"
     assert_failure
     assert_output ""
     run env MMRY_API_URL="" MMRY_API_KEY="" MMRY_AUTH_METHOD="" MMRY_CONFIG_FILE="$TEST_TMPDIR/cfg.json" \
         bash -c 'source "$1/hooks-handlers/lib-foundation-key.sh"; mmry_foundation_identity_known_v' _ "$PLUGIN_ROOT"
     assert_failure
+}
+
+@test "#33620: the _v form a handler calls under set -e never fails on a refused identity; it leaves the key empty" {
+    # mmry-client.sh calls mmry_foundation_account_key_v as a bare statement with errexit on (the set
+    # reader and both writers). A refusal that returned 1 there would end the handler mid-way.
+    run env MMRY_API_URL="https://mmryai.com" MMRY_API_KEY=$'abc\ndef' MMRY_AUTH_METHOD=apikey MMRY_CONFIG_FILE="" \
+        bash -c 'set -euo pipefail; source "$1/hooks-handlers/lib-foundation-key.sh"; mmry_foundation_account_key_v; printf "rc0|%s" "$_MMRY_FND_ACCT"' _ "$PLUGIN_ROOT"
+    assert_success
+    assert_output "rc0|"
 }
 
 @test "#33620: the Codex early helper arms nothing for a refused identity (no session part, no key)" {

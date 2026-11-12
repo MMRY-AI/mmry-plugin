@@ -97,14 +97,19 @@ mmry_codex_config_file_v() {
 # TC6). With no credential file at all the key is the client's default identity, as the Foundation
 # path's is: two unconfigured accounts are one identity, and there is nothing to keep apart.
 #
-# Returns 1 when lib-foundation-key.sh could not be loaded. A caller then has no key, and must arm or
-# read NOTHING rather than fall back to a bare name, which would be the defect under another spelling.
+# Returns 1 when lib-foundation-key.sh could not be loaded, and (#33620) when the identity it names is
+# REFUSED, a control character in the server address or the sign-in, which gives no key at all. A
+# caller then has no key, and must arm or read NOTHING rather than fall back to a bare name, which
+# would be the defect under another spelling.
 #   mmry_codex_session_part_v <sid>
 mmry_codex_session_part_v() {
     (( _MMRY_CODEX_KEY_READY == 1 )) || return 1
     mmry_codex_config_file_v
     local MMRY_CONFIG_FILE="$_MMRY_CODEX_CFG" MMRY_HOST="codex"
     mmry_foundation_session_part_v "${1:-}"
+    _MMRY_CODEX_SESSION_PART=""
+    _MMRY_CODEX_KEY=""
+    [[ -n "$_MMRY_FND_ACCT" && -n "$_MMRY_FND_SESSION_PART" ]] || return 1
     _MMRY_CODEX_SESSION_PART="$_MMRY_FND_SESSION_PART"
     _MMRY_CODEX_KEY="$_MMRY_FND_ACCT"
 }
