@@ -136,6 +136,18 @@ _prompt() {
     JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
 }
 _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext // empty'; }
+# True once every start this test made has finished its deferred work (the probe self-update is its
+# last step), or after $1 seconds: a check of what a start left behind must not race its housekeeping.
+_wait_starts() {
+    local i=0 n
+    while (( i < $1 * 4 )); do
+        n=0
+        [[ -f "$TEST_TMPDIR/su-finished-list" ]] && n="$(wc -l < "$TEST_TMPDIR/su-finished-list" | tr -d ' ')"
+        (( ${n:-0} >= STARTS )) && return 0
+        sleep 0.25; i=$((i + 1))
+    done
+    return 1
+}
 _listing() { ls -a "$1" 2>/dev/null | grep -v '^\.\.\?$' | tr '\n' ' '; }
 _old_names_in_tmp() { ls -a "$TMPDIR" 2>/dev/null | grep -E '^\.mmry-codex-(late|start)|^mmry-codex-(session-start|first-prompt)\.log$' | tr '\n' ' '; }
 
@@ -220,6 +232,7 @@ _plant() {
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
     local after; after="$(ls -la "$HAND" | tail -n +2)"
     [[ "$after" == "$before" ]] || { echo "the start wrote into another user's folder: before [$before] after [$after]"; return 1; }
+    _wait_starts 60 || true
     [ -z "$(_old_names_in_tmp)" ] || { echo "the start fell back to the shared temp folder: $(_old_names_in_tmp)"; return 1; }
 }
 
@@ -241,6 +254,25 @@ _plant() {
     local after; after="$(ls -la "$elsewhere" | tail -n +2)"
     [[ "$after" == "$before" ]] || { echo "the start wrote through the link: before [$before] after [$after]"; return 1; }
     [ -L "$HAND" ] || { echo "the link was replaced"; return 1; }
+}
+
+@test "#33231: a hand-off location that is not a directory (a plain file at its name) is refused on every platform: the start arms nothing, writes nothing beside it, answers in time with its session id, and the first prompt says nothing" {
+    # The refused path exercised where symlinks and ownership cannot be made: a file squatting the name.
+    printf 'squatter\n' > "$HAND"
+    _start file-1
+    assert_success
+    run _context
+    assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
+    # The start still learned its session id from the payload (the hook drains stdin for it, so it must
+    # be handed on privately even with no folder): no warning, and the memories file is named by it.
+    refute_output --partial "could not be read from stdin"
+    assert_output --partial "mmry-memories.${KEY}.file-1.md"
+    [ -f "$HAND" ] && [[ "$(cat "$HAND")" == "squatter" ]] || { echo "the squatting file was replaced or removed"; return 1; }
+    _wait_starts 60 || true
+    [ -z "$(_old_names_in_tmp)" ] || { echo "the start wrote hand-off files to the shared temp folder: $(_old_names_in_tmp)"; return 1; }
+    _prompt file-1
+    assert_success
+    [ -z "$JSON" ] || { echo "the first prompt said something with no folder: $JSON"; return 1; }
 }
 
 @test "#33231: a marker or hand-off file that is itself a link is refused, even inside the owner's own folder" {
@@ -439,7 +471,7 @@ _mutant_root() {
     _modes_observable || skip "symlinks cannot be made as a plain user under Git Bash on Windows; this runs on the Linux and macOS CI legs"
     local root; root="$(_mutant_root)"
     _rep_all "$root/hooks-handlers/lib-codex-key.sh" '! -L "$d"' '-e "$d"' || { echo "no link check in lib-codex-key.sh to remove: the mutation is a no-op"; return 1; }
-    _rep_all "$root/hooks-handlers/codex-first-prompt.sh" '! -L "$1"' '-e "$1"' || { echo "no link check in codex-first-prompt.sh to remove: the mutation is a no-op"; return 1; }
+    _rep_all "$root/hooks-handlers/lib-codex-key.sh" '! -L "$1"' '-e "$1"' || { echo "no file link check in lib-codex-key.sh to remove: the mutation is a no-op"; return 1; }
     local elsewhere="$TEST_TMPDIR/elsewhere"
     (umask 077 && mkdir "$elsewhere")
     _plant mut-link-1 "$elsewhere"
@@ -454,7 +486,7 @@ _mutant_root() {
     _can_chown_away || skip "planting as another user needs passwordless sudo and a 'nobody' user (the GitHub runners have both)"
     local root; root="$(_mutant_root)"
     _rep_all "$root/hooks-handlers/lib-codex-key.sh" '-O "$d"' '-e "$d"' || { echo "no ownership check in lib-codex-key.sh to remove: the mutation is a no-op"; return 1; }
-    _rep_all "$root/hooks-handlers/codex-first-prompt.sh" '-O "$1"' '-e "$1"' || { echo "no ownership check in codex-first-prompt.sh to remove: the mutation is a no-op"; return 1; }
+    _rep_all "$root/hooks-handlers/lib-codex-key.sh" '-O "$1"' '-e "$1"' || { echo "no file ownership check in lib-codex-key.sh to remove: the mutation is a no-op"; return 1; }
     mkdir -p "$HAND"
     _plant mut-own-1 "$HAND"
     chmod 777 "$HAND"

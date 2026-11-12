@@ -366,9 +366,27 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     # The payload, read at the top of this file with builtins (Codex writes it and closes stdin), is
     # passed on from a file (a here-string would not parse under dash). If the file cannot be written,
     # session-start.sh reads what is left of stdin, as before.
-    if [[ ! -t 0 && -n "$_mmry_dir" ]]; then
-        _mmry_in="${_mmry_dir}/.mmry-codex-start.payload.$$"
-        printf '%s' "$_mmry_payload" > "$_mmry_in" 2>/dev/null || _mmry_in=""
+    if [[ ! -t 0 ]]; then
+        if [[ -n "$_mmry_dir" ]]; then
+            _mmry_in="${_mmry_dir}/.mmry-codex-start.payload.$$"
+            printf '%s' "$_mmry_payload" > "$_mmry_in" 2>/dev/null || _mmry_in=""
+        else
+            # NO PRIVATE FOLDER (refused or unmakeable): the payload still has to reach session-start.sh,
+            # because this hook has already drained stdin for it, and without it the start would warn
+            # that it could not learn its session id. So it goes through the temp folder, but as the
+            # client makes its own request files (#33480, _mmry_mktemp_v): created exclusively under
+            # noclobber, owner-only by the umask above, and used only if it is then a regular file and
+            # not a link, so nothing is ever written through a name another user planted. Failing that,
+            # session-start.sh reads what is left of stdin, as before.
+            _mmry_in="${TMPDIR:-/tmp}/.mmry-codex-start.payload.$$.${RANDOM}${RANDOM}"
+            set -C
+            if { printf '%s' "$_mmry_payload" > "$_mmry_in"; } 2>/dev/null && [[ -f "$_mmry_in" && ! -L "$_mmry_in" ]]; then
+                :
+            else
+                _mmry_in=""
+            fi
+            set +C
+        fi
     fi
     # From here the work is started, so the marker stays armed whatever happens to this hook.
     (( _mmry_armed == 1 )) && _mmry_armed=2
