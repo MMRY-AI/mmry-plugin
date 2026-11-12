@@ -48,6 +48,11 @@
 
 # NOTE: deliberately NOT `set -e`, a failure here must never fail the user's prompt.
 set -uo pipefail 2>/dev/null || true
+# EVERY FILE THIS HOOK WRITES IS OWNER-ONLY (#33652, DD-182): the prepared copy, claim, result, status,
+# outcome and by-reference files hold the account's directives, and the supervisor writes some of them
+# before it loads the client (which sets the same umask for the worker). A builtin: no process, on
+# any part of any prompt.
+umask 077
 
 # WITHOUT A PROCESS WHEN THE PATH SAYS IT (#31893). This was `$(cd "$(dirname "$0")/.." && pwd)`, three
 # processes on Windows paid by all six parts before anything else, so eighteen a prompt, and under load

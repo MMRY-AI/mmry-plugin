@@ -41,8 +41,31 @@
 # It runs only when a late marker exists: both the sh line in codex-hooks.json and codex-hook.cmd look
 # for one with no process started, so every other prompt of every conversation pays a file lookup.
 set -euo pipefail
+# EVERYTHING THIS WRITES IS OWNER-ONLY (#33231, DD-182): its claim and its log. A builtin.
+umask 077
 
+# The shared temp folder is named here for one thing only: the sweep of the names a previous plugin
+# wrote there, which nothing reads any more (#33231).
 _T="${TMPDIR:-/tmp}"
+
+# THE PER-USER FOLDER FIRST, AND NOTHING WITHOUT IT (#33231, DD-182). The marker and the hand-off live
+# in <CODEX_HOME, else $HOME/.codex>/mmry-handoff (lib-codex-key.sh, builtins only), and are read only
+# when that is this user's own directory and not a link. A folder that is a link, another user's, or
+# absent is refused: nothing is read, nothing is delivered and nothing is said. Not even logged, because
+# the log lives in the folder. Forward slashes first and only when there is a backslash, as
+# codex-hook.sh does: this file is found from a Windows path when codex-hook.cmd started it.
+_self="${BASH_SOURCE[0]}"
+case "$_self" in *\*) _self="${_self//\//}" ;; esac
+[[ "$_self" == */* ]] || _self="./${_self}"
+_D=""
+if [[ -f "${_self%/*}/lib-codex-key.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${_self%/*}/lib-codex-key.sh" 2>/dev/null || true
+    if declare -F mmry_codex_private_dir_ok >/dev/null 2>&1; then
+        mmry_codex_private_dir_v 2>/dev/null && mmry_codex_private_dir_ok 2>/dev/null && _D="$_MMRY_CODEX_DIR"
+    fi
+fi
+[[ -n "$_D" ]] || exit 0
 
 _sid=""
 if [[ ! -t 0 ]]; then
@@ -55,8 +78,9 @@ fi
 
 # ONE LINE PER RUN THAT GOT PAST THE GATE, for support: what it found and what it did. The bash clock
 # where there is one (4.2+), so no process is started for it; the file is overwritten past 200 lines.
+# In the per-user folder (#33231): it names the session and what was delivered.
 _log() {
-    local f="${_T}/mmry-codex-first-prompt.log" n=0 l
+    local f="${_D}/mmry-codex-first-prompt.log" n=0 l
     [[ -f "$f" ]] && while IFS= read -r l; do n=$((n + 1)); done < "$f"
     (( n > 200 )) && : > "$f"
     # bash 3.2 (macOS) has no %(...)T: the line goes without its time there.
@@ -66,26 +90,22 @@ _log() {
 
 _sweep() {
     # A marker or hand-off no conversation collected (it ended before its first prompt) would keep
-    # the gate open for every prompt on this machine. Half a day on, it is nobody's.
+    # the gate open for every prompt on this machine. Half a day on, it is nobody's. The old names in
+    # the temp folder, which a previous plugin wrote and nothing reads now, go the same way.
+    find "$_D" -maxdepth 1 -type f \( -name '.mmry-codex-late.*' -o -name '.mmry-codex-start.*' \) -mmin +720 -delete 2>/dev/null || true
     find "$_T" -maxdepth 1 -type f \( -name '.mmry-codex-late.*' -o -name '.mmry-codex-start.*' \) -mmin +720 -delete 2>/dev/null || true
 }
 
 [[ -n "$_sid" ]] || { _log "no session id in the payload"; _sweep; exit 0; }
-# The account key, from lib-codex-key.sh beside this file, builtins only (#33617). Forward slashes first
-# and only when there is a backslash, as codex-hook.sh does: this file is found from a Windows path when
-# codex-hook.cmd started it. Without a key nothing is read: a bare name is never looked for.
-_self="${BASH_SOURCE[0]}"
-case "$_self" in *\\*) _self="${_self//\\//}" ;; esac
-[[ "$_self" == */* ]] || _self="./${_self}"
+# The account key, from lib-codex-key.sh above, builtins only (#33617). Without a key nothing is read: a
+# bare name is never looked for.
 _part="" _key=""
-if [[ -f "${_self%/*}/lib-codex-key.sh" ]]; then
-    # shellcheck source=/dev/null
-    source "${_self%/*}/lib-codex-key.sh" 2>/dev/null || true
-    mmry_codex_session_part_v "$_sid" 2>/dev/null && _part="$_MMRY_CODEX_SESSION_PART" _key="$_MMRY_CODEX_KEY"
-fi
+declare -F mmry_codex_session_part_v >/dev/null 2>&1 \
+    && mmry_codex_session_part_v "$_sid" 2>/dev/null && _part="$_MMRY_CODEX_SESSION_PART" _key="$_MMRY_CODEX_KEY"
 [[ -n "$_part" && -n "$_key" ]] || { _log "no account key could be computed: nothing is read"; exit 0; }
-_late="${_T}/.mmry-codex-late.${_part}"
-[[ -f "$_late" ]] || { _log "nothing late for this session"; _sweep; exit 0; }
+_late="${_D}/.mmry-codex-late.${_part}"
+# The marker must be this user's own regular file, not a link (#33231): anything else is not read.
+mmry_codex_own_file "$_late" || { _log "nothing late for this session"; _sweep; exit 0; }
 
 _pid="" _state=""
 { IFS= read -r _pid; IFS= read -r _state; } < "$_late" 2>/dev/null || true
@@ -97,7 +117,7 @@ if ! [[ "$_pid" =~ $_re_pid ]] || (( ${#_pid} > 10 )); then
     rm -f "$_late" 2>/dev/null
     exit 0
 fi
-_hand="${_T}/.mmry-codex-start.${_part}.${_pid}"
+_hand="${_D}/.mmry-codex-start.${_part}.${_pid}"
 # The session start arms the marker as it begins (fix round 2) and settles it: "delivered" when the
 # memories went out in time, "none" when it started no work. Either way there is nothing to hand over.
 if [[ "$_state" == delivered || "$_state" == none ]]; then
@@ -189,14 +209,22 @@ done
 
 _ans="" _refused=0
 if [[ -f "${_hand}.ready" ]]; then
-    IFS= read -r -d '' _ans < "${_hand}.out" 2>/dev/null || true
+    # THE FIRST GUARD (#33231, DD-182): the hand-off is read only when .ready and .out are this user's
+    # own regular files, not links. Anything else at those names is refused, cleared below with the
+    # marker, and the person is told as for memories that never arrived.
+    if mmry_codex_own_file "${_hand}.ready" && mmry_codex_own_file "${_hand}.out"; then
+        IFS= read -r -d '' _ans < "${_hand}.out" 2>/dev/null || true
+    else
+        _refused=1
+        _log "refused the late start ${_pid}: its hand-off is not this user's own regular file"
+    fi
     # THE SECOND GUARD (#33617, DD-179): an answer that names a memories file names THIS account's, or it
     # is refused. The file is mmry-memories.<key>.<session>.md (lib-foundation-key.sh), so a path under
     # another key is another account's memories, whatever name the hand-off came under. Cheap, and it
     # holds even if a writer forgets the key. A refused hand-off is cleared below with the marker, and the
     # person is told as for memories that never arrived, which for this account they did not.
     _mark='Read them now: '
-    if [[ "$_ans" == *"$_mark"* && "$_ans" != *"mmry-memories.${_key}."* ]]; then
+    if (( _refused == 0 )) && [[ "$_ans" == *"$_mark"* && "$_ans" != *"mmry-memories.${_key}."* ]]; then
         _refused=1
         _log "refused the late start ${_pid}: its memories file is not this account's"
     fi

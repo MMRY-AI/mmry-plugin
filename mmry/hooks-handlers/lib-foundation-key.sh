@@ -75,6 +75,23 @@ _MMRY_FND_ACCT_FOR=""
 # Whether a server address was actually GIVEN, by the environment or the config, as opposed to the
 # default applied below when none was (#32915, mmry_foundation_identity_known_v).
 _MMRY_FND_ID_URL_GIVEN=0
+# Whether the identity was REFUSED (#33620): a control character in the server address or the sign-in.
+_MMRY_FND_ID_REFUSED=0
+
+# NO CONTROL CHARACTER IN EITHER PART OF THE IDENTITY (#33620). The key below is hashed over
+# "<url>\n<key>", and a line break inside either part moves that boundary: ("https://a.test", "x\ny")
+# and ("https://a.test\nx", "y") are two different pairs that hash the same bytes (finding S3 of the
+# independent QA of #33363, 2026-11-09). Using it needs control of the person's own settings, so the
+# risk is low, but every Foundation file and the Codex hand-off are kept apart by this key (#32915,
+# #33363, #33617), and that separation should not depend on it. So a part holding any control
+# character (bytes 0x00 to 0x1F, or 0x7F) is refused before the key is made, and the join stays as it
+# was: no valid pair holds one (setup writes the key the service issued, hex, and a plain URL), so no
+# existing account's key, and so none of its files, changes. The bytes are tested under the C locale
+# so that a multibyte character is never read as one, on any platform. A builtin pattern: no process.
+_mmry_fnd_has_cntrl() {
+    local LC_ALL=C
+    [[ "$1" == *[[:cntrl:]]* ]]
+}
 
 # Lowercase ASCII with no process, as lib-foundation-switch.sh and lib-host.sh do: bash 3.2 has no ${x,,}.
 _mmry_fnd_key_tolower_v() {
@@ -166,14 +183,31 @@ mmry_foundation_identity_v() {
     [[ -n "$url" ]] || url="$_MMRY_FND_DEFAULT_URL"
     _mmry_fnd_key_tolower_v "$url"; url="$_MMRY_FND_LOWER"
     while [[ "$url" == */ && ${#url} -gt 1 ]]; do url="${url%/}"; done
+    # REFUSED (#33620): a control character in either part. The identity is then not known (below),
+    # the credential is dropped so that nothing downstream can key a file by it, and the key is empty.
+    _MMRY_FND_ID_REFUSED=0
+    if _mmry_fnd_has_cntrl "$url" || _mmry_fnd_has_cntrl "$key"; then
+        _MMRY_FND_ID_REFUSED=1
+        _MMRY_FND_ID_URL_GIVEN=0
+        key=""
+    fi
     _MMRY_FND_ID_URL="$url"
     _MMRY_FND_ID_KEY="$key"
 }
 
 # THE KEY, into _MMRY_FND_ACCT. Recomputed only when the identity it was computed from has changed, so
-# a handler that asks many times pays once.
+# a handler that asks many times pays once. A REFUSED identity (#33620) has NO key: _MMRY_FND_ACCT is
+# left EMPTY and this still returns 0, because mmry-client.sh calls it as a bare statement with errexit
+# on (the set reader and both writers), where a non-zero return would end the handler mid-way. Every
+# name function below builds no name from an empty key, and mmry_foundation_identity_known_v is false,
+# which is the question every handler asks before it loads, writes or serves anything (#32915).
 mmry_foundation_account_key_v() {
     mmry_foundation_identity_v
+    if (( _MMRY_FND_ID_REFUSED == 1 )); then
+        _MMRY_FND_ACCT=""
+        _MMRY_FND_ACCT_FOR=""
+        return 0
+    fi
     local id="${_MMRY_FND_ID_URL}"$'\n'"${_MMRY_FND_ID_KEY}"
     if [[ -z "$_MMRY_FND_ACCT" || "$_MMRY_FND_ACCT_FOR" != "$id" ]]; then
         mmry_foundation_hash_v "$id"
@@ -182,21 +216,31 @@ mmry_foundation_account_key_v() {
     fi
 }
 
-# The printing form, for a caller that takes it by command substitution (tests, mostly).
+# The printing form, for a caller that takes it by command substitution (tests, mostly). It carries
+# the verdict: the key and 0, or nothing and 1 for a refused identity (#33620).
 mmry_foundation_account_key() {
     mmry_foundation_account_key_v
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 1
     printf '%s' "$_MMRY_FND_ACCT"
 }
 
 # The two keyed names, for callers that have only this file: "<dir>/mmry-foundation-set.<key>.md" and
 # "<dir>/mmry-foundation.session.<key>". mmry-client.sh's mmry_foundation_set_path and
 # mmry_foundation_session_path are these, with the client's temp directory as the default.
+# EVERY NAME FUNCTION GIVES AN EMPTY NAME FOR A REFUSED IDENTITY (#33620): a name built from an empty
+# key, "mmry-foundation-set..md", would be one file every refused identity on the machine shared, which
+# is the defect under another spelling. An empty name is never read ([[ -f "" ]] is false) and never
+# written (a redirection to "" fails, and every writer already tolerates that).
 mmry_foundation_set_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_SET_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_SET_NAME="${1}/mmry-foundation-set.${_MMRY_FND_ACCT}.md"
 }
 mmry_foundation_session_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_SESSION_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_SESSION_NAME="${1}/mmry-foundation.session.${_MMRY_FND_ACCT}"
 }
 
@@ -214,6 +258,8 @@ mmry_foundation_identity_known_v() {
     # environment holds now. A caller without the client (the per-prompt supervisor) has no record
     # and the scan above decides.
     [[ -n "${_MMRY_CFG_URL_GIVEN:-}" ]] && given="$_MMRY_CFG_URL_GIVEN"
+    # A refused identity (#33620) is never known, whatever the client recorded about the server.
+    (( _MMRY_FND_ID_REFUSED == 0 )) || return 1
     [[ -n "$_MMRY_FND_ID_KEY" && "$given" == 1 ]]
 }
 
@@ -242,6 +288,8 @@ mmry_foundation_memories_name_v() {
     local sid="${2:-}"
     [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || sid=""
     mmry_foundation_account_key_v
+    _MMRY_FND_MEMORIES_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_MEMORIES_NAME="${1}/mmry-memories.${_MMRY_FND_ACCT}${sid:+.$sid}.md"
 }
 
@@ -252,20 +300,28 @@ mmry_foundation_memories_name_v() {
 # fell back to one shared mmry-foundation.byref.md. Each is now the account's own.
 mmry_foundation_log_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_LOG_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_LOG_NAME="${1}/mmry-foundation.${_MMRY_FND_ACCT}.log"
 }
 mmry_foundation_refresh_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_REFRESH_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_REFRESH_NAME="${1}/.mmry-foundation-refresh.${_MMRY_FND_ACCT}"
 }
 mmry_foundation_refresh_checked_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_REFRESH_CHECKED_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_REFRESH_CHECKED_NAME="${1}/.mmry-foundation-refresh-checked.${_MMRY_FND_ACCT}"
 }
 # "<dir>/mmry-foundation.byref.<key>.<session id or token>.md", or without the last part when the
 # caller has neither: still the account's own, never a shared name.
 mmry_foundation_byref_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_BYREF_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_BYREF_NAME="${1}/mmry-foundation.byref.${_MMRY_FND_ACCT}${2:+.$2}.md"
 }
 
@@ -276,6 +332,8 @@ mmry_foundation_byref_name_v() {
 # how many Foundation memories the account has. The status check reads it; it needs no network.
 mmry_foundation_moment_report_name_v() {
     mmry_foundation_account_key_v
+    _MMRY_FND_MOMENT_REPORT_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_MOMENT_REPORT_NAME="${1}/mmry-foundation-moment.${_MMRY_FND_ACCT}.${2:-none}"
 }
 
@@ -305,6 +363,8 @@ mmry_foundation_session_part_v() {
     local v="${1:-}"
     [[ "$v" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || v=""
     mmry_foundation_account_key_v
+    _MMRY_FND_SESSION_PART=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"
 }
 
@@ -313,5 +373,7 @@ mmry_foundation_session_part_v() {
 # session id. "<dir>/mmry-foundation-shortening.<key>.<sid or none>.md".
 mmry_foundation_shortening_name_v() {
     mmry_foundation_session_part_v "${2:-}"
+    _MMRY_FND_SHORTENING_NAME=""
+    [[ -n "$_MMRY_FND_SESSION_PART" ]] || return 0
     _MMRY_FND_SHORTENING_NAME="${1}/mmry-foundation-shortening.${_MMRY_FND_SESSION_PART}.md"
 }

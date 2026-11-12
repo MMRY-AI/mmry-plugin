@@ -48,6 +48,11 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 set -euo pipefail
+# EVERYTHING THIS HOOK AND ITS CHILDREN WRITE IS OWNER-ONLY (#33652, #33231, DD-182). The memories
+# file, the Foundation set and markers, the hand-off and its logs are one person's; on a machine where
+# several people share a temp folder the invoking umask (commonly 022) let every other user read them.
+# A builtin, inherited by every handler started below: no process on the budgeted start.
+umask 077
 
 HANDLER_NAME="${1:-}"
 [[ -n "$HANDLER_NAME" ]] || exit 0
@@ -94,13 +99,25 @@ fi
 #     and the deferred work remove it without delivering anything;
 #   - a way out below that starts no work at all rewrites it "none" (the EXIT trap), so the first
 #     prompt does not wait for work that was never started.
-_mmry_payload="" _mmry_in="" _mmry_hand="" _mmry_late_file="" _mmry_armed=0
+_mmry_payload="" _mmry_in="" _mmry_hand="" _mmry_late_file="" _mmry_armed=0 _mmry_dir=""
 if [[ "$HANDLER_NAME" == "session-init" && ! -t 0 ]]; then
     IFS= read -r -d '' -t 5 _mmry_payload || true
+    # THE PER-USER FOLDER FIRST (#33231, DD-182): the marker, the hand-off, the saved payload and the
+    # start's log live in <CODEX_HOME, else $HOME/.codex>/mmry-handoff, created 700 when absent and
+    # used only when it is this user's own directory and not a link (lib-codex-key.sh). Without it
+    # nothing of the kind is written anywhere: no hand-off is armed, the payload goes by stdin and
+    # the log to /dev/null, never to the shared temp folder.
+    if [[ -f "${_mmry_self%/*}/lib-codex-key.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "${_mmry_self%/*}/lib-codex-key.sh" 2>/dev/null || true
+        if declare -F mmry_codex_private_dir_ready >/dev/null 2>&1; then
+            mmry_codex_private_dir_v 2>/dev/null && mmry_codex_private_dir_ready 2>/dev/null && _mmry_dir="$_MMRY_CODEX_DIR"
+        fi
+    fi
     # The session id names the hand-off: the same characters the per-prompt hook accepts, and no dot,
-    # so an id cannot reach outside the temp directory or name another conversation's file.
+    # so an id cannot reach outside the folder or name another conversation's file.
     _mmry_re_sid='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"'
-    if [[ "$_mmry_payload" =~ $_mmry_re_sid ]]; then
+    if [[ -n "$_mmry_dir" && "$_mmry_payload" =~ $_mmry_re_sid ]]; then
         # THE NAMES CARRY THE ACCOUNT, <key>.<session>, NOT THE ID ALONE (#33617, DD-179). Two accounts on
         # one machine can share a session id (a conversation resumed under a second account, an id passed
         # by hand), and the independent QA of #33363 (S1) saw account B's first prompt handed account A's
@@ -110,14 +127,13 @@ if [[ "$HANDLER_NAME" == "session-init" && ! -t 0 ]]; then
         # credential, with builtins only. Without the helper there is no key, and then NO hand-off is
         # armed and the start gives its old notice: a bare name is never written again.
         _mmry_part=""
-        if [[ -f "${_mmry_self%/*}/lib-codex-key.sh" ]]; then
-            # shellcheck source=/dev/null
-            source "${_mmry_self%/*}/lib-codex-key.sh" 2>/dev/null || true
+        if declare -F mmry_codex_session_part_v >/dev/null 2>&1; then
             mmry_codex_session_part_v "${BASH_REMATCH[1]}" 2>/dev/null && _mmry_part="$_MMRY_CODEX_SESSION_PART"
         fi
         if [[ -n "$_mmry_part" ]]; then
-            _mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${_mmry_part}.$$"
-            _mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${_mmry_part}"
+            # In the per-user folder (#33231, DD-182), never the shared temp folder.
+            _mmry_hand="${_mmry_dir}/.mmry-codex-start.${_mmry_part}.$$"
+            _mmry_late_file="${_mmry_dir}/.mmry-codex-late.${_mmry_part}"
             # The pid ends with a newline, so every bash reads it back as a whole line.
             if printf '%s\n' "$$" > "$_mmry_late_file" 2>/dev/null; then
                 _mmry_armed=1
@@ -268,7 +284,13 @@ _mmry_codex_ss() {
 _mmry_codex_drain() {
     local ans=""
     IFS= read -r -d '' ans
-    printf '%s' "$ans" > "${_mmry_hand}.out" 2>/dev/null && : > "${_mmry_hand}.ready" 2>/dev/null
+    # BEFORE ANYTHING IS EMITTED (#33231, DD-182): the folder is still this user's own directory and
+    # not a link, and nothing stands at the two names that could be written through (a link). Else
+    # the answer goes to the reader alone and no hand-off is written; the first prompt, finding no
+    # .ready, says the memories were not loaded, which for a folder someone tampered with is right.
+    if mmry_codex_private_dir_ok 2>/dev/null && [[ ! -L "${_mmry_hand}.out" && ! -L "${_mmry_hand}.ready" ]]; then
+        printf '%s' "$ans" > "${_mmry_hand}.out" 2>/dev/null && : > "${_mmry_hand}.ready" 2>/dev/null
+    fi
     # To the reader, if it is still listening. When it gave up the pipe is closed, and this ends here.
     printf '%s' "$ans"
 }
@@ -305,7 +327,10 @@ _mmry_codex_start() {
             rm -f "${_mmry_hand}.out" "${_mmry_hand}.ready" "${_mmry_hand}.pid" "${_mmry_hand}.claim" 2>/dev/null
         fi
     fi
-    # Hand-offs and markers no conversation collected (it ended before its first prompt), half a day on.
+    # Hand-offs and markers no conversation collected (it ended before its first prompt), half a day on:
+    # in the per-user folder, and under the old names in the temp folder a previous plugin wrote to
+    # (never read since #33231; cleared here so an upgrade leaves nothing behind).
+    [[ -n "$_mmry_dir" ]] && find "$_mmry_dir" -maxdepth 1 -type f \( -name '.mmry-codex-start.*' -o -name '.mmry-codex-late.*' \) -mmin +720 -delete 2>/dev/null || true
     find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \( -name '.mmry-codex-start.*' -o -name '.mmry-codex-late.*' \) -mmin +720 -delete 2>/dev/null || true
 }
 
@@ -333,12 +358,16 @@ if [[ "$HANDLER_NAME" == "session-init" ]]; then
     fi
     # What the launcher had spent before this shell's clock started; the reader adds its own clock to it.
     _mmry_off=$(( _mmry_spent - SECONDS ))
-    _mmry_errlog="${TMPDIR:-/tmp}/mmry-codex-session-start.log"
+    # The start's log and the saved payload are the user's own (#33231, DD-182): in the per-user folder
+    # when there is one, else nowhere (the log to /dev/null, the payload by stdin). Never the shared
+    # temp folder: the log can carry the service's error text, the payload the working directory.
+    _mmry_errlog=/dev/null
+    [[ -n "$_mmry_dir" ]] && _mmry_errlog="${_mmry_dir}/mmry-codex-session-start.log"
     # The payload, read at the top of this file with builtins (Codex writes it and closes stdin), is
     # passed on from a file (a here-string would not parse under dash). If the file cannot be written,
     # session-start.sh reads what is left of stdin, as before.
-    if [[ ! -t 0 ]]; then
-        _mmry_in="${TMPDIR:-/tmp}/.mmry-codex-start.payload.$$"
+    if [[ ! -t 0 && -n "$_mmry_dir" ]]; then
+        _mmry_in="${_mmry_dir}/.mmry-codex-start.payload.$$"
         printf '%s' "$_mmry_payload" > "$_mmry_in" 2>/dev/null || _mmry_in=""
     fi
     # From here the work is started, so the marker stays armed whatever happens to this hook.
