@@ -162,7 +162,8 @@ _codex_prompt() {
 # What a failing first-prompt check needs to show: the hook's whole output (stdout and stderr), the
 # late markers and hand-offs in the temp folder, and the handler's own log.
 _prompt_diag() {
-    local t="${TMPDIR:-/tmp}"
+    # The hand-off lives in the account's own folder, <CODEX_HOME>/mmry-handoff (#33231, DD-182).
+    local t="$CX/mmry-handoff"
     echo "first-prompt hook output (stdout+stderr): ${PROMPT_OUT:-<none>}"
     echo "late files in $t: $(ls -a "$t" 2>/dev/null | grep -E '^\.mmry-codex-(late|start)' | tr '\n' ' ')"
     echo "handler log: $(tail -3 "$t/mmry-codex-first-prompt.log" 2>/dev/null | tr '\n' ' ')"
@@ -430,7 +431,7 @@ EOF
     _slow_curl "/api/memories/startup" 30
     _codex_start 23
     local pf
-    pf="$(ls "${TMPDIR:-/tmp}"/.mmry-codex-start."$(_cx_part budget-23)".*.pid 2>/dev/null | head -1)"
+    pf="$(ls "$CX/mmry-handoff"/.mmry-codex-start."$(_cx_part budget-23)".*.pid 2>/dev/null | head -1)"
     [ -s "$pf" ] || { echo "the session start recorded no work for the first prompt to watch: $(ls -a "${TMPDIR:-/tmp}" | grep mmry-codex | tr '\n' ' ')"; return 1; }
     kill "$(cat "$pf")"
     _codex_prompt 23
@@ -523,7 +524,9 @@ EOF
     # hand-off, and had not yet marked "delivered" when the first prompt looked. Nothing is to be said
     # twice, and a claim already taken must not end the hook's shell: under sh (bash in POSIX mode on
     # Windows and macOS) a failed redirection on `:` would, and Codex reports that as a failed hook.
-    local t="${TMPDIR:-/tmp}" part
+    # In the account's own folder (#33231, DD-182), as the start would have armed it.
+    local t="$CX/mmry-handoff" part
+    mkdir -m 700 "$t"
     part="$(_cx_part budget-27)"
     printf '4242\n' > "$t/.mmry-codex-late.$part"
     printf '4242\n' > "$t/.mmry-codex-start.$part.4242.claim"
@@ -555,25 +558,28 @@ EOF
     cmd="$(jq -r '[.hooks.UserPromptSubmit[].hooks[] | select(.command | test("codex-first-prompt"))][0].command // empty' "$ROOT/hooks/codex-hooks.json")"
     [ -n "$cmd" ]
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "mkdir -p \"\$TMPDIR\" && $cmd" </dev/null
+    # The gate looks in the account's own folder, <CODEX_HOME>/mmry-handoff (#33231, DD-182).
+    run env PLUGIN_ROOT="$ROOT" CODEX_HOME="$CX" sh -c "$cmd" </dev/null
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate let the hook run with nothing pending"; return 1; }
     # And a pending late start opens it.
-    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.x"
-    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "$cmd" </dev/null
+    mkdir -p "$CX/mmry-handoff"
+    : > "$CX/mmry-handoff/.mmry-codex-late.x"
+    run env PLUGIN_ROOT="$ROOT" CODEX_HOME="$CX" sh -c "$cmd" </dev/null
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate stayed shut with a late start pending"; return 1; }
 }
 
 @test "R1: on Windows, with no late start pending, codex-hook.cmd exits before it looks for bash" {
     case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    mkdir -p "$TEST_TMPDIR/gate-tmp"
-    local wtmp; wtmp="$(cygpath -w "$TEST_TMPDIR/gate-tmp")"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
+    # The launcher looks in the account's own folder, %CODEX_HOME%\mmry-handoff (#33231, DD-182).
+    local wcx; wcx="$(cygpath -w "$CX")"
+    run env CODEX_HOME="$wcx" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd started bash with nothing pending"; return 1; }
-    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.x"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
+    mkdir -p "$CX/mmry-handoff"
+    : > "$CX/mmry-handoff/.mmry-codex-late.x"
+    run env CODEX_HOME="$wcx" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd stayed shut with a late start pending"; return 1; }
 }
 
@@ -581,15 +587,16 @@ EOF
     # The way Codex runs it on Windows: cmd.exe, the launcher, Git's bash, and codex-hook.sh started by
     # its Windows path (C:\...\codex-hook.sh). A late start and its finished hand-off are waiting.
     case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
-    local g="$TEST_TMPDIR/gate-tmp" wtmp part key
-    mkdir -p "$g"; wtmp="$(cygpath -w "$g")"
-    # The account's own keyed names (#33617), and its own memories file in the answer, as on a real
-    # Windows Codex, where CODEX_HOME names the home the credential sits in.
+    # In the account's own folder under CODEX_HOME (#33231, DD-182), which is also where the
+    # credential sits, as on a real Windows Codex.
+    local g="$CX/mmry-handoff" part key
+    mkdir -m 700 "$g"
+    # The account's own keyed names (#33617), and its own memories file in the answer.
     part="$(_cx_part win-1)"; key="${part%.win-1}"
     printf '4242' > "$g/.mmry-codex-late.$part"
     printf '%s' "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"MMRY AI loaded 3 memories. Read them now: C:\\\\x\\\\mmry-memories.${key}.win-1.md\"}}" > "$g/.mmry-codex-start.$part.4242.out"
     : > "$g/.mmry-codex-start.$part.4242.ready"
-    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env -u MMRY_CONFIG_FILE CODEX_HOME="$3" TMPDIR="$1" cmd //d //c "$2" codex-first-prompt 3>&-' _ "$wtmp" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" "$(cygpath -w "$CX")"
+    run bash -c 'printf "%s" "{\"session_id\":\"win-1\",\"prompt\":\"hi\"}" | env -u MMRY_CONFIG_FILE CODEX_HOME="$3" cmd //d //c "$2" codex-first-prompt 3>&-' _ "" "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" "$(cygpath -w "$CX")"
     assert_success
     JSON="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
     printf '%s' "$JSON" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null || {

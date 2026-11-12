@@ -300,22 +300,31 @@ _plant() {
     [[ "$lib" == "$HOME/.codex/mmry-handoff" ]] || { echo "lib-codex-key.sh resolves '$lib' with no CODEX_HOME, not $HOME/.codex/mmry-handoff"; return 1; }
 }
 
-@test "#33231 (Windows): the gate line, run by sh with nothing pending, is one shell and nothing else (job-object count)" {
-    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: counts processes with a Windows job object" ;; esac
-    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
-    printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    # The registered line, verbatim, as the body of a script sh runs: the outer sh (the script) and the
-    # inner `sh -c` the line itself starts are the two shells; nothing else may appear.
-    printf '%s\n' "$FP_CMD" > "$TEST_TMPDIR/gate.sh"
-    local counter ws n
+_count_sh_script() {
+    # The processes a Windows job object sees when Git's sh runs script $1, into _N.
+    local counter ws
     counter="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/count-processes.ps1")"
     ws="$(cygpath -w "$(command -v sh)")"
     CODEX_HOME="$CX" PLUGIN_ROOT="$ROOT" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$counter" \
-        -CommandLine "\"$ws\" \"$(cygpath -w "$TEST_TMPDIR/gate.sh")\"" < /dev/null > "$TEST_TMPDIR/count.txt" 2>&1 3>&- || true
-    n="$(tr -d '\r' < "$TEST_TMPDIR/count.txt" | sed -n 's/.*PROCESSES=\([0-9]*\).*/\1/p')"
-    echo "# gate line: ${n:-?} process(es), the two shells included" >&3
-    [[ "$n" =~ ^[0-9]+$ ]] || { echo "the counter did not answer: $(cat "$TEST_TMPDIR/count.txt")"; return 1; }
-    (( n <= 2 )) || { echo "the gate started a process beyond its two shells: $n"; return 1; }
+        -CommandLine "\"$ws\" \"$(cygpath -w "$1")\"" < /dev/null > "$TEST_TMPDIR/count.txt" 2>&1 3>&- || true
+    _N="$(tr -d '\r' < "$TEST_TMPDIR/count.txt" | sed -n 's/.*PROCESSES=\([0-9]*\).*/\1/p')"
+    [[ "$_N" =~ ^[0-9]+$ ]] || { echo "the counter did not answer: $(cat "$TEST_TMPDIR/count.txt")"; return 1; }
+}
+
+@test "#33231 (Windows): the gate line, run by sh with nothing pending, starts the inner shell it names and nothing else (job-object count against a measured baseline)" {
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: counts processes with a Windows job object" ;; esac
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
+    # The baseline: what Git's sh costs to run a script that does nothing (on this machine the launcher
+    # itself is more than one process). Then the registered line, verbatim, as a script's body: it may
+    # add exactly one process, the `sh -c` it names, and nothing else.
+    printf 'exit 0\n' > "$TEST_TMPDIR/base.sh"
+    _count_sh_script "$TEST_TMPDIR/base.sh" || return 1
+    local base="$_N"
+    printf '%s\n' "$FP_CMD" > "$TEST_TMPDIR/gate.sh"
+    _count_sh_script "$TEST_TMPDIR/gate.sh" || return 1
+    echo "# gate line: $_N process(es) against a baseline of $base for an empty script" >&3
+    (( _N - base <= 1 )) || { echo "the gate started $(( _N - base )) process(es) beyond the shell that runs it; at most one, its own sh -c"; return 1; }
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate let the hook run with nothing pending"; return 1; }
 }
 
