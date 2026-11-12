@@ -55,7 +55,7 @@ _T="${TMPDIR:-/tmp}"
 # the log lives in the folder. Forward slashes first and only when there is a backslash, as
 # codex-hook.sh does: this file is found from a Windows path when codex-hook.cmd started it.
 _self="${BASH_SOURCE[0]}"
-case "$_self" in *\*) _self="${_self//\//}" ;; esac
+case "$_self" in *\\*) _self="${_self//\\//}" ;; esac
 [[ "$_self" == */* ]] || _self="./${_self}"
 _D=""
 if [[ -f "${_self%/*}/lib-codex-key.sh" ]]; then
