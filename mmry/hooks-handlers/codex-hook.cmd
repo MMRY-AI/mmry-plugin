@@ -35,20 +35,25 @@ rem took 4 to 7 s of that. codex-hook.sh counts its budget from this time when i
 rem builtin `set`: it starts no process.
 if /i "%~1"=="session-init" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
 if /i "%~1"=="codex-first-prompt" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
-rem THE LATE-MEMORIES GATE (#33062 fix round 1; moved by #33231, DD-182). codex-first-prompt runs on
-rem every prompt and has work only when a session start ran out of time and left a
-rem .mmry-codex-late.<key>.<session> marker, so with none it exits here, before where.exe, reg.exe or
-rem bash. THE MARKER LIVES IN THE USER'S OWN FOLDER, <Codex home>\mmry-handoff, never the temp folder
-rem (#33231): the Codex home is %CODEX_HOME%, else <home>\.codex, and <home> is %HOME% when Git's bash
-rem would see one, else %USERPROFILE%, the same rule hooks-handlers/lib-codex-key.sh applies. Every
-rem spelling that is defined is looked in, because a stray extra match only costs a check that would
-rem have run anyway, and a missed one loses the memories. Builtins only: set, if and for start no
-rem process.
+rem THE LATE-MEMORIES GATE (#33062 fix round 1). codex-first-prompt runs on every prompt and has work
+rem only when a session start ran out of time and left a .mmry-codex-late.<session> marker, so with
+rem none it exits here, before where.exe, reg.exe or bash. The same folders, in the same order, as the
+rem formation gate below, which says why. Builtins only: set, if and for start no process.
 if /i not "%~1"=="codex-first-prompt" goto :after_late_gate
 set "MMRY_LATE="
-if defined CODEX_HOME for %%F in ("%CODEX_HOME%\mmry-handoff\.mmry-codex-late.*") do set "MMRY_LATE=1"
-if defined HOME for %%F in ("%HOME%\.codex\mmry-handoff\.mmry-codex-late.*") do set "MMRY_LATE=1"
-if defined USERPROFILE for %%F in ("%USERPROFILE%\.codex\mmry-handoff\.mmry-codex-late.*") do set "MMRY_LATE=1"
+if not defined TMPDIR goto :late_usertemp
+set "MMRY_GATE_DIR=%TMPDIR%"
+set "MMRY_GATE_ABS="
+if "%MMRY_GATE_DIR:~1,1%"==":" set "MMRY_GATE_ABS=1"
+if "%MMRY_GATE_DIR:~0,2%"=="\\" set "MMRY_GATE_ABS=1"
+if not defined MMRY_GATE_ABS goto :after_late_gate
+for %%F in ("%MMRY_GATE_DIR%\.mmry-codex-late.*") do set "MMRY_LATE=1"
+goto :late_decide
+:late_usertemp
+if defined TEMP for %%F in ("%TEMP%\.mmry-codex-late.*") do set "MMRY_LATE=1"
+if defined TMP for %%F in ("%TMP%\.mmry-codex-late.*") do set "MMRY_LATE=1"
+if defined LOCALAPPDATA for %%F in ("%LOCALAPPDATA%\Temp\.mmry-codex-late.*") do set "MMRY_LATE=1"
+:late_decide
 if not defined MMRY_LATE exit /b 0
 :after_late_gate
 rem THE FORMATION GATE, FIRST, BEFORE ANYTHING ELSE RUNS (#31746, Eric Barone 2026-10-07).

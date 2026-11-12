@@ -30,11 +30,6 @@
 # declare it (file-integrity.bats).
 set -euo pipefail 2>/dev/null || true
 set +e
-# THE BEFORE-SHORTENING FILE AND ITS STAGING COPY ARE OWNER-ONLY (#33652, DD-182). On a machine where
-# several people share the temp folder, the invoking umask (commonly 022) let every other user read
-# the directives written below. Set before anything is written; the staging copy is renamed into
-# place, so its mode is the file's. A builtin: no process.
-umask 077
 
 MMRY_FND_PART=1
 if [[ "${1:-}" == "--part" && "${2:-}" =~ ^[1-9][0-9]*$ ]]; then MMRY_FND_PART="$2"; fi

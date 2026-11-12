@@ -79,12 +79,6 @@ MMRY_FORMATION_LISTEN_MINUTES="${MMRY_FORMATION_LISTEN_MINUTES:-}"
 
 # Temp directory — cross-platform
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
-# EVERY FILE THIS CLIENT AND ITS HANDLERS WRITE IS OWNER-ONLY (#33652, DD-182): the memories file
-# SessionStart tells the model to read, the Foundation set, the session, stored and moment markers,
-# the by-reference copy, the request bodies. On a machine where several people share one temp folder
-# the invoking umask (commonly 022) let every other user read a customer's memories and directives.
-# Set here, where every handler sources it, before any of them writes. A builtin: no process.
-umask 077
 
 # HTTP response globals
 MMRY_HTTP_CODE=""

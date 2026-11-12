@@ -71,10 +71,12 @@ unset _mmry_ck_self
 # (_MMRY_HOST_DIR_FROM_MARKER), which lib-host.sh reaches only when MMRY_HOST was NOT exported, and
 # codex-hook.sh exports it before lib-host.sh is sourced: never on a hook firing, which is the only
 # place these two files are named.
-# The Codex home, into _MMRY_CODEX_HOME: CODEX_HOME, else <home>/.codex, trailing separators stripped
-# and never down to nothing. Shared by the credential file below and the hand-off folder (#33231).
-_mmry_codex_home_v() {
+mmry_codex_config_file_v() {
     local dir home
+    if [[ -n "${MMRY_CONFIG_FILE:-}" ]]; then
+        _MMRY_CODEX_CFG="$MMRY_CONFIG_FILE"
+        return 0
+    fi
     home="${HOME:-}"
     [[ -n "$home" ]] || home="${USERPROFILE:-}"
     if [[ -z "$home" && -n "${HOMEDRIVE:-}" && -n "${HOMEPATH:-}" ]]; then home="${HOMEDRIVE}${HOMEPATH}"; fi
@@ -83,60 +85,7 @@ _mmry_codex_home_v() {
         [[ "${#dir}" -le 1 ]] && break
         dir="${dir%[/\\]}"
     done
-    _MMRY_CODEX_HOME="$dir"
-}
-mmry_codex_config_file_v() {
-    if [[ -n "${MMRY_CONFIG_FILE:-}" ]]; then
-        _MMRY_CODEX_CFG="$MMRY_CONFIG_FILE"
-        return 0
-    fi
-    _mmry_codex_home_v
-    _MMRY_CODEX_CFG="${_MMRY_CODEX_HOME}/mmry-config.json"
-}
-
-# THE PER-USER FOLDER THE HAND-OFF LIVES IN (#33231, DD-182), into _MMRY_CODEX_DIR:
-# <CODEX_HOME, else <home>/.codex>/mmry-handoff. It holds the late marker, the hand-off
-# (.out/.ready/.pid/.claim), the saved payload and the two fixed-name logs that used to sit in
-# ${TMPDIR:-/tmp}, where on a shared Linux machine another user could read them, plant a .ready/.out
-# pair to inject text into a conversation, or put a link at a path the hook would write through
-# (independent QA of #33062, new requirement 1). Under the Codex home, not the temp folder: a name
-# under /tmp could be squatted by another user before the owner's first start, and USER and LOGNAME,
-# which could name a per-user temp folder, are not reliably set in a hook. Beside ~/.codex/mmry, not
-# inside it: self-update prunes that tree against release-files.txt. MMRY_CONFIG_FILE is deliberately
-# NOT consulted: the sh gate in hooks/codex-hooks.json and codex-hook.cmd resolve this same folder from
-# CODEX_HOME and HOME alone, with no process, so the rule must need nothing else.
-mmry_codex_private_dir_v() {
-    _mmry_codex_home_v
-    _MMRY_CODEX_DIR="${_MMRY_CODEX_HOME}/mmry-handoff"
-}
-
-# WHETHER THE FOLDER IS THE CALLER'S OWN: a directory, not a link, owned by the effective user
-# (-d, ! -L, -O: builtins, no process). Anything else is refused, and the caller arms, writes and
-# reads NOTHING there, and falls back to no other folder. Another user cannot write into a 700
-# folder the owner made; a folder they made first is not the owner's; a link is refused wherever it
-# stands. Reading only: the first prompt has nothing to read where there is no folder.
-mmry_codex_private_dir_ok() {
-    local d="${_MMRY_CODEX_DIR:-}"
-    [[ -n "$d" && -d "$d" && ! -L "$d" && -O "$d" ]]
-}
-
-# THE FOLDER, CREATED EXCLUSIVELY WITH OWNER-ONLY PERMISSIONS WHEN IT IS ABSENT, then checked as above.
-# mkdir -m 700 without -p: it fails if the name exists, so a name squatted between the test and the
-# create is never adopted, and it is the one process this costs, once per user, never on a later
-# start (the folder persists under the home). A name that exists and is not the owner's directory is
-# refused as it stands; nothing is removed or replaced.
-mmry_codex_private_dir_ready() {
-    local d="${_MMRY_CODEX_DIR:-}"
-    [[ -n "$d" ]] || return 1
-    if [[ ! -e "$d" && ! -L "$d" ]]; then
-        mkdir -m 700 "$d" 2>/dev/null || return 1
-    fi
-    mmry_codex_private_dir_ok
-}
-
-# WHETHER ONE FILE IN IT IS THE CALLER'S OWN: a regular file, not a link, owned by the effective user.
-mmry_codex_own_file() {
-    [[ -n "${1:-}" && -f "$1" && ! -L "$1" && -O "$1" ]]
+    _MMRY_CODEX_CFG="${dir}/mmry-config.json"
 }
 
 # <key>.<sid> FOR THE CODEX ACCOUNT THIS HOOK SERVES, into _MMRY_CODEX_SESSION_PART, and the key alone
@@ -148,19 +97,14 @@ mmry_codex_own_file() {
 # TC6). With no credential file at all the key is the client's default identity, as the Foundation
 # path's is: two unconfigured accounts are one identity, and there is nothing to keep apart.
 #
-# Returns 1 when lib-foundation-key.sh could not be loaded, and (#33620) when the identity it names is
-# REFUSED, a control character in the server address or the sign-in, which gives no key at all. A
-# caller then has no key, and must arm or read NOTHING rather than fall back to a bare name, which
-# would be the defect under another spelling.
+# Returns 1 when lib-foundation-key.sh could not be loaded. A caller then has no key, and must arm or
+# read NOTHING rather than fall back to a bare name, which would be the defect under another spelling.
 #   mmry_codex_session_part_v <sid>
 mmry_codex_session_part_v() {
     (( _MMRY_CODEX_KEY_READY == 1 )) || return 1
     mmry_codex_config_file_v
     local MMRY_CONFIG_FILE="$_MMRY_CODEX_CFG" MMRY_HOST="codex"
     mmry_foundation_session_part_v "${1:-}"
-    _MMRY_CODEX_SESSION_PART=""
-    _MMRY_CODEX_KEY=""
-    [[ -n "$_MMRY_FND_ACCT" && -n "$_MMRY_FND_SESSION_PART" ]] || return 1
     _MMRY_CODEX_SESSION_PART="$_MMRY_FND_SESSION_PART"
     _MMRY_CODEX_KEY="$_MMRY_FND_ACCT"
 }
