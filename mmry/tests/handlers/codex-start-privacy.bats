@@ -219,7 +219,7 @@ _plant() {
     chmod 777 "$HAND"
     sudo -n chown -R nobody "$HAND"
     FOREIGN="$HAND"
-    local before; before="$(ls -la "$HAND" | tail -n +2)"
+    local before; before="$(ls -lA "$HAND" | tail -n +2)"
     _prompt planted-1
     assert_success
     [[ "$output" != *"PLANTED-BY-ANOTHER-USER"* ]] || { echo "another user's text was delivered: $output"; return 1; }
@@ -230,7 +230,7 @@ _plant() {
     assert_success
     run _context
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
-    local after; after="$(ls -la "$HAND" | tail -n +2)"
+    local after; after="$(ls -lA "$HAND" | tail -n +2)"
     [[ "$after" == "$before" ]] || { echo "the start wrote into another user's folder: before [$before] after [$after]"; return 1; }
     _wait_starts 60 || true
     [ -z "$(_old_names_in_tmp)" ] || { echo "the start fell back to the shared temp folder: $(_old_names_in_tmp)"; return 1; }
@@ -242,7 +242,7 @@ _plant() {
     (umask 077 && mkdir "$elsewhere")
     _plant link-1 "$elsewhere"
     ln -s "$elsewhere" "$HAND"
-    local before; before="$(ls -la "$elsewhere" | tail -n +2)"
+    local before; before="$(ls -lA "$elsewhere" | tail -n +2)"
     _prompt link-1
     assert_success
     [[ "$output" != *"PLANTED-BY-ANOTHER-USER"* ]] || { echo "text behind a symlinked folder was delivered: $output"; return 1; }
@@ -251,7 +251,7 @@ _plant() {
     assert_success
     run _context
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
-    local after; after="$(ls -la "$elsewhere" | tail -n +2)"
+    local after; after="$(ls -lA "$elsewhere" | tail -n +2)"
     [[ "$after" == "$before" ]] || { echo "the start wrote through the link: before [$before] after [$after]"; return 1; }
     [ -L "$HAND" ] || { echo "the link was replaced"; return 1; }
 }
@@ -432,9 +432,13 @@ _count_sh_script() {
 # ---------------------------------------------------------------------------------------------
 _rep_all() {
     # _rep_all <file> <from> <to>: every occurrence; fails when <from> is absent (a no-op mutation).
-    local t; t="$(cat "$1"; printf x)"; t="${t%x}"
+    # Prefix and suffix, not ${t/"$2"/"$3"}: the stock macOS bash 3.2 keeps the quotes around the
+    # operands of that form literally (the macOS CI leg wrote a mutant whose quoting was broken), while
+    # the quoted-variable pattern in ${t%%"$2"*} and ${t#*"$2"} is the form lib-foundation-key.sh runs
+    # on bash 3.2 every prompt.
+    local t pre post; t="$(cat "$1"; printf x)"; t="${t%x}"
     [[ "$t" == *"$2"* ]] || return 1
-    while [[ "$t" == *"$2"* ]]; do t="${t/"$2"/"$3"}"; done
+    while [[ "$t" == *"$2"* ]]; do pre="${t%%"$2"*}"; post="${t#*"$2"}"; t="${pre}${3}${post}"; done
     printf '%s' "$t" > "$1"
 }
 _mutant_root() {
