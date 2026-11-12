@@ -129,7 +129,11 @@ mmry_codex_private_dir_ready() {
     local d="${_MMRY_CODEX_DIR:-}"
     [[ -n "$d" ]] || return 1
     if [[ ! -e "$d" && ! -L "$d" ]]; then
-        mkdir -m 700 "$d" 2>/dev/null || return 1
+        # Git Bash on Windows can create the folder and still fail the chmod mkdir -m does after it
+        # (measured: "cannot change permissions", with the folder made). The umask above has already
+        # given it 700 where modes exist at all, so a folder that is there and ours after the attempt
+        # is taken; one that is not there, or not ours (a name squatted in between), is refused.
+        mkdir -m 700 "$d" 2>/dev/null || [[ -d "$d" && ! -L "$d" && -O "$d" ]] || return 1
     fi
     mmry_codex_private_dir_ok
 }
