@@ -226,7 +226,7 @@ _plant() {
 @test "#33231: a hand-off folder that is a symlink is refused: nothing is delivered from the pair behind it, and the start writes nothing through it" {
     _modes_observable || skip "symlinks cannot be made as a plain user under Git Bash on Windows; this runs on the Linux and macOS CI legs"
     local elsewhere="$TEST_TMPDIR/elsewhere"
-    mkdir -m 700 "$elsewhere"
+    (umask 077 && mkdir "$elsewhere")
     _plant link-1 "$elsewhere"
     ln -s "$elsewhere" "$HAND"
     local before; before="$(ls -la "$elsewhere" | tail -n +2)"
@@ -245,9 +245,9 @@ _plant() {
 
 @test "#33231: a marker or hand-off file that is itself a link is refused, even inside the owner's own folder" {
     _modes_observable || skip "symlinks cannot be made as a plain user under Git Bash on Windows; this runs on the Linux and macOS CI legs"
-    mkdir -m 700 "$HAND"
+    (umask 077 && mkdir "$HAND")
     local elsewhere="$TEST_TMPDIR/elsewhere"
-    mkdir -m 700 "$elsewhere"
+    (umask 077 && mkdir "$elsewhere")
     _plant flink-1 "$elsewhere"
     ln -s "$elsewhere/.mmry-codex-late.${KEY}.flink-1" "$HAND/.mmry-codex-late.${KEY}.flink-1"
     ln -s "$elsewhere/.mmry-codex-start.${KEY}.flink-1.4242.out" "$HAND/.mmry-codex-start.${KEY}.flink-1.4242.out"
@@ -315,16 +315,17 @@ _count_sh_script() {
     case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: counts processes with a Windows job object" ;; esac
     command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    # The baseline: what Git's sh costs to run a script that does nothing (on this machine the launcher
-    # itself is more than one process). Then the registered line, verbatim, as a script's body: it may
-    # add exactly one process, the `sh -c` it names, and nothing else.
-    printf 'exit 0\n' > "$TEST_TMPDIR/base.sh"
+    # The baseline: what Git's sh costs to run a script whose only line starts an inner `sh -c` that does
+    # nothing. On Windows that inner shell is two processes (MSYS forks, then execs), measured: an empty
+    # script is 1, `sh -c 'exit 0'` is 3. The registered line, verbatim, as a script's body, must cost
+    # exactly the same: its own `sh -c` and nothing else.
+    printf "sh -c 'exit 0'\n" > "$TEST_TMPDIR/base.sh"
     _count_sh_script "$TEST_TMPDIR/base.sh" || return 1
     local base="$_N"
     printf '%s\n' "$FP_CMD" > "$TEST_TMPDIR/gate.sh"
     _count_sh_script "$TEST_TMPDIR/gate.sh" || return 1
-    echo "# gate line: $_N process(es) against a baseline of $base for an empty script" >&3
-    (( _N - base <= 1 )) || { echo "the gate started $(( _N - base )) process(es) beyond the shell that runs it; at most one, its own sh -c"; return 1; }
+    echo "# gate line: $_N process(es) against a baseline of $base for a script that only starts sh -c" >&3
+    (( _N <= base )) || { echo "the gate started $(( _N - base )) process(es) beyond its own sh -c"; return 1; }
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate let the hook run with nothing pending"; return 1; }
 }
 
@@ -440,7 +441,7 @@ _mutant_root() {
     _rep_all "$root/hooks-handlers/lib-codex-key.sh" '! -L "$d"' '-e "$d"' || { echo "no link check in lib-codex-key.sh to remove: the mutation is a no-op"; return 1; }
     _rep_all "$root/hooks-handlers/codex-first-prompt.sh" '! -L "$1"' '-e "$1"' || { echo "no link check in codex-first-prompt.sh to remove: the mutation is a no-op"; return 1; }
     local elsewhere="$TEST_TMPDIR/elsewhere"
-    mkdir -m 700 "$elsewhere"
+    (umask 077 && mkdir "$elsewhere")
     _plant mut-link-1 "$elsewhere"
     ln -s "$elsewhere" "$HAND"
     _prompt mut-link-1 "$root"

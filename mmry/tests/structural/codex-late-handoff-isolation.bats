@@ -179,7 +179,7 @@ _codex_files() {
 #   _late <codex-home> <sid>   -> <codex-home>/mmry-handoff/.mmry-codex-late.<key>.<sid>
 #   _hand <codex-home> <sid> <pid> -> <codex-home>/mmry-handoff/.mmry-codex-start.<key>.<sid>.<pid>
 _part() { FND_CONFIG_OVERRIDE="$1/mmry-config.json" fnd_session_part "$2"; }
-_dir() { [[ -d "$1/mmry-handoff" ]] || mkdir -m 700 "$1/mmry-handoff"; printf '%s/mmry-handoff' "$1"; }
+_dir() { [[ -d "$1/mmry-handoff" ]] || (umask 077 && mkdir "$1/mmry-handoff"); printf '%s/mmry-handoff' "$1"; }
 _late() { printf '%s/.mmry-codex-late.%s' "$(_dir "$1")" "$(_part "$1" "$2")"; }
 _hand() { printf '%s/.mmry-codex-start.%s.%s' "$(_dir "$1")" "$(_part "$1" "$2")" "$3"; }
 
@@ -285,17 +285,17 @@ _no_bare_written() {
 }
 
 # ---------------------------------------------------------------------------------------------
-# THE GATES NEED NO CHANGE. The sh line in codex-hooks.json and codex-hook.cmd both look for
-# .mmry-codex-late.*, which a keyed name still matches. Proved against the gate's own command line.
+# THE GATES look for .mmry-codex-late.*, which a keyed name still matches, in the account's own folder
+# since #33231 (DD-182). Proved against the gate's own command line.
 # ---------------------------------------------------------------------------------------------
 @test "gate: the sh gate in codex-hooks.json opens for a keyed late marker and stays shut with none" {
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    mkdir -p "$TEST_TMPDIR/gate-tmp"
-    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "$FP_CMD" </dev/null
+    # The gate looks in the account's own folder, <CODEX_HOME>/mmry-handoff (#33231, DD-182).
+    run env PLUGIN_ROOT="$ROOT" CODEX_HOME="$HA" sh -c "$FP_CMD" </dev/null
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate let the hook run with nothing pending"; return 1; }
-    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.${KA}.${SID}"
-    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "$FP_CMD" </dev/null
+    : > "$(_late "$HA" "$SID")"
+    run env PLUGIN_ROOT="$ROOT" CODEX_HOME="$HA" sh -c "$FP_CMD" </dev/null
     assert_success
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate stayed shut with a keyed late marker pending"; return 1; }
 }
@@ -303,13 +303,13 @@ _no_bare_written() {
 @test "gate (Windows): codex-hook.cmd opens for a keyed late marker and stays shut with none" {
     case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    mkdir -p "$TEST_TMPDIR/gate-tmp"
-    local wtmp; wtmp="$(cygpath -w "$TEST_TMPDIR/gate-tmp")"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
+    # The launcher looks in the account's own folder, %CODEX_HOME%\mmry-handoff (#33231, DD-182).
+    local wha; wha="$(cygpath -w "$HA")"
+    run env CODEX_HOME="$wha" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd started bash with nothing pending"; return 1; }
-    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.${KA}.${SID}"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
+    : > "$(_late "$HA" "$SID")"
+    run env CODEX_HOME="$wha" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd stayed shut with a keyed late marker pending"; return 1; }
 }
 

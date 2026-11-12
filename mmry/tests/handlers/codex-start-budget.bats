@@ -526,7 +526,7 @@ EOF
     # Windows and macOS) a failed redirection on `:` would, and Codex reports that as a failed hook.
     # In the account's own folder (#33231, DD-182), as the start would have armed it.
     local t="$CX/mmry-handoff" part
-    mkdir -m 700 "$t"
+    (umask 077 && mkdir "$t")
     part="$(_cx_part budget-27)"
     printf '4242\n' > "$t/.mmry-codex-late.$part"
     printf '4242\n' > "$t/.mmry-codex-start.$part.4242.claim"
@@ -590,7 +590,7 @@ EOF
     # In the account's own folder under CODEX_HOME (#33231, DD-182), which is also where the
     # credential sits, as on a real Windows Codex.
     local g="$CX/mmry-handoff" part key
-    mkdir -m 700 "$g"
+    (umask 077 && mkdir "$g")
     # The account's own keyed names (#33617), and its own memories file in the answer.
     part="$(_cx_part win-1)"; key="${part%.win-1}"
     printf '4242' > "$g/.mmry-codex-late.$part"
