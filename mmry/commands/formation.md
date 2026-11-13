@@ -246,6 +246,8 @@ Each member is also given one rule for its own role:
 
 **The lead hears who is free.** A member with no active work for 15 minutes is named to the lead, up to three times, 30 minutes apart, and the roster marks it. A member's own Done asks the lead: Is there anything else I can do? A lead on Codex or a connected assistant sees this on its next action, not while idle.
 
+**The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, with the name of the tool asking and nothing else from the prompt, and the roster marks that member as waiting. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY cannot see them.
+
 **Address the report to the lead,** with `say --to <leadMemberId>`; the roster shows which member
 is the lead. A report to the lead is never chatter, so the guidance about not narrating to the
 formation does not apply to it. Where the stopping point is also a change of state, record it with
