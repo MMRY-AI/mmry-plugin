@@ -85,7 +85,7 @@ add supervisor-gate-off "the supervisor serves a set standing at the name an uni
         exit 0' \
     '    if false; then
         exit 0' "$H"
-add session-part-unkeyed "the account key is dropped from the id-less session part, so every marker made with no session id is shared again" \
+add session-part-unkeyed "the account key is dropped from every session part, so two accounts in one session, or with no session id, share every per-session marker again" \
     '_MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"' \
     '_MMRY_FND_SESSION_PART="${v:-none}"' "$K"
 add prepared-unkeyed "the prepared copy, claim, result and stored check go back to the bare token, shared across accounts with no session id" \
