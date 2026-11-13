@@ -157,7 +157,7 @@ _session() {
 _offer_release() {
     local ver="$1"
     RELEASE="$TEST_TMPDIR/remote/mmry-plugin-master/mmry"
-    rm -rf "$TEST_TMPDIR/remote" "$TEST_TMPDIR/remote.tar.gz"
+    rm -rf "${TEST_TMPDIR:?}/remote" "${TEST_TMPDIR:?}/remote.tar.gz"
     mkdir -p "$TEST_TMPDIR/remote/mmry-plugin-master"
     _copy_plugin "$RELEASE"
     jq --arg v "$ver" '.version = $v' "$REF/.claude-plugin/plugin.json" > "$RELEASE/.claude-plugin/plugin.json"
@@ -244,7 +244,7 @@ _wait_for_root_version() {
     local d; d="$(_root_vs_release)"
     [[ -z "$d" ]] || { echo "the release session did not install the release:"; printf '%s\n' "$d"; return 1; }
     # From here the folder Codex fingerprints, once the customer has reviewed the new hooks, is this one.
-    rm -rf "$REF"; mkdir -p "$REF"
+    rm -rf "${REF:?}"; mkdir -p "$REF"
     ( cd "$ROOT" && tar -cf - . ) | ( cd "$REF" && tar -xf - )
     local s
     for s in 2 3; do

@@ -22,8 +22,10 @@ HOOK="${1:?usage: foundation-under-load.sh <hook.sh> [prompts] [spinners] [churn
 RUNS="${2:-20}"; SPIN="${3:-128}"; CHURN="${4:-128}"; LINES="${5:-600}"
 LIMIT="${MMRY_LOAD_LIMIT_SECS:-20}"
 HOOK="$(cd "$(dirname "$HOOK")" && pwd)/$(basename "$HOOK")"
-W="$(mktemp -d)"; STOP="$W/stop"
-cleanup() { : > "$STOP"; sleep 3; rm -rf "$W"; }
+W="$(mktemp -d)" || W=""
+[[ -n "$W" && -d "$W" ]] || { echo "REFUSED TO START: could not create a work folder (TMPDIR is '${TMPDIR:-unset}'; #33618)" >&2; exit 2; }
+STOP="$W/stop"
+cleanup() { : > "$STOP"; sleep 3; rm -rf "${W:?}"; }
 # On any way out, including a timeout or Ctrl-C: the load loops stop only when the stop file exists.
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP

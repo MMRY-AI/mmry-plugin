@@ -142,7 +142,9 @@ _su_removals_available() {
 cleanup() {
     local p
     for p in "${tmp_archive:-}" "${tmp_extract:-}" "${_su_scratch:-}"; do
-        [[ -n "$p" ]] && rm -rf "$p"
+        # Each is a mktemp result or empty (#33618): never the root or TMPDIR itself.
+        case "${p%/}" in ''|/|"${TMPDIR%/}") continue ;; esac
+        rm -rf "${p:?}"
     done
     return 0
 }

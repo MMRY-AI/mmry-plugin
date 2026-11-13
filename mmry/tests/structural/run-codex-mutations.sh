@@ -53,6 +53,17 @@ BATS="${MMRY_BATS_BIN:-$TESTS/libs/bats-core/bin/bats}"
 
 cd "$REPO_ROOT" || exit 1
 
+# Work folder (#33618), for the interpreter's error file: made inside an existing TMPDIR by a checked
+# mktemp, never in a fallback /tmp, before anything is mutated, and removed only through
+# mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$TESTS/helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 1; }
+mmry_work_dir_new codex-mut || exit 1
+WORK="$MMRY_WORK_DIR"
+# Removed on every exit from here, including the refusals below (no Python 3, a dirty tree); the
+# trap set before the first mutation replaces this one and also restores the mutated file.
+trap 'mmry_work_dir_remove "$WORK"' EXIT
+
 # ---- Pin the interpreter, BY BEHAVIOUR AND NOT BY NAME. ---------------------------------------
 #
 # Three traps live in this six-line problem, and this harness fell into all of them:
@@ -130,7 +141,8 @@ _restore() {
         CURRENT_FILE=""
     fi
 }
-trap _restore EXIT INT TERM
+trap '_restore; mmry_work_dir_remove "$WORK"' EXIT
+trap _restore INT TERM
 
 # mutate <label> <file> <python-expression-file-edit> <test-file> <expected-failing-test-substring>
 mutate() {
@@ -153,7 +165,7 @@ mutate() {
     # ("fatal error - couldn't create signal pipe") and every experiment came back as exit 127 -
     # another harness fault that looks like a finding.
     local pyerr applied
-    local errfile="${TMPDIR:-/tmp}/mmry-mutation-stderr.$$"
+    local errfile="$WORK/mmry-mutation-stderr"
     "$PYBIN" - "$PLUGIN/$file" 2>"$errfile" <<PY
 import io, sys
 p = sys.argv[1]
@@ -514,7 +526,7 @@ mutate "the formation remedy stops being derived per host" hooks-handlers/lib-ho
 #    exist for. "No slash command appears on Codex" is trivially satisfied by a handler that
 #    names nothing, leaving the customer with a complaint and no way forward - and without a
 #    control that is indistinguishable from a fix. The Claude assertions must go red here.
-mutate "the formation remedy names no command on either host" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "/mmry:formation %s%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), "printf " + chr(39) + "the formation %s operation%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), 1)'   structural/codex-formation-instructions.bats "still names the slash command, unchanged"
+mutate "the formation remedy names no command on Claude Code (the Codex branch is untouched)" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "/mmry:formation %s%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), "printf " + chr(39) + "the formation %s operation%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), 1)'   structural/codex-formation-instructions.bats "still names the slash command, unchanged"
 
 # 3. A HANDLER STOPS ASKING. The helper is left correct and one handler goes back to a hardcoded
 #    literal. This is the experiment that proves the assertions read the HANDLER'S OUTPUT rather

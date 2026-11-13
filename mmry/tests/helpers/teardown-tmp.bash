@@ -103,15 +103,23 @@ _mmry_td_kill() {
 mmry_teardown_tmp() {
     local dir="${1:-}" out pid cmd a0 t0 grace="${MMRY_TEARDOWN_GRACE:-10}" report="" n=0
     [[ -n "$dir" ]] || return 0
+    # Never the root, HOME or a shared temporary folder, whatever a caller passes (#33618). A test's own
+    # folder is its TMPDIR, so TMPDIR is not on this list; the system folders that TMPDIR falls back to are.
+    case "${dir%/}" in
+        ''|/|/tmp|/var/tmp|/private/tmp|/private/var/tmp|"${HOME%/}")
+            printf 'mmry_teardown_tmp: refusing to delete %s: it is the root, HOME or a shared temporary folder
+' "$dir" >&2
+            return 1 ;;
+    esac
     case "$(uname -s 2>/dev/null)" in
         MINGW*|MSYS*|CYGWIN*)
-            rm -rf "$dir" 2>/dev/null
-            [[ ! -e "$dir" ]] || { sleep 1; rm -rf "$dir"; }
+            rm -rf "${dir:?}" 2>/dev/null
+            [[ ! -e "$dir" ]] || { sleep 1; rm -rf "${dir:?}"; }
             return 0 ;;
     esac
     [[ -d "$dir" ]] || return 0
     # Outside the folder: the test's TMPDIR IS the folder, so a bare mktemp would put this inside it.
-    out="$(TMPDIR=/tmp mktemp /tmp/mmry-td.XXXXXX)" || { rm -rf "$dir"; return 0; }
+    out="$(TMPDIR=/tmp mktemp /tmp/mmry-td.XXXXXX)" || { rm -rf "${dir:?}"; return 0; }
     t0="$(date +%s)"
     while :; do
         _mmry_td_scan "$dir" "$out"
@@ -136,7 +144,7 @@ mmry_teardown_tmp() {
         _mmry_td_kill "$out"
     fi
     rm -f "$out"
-    rm -rf "$dir" 2>/dev/null || { sleep 1; rm -rf "$dir"; }
+    rm -rf "${dir:?}" 2>/dev/null || { sleep 1; rm -rf "${dir:?}"; }
     if (( n > 0 )); then
         printf 'LEFTOVER: %d process(es) this test started were still running %ss after it ended, and carry its temp folder:\n%s' "$n" "$grace" "$report" >&2
         return 1

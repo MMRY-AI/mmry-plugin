@@ -68,9 +68,13 @@ CLIENT_REL="hooks-handlers/mmry-client.sh"
 EDGES_TESTS="handlers/foundation-31597-edges.bats"
 SWITCH_REL="hooks-handlers/lib-foundation-switch.sh"
 
-WORK_BASE="${TMPDIR:-/tmp}/mmry-mutation-$$"
-mkdir -p "$WORK_BASE"
-trap 'rm -rf "$WORK_BASE" 2>/dev/null' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new mutation || exit 2
+WORK_BASE="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK_BASE"' EXIT
 
 # PORTABLE IN-PLACE EDIT (#31434 QA round 2). Every mutation below used `sed -i SCRIPT FILE`,
 # which is a GNU extension: BSD sed, the sed macOS actually ships, reads the token after -i as

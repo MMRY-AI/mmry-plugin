@@ -23,7 +23,7 @@ setup() {
     export CLAUDE_SESSION_ID="bats-31746-$$"
     unset CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID MMRY_HOST MMRY_JQ
     bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_SESSION_ID" || true
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_sid)" "${TMPDIR:?}/.mmry-formation-poll-$(_sid)"
 
     # Two messages, so "every message" is a count and not a single yes or no.
     BODY='[{"senderRole":"lead","senderSessionID":"lead-1","senderUserID":1,"content":"KT-MSG-ONE review the claim","sentDate":"2026-10-07T01:00:00"},{"senderRole":"member","senderSessionID":"dev-2","senderUserID":2,"recipientMemberID":5,"content":"KT-MSG-TWO take the slot","sentDate":"2026-10-07T01:05:00"}]'
@@ -122,8 +122,8 @@ _kt_fire() {
 # discards it.
 _kt_point() {
     local hdir="$1" mode="$2" point="$3"
-    rm -rf "$KT_DIR"; mkdir -p "$KT_DIR"
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)"
+    rm -rf "${KT_DIR:?}"; mkdir -p "$KT_DIR"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_sid)" "${TMPDIR:?}/.mmry-formation-poll-$(_sid)"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
 
     # The hook ITSELF goes in the background, not a function that runs it. A backgrounded function
@@ -166,8 +166,8 @@ _kt_point() {
 # final "points=<n>". Prints "calibration-failed" if an unstopped check did not deliver.
 _kt_all_points() {
     local hdir="$1" mode="$2" n k
-    rm -rf "$KT_DIR"; mkdir -p "$KT_DIR"
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)"
+    rm -rf "${KT_DIR:?}"; mkdir -p "$KT_DIR"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_sid)"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     _kt_fire "$hdir" "$mode" "" "${KT_DIR}/calibrate.out" || true
     if ! grep -q 'KT-MSG-TWO' "${KT_DIR}/calibrate.out"; then
@@ -192,7 +192,7 @@ _kt_init() {
 # A copy of the handler with "seen" written BEFORE the block is shown: the order this task removes.
 _mark_first_handler_dir() {
     local dir="${BATS_TEST_TMPDIR}/handlers-mark-first"
-    rm -rf "$dir"; mkdir -p "$dir"
+    rm -rf "${dir:?}"; mkdir -p "$dir"
     cp "${HANDLERS}"/*.sh "$dir"/
     perl -0777 -pi -e 's{^([ ]+)_poll_once \|\| exit 0\r?\n}{$1_poll_once || exit 0\n$1_mark_shown\n}mg' "${dir}/formation-check.sh"
     if cmp -s "${dir}/formation-check.sh" "${HANDLERS}/formation-check.sh"; then
@@ -392,7 +392,7 @@ _handler_figure() {
 # held here is what the time was spent on: processes. Counted, not timed.
 @test "preparation: a delivering prompt check runs jq at most five times and no state helper process" {
     _kt_init || return 1
-    rm -rf "$KT_DIR"; mkdir -p "$KT_DIR"
+    rm -rf "${KT_DIR:?}"; mkdir -p "$KT_DIR"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
 
     # A jq that logs one line per run, before and after the request.
@@ -420,7 +420,7 @@ _handler_figure() {
 # ---------------------------------------------------------------------------------------------
 @test "locks: a delivery mutex whose holder is dead does not silence the next check" {
     _kt_init || return 1
-    rm -rf "$KT_DIR"; mkdir -p "$KT_DIR"
+    rm -rf "${KT_DIR:?}"; mkdir -p "$KT_DIR"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     # A pid that existed and has exited.
     local dead; dead="$(bash -c 'printf %s $$')"
@@ -436,7 +436,7 @@ _handler_figure() {
     # Requirement 4: reclaiming a dead holder's lock must not become taking a live one, or two
     # readers show the same batch. The bats process running this test is alive by definition.
     _kt_init || return 1
-    rm -rf "$KT_DIR"; mkdir -p "$KT_DIR"
+    rm -rf "${KT_DIR:?}"; mkdir -p "$KT_DIR"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     mkdir -p "${TMPDIR}/.mmry-formation-cs-$(_sid)"
     printf '%s\n' "$$" > "${TMPDIR}/.mmry-formation-cs-$(_sid)/pid"

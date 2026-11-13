@@ -263,7 +263,7 @@ _query_entries_from_installed() {
     local pair inst sess new old
     for pair in "2.10.0 2.9.1" "2.15.10 2.15.9"; do
         inst="${pair% *}"; sess="${pair#* }"
-        rm -rf "$STATE_DIR" "$TEST_TMPDIR/cache"
+        rm -rf "${STATE_DIR:?}" "${TEST_TMPDIR:?}/cache"
         new="$TEST_TMPDIR/cache/$inst"; old="$TEST_TMPDIR/cache/$sess"
         _plugin_root "$new" "$inst"
         _plugin_root "$old" "$sess" old
@@ -573,7 +573,7 @@ _assert_session_removed_nothing() {
     [[ "$output" != *"removed "* ]] || fail "3.1 over 3.1.1: the older session removed files: $output"
 
     # The reverse, installed 3.1 and session 3.1.1: the newer session installs and mirrors.
-    rm -rf "$STATE_DIR"
+    rm -rf "${STATE_DIR:?}"
     _installed_by_self_update "$old" 3.1
     _session_init "$new" -u MMRY_HOST
     [[ "$status" -eq 0 ]] || fail "3.1.1 over 3.1: status $status: $output"
@@ -619,7 +619,7 @@ _assert_session_removed_nothing() {
     [[ "$output" != *"removed "* ]] || fail "the older session removed files: $output"
 
     # A build suffix on the installed side: installed 3.1.1+build7, session 3.1: refused likewise.
-    rm -rf "$STATE_DIR"
+    rm -rf "${STATE_DIR:?}"
     local b="$TEST_TMPDIR/cache/3.1.1+build7" s="$TEST_TMPDIR/cache/3.1"
     _plugin_root "$b" 3.1.1+build7
     printf 'only in 3.1.1\n' > "$b/commands/only-in-new.md"

@@ -161,5 +161,5 @@ ids="$(find_ids "$MK")"
 
 say ""
 say "RESULT: $fails failure(s)"
-rm -rf "$W"
+rm -rf "${W:?}"
 exit $(( fails > 0 ))

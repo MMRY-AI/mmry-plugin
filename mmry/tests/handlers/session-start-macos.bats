@@ -57,7 +57,7 @@ _macos_shim_dir() {
 # not enough - it has to be the tree.
 _mutant_plugin() {
     local dir="${TEST_TMPDIR}/mutant-plugin"
-    rm -rf "$dir"
+    rm -rf "${dir:?}"
     cp -r "$PLUGIN_ROOT" "$dir"
     local f="${dir}/hooks-handlers/session-start.sh"
 
