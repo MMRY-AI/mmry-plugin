@@ -29,10 +29,10 @@ setup() {
     export MMRY_RESPONSE='{"error":"no credits"}'
     run _mmry_print_error
     [[ "$output" == "no credits" ]] || { echo "$output"; return 1; }
-    [[ "$output" != *"/mmry:setup"* ]]
+    [[ "$output" != *"/mmry:setup"* ]] || return 1
     export MMRY_RESPONSE=''
     run _mmry_print_error
-    [[ "$output" == *"Credits exhausted"* ]]
+    [[ "$output" == *"Credits exhausted"* ]] || return 1
     [[ "$output" != *"/mmry:setup"* ]]
 }
 
