@@ -37,6 +37,7 @@ hooks-handlers/formation-say.sh
 hooks-handlers/formation-start.sh
 hooks-handlers/formation-state.sh
 hooks-handlers/formation-status.sh
+hooks-handlers/formation-waiting.sh
 hooks-handlers/foundation-cut.awk
 hooks-handlers/foundation-status.sh
 hooks-handlers/hook-guard.sh
@@ -121,6 +122,7 @@ tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats
+tests/handlers/formation-waiting.bats
 tests/handlers/foundation-31597-edges.bats
 tests/handlers/foundation-both-paths.bats
 tests/handlers/foundation-cross-surface.bats

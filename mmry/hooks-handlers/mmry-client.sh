@@ -1922,6 +1922,31 @@ mmry_release_formation_claim() {
         "/api/formations/${formation_id}/claims/${claim_id}?sessionId=$(_mmry_urlencode "$session_id")"
 }
 
+mmry_set_formation_member_waiting() {
+    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME]
+    #
+    # #33452. This member is waiting on a permission prompt in its own window, so the lead is told.
+    # The server records it only for the caller's OWN entry, resolved from the session, and refuses
+    # any other member id. TOOL_NAME is the bare name of the tool asking (Bash, apply_patch,
+    # mcp__server__tool) or empty, and it is the only part of the prompt this ever sends: never the
+    # command, its arguments, a path or a file's contents. formation-waiting.sh checks it is a bare
+    # name before it gets here, and the server refuses anything else.
+    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}"
+    local body
+    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool")"
+    _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}/waiting" "$body"
+}
+
+mmry_clear_formation_member_waiting() {
+    # Usage: mmry_clear_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID
+    #
+    # #33452. The member has continued, so it is no longer waiting. The lead is told only if it was
+    # told the member started waiting.
+    local formation_id="$1" member_id="$2" session_id="$3"
+    _mmry_request DELETE \
+        "/api/formations/${formation_id}/members/${member_id}/waiting?sessionId=$(_mmry_urlencode "$session_id")"
+}
+
 mmry_submit_feedback() {
     # Usage: mmry_submit_feedback TYPE TITLE DESCRIPTION [COMPONENT] [REPRO_STEPS] [ENVIRONMENT]
     local type="$1" title="$2" description="$3"
