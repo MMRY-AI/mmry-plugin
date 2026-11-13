@@ -55,7 +55,7 @@ add empty-told-id-bare "SessionStart writes the id-form empty-set told marker un
     '        mmry_foundation_session_part_v "$_fnd_esid"
         printf '"'"'%s'"'"' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
     '        printf '"'"'%s'"'"' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true' "$S"
-add codex-stored-quick-bare "the Codex writer's quick path spells the stored marker from the id itself, so two Codex accounts on one id share mmry-foundation.stored.<sid>" \
+add codex-stored-quick-bare "the Codex writer's quick path spells the stored marker from the bare id or token, without the account key, so two Codex accounts share mmry-foundation.stored.<sid> on one id, or mmry-foundation.stored.unknown with none" \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true' "$C"
 

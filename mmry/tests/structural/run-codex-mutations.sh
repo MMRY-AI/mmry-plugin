@@ -523,7 +523,7 @@ mutate "the formation remedy stops being derived per host" hooks-handlers/lib-ho
 #    exist for. "No slash command appears on Codex" is trivially satisfied by a handler that
 #    names nothing, leaving the customer with a complaint and no way forward - and without a
 #    control that is indistinguishable from a fix. The Claude assertions must go red here.
-mutate "the formation remedy names no command on either host" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "/mmry:formation %s%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), "printf " + chr(39) + "the formation %s operation%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), 1)'   structural/codex-formation-instructions.bats "still names the slash command, unchanged"
+mutate "the formation remedy names no command on Claude Code (the Codex branch is untouched)" hooks-handlers/lib-host.sh   's = s.replace("printf " + chr(39) + "/mmry:formation %s%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), "printf " + chr(39) + "the formation %s operation%s" + chr(39) + " " + chr(34) + "$sub" + chr(34) + " " + chr(34) + "$rest" + chr(34), 1)'   structural/codex-formation-instructions.bats "still names the slash command, unchanged"
 
 # 3. A HANDLER STOPS ASKING. The helper is left correct and one handler goes back to a hardcoded
 #    literal. This is the experiment that proves the assertions read the HANDLER'S OUTPUT rather
