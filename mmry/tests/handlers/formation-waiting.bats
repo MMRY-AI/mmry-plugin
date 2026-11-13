@@ -241,3 +241,39 @@ DOWN
     [ -z "$output" ]
     [ -z "$(_marker)" ]
 }
+
+# ---------------------------------------------------------------------------------------------
+# TC2 in the plugin: the roster shows which members are waiting
+# ---------------------------------------------------------------------------------------------
+
+_roster() { # $1 the roster body the fake service returns
+    cat > "$BIN/curl" <<'ROSTERCURL'
+#!/usr/bin/env bash
+out=""; prev=""
+for arg in "$@"; do [[ "$prev" == "-o" ]] && out="$arg"; prev="$arg"; done
+[[ -n "$out" ]] && printf '%s' "$FAKE_ROSTER" > "$out"
+printf '200'
+ROSTERCURL
+    chmod +x "$BIN/curl"
+    FAKE_ROSTER="$1" run bash "$HH/formation-roster.sh" 4242
+}
+_HEAD='{"formation":{"id":4242,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leftDate":null},'
+
+@test "W-17 the roster marks a waiting member with the time and the tool" {
+    _roster "${_HEAD}"'{"id":12,"role":"Wingman","email":"m@x.y","progress":"Accepted","waitingSince":"2026-11-13T14:05:42.1234567","waitingTool":"Bash","leftDate":null}]}'
+    [ "$status" -eq 0 ]
+    local line; line="$(printf '%s\n' "$output" | tr -d '\r' | grep 'm@x.y')"
+    [[ "$line" == *"  (waiting on a permission prompt since 14:05 UTC, for Bash)" ]] || { echo "$output"; return 1; }
+}
+
+@test "W-18 without a tool name the mark names none; a member not waiting reads exactly as before" {
+    _roster "${_HEAD}"'{"id":12,"role":"Wingman","email":"m@x.y","waitingSince":"2026-11-13T14:05:42","waitingTool":null,"leftDate":null}]}'
+    local line; line="$(printf '%s\n' "$output" | tr -d '\r' | grep 'm@x.y')"
+    [[ "$line" == *"  (waiting on a permission prompt since 14:05 UTC)" ]] || { echo "$output"; return 1; }
+
+    _roster "${_HEAD}"'{"id":12,"role":"Wingman","email":"m@x.y","progress":"Accepted","leftDate":null}]}'
+    local before="$output"
+    _roster "${_HEAD}"'{"id":12,"role":"Wingman","email":"m@x.y","progress":"Accepted","waitingSince":null,"waitingTool":null,"leftDate":null}]}'
+    [ "$output" = "$before" ] || { echo "--- absent"; echo "$before"; echo "--- null"; echo "$output"; return 1; }
+    [[ "$output" != *"permission prompt"* ]]
+}

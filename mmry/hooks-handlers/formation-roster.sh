@@ -87,6 +87,9 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # status view, so the two cannot describe a member differently.
 # #32683: a member with no active work (no assignment, Done or Abandoned) carries idleSince from the
 # service, and its line says since when. A server that does not send the field shows no mark.
+# #33452: a member waiting on a permission prompt in its own window carries waitingSince (and the
+# tool's bare name in waitingTool when its client knew it), and its line says so, so the lead knows
+# to ask the person at that window. A server that does not send the fields shows no mark.
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
     (.members // [])
     | sort_by(.leftDate != null, .id)
@@ -97,6 +100,10 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
       + (if .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]" else "" end)
       + (if (.idleSince // null) != null and .leftDate == null
          then "  (no active assignment since " + ((.idleSince | tostring)[11:16]) + " UTC)" else "" end)
+      + (if (.waitingSince // null) != null and .leftDate == null
+         then "  (waiting on a permission prompt since " + ((.waitingSince | tostring)[11:16]) + " UTC"
+              + (if (.waitingTool // null) != null then ", for " + (.waitingTool | tostring) else "" end) + ")"
+         else "" end)
       + (if .leftDate == null then ""
          elif .removedByEmail then "   (removed by " + .removedByEmail + "; cannot be addressed)"
          elif .removedByUserId then "   (removed; cannot be addressed)"
