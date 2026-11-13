@@ -205,7 +205,7 @@ check_text() {
 }
 
 # ---- read: one awk pass emits FILE<TAB>LINE<TAB>TEXT for each candidate line, continuations joined
-records="$(awk '
+found="$(awk '
     function flush() { if (pend) { print FILENAME_P "\t" start "\t" buf; pend = 0 } }
     FNR == 1 { flush() }
     {
@@ -230,7 +230,7 @@ while IFS=$'\t' read -r f ln text; do
         trimmed="${text#"${text%%[![:space:]]*}"}"
         echo "UNGUARDED: $f:$ln: $trimmed"
     fi
-done <<< "$records"
+done <<< "$found"
 
 for f in ${skipped[@]+"${skipped[@]}"}; do
     echo "not read: $f (a frozen copy of a shipped release; see the header)"
