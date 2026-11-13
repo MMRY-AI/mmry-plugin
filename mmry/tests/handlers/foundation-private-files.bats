@@ -364,12 +364,15 @@ SHIM
     "$real" +x "$shims/chmod"
     _u_plant_old
     : > "$calls"
-    PATH="$shims:$PATH" _cc_start "$_U_SID" >/dev/null
-    local at_start; at_start="$(grep -c '^chmod 600' "$calls" || true)"
+    # The session start is run here with its stderr kept, so a failure says what the start did.
+    printf '{"session_id":"%s","hook_event_name":"SessionStart","source":"startup"}' "$_U_SID" \
+        | PATH="$shims:$PATH" bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" >/dev/null 2>"$TEST_TMPDIR/start-err"
+    local start_rc=$? at_start; at_start="$(grep -c '^chmod 600' "$calls" || true)"
+    local seen; seen="session start rc $start_rc, chmod 600 started $at_start times, marker $(ls -A "$TEST_TMPDIR" | grep -c '^\.mmry-foundation-private\.'); stderr: $(tr '\n' ' ' < "$TEST_TMPDIR/start-err" | cut -c1-400)"
+    (( at_start == 1 )) || { echo "the session start did not start chmod 600 exactly once: $seen"; return 1; }
     : > "$calls"
     PATH="$shims:$PATH" _cc_prompt "$_U_SID"
-    [[ "$(grep -c '^chmod 600' "$calls" || true)" == 0 ]] || { echo "a prompt after a session start started chmod: $(cat "$calls")"; return 1; }
-    (( at_start == 1 )) || { echo "the session start started chmod $at_start times, not once"; return 1; }
+    [[ "$(grep -c '^chmod 600' "$calls" || true)" == 0 ]] || { echo "a prompt after a session start started chmod: $(cat "$calls"); after the start: $seen"; return 1; }
     # No session start since the upgrade: the marker is missing.
     rm -f "$TEST_TMPDIR"/.mmry-foundation-private.*
     chmod 644 "$TEST_TMPDIR/$(_u_name prepared)"

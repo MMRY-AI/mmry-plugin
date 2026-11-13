@@ -413,12 +413,20 @@ mmry_foundation_private_v() {
     m="${d}/.mmry-foundation-private.${_MMRY_FND_ACCT}"
     [[ -f "$m" && ! -L "$m" && -O "$m" ]] && return 0
     for f in "$d"/mmry-foundation* "$d"/.mmry-foundation* "$d"/mmry-memories*; do
-        [[ -f "$f" && ! -L "$f" && -O "$f" ]] && own[${#own[@]}]="$f"
+        if [[ -f "$f" && ! -L "$f" && -O "$f" ]]; then
+            own[${#own[@]}]="$f"
+        fi
     done
+    # chmod's status is not the marker's condition: a staging copy another firing renamed away between
+    # the listing and the chmod makes it return non-zero (seen on the macOS leg) though every file still
+    # there was narrowed, and a vanished file needs nothing. Waiting on a clean status put the chmod
+    # back on every prompt.
     if (( ${#own[@]} > 0 )); then
-        chmod 600 -- "${own[@]}" 2>/dev/null || return 0
+        chmod 600 -- "${own[@]}" 2>/dev/null || true
     fi
-    [[ -e "$m" || -L "$m" ]] && return 0
+    if [[ -e "$m" || -L "$m" ]]; then
+        return 0
+    fi
     case "$-" in *C*) had_c=1 ;; esac
     set -C
     { : > "$m"; } 2>/dev/null
