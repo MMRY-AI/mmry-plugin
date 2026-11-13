@@ -56,10 +56,11 @@ mmry_work_dir_remove() {
     [ -n "$t" ] || { _mmry_wd_refuse "not removing '$p': TMPDIR is not set, so it cannot be shown to be a work folder"; return 1; }
     p="${p%/}"; t="${t%/}"; h="${h%/}"
     [ -n "$p" ] || { _mmry_wd_refuse "not removing the root"; return 1; }
-    [ "$p" != "$t" ] || { _mmry_wd_refuse "not removing '$p': it is TMPDIR itself"; return 1; }
     [ -z "$h" ] || [ "$p" != "$h" ] || { _mmry_wd_refuse "not removing '$p': it is HOME"; return 1; }
     _mmry_wd_climbs "$p" && { _mmry_wd_refuse "not removing '$p': the path climbs with . or .."; return 1; }
-    case "$p" in "$t"/*) ;; *) _mmry_wd_refuse "not removing '$p': it is not inside TMPDIR '$t'"; return 1 ;; esac
+    # Strictly inside TMPDIR. This is also what refuses TMPDIR itself: "$t" never matches "$t"/*.
+    # (A separate equality test was removed in round 1b: nothing reached it that this did not refuse.)
+    case "$p" in "$t"/*) ;; *) _mmry_wd_refuse "not removing '$p': it is TMPDIR itself or not inside it ('$t')"; return 1 ;; esac
     name="${p#"$t"/}"
     case "$name" in */*) _mmry_wd_refuse "not removing '$p': it is not directly inside TMPDIR"; return 1 ;; esac
     case "$name" in mmry-?*.?*) ;; *) _mmry_wd_refuse "not removing '$p': it is not named like a work folder (mmry-LABEL.XXXXXX)"; return 1 ;; esac

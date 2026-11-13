@@ -152,6 +152,21 @@ _helper() { printf '%s' "$PLUGIN_ROOT/tests/helpers/work-dir.bash"; }
     done
     [[ -f "$t/sentinel" && -d "$t/keep" && -f "$h/sentinel" && -f "$other/mmry-x.abc/sentinel" ]] \
         || fail "a refused removal deleted something"
+    # Inputs only one check stops, so removing that check turns this test red (round 1b mutations).
+    # The containment check: TMPDIR itself, and a work-folder name outside it, when both are relative
+    # and named like a work folder (no slash, so the "directly inside" check cannot catch them).
+    local rel="$BATS_TEST_TMPDIR/rel"
+    mkdir -p "$rel/mmry-t.1/mmry-in.abc" "$rel/mmry-out.abc"
+    : > "$rel/mmry-t.1/sentinel"; : > "$rel/mmry-out.abc/sentinel"
+    for p in "mmry-t.1" "mmry-out.abc" ; do
+        run env TMPDIR="mmry-t.1" HOME="$h" bash -c 'cd "$3" || exit 9; . "$1"; mmry_work_dir_remove "$2"' _ "$(_helper)" "$p" "$rel"
+        [[ "$status" -ne 0 && "$status" -ne 9 ]] || fail "removing relative '$p' (TMPDIR=mmry-t.1) was not refused: exit $status: $output"
+    done
+    [[ -f "$rel/mmry-t.1/sentinel" && -f "$rel/mmry-out.abc/sentinel" ]] || fail "a refused relative removal deleted something"
+    # The "directly inside" check: a folder nested in a work folder, whose name still starts mmry-.
+    mkdir -p "$t/mmry-a.b/sub"; : > "$t/mmry-a.b/sub/sentinel"
+    run env TMPDIR="$t" HOME="$h" bash -c '. "$1"; mmry_work_dir_remove "$2"' _ "$(_helper)" "$t/mmry-a.b/sub"
+    [[ "$status" -ne 0 && -f "$t/mmry-a.b/sub/sentinel" ]] || fail "a folder nested in a work folder was removed: exit $status: $output"
     # The one it made goes.
     run env TMPDIR="$t" HOME="$h" bash -c '. "$1"; mmry_work_dir_new demo || exit 9; : > "$MMRY_WORK_DIR/f"; mmry_work_dir_remove "$MMRY_WORK_DIR" || exit 8; [ ! -e "$MMRY_WORK_DIR" ]' _ "$(_helper)"
     [[ "$status" -eq 0 ]] || fail "its own work folder was not removed: exit $status: $output"
