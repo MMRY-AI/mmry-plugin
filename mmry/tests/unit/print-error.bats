@@ -73,13 +73,18 @@ FIXED_402=$'Credits exhausted. Your MMRY AI subscription has run out of API cred
 @test "33716 client: raw C1 controls are removed where printf gives the first byte, as bash 3.2 does" {
     # macOS's /bin/bash 3.2 answers printf '%d' "'c" with the character's first byte (C2 for every
     # C1 control), not its code point; CI run 43394385462 showed a raw CSI passing there. This
-    # stands in that answer on any bash, so Linux and Windows guard it too.
+    # stands in that answer on any bash, so Linux and Windows guard it too. The answers come from a
+    # table of the characters below (bash 3.2's signed first byte: C2 is -62, C3 is -61), never from
+    # switching locale inside the stand-in: bash 3.2 restores a function's local LC_ALL to the wrong
+    # value on return, which flipped the cleaner's locale mid-walk (CI run 43414669546, macOS, LC_ALL=C).
     printf() {
         if [[ "$1" == "-v" && "$3" == "%d" && "$4" == "'"* ]]; then
-            local ch="${4:1}" v LC_ALL=C
-            ch="${ch:0:1}"
-            builtin printf -v v '%d' "'$ch"
-            if (( v > 127 )); then v=$(( v - 256 )); fi
+            local ch="${4:1}" v
+            case "$ch" in
+                $'\xc2\x80'*|$'\xc2\x85'*|$'\xc2\x9b'*|$'\xc2\x9f'*|$'\xc2\xa9'*) v=-62 ;;
+                $'\xc3\xa9'*) v=-61 ;;
+                *) builtin printf -v v '%d' "'$ch" ;;
+            esac
             eval "$2=\$v"
             return 0
         fi
