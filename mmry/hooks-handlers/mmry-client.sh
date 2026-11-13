@@ -1120,6 +1120,10 @@ _mmry_request() {
 # BUILTINS ONLY, NO PROCESS: the 402 paths this serves (the client's error print, session-start's
 # 402 answer) start none today, and on Windows each process is tens of milliseconds.
 _MMRY_SERVER_TEXT_MAX=300
+# The 32 C1 controls, U+0080 to U+009F, as UTF-8 (C2 80 to C2 9F). Compared as characters, because
+# bash 3.2 (macOS's /bin/bash) answers printf '%d' "'c" with the character's FIRST BYTE, not its
+# code point: there U+009B reads as 194 (C2), so a code-point range test alone lets a raw CSI through.
+_MMRY_C1_CHARS=$'\xc2\x80\xc2\x81\xc2\x82\xc2\x83\xc2\x84\xc2\x85\xc2\x86\xc2\x87\xc2\x88\xc2\x89\xc2\x8a\xc2\x8b\xc2\x8c\xc2\x8d\xc2\x8e\xc2\x8f\xc2\x90\xc2\x91\xc2\x92\xc2\x93\xc2\x94\xc2\x95\xc2\x96\xc2\x97\xc2\x98\xc2\x99\xc2\x9a\xc2\x9b\xc2\x9c\xc2\x9d\xc2\x9e\xc2\x9f'
 
 # Usage: _mmry_server_text_clean_v TEXT   (sets _MMRY_SERVER_TEXT; empty when nothing printable is left)
 _mmry_server_text_clean_v() {
@@ -1141,7 +1145,10 @@ _mmry_server_text_clean_v() {
             i=$(( i + 1 )); continue
         fi
         if (( utf8 )); then
+            # A code point (bash 4 and later) or a lone stray byte in 128 to 159, or a whole C1
+            # character matched as text (bash 3.2, where n is the lead byte C2 = 194).
             if (( n >= 128 && n <= 159 )); then i=$(( i + 1 )); continue; fi
+            if (( n >= 128 )) && [[ "$_MMRY_C1_CHARS" == *"$c"* ]]; then i=$(( i + 1 )); continue; fi
             if (( kept >= _MMRY_SERVER_TEXT_MAX )); then cut=1; break; fi
             out+="$c"; kept=$(( kept + 1 )); i=$(( i + 1 ))
             continue

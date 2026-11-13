@@ -70,6 +70,29 @@ FIXED_402=$'Credits exhausted. Your MMRY AI subscription has run out of API cred
     [[ "$output" == "Renewing [31mnow2J. Try again soon "$'\xc3\xa9'"t"$'\xc3\xa9'"." ]] || { echo "got: $output"; return 1; }
 }
 
+@test "33716 client: raw C1 controls are removed where printf gives the first byte, as bash 3.2 does" {
+    # macOS's /bin/bash 3.2 answers printf '%d' "'c" with the character's first byte (C2 for every
+    # C1 control), not its code point; CI run 43394385462 showed a raw CSI passing there. This
+    # stands in that answer on any bash, so Linux and Windows guard it too.
+    printf() {
+        if [[ "$1" == "-v" && "$3" == "%d" && "$4" == "'"* ]]; then
+            local ch="${4:1}" v LC_ALL=C
+            ch="${ch:0:1}"
+            builtin printf -v v '%d' "'$ch"
+            if (( v > 127 )); then v=$(( v - 256 )); fi
+            eval "$2=\$v"
+            return 0
+        fi
+        builtin printf "$@"
+    }
+    local loc
+    for loc in C.UTF-8 en_US.UTF-8 C; do
+        LC_ALL="$loc" _mmry_server_text_clean_v $'Try\xc2\x9b again \xc2\x85now \xc2\x80\xc2\x9f\xc3\xa9t\xc3\xa9 \xc2\xa9 ok'
+        [[ "$_MMRY_SERVER_TEXT" == "Try again now "$'\xc3\xa9t\xc3\xa9 \xc2\xa9'" ok" ]] || { echo "[$loc] got: $_MMRY_SERVER_TEXT"; unset -f printf; return 1; }
+    done
+    unset -f printf
+}
+
 @test "33716 client: a very long 402 error is capped at 300 characters" {
     export MMRY_HTTP_CODE="402"
     local long; long="$(printf 'A%.0s' $(seq 1 5000))"
