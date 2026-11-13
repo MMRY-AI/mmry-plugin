@@ -60,6 +60,9 @@ cd "$REPO_ROOT" || exit 1
 . "$TESTS/helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 1; }
 mmry_work_dir_new codex-mut || exit 1
 WORK="$MMRY_WORK_DIR"
+# Removed on every exit from here, including the refusals below (no Python 3, a dirty tree); the
+# trap set before the first mutation replaces this one and also restores the mutated file.
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 
 # ---- Pin the interpreter, BY BEHAVIOUR AND NOT BY NAME. ---------------------------------------
 #

@@ -17,7 +17,8 @@
 #      mktemp, and removes only a folder it made: never an empty path, /, HOME, TMPDIR itself, or a
 #      path outside TMPDIR.
 #   5. Each mutation runner run with TMPDIR set to a folder that does not exist, or with TMPDIR unset,
-#      stops with a plain message, and sentinel files in a scratch stand-in and in HOME survive.
+#      stops with a plain message, and sentinel files in a scratch stand-in and in HOME survive. Each
+#      runner sets the trap that removes its work folder before any exit after making it.
 #   6. The test teardown refuses to delete HOME.
 #
 # Fixtures below spell the command RM, so this file, which the check also reads, does not carry the
@@ -224,6 +225,20 @@ _runners() { ls "$PLUGIN_ROOT"/tests/mutation/run-*.sh "$PLUGIN_ROOT"/tests/stru
         grep -nE '^[[:space:]]*((export|local)[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*="?\$\{TMPDIR:-/tmp\}|mktemp[^|;]*TMPDIR:-/tmp|TMPDIR=/tmp' "$f" >/dev/null && bad="$bad $(basename "$f")"
     done
     [[ -z "$bad" ]] || fail "falls back to /tmp:$bad"
+}
+
+@test "33618: every mutation runner removes its work folder on any exit after making it" {
+    # A refusal between mmry_work_dir_new and the trap that removes the folder leaves the folder
+    # behind (round 1b: run-codex-mutations.sh refused a dirty tree before its trap was set).
+    local r a b bad=""
+    for r in $(_runners); do
+        a="$(grep -n 'mmry_work_dir_new' "$r" | head -1 | cut -d: -f1)"
+        b="$(grep -n '^[[:space:]]*trap .*mmry_work_dir_remove.* EXIT' "$r" | head -1 | cut -d: -f1)"
+        [[ -n "$a" && -n "$b" ]] || { bad="$bad $(basename "$r")(no removal trap)"; continue; }
+        awk -v a="$a" -v b="$b" 'NR > a && NR < b && !/^[[:space:]]*#/ && /(^|[^A-Za-z_])exit([[:space:]]|;|$)/ { f = 1 } END { exit !f }' "$r" \
+            && bad="$bad $(basename "$r")(exits before line $b sets its trap)"
+    done
+    [[ -z "$bad" ]] || fail "a refusal can leave the work folder behind:$bad"
 }
 
 # ---------------------------------------------------------------- 6. the test teardown
