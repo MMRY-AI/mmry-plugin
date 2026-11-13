@@ -348,6 +348,40 @@ _copy_without_umask() {
     (( seen == 1 )) || { echo "the mutant wrote no memories file"; return 1; }
 }
 
+# THE PER-PROMPT BUDGET (#33652). The prepared copy is written "in place, with no process" (#31893), so
+# the repair must not put a process on every prompt. Counted with a chmod on PATH that logs each start:
+# after a session start (which leaves the marker) a prompt's six parts start no chmod at all; with no
+# session start since the upgrade, the first prompt starts exactly one (part 1) and the next none.
+@test "#33652 budget: a prompt after a session start starts no chmod; the first prompt with no session start since the upgrade starts one, the next none" {
+    _modes_observable || skip "the repair does nothing on Windows (no POSIX modes), so there is nothing to count; this runs on the Linux and macOS CI legs"
+    local shims="$TEST_TMPDIR/shims" calls="$TEST_TMPDIR/chmod-calls" real; real="$(command -v chmod)"
+    mkdir -p "$shims"
+    cat > "$shims/chmod" <<SHIM
+#!/usr/bin/env bash
+echo "chmod \$*" >> "$calls"
+exec "$real" "\$@"
+SHIM
+    "$real" +x "$shims/chmod"
+    _u_plant_old
+    : > "$calls"
+    PATH="$shims:$PATH" _cc_start "$_U_SID" >/dev/null
+    local at_start; at_start="$(grep -c '^chmod 600' "$calls" || true)"
+    : > "$calls"
+    PATH="$shims:$PATH" _cc_prompt "$_U_SID"
+    [[ "$(grep -c '^chmod 600' "$calls" || true)" == 0 ]] || { echo "a prompt after a session start started chmod: $(cat "$calls")"; return 1; }
+    (( at_start == 1 )) || { echo "the session start started chmod $at_start times, not once"; return 1; }
+    # No session start since the upgrade: the marker is missing.
+    rm -f "$TEST_TMPDIR"/.mmry-foundation-private.*
+    chmod 644 "$TEST_TMPDIR/$(_u_name prepared)"
+    : > "$calls"
+    PATH="$shims:$PATH" _cc_prompt "$_U_SID"
+    [[ "$(grep -c '^chmod 600' "$calls" || true)" == 1 ]] || { echo "the first prompt with no marker started chmod $(grep -c '^chmod 600' "$calls" || true) times, not once: $(cat "$calls")"; return 1; }
+    _u_assert_600 prepared
+    : > "$calls"
+    PATH="$shims:$PATH" _cc_prompt "$_U_SID"
+    [[ "$(grep -c '^chmod 600' "$calls" || true)" == 0 ]] || { echo "the prompt after that started chmod again"; return 1; }
+}
+
 # MUTATION CONTROLS FOR THE UPGRADE PATH (#33652, QA round 1 of PR #138). A copy of the plugin with one
 # of the two parts of the fix disabled, driven the same way: the matching check above must then fail.
 # Pure string replacement on the copy, refusing anything but exactly one occurrence.
