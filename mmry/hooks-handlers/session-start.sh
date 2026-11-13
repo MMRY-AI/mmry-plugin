@@ -389,6 +389,19 @@ if ! mmry_get_startup_memories "$WORK_DIR" "" "" "$_mmry_moment"; then
         exit 0
     fi
     if [[ "${MMRY_HTTP_CODE:-}" == "402" ]]; then
+        # The server's own sentence when it sent one (#33716): a renewal still in progress answers
+        # 402 too, and telling that person their credits have run out is wrong. Cleaned and capped,
+        # builtins only (_mmry_api_error_v in the client); the fixed text when the body has none.
+        _mmry_api_error_v
+        if [[ -n "$_MMRY_API_ERROR" ]]; then
+            # Escaped here rather than through $(_mmry_json_escape), which is a subshell: the cleaned
+            # text holds no control characters, so backslash and double quote are all there is.
+            _mmry_said="${_MMRY_API_ERROR//\\/\\\\}"
+            _mmry_said="${_mmry_said//\"/\\\"}"
+            printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI did not load memories for this session (HTTP 402). Tell the user this sentence from MMRY AI, word for word: \\"%s\\""}}' \
+                "$_mmry_said"
+            exit 0
+        fi
         printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI credits exhausted. Inform the user their API credits have run out. Visit https://mmryai.com to add more credits or upgrade their plan."}}'
         exit 0
     fi
