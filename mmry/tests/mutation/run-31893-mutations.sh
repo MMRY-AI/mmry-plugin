@@ -12,8 +12,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
 H="hooks-handlers/userpromptsubmit-foundation.sh"
 SUITE="tests/handlers/foundation-in-time.bats"
-WORK="${TMPDIR:-/tmp}/mmry-31893-mut-$$"
-mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new 31893-mut || exit 2
+WORK="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 
 # Replace the first occurrence of $2 with $3 in file $1; fail if $2 is not there.
 _rep() {
@@ -110,7 +115,7 @@ add awk-unbounded "the preparing part's character cut is not bounded by the time
 
 run_suite() { ( cd "$1/tests" && ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 
-copy() { rm -rf "$1"; mkdir -p "$1"; cp -R "$PLUGIN_SRC/." "$1/"; }
+copy() { mmry_work_reset "$1" || exit 2; cp -R "$PLUGIN_SRC/." "$1/"; }
 
 echo "baseline: the untouched copy"
 copy "$WORK/base"

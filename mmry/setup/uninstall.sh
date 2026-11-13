@@ -197,7 +197,7 @@ fi
 
 # Step 3: Remove stable hooks directory
 if [[ -d "${HOME}/.claude/mmry" ]]; then
-    rm -rf "${HOME}/.claude/mmry"
+    rm -rf "${HOME:?}/.claude/mmry"
     echo "  Removed ~/.claude/mmry/"
 fi
 
@@ -205,7 +205,7 @@ fi
 for cache_name in "mmry-plugin" "internal-plugins"; do
     CACHE_DIR="${CLAUDE_DIR}/plugins/cache/${cache_name}/mmry"
     if [[ -d "$CACHE_DIR" ]]; then
-        rm -rf "$CACHE_DIR"
+        rm -rf "${CACHE_DIR:?}"
         echo "  Cleared plugin cache (${cache_name})"
     fi
 done

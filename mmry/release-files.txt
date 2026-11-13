@@ -158,6 +158,7 @@ tests/helpers/mock-curl.sh
 tests/helpers/self-update-release.bash
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
+tests/helpers/work-dir.bash
 tests/integration/api-health.bats
 tests/integration/codex-foundation-live.bats
 tests/integration/codex-hook-trust-live.bats

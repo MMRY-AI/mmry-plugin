@@ -66,4 +66,4 @@ printf 'mmry-foundation v1 entries=12 bytes=%s cksum=%s\n' "$((b+1))" "$s" > "$C
 out="$(bash "$PLUGIN_ROOT/hooks-handlers/userpromptsubmit-foundation.sh")"; rc=$?
 echo "exit=$rc"
 case "$out" in *'could not verify'*) echo "VERDICT: REFUSED";; *'Directive 1'*) echo "VERDICT: INJECTED";; *) echo "VERDICT: SILENT/OTHER";; esac
-rm -rf "$WORK"
+rm -rf "${WORK:?}"

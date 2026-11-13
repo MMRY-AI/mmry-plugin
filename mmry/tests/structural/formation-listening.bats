@@ -48,8 +48,8 @@ teardown() {
 _sid() { printf '%s' "$CLAUDE_SESSION_ID" | tr -c 'A-Za-z0-9._-' '_'; }
 
 _reset_locks() {
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)" \
-           "${TMPDIR}/.mmry-formation-renewed-$(_sid)" "${TMPDIR}/.mmry-formation-handover-$(_sid)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_sid)" "${TMPDIR:?}/.mmry-formation-poll-$(_sid)" \
+           "${TMPDIR:?}/.mmry-formation-renewed-$(_sid)" "${TMPDIR:?}/.mmry-formation-handover-$(_sid)"
 }
 
 # A curl that ROUTES: the membership-and-read-status route answers with FAKE_SENT_*, everything else
@@ -240,7 +240,7 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     # POSITIVE CONTROL for "leaving the formation mid-watch stops it". The same scenario against a
     # handler with the per-iteration check removed must run to the end of its window instead.
     local mutant="${BATS_TEST_TMPDIR}/handlers-noleave"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -0777 -pi -e 's{\n[ ]+mmry_formation_state_read "\$session_id" \|\| exit 0\n[ ]+\[\[ "\$MMRY_FS_FORMATION" == "\$formation_id" \]\] \|\| exit 0\n}{\n}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash -n "${mutant}/formation-check.sh"
@@ -311,7 +311,7 @@ _count_sent()  { grep -c '/transmissions/sent' "$URLS" 2>/dev/null || true; }
     # past is staged with a reserve larger than the budget, which is exactly "no time left".
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local mutant="${BATS_TEST_TMPDIR}/handlers-late"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     # The response arrives, then the deadline has passed: _fc_in_time refuses to hand over the block.
     perl -0777 -pi -e 's{_fc_in_time \|\| \{ _release_mutex; return 1; \}}{SECONDS=999; _fc_in_time || { _release_mutex; return 1; }}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
@@ -409,7 +409,7 @@ _reply_latency() {
     # not the old flat 15: 15 lands on the boundary itself, and whole-second timing on a fast host
     # could read it either way, which would make this control a coin toss rather than a proof.
     local mutant="${BATS_TEST_TMPDIR}/handlers-slow-early"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -pi -e 's{^_IDLE_EARLY_INTERVAL=3$}{_IDLE_EARLY_INTERVAL=20}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
 
@@ -477,7 +477,7 @@ _handover_run() {
     # which is what the watch did before the handover: B says nothing, and the reply waits for A's
     # next once-a-minute ask.
     local mutant="${BATS_TEST_TMPDIR}/handlers-nohandover"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -0777 -pi -e 's{if ! _acquire_poller "\$_poller_dir" "\$_IDLE_LOCK_STALE"; then\n}{if ! _acquire_poller "\$_poller_dir" "\$_IDLE_LOCK_STALE"; then exit 0\n}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash -n "${mutant}/formation-check.sh"
@@ -570,7 +570,7 @@ _polls_over_window() {
     mkdir -p "${TMPDIR}/.mmry-formation-renewed-$(_sid)"
     # _polls_over_window resets the locks, which would remove the marker; plant it after the reset.
     local hdir="${BATS_TEST_TMPDIR}/handlers-plant"
-    rm -rf "$hdir"; mkdir -p "$hdir"; cp "${HANDLERS}"/*.sh "$hdir"/
+    rm -rf "${hdir:?}"; mkdir -p "$hdir"; cp "${HANDLERS}"/*.sh "$hdir"/
     perl -0777 -pi -e 's{(_renew_marker="\$\{MMRY_TMPDIR\}/\.mmry-formation-renewed-\$\{_safe_sid\}"\n)}{$1        mkdir "\$_renew_marker" 2>/dev/null || true\n}' "${hdir}/formation-check.sh"
     ! cmp -s "${hdir}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "plant did not apply"; return 1; }
     read -r renewed elapsed <<< "$(_polls_over_window "$hdir")"

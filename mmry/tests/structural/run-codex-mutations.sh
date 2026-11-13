@@ -53,6 +53,14 @@ BATS="${MMRY_BATS_BIN:-$TESTS/libs/bats-core/bin/bats}"
 
 cd "$REPO_ROOT" || exit 1
 
+# Work folder (#33618), for the interpreter's error file: made inside an existing TMPDIR by a checked
+# mktemp, never in a fallback /tmp, before anything is mutated, and removed only through
+# mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$TESTS/helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 1; }
+mmry_work_dir_new codex-mut || exit 1
+WORK="$MMRY_WORK_DIR"
+
 # ---- Pin the interpreter, BY BEHAVIOUR AND NOT BY NAME. ---------------------------------------
 #
 # Three traps live in this six-line problem, and this harness fell into all of them:
@@ -130,7 +138,8 @@ _restore() {
         CURRENT_FILE=""
     fi
 }
-trap _restore EXIT INT TERM
+trap '_restore; mmry_work_dir_remove "$WORK"' EXIT
+trap _restore INT TERM
 
 # mutate <label> <file> <python-expression-file-edit> <test-file> <expected-failing-test-substring>
 mutate() {
@@ -153,7 +162,7 @@ mutate() {
     # ("fatal error - couldn't create signal pipe") and every experiment came back as exit 127 -
     # another harness fault that looks like a finding.
     local pyerr applied
-    local errfile="${TMPDIR:-/tmp}/mmry-mutation-stderr.$$"
+    local errfile="$WORK/mmry-mutation-stderr"
     "$PYBIN" - "$PLUGIN/$file" 2>"$errfile" <<PY
 import io, sys
 p = sys.argv[1]

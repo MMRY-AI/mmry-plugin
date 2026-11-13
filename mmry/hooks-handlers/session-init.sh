@@ -44,7 +44,9 @@ fi
 
 # Clean old hooks dir, create target directories
 # `|| true` (#31844): under set -e a failing rm ended the session start here, before memories loaded.
-rm -rf "${MMRY_STATE_DIR}/hooks" 2>/dev/null || true
+# The explicit test keeps an empty state folder from ending the session start; ${...:?} is the
+# second guard, which the folder-delete check reads (#33618).
+[[ -n "${MMRY_STATE_DIR:-}" ]] && { rm -rf "${MMRY_STATE_DIR:?}/hooks" 2>/dev/null || true; }
 mkdir -p "${MMRY_STATE_DIR}/hooks-handlers" "${MMRY_STATE_DIR}/setup"
 
 # WRITE DOWN WHICH HOST THIS INSTALL BELONGS TO, BESIDE THE FILES (#31245 QA round 3).
@@ -318,7 +320,7 @@ if (( _mmry_install == 1 )); then
 
     _mmry_mirror || true
     if [[ -n "$_su_scratch" ]]; then
-        rm -rf "$_su_scratch" 2>/dev/null || true
+        rm -rf "${_su_scratch:?}" 2>/dev/null || true
     fi
 fi
 

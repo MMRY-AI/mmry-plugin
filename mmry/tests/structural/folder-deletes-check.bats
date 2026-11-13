@@ -104,6 +104,13 @@ _passes() { # NAME BODY
     _passes redirect   'RM -rf -- "${W:?}" 2>/dev/null || true'
 }
 
+@test "33618: an rm inside a quoted payload ends with its string; one in a message is still read" {
+    [[ -f "$CHECK" ]] || fail "scripts/check-folder-deletes.sh does not exist"
+    _passes  payload-double  'printf "%s" "42; RM -rf /" > "${TMPDIR:?}/f"'
+    _passes  payload-single  "call '{\"id\":\"41; RM -rf /\"}' \"\$(other)\""
+    _refused message-var     'echo "then RM -rf $W"' 2
+}
+
 @test "33618: a file that cannot be read is a failure to pass, not a pass" {
     [[ -f "$CHECK" ]] || fail "scripts/check-folder-deletes.sh does not exist"
     run bash "$CHECK" --file "$BATS_TEST_TMPDIR/not-there.sh"

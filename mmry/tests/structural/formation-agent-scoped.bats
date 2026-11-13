@@ -38,7 +38,7 @@ setup() {
     export CLAUDE_SESSION_ID="bats-agentscoped-$$"
     SID="$CLAUDE_SESSION_ID"
     bash "${HANDLERS}/formation-state.sh" clear "$SID" || true
-    rm -rf "${TMPDIR}/.mmry-formation-cs-${SID}" "${TMPDIR}/.mmry-formation-poll-${SID}"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-${SID}" "${TMPDIR:?}/.mmry-formation-poll-${SID}"
 
     # One DIRECTED message (it carries a recipient and an id), because a directed line is the one
     # whose seen-marking reaches the service: its id is reported as read on the next poll.
@@ -93,7 +93,7 @@ _payload() {
 _run_check() {
     local event="$1" who="$2" host="${3:-}"
     _payload "$event" "$who" > "${BATS_TEST_TMPDIR}/payload.json"
-    rm -rf "${TMPDIR}/.mmry-formation-cs-${SID}" "${TMPDIR}/.mmry-formation-poll-${SID}"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-${SID}" "${TMPDIR:?}/.mmry-formation-poll-${SID}"
     local hostenv="-u MMRY_HOST"
     [[ -n "$host" ]] && hostenv="MMRY_HOST=${host}"
     # stderr is captured on its own: on Claude Code the tool and idle routes deliver there.

@@ -44,9 +44,9 @@ teardown() {
 _sid() { printf '%s' "$CLAUDE_SESSION_ID" | tr -c 'A-Za-z0-9._-' '_'; }
 
 _reset_locks() {
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)" \
-           "${TMPDIR}/.mmry-formation-renewed-$(_sid)" "${TMPDIR}/.mmry-formation-handover-$(_sid)" \
-           "${TMPDIR}/.mmry-renewal-turn-$(_sid)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_sid)" "${TMPDIR:?}/.mmry-formation-poll-$(_sid)" \
+           "${TMPDIR:?}/.mmry-formation-renewed-$(_sid)" "${TMPDIR:?}/.mmry-formation-handover-$(_sid)" \
+           "${TMPDIR:?}/.mmry-renewal-turn-$(_sid)"
 }
 
 # A curl that routes, as formation-listening.bats's does, and that can also HANG: with FAKE_HANG=1
@@ -340,7 +340,7 @@ _chain() {
 @test "control: the limit tests fail against a watch that ignores the setting" {
     # POSITIVE CONTROL. With the limit check removed the chain renews past 60 minutes.
     local mutant="${BATS_TEST_TMPDIR}/handlers-nolimit"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -0777 -pi -e 's{\n[ ]+_fc_listen_setting\n}{\n        _listen_secs=-1\n}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
@@ -397,7 +397,7 @@ _worst_case() {
     # POSITIVE CONTROL. The watch used to start its 28 minutes after it had taken the lock, so a
     # handover wait of up to 40 s came on top of the window and the margin.
     local mutant="${BATS_TEST_TMPDIR}/handlers-late-start"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -0777 -pi -e 's{_deadline=\$\(\( _hook_start \+ MMRY_IDLE_POLL_SECONDS \)\)}{_deadline=\$(( \$(date +%s) + MMRY_IDLE_POLL_SECONDS ))}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     local took rc
@@ -447,7 +447,7 @@ _reused_lock() {
 
 @test "control: without the backstop, the reused-pid lock silences delivery for good" {
     local mutant="${BATS_TEST_TMPDIR}/handlers-nobackstop"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -0777 -pi -e 's{_lock_is_stale "\$\{dir\}/pid" "\$_IDLE_LOCK_BACKSTOP" \|\| return 1}{return 1}' "${mutant}/formation-check.sh"
     ! cmp -s "${mutant}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
