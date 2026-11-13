@@ -167,6 +167,142 @@ _all_owner_only() {
 }
 
 # ---------------------------------------------------------------------------------------------
+# REQUIREMENT 1 ON THE UPGRADE PATH (QA round 1 of PR #138, 33652 R1 FAILED). umask 077 narrows only
+# the files the plugin CREATES. These per-account files are rewritten IN PLACE at a name that persists
+# across prompts and sessions (a plain redirect or an append), and an open with O_TRUNC or O_APPEND
+# leaves an existing file's mode as it was: a copy the previous plugin created at 644 on a shared
+# Linux machine kept 644 after the upgrade, and kept receiving the account's directives on every
+# prompt. Each case below plants the file at 644 BEFORE the session start, as an older plugin left it,
+# then runs one session start and one prompt (all six parts), and requires 600.
+# ---------------------------------------------------------------------------------------------
+_U_SID=cc-upg-1
+
+# The per-account names, as the handlers build them (lib-foundation-key.sh): <account key> for the
+# account's own files, <account key>.<session id> for the per-session part of the name.
+_u_name() {
+    local a; a="$(fnd_acct)"
+    case "$1" in
+        prepared) printf '.mmry-foundation-prepared.%s.%s' "$a" "$_U_SID" ;;
+        result)   printf '.mmry-foundation-result.%s.%s' "$a" "$_U_SID" ;;
+        claim)    printf '.mmry-foundation-claim.%s.%s' "$a" "$_U_SID" ;;
+        session)  printf 'mmry-foundation.session.%s' "$a" ;;
+        log)      printf 'mmry-foundation.%s.log' "$a" ;;
+        moment)   printf 'mmry-foundation-moment.%s.every-message' "$a" ;;
+        checked)  printf '.mmry-foundation-refresh-checked.%s' "$a" ;;
+        memories) printf 'mmry-memories.%s.%s.md' "$a" "$_U_SID" ;;
+        stored)   printf 'mmry-foundation.stored.%s.%s' "$a" "$_U_SID" ;;
+        status)   printf 'mmry-foundation.status.%s.%s' "$a" "$_U_SID" ;;
+    esac
+}
+_U_ALL="prepared result claim session log moment checked memories stored status"
+
+# Every name above, planted at 644 the way an older plugin left it.
+_u_plant_old() {
+    local k p
+    for k in $_U_ALL; do
+        p="$TEST_TMPDIR/$(_u_name "$k")"
+        case "$k" in
+            claim)   printf '1 1' > "$p" ;;
+            checked) printf '0' > "$p" ;;
+            stored)  printf '1' > "$p" ;;
+            log)     printf '2026-01-01T00:00:00 an older plugin wrote this line\n' > "$p" ;;
+            *)       printf 'written by an older plugin' > "$p" ;;
+        esac
+        chmod 644 "$p"
+        [[ "$(_mode "$p")" == "644" ]] || { echo "could not plant $k at 644"; return 1; }
+    done
+}
+
+_u_start_and_prompt() {
+    _cc_start "$_U_SID" >/dev/null
+    _cc_prompt "$_U_SID"
+}
+
+# Fails unless the planted file $1 is still there as a regular file and is now 600.
+_u_assert_600() {
+    local p; p="$TEST_TMPDIR/$(_u_name "$1")"
+    [[ -f "$p" && ! -L "$p" ]] || { echo "$1 ($(_u_name "$1")) is gone or not a regular file: $(ls -lA "$TEST_TMPDIR" | tr '\n' ' ')"; return 1; }
+    [[ "$(_mode "$p")" == "600" ]] || { echo "$1 ($(_u_name "$1")) planted at 644 by an older plugin is still $(_mode "$p") after a session start and a prompt"; return 1; }
+}
+
+@test "#33652 upgrade: the prepared copy (.mmry-foundation-prepared), planted at 644 by an older plugin, is 600 after one session start and one prompt, and was rewritten" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    _u_plant_old
+    _u_start_and_prompt
+    _u_assert_600 prepared
+    # The prompt really wrote it (an in-place rewrite, the path QA named), not merely left it.
+    local first; IFS= read -r first < "$TEST_TMPDIR/$(_u_name prepared)" || true
+    [[ "$first" == "mmry-fnd-prepared v1 "* ]] || { echo "the prepared copy was not rewritten by the prompt: '$first'"; return 1; }
+}
+
+@test "#33652 upgrade: the session marker (mmry-foundation.session), planted at 644 by an older plugin, is 600 after one session start and one prompt" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    _u_plant_old
+    _u_start_and_prompt
+    _u_assert_600 session
+    [[ "$(<"$TEST_TMPDIR/$(_u_name session)")" == "$_U_SID" ]] || { echo "the session start did not write its marker"; return 1; }
+}
+
+@test "#33652 upgrade: the result file (.mmry-foundation-result), planted at 644 by an older plugin, is 600 after one session start and one prompt" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    _u_plant_old
+    _u_start_and_prompt
+    _u_assert_600 result
+}
+
+@test "#33652 upgrade: the account's log (mmry-foundation.<key>.log), planted at 644 by an older plugin, is 600 after one session start and one prompt, its lines kept" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    _u_plant_old
+    _u_start_and_prompt
+    _u_assert_600 log
+    grep -q 'an older plugin wrote this line' "$TEST_TMPDIR/$(_u_name log)" || { echo "the log lost its earlier lines"; return 1; }
+}
+
+@test "#33652 upgrade: the moment report (mmry-foundation-moment), planted at 644 by an older plugin, is 600 after one session start and one prompt" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    _u_plant_old
+    _u_start_and_prompt
+    _u_assert_600 moment
+}
+
+@test "#33652 upgrade: every other per-account file written in place (claim, refresh check, memories file, stored marker, delivery record), planted at 644, is 600 after one session start and one prompt" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    _u_plant_old
+    _u_start_and_prompt
+    local k bad=""
+    for k in claim checked memories stored status; do
+        _u_assert_600 "$k" >/dev/null 2>&1 || bad+="$k=$(_mode "$TEST_TMPDIR/$(_u_name "$k")" 2>/dev/null || echo gone) "
+    done
+    [[ -z "$bad" ]] || { echo "still not owner-only after a session start and a prompt: $bad"; return 1; }
+    # And every Foundation working file in the folder, whoever's name it carries, is owner-only now.
+    _foundation_files | _all_owner_only
+}
+
+@test "#33652 upgrade: a link planted at a per-account name is never written through or chmodded through, and the Foundation is still delivered" {
+    _modes_observable || skip "POSIX modes and real symlinks are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    local k p v bad=""
+    for k in prepared result session moment log checked; do
+        v="$TEST_TMPDIR/victim-$k"
+        printf 'VICTIM %s' "$k" > "$v"
+        chmod 644 "$v"
+        p="$TEST_TMPDIR/$(_u_name "$k")"
+        ln -s "$v" "$p"
+    done
+    _cc_start "$_U_SID" >/dev/null
+    run bash -c 'printf "{\"session_id\":\"%s\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"hi\"}" "$1" | bash "$2/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 2>/dev/null' _ "$_U_SID" "$PLUGIN_ROOT"
+    local out="$output"
+    _cc_prompt "$_U_SID"
+    for k in prepared result session moment log checked; do
+        v="$TEST_TMPDIR/victim-$k"
+        p="$TEST_TMPDIR/$(_u_name "$k")"
+        [[ "$(<"$v")" == "VICTIM $k" ]] || bad+="$k: written through the link; "
+        [[ "$(_mode "$v")" == "644" ]] || bad+="$k: the link's target was chmodded to $(_mode "$v"); "
+    done
+    [[ -z "$bad" ]] || { echo "$bad"; return 1; }
+    [[ "$out" == *"EVERY-12 holds"* ]] || { echo "the Foundation was not delivered with links at the account's names: $out"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
 # MUTATION CONTROL (the ticket: "it fails with the change removed"). A copy of the plugin with every
 # umask line removed, driven the same way: the checks above must then fail. Pure string replacement
 # on the copy, as tests/mutation/run-33617-mutations.sh does.
