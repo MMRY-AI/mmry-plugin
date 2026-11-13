@@ -48,6 +48,11 @@
 
 # NOTE: deliberately NOT `set -e`, a failure here must never fail the user's prompt.
 set -uo pipefail 2>/dev/null || true
+# EVERY FILE THIS HOOK WRITES IS OWNER-ONLY (#33652, DD-182): the prepared copy, claim, result, status,
+# outcome and by-reference files hold the account's directives, and the supervisor writes some of them
+# before it loads the client (which sets the same umask for the worker). A builtin: no process, on
+# any part of any prompt.
+umask 077
 
 # WITHOUT A PROCESS WHEN THE PATH SAYS IT (#31893). This was `$(cd "$(dirname "$0")/.." && pwd)`, three
 # processes on Windows paid by all six parts before anything else, so eighteen a prompt, and under load
@@ -122,6 +127,10 @@ _FND_ACCT="$_MMRY_FND_ACCT"
 # large for K parts. Parts 2..K only ever speak about their own part.
 MMRY_FND_PART=1
 if [[ "${1:-}" == "--part" && "${2:-}" =~ ^[1-9][0-9]*$ ]]; then MMRY_FND_PART="$2"; fi
+# FILES AN OLDER PLUGIN LEFT AT 644 ARE MADE OWNER-ONLY (#33652, QA round 1 of PR #138). Part 1 only,
+# before anything is written; one test and no process once the account's marker is there, which the
+# session start leaves (lib-foundation-key.sh, mmry_foundation_private_v, says why and what it costs).
+(( MMRY_FND_PART == 1 )) && mmry_foundation_private_v "$_FOUND_TMPDIR"
 MMRY_FND_PARTS_MAX="${MMRY_FOUNDATION_PARTS_MAX:-6}"
 [[ "$MMRY_FND_PARTS_MAX" =~ ^[1-9][0-9]*$ ]] || MMRY_FND_PARTS_MAX=6
 # Characters of the SET per part, counted as Claude Code counts them, in UTF-16 units (see
@@ -182,6 +191,8 @@ _mmry_fnd_write() {
 # line before any write happened. So after a failed emit the stamp is taken inside a fresh process.
 _mmry_fnd_log() {
     [[ -e "$_FOUND_LOG" && ! -f "$_FOUND_LOG" ]] && return 0
+    # Nor through a link, nor into another user's file (#33652).
+    mmry_foundation_writable_name "$_FOUND_LOG" || return 0
     if [[ -n "${_FND_STDOUT_SPOILED:-}" ]]; then
         env sh -c 'printf "%s %s\n" "$(date +%FT%T 2>/dev/null || echo now)" "$1"' _ "$1" >> "$_FOUND_LOG" 2>/dev/null || true
     elif (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
@@ -477,7 +488,8 @@ _mmry_fnd_finish() {
     [[ "$cut" == cut ]] && _mmry_fnd_mark_cut
     if [[ -n "$out" ]]; then
         _mmry_fnd_outcome_line "$out"
-        if [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]] && { [[ ! -e "$o" ]] || [[ -f "$o" ]]; } \
+        if [[ -z "${_FND_STDOUT_SPOILED:-}" && -f "$_INFLIGHT" ]] && mmry_foundation_writable_name "$_INFLIGHT" \
+            && { [[ ! -e "$o" ]] || [[ -f "$o" ]]; } \
             && printf '%s' "$_FND_OLINE" > "$_INFLIGHT" 2>/dev/null && mv -f "$_INFLIGHT" "$o" 2>/dev/null; then
             :
         else
@@ -825,7 +837,9 @@ _mmry_fnd_deliver() {
     local cur=""
     [[ -n "${_FND_STATUS_LINE:-}" ]] || return 0
     [[ -f "$_STATUS" && -r "$_STATUS" ]] && { IFS= read -r -d '' cur < "$_STATUS" 2>/dev/null; }
-    if [[ -n "$cur" && "$cur" == "$_FND_STATUS_LINE" ]]; then
+    # Renewed in place only in the caller's own regular file; a link or another user's file is replaced
+    # by the rename below instead, which replaces the name and never writes through it (#33652).
+    if [[ -n "$cur" && "$cur" == "$_FND_STATUS_LINE" ]] && mmry_foundation_writable_name "$_STATUS"; then
         printf '%s' "$_FND_STATUS_LINE" 1<> "$_STATUS" 2>/dev/null
     elif [[ ! -e "$_STATUS" && ! -L "$_STATUS" ]]; then
         printf '%s' "$_FND_STATUS_LINE" > "$_STATUS" 2>/dev/null
@@ -899,6 +913,8 @@ _mmry_fnd_store_prepared() {
     for p in "${FND_PARTS[@]}"; do o=$(( o + ${#p} )); ends+=" $o"; done
     (( ${#FND_PARTS[@]} >= 1 && ${#FND_PARTS[@]} <= MMRY_FND_PARTS_MAX && o == ${#4} )) || return 1
     [[ -e "$f" && ! -f "$f" ]] && return 1
+    # Never through a link or into another user's file (#33652): refused, and the next prompt prepares.
+    mmry_foundation_writable_name "$f" || return 1
     printf '%s' "mmry-fnd-prepared v1 $1 ${#FND_PARTS[@]} $2 $3 ${MMRY_FND_PARTS_MAX} ${MMRY_FND_PART_CAP} ${o}${ends}
 ${MMRY_FND_RAW}" > "$f" 2>/dev/null
 }
@@ -907,6 +923,7 @@ ${MMRY_FND_RAW}" > "$f" 2>/dev/null
 # where nothing but a regular file stands (#31411 QA round 3, N2).
 _mmry_fnd_mark_cut() {
     [[ -e "$_CUTSHORT" && ! -f "$_CUTSHORT" ]] && return 0
+    mmry_foundation_writable_name "$_CUTSHORT" || return 0
     : > "$_CUTSHORT" 2>/dev/null || true
 }
 
@@ -918,6 +935,7 @@ _mmry_fnd_mark_cut() {
 _mmry_fnd_result() {
     local f="${_FOUND_TMPDIR}/.mmry-foundation-result.${_FND_KEY}"
     [[ -e "$f" && ! -f "$f" ]] && return 0
+    mmry_foundation_writable_name "$f" || return 0
     printf '%s.%s %s' "$$" "${_FND_T0:-0}" "$1" > "$f" 2>/dev/null || true
 }
 
@@ -934,7 +952,7 @@ _mmry_fnd_result() {
 _mmry_fnd_claim() {
     local c="${_FOUND_TMPDIR}/.mmry-foundation-claim.${_FND_KEY}" l="" mine="$$ ${_FND_T0:-0}" rc
     _FND_HELD=""
-    if [[ ! -e "$c" ]]; then
+    if [[ ! -e "$c" && ! -L "$c" ]]; then
         set -C
         { printf '%s' "$mine" > "$c"; } 2>/dev/null
         rc=$?
@@ -944,7 +962,8 @@ _mmry_fnd_claim() {
         return 1
     fi
     # Not a regular file: nothing can hold it, so nobody waits on it; this firing prepares.
-    [[ -f "$c" && -r "$c" ]] || return 0
+    # Nor a link, nor another user's file (#33652): never read as a claim, never written over.
+    mmry_foundation_writable_name "$c" && [[ -f "$c" && -r "$c" ]] || return 0
     l="$(<"$c")" 2>/dev/null || l=""
     if [[ "$l" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
         [[ "$l" == "$mine" ]] && return 0
@@ -1149,7 +1168,8 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # on another account could otherwise find standing where its own would go. _FND_ACCT costs no
     # process; it was computed at the top with the set's name.
     _FOUND_ERR=/dev/null
-    [[ -n "${MMRY_DEBUG:-}" ]] && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.${_FND_ACCT}.log"
+    [[ -n "${MMRY_DEBUG:-}" ]] && mmry_foundation_writable_name "${_FOUND_TMPDIR}/mmry-foundation-debug.${_FND_ACCT}.log" \
+        && _FOUND_ERR="${_FOUND_TMPDIR}/mmry-foundation-debug.${_FND_ACCT}.log"
     exec 2>>"$_FOUND_ERR"
 
     # Every abnormal exit below appends here regardless of MMRY_DEBUG. A failure that tells the
@@ -1269,6 +1289,7 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         [[ -f "$f" ]] && { last="$(<"$f")" 2>/dev/null || last=""; }
         _mmry_fnd_now
         [[ "$last" =~ ^[0-9]+$ ]] && (( _FND_NOW > 0 && _FND_NOW - last < every && _FND_NOW >= last )) && return 0
+        mmry_foundation_writable_name "$f" || return 0
         printf '%s' "$_FND_NOW" > "$f" 2>/dev/null || return 0
         MMRY_FOUNDATION_WORKER=1 MMRY_FND_REFRESH_ONLY=1 \
             bash "${PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh" --part 1 \
@@ -1331,7 +1352,9 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     # path is free or a regular file (#31893): this was a temp file and a rename, two processes on
     # Windows on every part of every prompt. Anything else at the path, a FIFO or a directory, still goes
     # through _mmry_fnd_write, which never opens one for writing (#31411 QA round 3, N2).
-    if [[ -e "$_INFLIGHT" && ! -f "$_INFLIGHT" ]]; then
+    # A link or another user's file at the name goes the rename way too, which replaces the name and
+    # never writes through it (#33652).
+    if [[ -e "$_INFLIGHT" && ! -f "$_INFLIGHT" ]] || ! mmry_foundation_writable_name "$_INFLIGHT"; then
         _mmry_fnd_write "$_INFLIGHT" "" || true
     else
         : > "$_INFLIGHT" 2>/dev/null || true
@@ -1905,6 +1928,8 @@ STATUS="$(mmry_foundation_record_path "$MMRY_TMPDIR" "${MMRY_FND_SID:-}")"
 STATUS_OUT="${MMRY_FOUNDATION_PENDING:-$STATUS}"
 # The delivery record describes the set and is part 1's to write (#31411 split).
 (( MMRY_FND_PART > 1 )) && STATUS_OUT=""
+# Written in place, so never through a link or into another user's file (#33652).
+[[ -n "$STATUS_OUT" ]] && ! mmry_foundation_writable_name "$STATUS_OUT" && STATUS_OUT=""
 
 # THROUGH THE SHARED VERIFIER (#31583 QA). This block used to carry its own copy of the
 # manifest regex, the entries=0 check, the checksum comparison and the whitespace check, and

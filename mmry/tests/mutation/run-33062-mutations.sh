@@ -74,7 +74,7 @@ m_first_keeps_marker() { _rep "$1/$FIRST" 'rm -f "$_late" "${_hand}.out"' 'rm -f
 m_first_not_retagged() { _rep "$1/$FIRST" 'printf '"'%s'"' "${_ans/$_from/$_to}"' 'printf '"'%s'"' "$_ans"'; }
 m_first_no_fail_notice() { _rep "$1/$FIRST" "    printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories" "    false && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"MMRY AI: the memories"; }
 # (Since #33617 the name is keyed, <key>.<sid>; the mutation takes whichever marker is there, as before.)
-m_first_any_session() { _rep "$1/$FIRST" '_late="${_T}/.mmry-codex-late.${_part}"' 'for _late in "${_T}"/.mmry-codex-late.*; do break; done; _part="${_late##*.mmry-codex-late.}"'; }
+m_first_any_session() { _rep "$1/$FIRST" '_late="${_D}/.mmry-codex-late.${_part}"' 'for _late in "${_D}"/.mmry-codex-late.*; do break; done; _part="${_late##*.mmry-codex-late.}"'; }
 m_sh_gate_open() { _rep "$1/$HOOKS" "done; exit 0' mmry-late-gate" "done; exec sh \\\"\$@\\\"' mmry-late-gate"; }
 m_first_launcher_clock_ignored() { _rep "$1/$FIRST" '(( _since > SECONDS && _since <= 300 )) && _spent0=$(( _since - SECONDS ))' ':'; }
 # Fix round 2 (measured on a real Codex at 157 to 177 bash processes). Each plants back one cause.

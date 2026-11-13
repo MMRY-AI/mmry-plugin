@@ -111,6 +111,7 @@ tests/handlers/codex-qa-delta.bats
 tests/handlers/codex-self-update.bats
 tests/handlers/codex-session.bats
 tests/handlers/codex-start-budget.bats
+tests/handlers/codex-start-privacy.bats
 tests/handlers/codex-tools-first-output.bats
 tests/handlers/correction-31847.bats
 tests/handlers/database-command.bats
@@ -126,6 +127,7 @@ tests/handlers/foundation-cross-surface.bats
 tests/handlers/foundation-in-time.bats
 tests/handlers/foundation-moments.bats
 tests/handlers/foundation-parts.bats
+tests/handlers/foundation-private-files.bats
 tests/handlers/foundation-status.bats
 tests/handlers/list-groups.bats
 tests/handlers/make-private.bats
@@ -253,6 +255,7 @@ tests/structural/teardown-tmp.bats
 tests/structural/test-file-size.bats
 tests/structural/test-isolation.bats
 tests/structural/trimmed-tool-list.bats
+tests/unit/account-key-no-collision.bats
 tests/unit/auth-header.bats
 tests/unit/codex-claude-config-isolation.bats
 tests/unit/config-loading.bats

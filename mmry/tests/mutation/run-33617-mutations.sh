@@ -42,28 +42,28 @@ _rep() {
 # The writer names the late marker by the bare id again: the reader, looking for its keyed name, finds
 # nothing, and the account's own late memories never arrive.
 m_writer_late_unkeyed() {
-    _rep "$1/$HOOK" '_mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${_mmry_part}"' \
-                    '_mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${BASH_REMATCH[1]}"'
+    _rep "$1/$HOOK" '_mmry_late_file="${_mmry_dir}/.mmry-codex-late.${_mmry_part}"' \
+                    '_mmry_late_file="${_mmry_dir}/.mmry-codex-late.${BASH_REMATCH[1]}"'
 }
 # The reader looks for the late marker by the bare id again.
 m_reader_late_unkeyed() {
-    _rep "$1/$FIRST" '_late="${_T}/.mmry-codex-late.${_part}"' \
-                     '_late="${_T}/.mmry-codex-late.${_sid}"'
+    _rep "$1/$FIRST" '_late="${_D}/.mmry-codex-late.${_part}"' \
+                     '_late="${_D}/.mmry-codex-late.${_sid}"'
 }
 # Both names, both files, by the bare id: the develop 2818e45b defect itself (S1).
 m_both_unkeyed() {
-    _rep "$1/$HOOK" '_mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${_mmry_part}"' \
-                    '_mmry_late_file="${TMPDIR:-/tmp}/.mmry-codex-late.${BASH_REMATCH[1]}"' &&
-    _rep "$1/$HOOK" '_mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${_mmry_part}.$$"' \
-                    '_mmry_hand="${TMPDIR:-/tmp}/.mmry-codex-start.${BASH_REMATCH[1]}.$$"' &&
-    _rep "$1/$FIRST" '_late="${_T}/.mmry-codex-late.${_part}"' \
-                     '_late="${_T}/.mmry-codex-late.${_sid}"' &&
-    _rep "$1/$FIRST" '_hand="${_T}/.mmry-codex-start.${_part}.${_pid}"' \
-                     '_hand="${_T}/.mmry-codex-start.${_sid}.${_pid}"'
+    _rep "$1/$HOOK" '_mmry_late_file="${_mmry_dir}/.mmry-codex-late.${_mmry_part}"' \
+                    '_mmry_late_file="${_mmry_dir}/.mmry-codex-late.${BASH_REMATCH[1]}"' &&
+    _rep "$1/$HOOK" '_mmry_hand="${_mmry_dir}/.mmry-codex-start.${_mmry_part}.$$"' \
+                    '_mmry_hand="${_mmry_dir}/.mmry-codex-start.${BASH_REMATCH[1]}.$$"' &&
+    _rep "$1/$FIRST" '_late="${_D}/.mmry-codex-late.${_part}"' \
+                     '_late="${_D}/.mmry-codex-late.${_sid}"' &&
+    _rep "$1/$FIRST" '_hand="${_D}/.mmry-codex-start.${_part}.${_pid}"' \
+                     '_hand="${_D}/.mmry-codex-start.${_sid}.${_pid}"'
 }
 # The reader's second guard gone: an answer naming another account's memories file is delivered.
 m_guard_removed() {
-    _rep "$1/$FIRST" 'if [[ "$_ans" == *"$_mark"* && "$_ans" != *"mmry-memories.${_key}."* ]]; then' \
+    _rep "$1/$FIRST" 'if (( _refused == 0 )) && [[ "$_ans" == *"$_mark"* && "$_ans" != *"mmry-memories.${_key}."* ]]; then' \
                      'if false; then'
 }
 

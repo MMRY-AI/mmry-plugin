@@ -79,6 +79,12 @@ MMRY_FORMATION_LISTEN_MINUTES="${MMRY_FORMATION_LISTEN_MINUTES:-}"
 
 # Temp directory — cross-platform
 MMRY_TMPDIR="${TMPDIR:-/tmp}"
+# EVERY FILE THIS CLIENT AND ITS HANDLERS WRITE IS OWNER-ONLY (#33652, DD-182): the memories file
+# SessionStart tells the model to read, the Foundation set, the session, stored and moment markers,
+# the by-reference copy, the request bodies. On a machine where several people share one temp folder
+# the invoking umask (commonly 022) let every other user read a customer's memories and directives.
+# Set here, where every handler sources it, before any of them writes. A builtin: no process.
+umask 077
 
 # HTTP response globals
 MMRY_HTTP_CODE=""
@@ -515,6 +521,8 @@ mmry_foundation_mark_stored() {
     local p
     p="$(mmry_foundation_stored_path "$1" "$2")" || return 1
     [[ "$3" =~ ^[0-9]+$ ]] || return 1
+    # Written in place, so never through a link or into another user's file (#33652).
+    mmry_foundation_writable_name "$p" || return 1
     printf '%s' "$3" > "$p" 2>/dev/null
 }
 
@@ -829,7 +837,7 @@ mmry_write_foundation_cache() {
         # real id too), so Codex's start pays no process for it.
         if [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
             mmry_foundation_session_part_v "$sid"
-            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
+            mmry_foundation_writable_name "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" && printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
         else
             mmry_foundation_mark_stored "${cache%/*}" "$sid" "$entries" || true
         fi
@@ -945,6 +953,8 @@ mmry_foundation_note_moment() {
     [[ "$ov" == true || "$ov" == false ]] || ov="-"
     [[ "$fnd" =~ ^[0-9]+$ ]] || fnd="-"
     mmry_foundation_moment_report_name_v "$dir" "$moment"
+    # Written in place, so never through a link or into another user's file (#33652).
+    mmry_foundation_writable_name "$_MMRY_FND_MOMENT_REPORT_NAME" || return 0
     printf 'count=%s characters=%s over=%s foundation=%s\n' "$c" "$ch" "$ov" "$fnd" \
         > "$_MMRY_FND_MOMENT_REPORT_NAME" 2>/dev/null || true
     return 0

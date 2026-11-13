@@ -73,7 +73,7 @@ _wait_drains() {
     local i=0 f p alive
     while (( i < $1 * 4 )); do
         alive=0
-        for f in "$TMPDIR"/.mmry-codex-start.*.pid; do
+        for f in "$HA"/mmry-handoff/.mmry-codex-start.*.pid "$HB"/mmry-handoff/.mmry-codex-start.*.pid; do
             [[ -f "$f" ]] || continue
             p="$(cat "$f" 2>/dev/null | tr -d '\r\n')"
             [[ "$p" =~ ^[0-9]+$ ]] && kill -0 "$p" 2>/dev/null && alive=1
@@ -164,15 +164,24 @@ _fprompt() {
 
 _context() { printf '%s' "$JSON" | jq -r '.hookSpecificOutput.additionalContext // empty'; }
 _file() { local t; t="$(cat "$1"; printf x)"; printf '%s' "${t%x}"; }
-_codex_files() { ls -a "$TMPDIR" 2>/dev/null | grep -E '^\.mmry-codex-(late|start)' | tr '\n' ' '; }
+# Every late file of both accounts: in each account's own folder (#33231, DD-182) and, for the bare
+# names a previous plugin wrote, the temp folder.
+_codex_files() {
+    local d
+    for d in "$HA/mmry-handoff" "$HB/mmry-handoff" "$TMPDIR"; do
+        ls -a "$d" 2>/dev/null | grep -E '^\.mmry-codex-(late|start)' | sed "s|^|${d##*/}/|" | tr '\n' ' '
+    done
+}
 
-# The keyed names for one account and id, as the plugin spells them.
+# The keyed names for one account and id, as the plugin spells them, in that account's own folder
+# <codex-home>/mmry-handoff (#33231, DD-182). _dir makes the folder as the start would (700).
 #   _part <codex-home> <sid>   -> <key>.<sid>
-#   _late <codex-home> <sid>   -> $TMPDIR/.mmry-codex-late.<key>.<sid>
-#   _hand <codex-home> <sid> <pid> -> $TMPDIR/.mmry-codex-start.<key>.<sid>.<pid>
+#   _late <codex-home> <sid>   -> <codex-home>/mmry-handoff/.mmry-codex-late.<key>.<sid>
+#   _hand <codex-home> <sid> <pid> -> <codex-home>/mmry-handoff/.mmry-codex-start.<key>.<sid>.<pid>
 _part() { FND_CONFIG_OVERRIDE="$1/mmry-config.json" fnd_session_part "$2"; }
-_late() { printf '%s/.mmry-codex-late.%s' "$TMPDIR" "$(_part "$1" "$2")"; }
-_hand() { printf '%s/.mmry-codex-start.%s.%s' "$TMPDIR" "$(_part "$1" "$2")" "$3"; }
+_dir() { [[ -d "$1/mmry-handoff" ]] || (umask 077 && mkdir "$1/mmry-handoff"); printf '%s/mmry-handoff' "$1"; }
+_late() { printf '%s/.mmry-codex-late.%s' "$(_dir "$1")" "$(_part "$1" "$2")"; }
+_hand() { printf '%s/.mmry-codex-start.%s.%s' "$(_dir "$1")" "$(_part "$1" "$2")" "$3"; }
 
 # The bare names the previous plugin used for $SID: none may ever be written.
 _no_bare_written() {
@@ -276,17 +285,17 @@ _no_bare_written() {
 }
 
 # ---------------------------------------------------------------------------------------------
-# THE GATES NEED NO CHANGE. The sh line in codex-hooks.json and codex-hook.cmd both look for
-# .mmry-codex-late.*, which a keyed name still matches. Proved against the gate's own command line.
+# THE GATES look for .mmry-codex-late.*, which a keyed name still matches, in the account's own folder
+# since #33231 (DD-182). Proved against the gate's own command line.
 # ---------------------------------------------------------------------------------------------
 @test "gate: the sh gate in codex-hooks.json opens for a keyed late marker and stays shut with none" {
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    mkdir -p "$TEST_TMPDIR/gate-tmp"
-    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "$FP_CMD" </dev/null
+    # The gate looks in the account's own folder, <CODEX_HOME>/mmry-handoff (#33231, DD-182).
+    run env PLUGIN_ROOT="$ROOT" CODEX_HOME="$HA" sh -c "$FP_CMD" </dev/null
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate let the hook run with nothing pending"; return 1; }
-    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.${KA}.${SID}"
-    run env PLUGIN_ROOT="$ROOT" TMPDIR="$TEST_TMPDIR/gate-tmp" sh -c "$FP_CMD" </dev/null
+    : > "$(_late "$HA" "$SID")"
+    run env PLUGIN_ROOT="$ROOT" CODEX_HOME="$HA" sh -c "$FP_CMD" </dev/null
     assert_success
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "the gate stayed shut with a keyed late marker pending"; return 1; }
 }
@@ -294,13 +303,13 @@ _no_bare_written() {
 @test "gate (Windows): codex-hook.cmd opens for a keyed late marker and stays shut with none" {
     case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "codex-hook.cmd runs only on Windows" ;; esac
     printf '#!/bin/sh\n: > "%s/probe-ran"\n' "$TEST_TMPDIR" > "$ROOT/hooks-handlers/codex-hook.sh"
-    mkdir -p "$TEST_TMPDIR/gate-tmp"
-    local wtmp; wtmp="$(cygpath -w "$TEST_TMPDIR/gate-tmp")"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
+    # The launcher looks in the account's own folder, %CODEX_HOME%\mmry-handoff (#33231, DD-182).
+    local wha; wha="$(cygpath -w "$HA")"
+    run env CODEX_HOME="$wha" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     assert_success
     [ ! -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd started bash with nothing pending"; return 1; }
-    : > "$TEST_TMPDIR/gate-tmp/.mmry-codex-late.${KA}.${SID}"
-    run env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
+    : > "$(_late "$HA" "$SID")"
+    run env CODEX_HOME="$wha" cmd //d //c "$(cygpath -w "$ROOT/hooks-handlers/codex-hook.cmd")" codex-first-prompt </dev/null 3>&-
     [ -e "$TEST_TMPDIR/probe-ran" ] || { echo "codex-hook.cmd stayed shut with a keyed late marker pending"; return 1; }
 }
 
@@ -355,7 +364,7 @@ _same_identity() {
     _start "$HA" "$SID"
     assert_success
     local mk fk m f
-    m="$(ls -a "$TMPDIR" | grep -E "^\.mmry-codex-late\.[0-9a-f]{16}\.${SID}$" | head -1)"
+    m="$(ls -a "$HA/mmry-handoff" | grep -E "^\.mmry-codex-late\.[0-9a-f]{16}\.${SID}$" | head -1)"
     [ -n "$m" ] || { echo "no keyed late marker for $SID: $(_codex_files)"; return 1; }
     mk="${m#.mmry-codex-late.}"; mk="${mk%.$SID}"
     # A's first prompt collects the hand-off, so the start's work is complete before the Foundation hook runs.
@@ -410,7 +419,7 @@ _plant_handoff() {
     [[ "$output" != *"Read them now"* ]] || { echo "a foreign memories file was delivered: $output"; return 1; }
     run _context
     assert_output --partial "were not loaded"
-    grep -q 'refused' "$TMPDIR/mmry-codex-first-prompt.log" || { echo "the refusal was not logged: $(tail -3 "$TMPDIR/mmry-codex-first-prompt.log")"; return 1; }
+    grep -q 'refused' "$HB/mmry-handoff/mmry-codex-first-prompt.log" || { echo "the refusal was not logged: $(tail -3 "$HB/mmry-handoff/mmry-codex-first-prompt.log")"; return 1; }
     [ ! -e "$lb" ] && [ ! -e "$hb.out" ] && [ ! -e "$hb.ready" ] || { echo "the refused hand-off was left behind: $(_codex_files)"; return 1; }
 }
 
@@ -457,16 +466,20 @@ _plant_handoff() {
 # THE SWEEP covers keyed and bare names alike: half a day on, an uncollected marker or hand-off is
 # nobody's. Fresh files are kept.
 # ---------------------------------------------------------------------------------------------
-@test "sweep: keyed and bare late files half a day old are removed by the first prompt's sweep, and fresh ones are kept" {
-    local f
+@test "sweep: keyed and bare late files half a day old are removed by the first prompt's sweep, in the account's folder and under the old temp-folder names, and fresh ones are kept" {
+    # The gate opens only for a marker in the account's own folder (#33231), so the fresh marker that
+    # lets the sweep run sits there; the old files sit both there and in the temp folder.
+    local f d; d="$(_dir "$HA")"
     for f in ".mmry-codex-late.${KA}.old-1" ".mmry-codex-start.${KA}.old-1.77.out" ".mmry-codex-late.old-2" ".mmry-codex-start.old-2.78.ready"; do
         printf 'old\n' > "$TMPDIR/$f"; touch -t 202001010000 "$TMPDIR/$f"
+        printf 'old\n' > "$d/$f"; touch -t 202001010000 "$d/$f"
     done
-    printf 'fresh\n' > "$TMPDIR/.mmry-codex-late.${KB}.fresh-1"
+    printf 'fresh\n' > "$d/.mmry-codex-late.${KA}.fresh-1"
     _prompt "$HA" "nothing-late-here"
     assert_success
     for f in ".mmry-codex-late.${KA}.old-1" ".mmry-codex-start.${KA}.old-1.77.out" ".mmry-codex-late.old-2" ".mmry-codex-start.old-2.78.ready"; do
-        [ ! -e "$TMPDIR/$f" ] || { echo "the half-day-old $f was kept"; return 1; }
+        [ ! -e "$TMPDIR/$f" ] || { echo "the half-day-old $f was kept in the temp folder"; return 1; }
+        [ ! -e "$d/$f" ] || { echo "the half-day-old $f was kept in the account's folder"; return 1; }
     done
-    [ -f "$TMPDIR/.mmry-codex-late.${KB}.fresh-1" ] || { echo "the fresh marker was swept"; return 1; }
+    [ -f "$d/.mmry-codex-late.${KA}.fresh-1" ] || { echo "the fresh marker was swept"; return 1; }
 }
