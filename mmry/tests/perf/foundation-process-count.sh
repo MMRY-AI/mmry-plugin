@@ -25,13 +25,15 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 COUNTER="$(cygpath -w "$HERE/../helpers/count-processes.ps1")"
 WINBASH="$(cygpath -w "$(command -v bash)")"
 HOOK="$(cd "$(dirname "$HOOK")" && pwd)/$(basename "$HOOK")"
-W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+W="$(mktemp -d)" || W=""
+[[ -n "$W" && -d "$W" ]] || { echo "REFUSED TO START: could not create a work folder (TMPDIR is '${TMPDIR:-unset}'; #33618)" >&2; exit 2; }
+trap 'rm -rf "${W:?}"' EXIT
 mkdir -p "$W/home/.claude"
 now_ms() { local s; s=$(date +%s%N); printf '%d' $(( s / 1000000 )); }
 
 seed() { # a fresh temp dir with a sealed set of $LINES directives and a realistic config
     local d="$1" s b
-    rm -rf "$d"; mkdir -p "$d"
+    rm -rf "${d:?}"; mkdir -p "$d"
     if [[ "${MMRY_COUNT_SET:-}" == ja ]]; then
         # "- 指示 NNNN：" then 25 of 日 and a 。, in octal so no locale is involved.
         awk -v n="$LINES" 'BEGIN { for (i = 1; i <= n; i++) { printf "- \346\214\207\347\244\272 %04d\357\274\232", i; for (j = 0; j < 25; j++) printf "\346\227\245"; printf "\343\200\202\n" } }' > "$d/body"

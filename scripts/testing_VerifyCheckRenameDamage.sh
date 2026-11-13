@@ -17,7 +17,7 @@ guard="scripts/check-rename-damage.sh"
 [ -f "$guard" ] || { echo "REFUSED: $guard missing."; exit 2; }
 
 tmp="$(mktemp -d)"; wt="$tmp/wt"
-cleanup() { git worktree remove --force "$wt" > /dev/null 2>&1; rm -rf "$tmp"; }
+cleanup() { git worktree remove --force "$wt" > /dev/null 2>&1; rm -rf "${tmp:?}"; }
 trap cleanup EXIT
 git worktree add -q --detach "$wt" HEAD || { echo "REFUSED: cannot add a scratch worktree."; exit 2; }
 cp "$guard" "$wt/$guard"   # the guard as it is now, even before it is committed

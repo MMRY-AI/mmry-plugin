@@ -30,4 +30,4 @@ echo
 echo "== H3: could either path produce the observed 4 bytes '- x'? =="
 printf 'The account first directive begins: %s\n' "$(printf '%s\n' "$GOOD" | head -1 | cut -c1-20)"
 printf "A truncated write is a PREFIX of that. '- x' is not a prefix of it.\n"
-rm -rf "$W"
+rm -rf "${W:?}"

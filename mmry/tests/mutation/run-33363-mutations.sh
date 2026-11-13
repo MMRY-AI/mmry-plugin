@@ -18,8 +18,13 @@ K="hooks-handlers/lib-foundation-key.sh"
 S="hooks-handlers/session-start.sh"
 C="hooks-handlers/mmry-client.sh"
 SUITE="tests/structural/shared-session-id-isolation.bats"
-WORK="${TMPDIR:-/tmp}/mmry-33363-mut-$$"
-mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new 33363-mut || exit 2
+WORK="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 
 # Replace the first occurrence of $2 with $3 in file $1; fail if $2 is not there.
 _rep() {
@@ -50,13 +55,13 @@ add empty-told-id-bare "SessionStart writes the id-form empty-set told marker un
     '        mmry_foundation_session_part_v "$_fnd_esid"
         printf '"'"'%s'"'"' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
     '        printf '"'"'%s'"'"' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_fnd_esid}" 2>/dev/null || true' "$S"
-add codex-stored-quick-bare "the Codex writer's quick path spells the stored marker from the id itself, so two Codex accounts on one id share mmry-foundation.stored.<sid>" \
+add codex-stored-quick-bare "the Codex writer's quick path spells the stored marker from the bare id or token, without the account key, so two Codex accounts share mmry-foundation.stored.<sid> on one id, or mmry-foundation.stored.unknown with none" \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true' "$C"
 
 run_suite() { ( cd "$1/tests" && PLUGIN_ROOT="$1" ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 
-copy() { rm -rf "$1"; mkdir -p "$1"; cp -R "$PLUGIN_SRC/." "$1/"; }
+copy() { mmry_work_reset "$1" || exit 2; cp -R "$PLUGIN_SRC/." "$1/"; }
 
 echo "baseline: the untouched copy"
 copy "$WORK/base"

@@ -69,8 +69,8 @@ _safe_sid_for_test() {
 }
 
 _reset_locks() {
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)" \
-           "${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_safe_sid_for_test)" \
+           "${TMPDIR:?}/.mmry-formation-poll-$(_safe_sid_for_test)"
 }
 
 # A curl that answers from FAKE_BODY / FAKE_CODE, in bash, with no port and no network. Copied
@@ -178,7 +178,7 @@ _control_timeout_kind() {
 # notice a regression.
 _mutant_handler_dir() {
     local dir="${BATS_TEST_TMPDIR}/handlers-mutant"
-    rm -rf "$dir"; mkdir -p "$dir"
+    rm -rf "${dir:?}"; mkdir -p "$dir"
     cp "${HANDLERS}"/*.sh "$dir"/
     local f="${dir}/formation-check.sh"
 

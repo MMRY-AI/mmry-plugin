@@ -353,7 +353,7 @@ setup() {
     local elsewhere="$TEST_TMPDIR/elsewhere"
     mkdir -p "$elsewhere/hooks-handlers"
     printf 'mine\n' > "$elsewhere/hooks-handlers/save-record.sh"
-    rm -rf "$STATE_DIR"
+    rm -rf "${STATE_DIR:?}"
     # Git Bash copies instead of linking unless asked for a native link; Linux and macOS ignore MSYS.
     MSYS=winsymlinks:nativestrict ln -s "$elsewhere" "$STATE_DIR"
     [ -L "$STATE_DIR" ] || fail "precondition: $STATE_DIR is not a symbolic link"
@@ -530,7 +530,7 @@ else
 fi
 PROBE
     PROBE_PLUGIN="$TEST_TMPDIR/probe-plugin"
-    rm -rf "$PROBE_PLUGIN"
+    rm -rf "${PROBE_PLUGIN:?}"
     mkdir -p "$PROBE_PLUGIN/hooks-handlers" "$PROBE_PLUGIN/.claude-plugin"
     printf 'listed\n' > "$PROBE_PLUGIN/hooks-handlers/self-update.sh"
     printf 'listed\n' > "$PROBE_PLUGIN/hooks-handlers/save-entry.sh"
@@ -936,7 +936,7 @@ _assert_nothing_removed_by_update() {
 @test "33033 refusal partial library: a removal library missing any one of its functions removes nothing, and says so" {
     local fn
     for fn in _su_load_list _su_prune _su_scratch_dir _su_json_version; do
-        rm -rf "$TEST_TMPDIR/cache" "$HOME/.claude"
+        rm -rf "${TEST_TMPDIR:?}/cache" "${HOME:?}/.claude"
         _install_on_release
         printf '\nunset -f %s\n' "$fn" >> "$INSTALL_ROOT/hooks-handlers/lib-release-files.sh"
         _run_update
@@ -967,7 +967,7 @@ _comm_fails_on_call() {
 @test "33033 refusal cleanup marker: a cleanup that failed in either folder is not recorded as done" {
     local call failed cleaned
     for call in 1 2; do
-        rm -rf "$TEST_TMPDIR/cache" "$HOME/.claude"
+        rm -rf "${TEST_TMPDIR:?}/cache" "${HOME:?}/.claude"
         _install_on_release
         _comm_fails_on_call "$call"
         if [[ "$call" == 1 ]]; then failed="$INSTALL_ROOT"; cleaned="$STATE_DIR"; else failed="$STATE_DIR"; cleaned="$INSTALL_ROOT"; fi

@@ -37,7 +37,7 @@ setup() {
 # A Codex plugin folder holding a whole release at version $1 (a verified one: its list is for $1).
 _codex_root_at() {
     _release "$1" good
-    rm -rf "$ROOT"; mkdir -p "$ROOT"
+    rm -rf "${ROOT:?}"; mkdir -p "$ROOT"
     ( cd "$TEST_TMPDIR/remote/mmry-plugin-master/mmry" && tar -cf - . ) | ( cd "$ROOT" && tar -xf - )
 }
 

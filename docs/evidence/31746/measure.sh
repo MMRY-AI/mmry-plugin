@@ -70,8 +70,8 @@ for i in $(seq 1 "$RUNS"); do
         prep="NA"; [[ -n "$arr" ]] && prep=$(( arr - t0 ))
         d=no; [[ "$out" == *MEASURE-MSG* ]] && d=yes
         printf '%s %s %s %s %s\n' "$impl" "$i" "$(( t1 - t0 ))" "$prep" "$d" | tee -a "$OUT"
-        rm -rf "$sb"
+        rm -rf "${sb:?}"
     done
 done
 kill "$STUBPID" 2>/dev/null
-rm -rf "$STUBDIR"
+rm -rf "${STUBDIR:?}"
