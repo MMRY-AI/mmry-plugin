@@ -1107,12 +1107,150 @@ _mmry_request() {
     fi
 }
 
+# THE SERVER'S OWN WORDS, MADE SAFE TO PRINT (#33716). A 402 used to print this plugin's fixed
+# "Credits exhausted" text whatever the server said, so a person whose credits were being renewed at
+# that moment was told they had run out. The server's sentence is untrusted text that ends up on a
+# terminal or in the assistant's context, so it is cleaned first:
+#   - newline and tab become a space; every other control character goes, C0 (U+0000 to U+001F,
+#     carriage return included), DEL (U+007F) and C1 (U+0080 to U+009F, CSI among them), whether it
+#     arrived raw or as a JSON \u escape;
+#   - leading and trailing spaces are trimmed;
+#   - at most _MMRY_SERVER_TEXT_MAX (300) characters are kept, cut on a character boundary, and
+#     "..." is added when anything was cut.
+# BUILTINS ONLY, NO PROCESS: the 402 paths this serves (the client's error print, session-start's
+# 402 answer) start none today, and on Windows each process is tens of milliseconds.
+_MMRY_SERVER_TEXT_MAX=300
+
+# Usage: _mmry_server_text_clean_v TEXT   (sets _MMRY_SERVER_TEXT; empty when nothing printable is left)
+_mmry_server_text_clean_v() {
+    local s="$1" out="" c n i=0 len kept=0 cut=0 utf8=0 u=$'\xc3\xa9' need j b
+    # Whether this shell's locale counts UTF-8 characters (one unit per character) or bytes. In a
+    # byte locale a character is a lead byte and its continuation bytes, and is kept or cut whole.
+    [[ "${#u}" -eq 1 ]] && utf8=1
+    # Bounded before it is walked, so a flood costs no more than a sentence; generous enough that
+    # stripped controls cannot leave fewer than the cap behind.
+    s="${s:0:$(( _MMRY_SERVER_TEXT_MAX * 8 ))}"
+    len="${#s}"
+    while (( i < len )); do
+        c="${s:i:1}"
+        printf -v n '%d' "'$c" 2>/dev/null || n=0
+        (( n < 0 )) && n=$(( n + 256 ))
+        if (( n == 10 || n == 9 )); then
+            c=" "
+        elif (( n < 32 || n == 127 )); then
+            i=$(( i + 1 )); continue
+        fi
+        if (( utf8 )); then
+            if (( n >= 128 && n <= 159 )); then i=$(( i + 1 )); continue; fi
+            if (( kept >= _MMRY_SERVER_TEXT_MAX )); then cut=1; break; fi
+            out+="$c"; kept=$(( kept + 1 )); i=$(( i + 1 ))
+            continue
+        fi
+        # A byte locale. A continuation byte with no lead byte before it is not text: dropped.
+        if (( n >= 128 && n < 192 )); then i=$(( i + 1 )); continue; fi
+        need=1
+        if (( n >= 240 && n < 248 )); then need=4
+        elif (( n >= 224 )); then need=3
+        elif (( n >= 192 )); then need=2
+        fi
+        (( n >= 248 )) && { i=$(( i + 1 )); continue; }
+        # The whole sequence has to be there, or the lead byte is dropped.
+        u="$c"; j=1
+        while (( j < need )); do
+            b="${s:i+j:1}"
+            printf -v b '%d' "'$b" 2>/dev/null || b=0
+            (( b < 0 )) && b=$(( b + 256 ))
+            (( b >= 128 && b < 192 )) || break
+            u+="${s:i+j:1}"; j=$(( j + 1 ))
+        done
+        if (( j < need )); then i=$(( i + 1 )); continue; fi
+        # C1 controls in UTF-8 are C2 80 to C2 9F.
+        if (( need == 2 && n == 194 )); then
+            printf -v b '%d' "'${s:i+1:1}" 2>/dev/null || b=0
+            (( b < 0 )) && b=$(( b + 256 ))
+            if (( b < 160 )); then i=$(( i + 2 )); continue; fi
+        fi
+        if (( kept >= _MMRY_SERVER_TEXT_MAX )); then cut=1; break; fi
+        out+="$u"; kept=$(( kept + 1 )); i=$(( i + need ))
+    done
+    while [[ "$out" == " "* ]]; do out="${out# }"; done
+    while [[ "$out" == *" " ]]; do out="${out% }"; done
+    (( cut )) && [[ -n "$out" ]] && out+="..."
+    _MMRY_SERVER_TEXT="$out"
+}
+
+# The top-level "error" string of a JSON object response, decoded and cleaned, or empty when the
+# body has none: empty, not JSON, no such field, or not a string. Builtins only (see above): a regex
+# for the field and a loop for the JSON escapes, \uXXXX (surrogate pairs included) as UTF-8.
+# Usage: _mmry_api_error_v [BODY]   (BODY defaults to MMRY_RESPONSE; sets _MMRY_API_ERROR)
+_mmry_api_error_v() {
+    local body="${1-${MMRY_RESPONSE:-}}" re raw out="" c hex cp lo o1 o2 o3 o4 ch
+    _MMRY_API_ERROR=""
+    # Only an object, and only the start of it: the server writes "error" first, and a body of any
+    # size is then read no further than this.
+    body="${body:0:16384}"
+    while [[ "$body" == [[:space:]]* ]]; do body="${body#?}"; done
+    [[ "$body" == "{"* ]] || return 0
+    re='^\{[[:space:]]*("[^"]*"[[:space:]]*:[[:space:]]*("([^"\\]|\\.)*"|[^",{}]*)[[:space:]]*,[[:space:]]*)*"error"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)"'
+    [[ "$body" =~ $re ]] || return 0
+    raw="${BASH_REMATCH[4]}"
+    while [[ -n "$raw" ]]; do
+        if [[ "$raw" != *\\* ]]; then out+="$raw"; break; fi
+        out+="${raw%%\\*}"
+        raw="${raw#*\\}"
+        c="${raw:0:1}"; raw="${raw:1}"
+        case "$c" in
+            n) out+=$'\n' ;;
+            t) out+=$'\t' ;;
+            r|b|f) ;;
+            u)
+                hex="${raw:0:4}"
+                [[ "$hex" =~ ^[0-9A-Fa-f]{4}$ ]] || { _MMRY_API_ERROR=""; return 0; }
+                raw="${raw:4}"
+                cp=$(( 16#$hex ))
+                if (( cp >= 0xD800 && cp <= 0xDBFF )) && [[ "${raw:0:2}" == "\\u" && "${raw:2:4}" =~ ^[Dd][C-Fc-f][0-9A-Fa-f]{2}$ ]]; then
+                    lo=$(( 16#${raw:2:4} )); raw="${raw:6}"
+                    cp=$(( 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00) ))
+                elif (( cp >= 0xD800 && cp <= 0xDFFF )); then
+                    continue
+                fi
+                # Controls are left to the cleaner, which removes them; NUL cannot be held at all.
+                (( cp == 0 )) && continue
+                if (( cp < 0x80 )); then
+                    printf -v o1 '%03o' "$cp"; printf -v ch '%b' "\\0$o1"
+                elif (( cp < 0x800 )); then
+                    printf -v o1 '%03o' $(( 0xC0 | (cp >> 6) )); printf -v o2 '%03o' $(( 0x80 | (cp & 0x3F) ))
+                    printf -v ch '%b' "\\0$o1\\0$o2"
+                elif (( cp < 0x10000 )); then
+                    printf -v o1 '%03o' $(( 0xE0 | (cp >> 12) )); printf -v o2 '%03o' $(( 0x80 | ((cp >> 6) & 0x3F) ))
+                    printf -v o3 '%03o' $(( 0x80 | (cp & 0x3F) ))
+                    printf -v ch '%b' "\\0$o1\\0$o2\\0$o3"
+                else
+                    printf -v o1 '%03o' $(( 0xF0 | (cp >> 18) )); printf -v o2 '%03o' $(( 0x80 | ((cp >> 12) & 0x3F) ))
+                    printf -v o3 '%03o' $(( 0x80 | ((cp >> 6) & 0x3F) )); printf -v o4 '%03o' $(( 0x80 | (cp & 0x3F) ))
+                    printf -v ch '%b' "\\0$o1\\0$o2\\0$o3\\0$o4"
+                fi
+                out+="$ch" ;;
+            *) out+="$c" ;;
+        esac
+    done
+    _mmry_server_text_clean_v "$out"
+    _MMRY_API_ERROR="$_MMRY_SERVER_TEXT"
+}
+
 _mmry_print_error() {
     # Format an API error for display. Handles 402 (credits exhausted) specially.
     # Usage: _mmry_print_error [context]
     #   context: optional label like "save" or "search"
     local context="${1:-request}"
     if [[ "$MMRY_HTTP_CODE" == "402" ]]; then
+        # The server's own sentence when it sent one (#33716): it is what knows whether the credits
+        # ran out or are being renewed right now. The fixed text only when it sent none.
+        _mmry_api_error_v
+        if [[ -n "$_MMRY_API_ERROR" ]]; then
+            printf '%s\n' "$_MMRY_API_ERROR" >&2
+            return 0
+        fi
         echo "Credits exhausted. Your MMRY AI subscription has run out of API credits." >&2
         echo "Visit https://mmryai.com or contact your admin to add more credits." >&2
     elif [[ "$MMRY_HTTP_CODE" == "401" ]]; then

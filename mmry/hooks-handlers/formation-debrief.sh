@@ -125,6 +125,16 @@ if ! mmry_debrief_formation "$formation_id" "$summary"; then
         *)   reason=""
              fallback="Could not close out formation ${formation_id} (HTTP ${code}). It has not been changed." ;;
     esac
+    # A 402 IS THE SERVER'S SENTENCE, THEN WHAT HAPPENED TO THE FORMATION (#33716). The server knows
+    # whether the credits ran out or are being renewed this minute, so its words are shown as they
+    # came, capped and cleaned by the client's rule (_mmry_server_text_clean_v: one line, no control
+    # characters, at most 300 characters), followed by the clause that says the formation was not
+    # closed out. With no readable error the fixed sentence above stands.
+    if [[ "$code" == "402" && -n "$reason" ]]; then
+        _mmry_server_text_clean_v "$reason"
+        reason=""
+        [[ -n "$_MMRY_SERVER_TEXT" ]] && reason="${_MMRY_SERVER_TEXT} Formation ${formation_id} was not closed out."
+    fi
     # printf, not echo: a reason that is exactly "-n" or "-e" was taken as an option and printed
     # nothing (#31738 QA round 2).
     if [[ -n "$reason" ]]; then printf '%s\n' "$reason"; else printf '%s\n' "$fallback"; fi
