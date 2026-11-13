@@ -59,7 +59,7 @@ add failclosed-off "a session whose account or server cannot be identified loads
 add url-default-counts "an empty server address is taken as the default server, so the identity is never unknown for want of one" \
     '    [[ -n "$MMRY_API_URL" ]] && _MMRY_CFG_URL_GIVEN=1' \
     '    _MMRY_CFG_URL_GIVEN=1' "$C"
-add legacy-not-swept "the legacy machine-wide file is left out of the week-old sweep" \
+add legacy-not-swept "the startup memories files, the legacy machine-wide one and every keyed per-session one, are left out of the week-old sweep" \
     "-o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md'" \
     "" "$S"
 add log-unkeyed "the failure log goes back to the shared name" \
@@ -88,7 +88,7 @@ add supervisor-gate-off "the supervisor serves a set standing at the name an uni
 add session-part-unkeyed "the account key is dropped from every session part, so two accounts in one session, or with no session id, share every per-session marker again" \
     '_MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"' \
     '_MMRY_FND_SESSION_PART="${v:-none}"' "$K"
-add prepared-unkeyed "the prepared copy, claim, result and stored check go back to the bare token, shared across accounts with no session id" \
+add prepared-unkeyed "the prepared copy, claim, result and stored check drop the account key and go back to the bare session id, or the bare token when there is none, so two accounts share them on one id or with no id" \
     '    _FND_KEY="$_MMRY_FND_SESSION_PART"' \
     '    _FND_KEY="${_FND_STAMP:-none}"' "$H"
 # QA round 2 (#32915). F-B: the four notice markers made with no session id.
@@ -114,7 +114,7 @@ add auth-oauth-as-apikey "the library takes any credential for an API key, so th
     '    [[ -z "$auth" && -n "$key" ]] && auth="apikey"' \
     '    [[ -n "$key" ]] && auth="apikey"' "$K"
 # QA round 2 (#32915). F-A: the Codex writer's quick path.
-add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the token itself, so two Codex accounts with no session id share mmry-foundation.stored.unknown (QA probe5)" \
+add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the bare id or token, without the account key, so two Codex accounts share mmry-foundation.stored.unknown with no session id (QA probe5), or mmry-foundation.stored.<sid> on one id" \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true' "$C"
 
