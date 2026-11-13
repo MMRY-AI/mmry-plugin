@@ -418,6 +418,42 @@ _env() {
     done
 }
 
+@test "33716 debrief: a 402 carrying the renewal sentence prints it word for word, then the formation clause" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local said="MMRY AI is renewing your credits right now. Try your request again in a minute."
+    PATH="${bin}:${PATH}" FAKE_CODE=402 FAKE_BODY="{\"error\":\"${said}\",\"code\":\"credits_exhausted\"}" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" == "${said} Formation 42 was not closed out." ]] || { echo "got: $output"; return 1; }
+}
+
+@test "33716 debrief: a 402 with an empty or non-JSON body keeps today's fixed text" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin body; bin="$(_fake_curl_dir)"
+    for body in '' 'Payment Required' '<html>402</html>' '{"code":"credits_exhausted"}'; do
+        PATH="${bin}:${PATH}" FAKE_CODE=402 FAKE_BODY="$body" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+        [ "$status" -ne 0 ] || return 1
+        [[ "$output" == "Credits exhausted. Your MMRY AI subscription has run out of API credits, so formation 42 was not closed out." ]] || { echo "body [$body] got: $output"; return 1; }
+    done
+}
+
+@test "33716 debrief: control characters and length in a 402 error are cleaned and capped" {
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local long; long="$(printf 'C%.0s' $(seq 1 3000))"
+    PATH="${bin}:${PATH}" FAKE_CODE=402 FAKE_BODY="{\"error\":\"Renewing \\u001b[31mnow\\u0007\\u009b\\nsoon. ${long}\"}" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run bash "${HANDLERS}/formation-debrief.sh" "The schema migrated cleanly and the import bug was the date format"
+    [ "$status" -ne 0 ]
+    [[ "$output" != *$'\033'* && "$output" != *$'\a'* && "$output" != *$'\xc2\x9b'* ]] || { echo "a control character survived"; return 1; }
+    local want="Renewing [31mnow soon. $(printf 'C%.0s' $(seq 1 277))... Formation 42 was not closed out."
+    [[ "$output" == "$want" ]] || { echo "got ${#output}: $output"; return 1; }
+}
+
 @test "debrief: a reason is printed without control characters (#31738 QA)" {
     bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
     local bin; bin="$(_fake_curl_dir)"

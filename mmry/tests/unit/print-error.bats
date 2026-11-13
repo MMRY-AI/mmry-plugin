@@ -23,11 +23,60 @@ setup() {
 }
 
 @test "format-error: 402 credits-exhausted stays distinct and is not swallowed by 401" {
+    # #33716: a 402 whose body carries the server's own words prints them; with no readable error
+    # it prints the plugin's fixed sentence. Either way it is not the 401 setup direction.
     export MMRY_HTTP_CODE="402"
     export MMRY_RESPONSE='{"error":"no credits"}'
     run _mmry_print_error
+    [[ "$output" == "no credits" ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"/mmry:setup"* ]]
+    export MMRY_RESPONSE=''
+    run _mmry_print_error
     [[ "$output" == *"Credits exhausted"* ]]
     [[ "$output" != *"/mmry:setup"* ]]
+}
+
+# ---- #33716: the server's own sentence for a 402 ------------------------------------------------
+RENEWING_33716="MMRY AI is renewing your credits right now. Try your request again in a minute."
+FIXED_402=$'Credits exhausted. Your MMRY AI subscription has run out of API credits.\nVisit https://mmryai.com or contact your admin to add more credits.'
+
+@test "33716 client: a 402 carrying the renewal sentence prints it word for word, and nothing else" {
+    export MMRY_HTTP_CODE="402"
+    export MMRY_RESPONSE="{\"error\":\"${RENEWING_33716}\",\"code\":\"credits_exhausted\"}"
+    run _mmry_print_error "save"
+    [[ "$output" == "$RENEWING_33716" ]] || { echo "got: $output"; return 1; }
+}
+
+@test "33716 client: a 402 with an empty, non-JSON or error-less body prints today's fixed text" {
+    export MMRY_HTTP_CODE="402"
+    local body
+    for body in '' '<html><body>Payment Required</body></html>' 'credits exhausted' '{"code":"credits_exhausted"}' '{"error":""}' '{"error":null}' '{"error":42}' '[1,2]' '{"error":"   "}'; do
+        export MMRY_RESPONSE="$body"
+        run _mmry_print_error
+        [[ "$output" == "$FIXED_402" ]] || { echo "body [$body] got: $output"; return 1; }
+    done
+}
+
+@test "33716 client: control characters in a 402 error are removed, escaped or raw, C0 and C1" {
+    export MMRY_HTTP_CODE="402"
+    # JSON escapes for ESC, BEL, CSI (U+009B) and a newline, a raw UTF-8 CSI and a raw DEL, and an
+    # escaped e-acute that must arrive as the letter.
+    export MMRY_RESPONSE=$'{"error":"Renewing \\u001b[31mnow\\u0007\\u009b2J.\\nTry\xc2\x9b again\x7f soon \\u00e9t\\u00e9.","code":"credits_exhausted"}'
+    run _mmry_print_error
+    [[ "$output" != *$'\033'* ]] || { echo "ESC reached the terminal"; return 1; }
+    [[ "$output" != *$'\a'* ]] || { echo "BEL reached the terminal"; return 1; }
+    [[ "$output" != *$'\xc2\x9b'* ]] || { echo "C1 CSI reached the terminal"; return 1; }
+    [[ "$output" != *$'\x7f'* ]] || { echo "DEL reached the terminal"; return 1; }
+    [[ "$output" == "Renewing [31mnow2J. Try again soon "$'\xc3\xa9'"t"$'\xc3\xa9'"." ]] || { echo "got: $output"; return 1; }
+}
+
+@test "33716 client: a very long 402 error is capped at 300 characters" {
+    export MMRY_HTTP_CODE="402"
+    local long; long="$(printf 'A%.0s' $(seq 1 5000))"
+    export MMRY_RESPONSE="{\"error\":\"${long}\"}"
+    run _mmry_print_error
+    [[ "${#lines[@]}" -eq 1 ]] || { echo "lines: ${#lines[@]}"; return 1; }
+    [[ "$output" == "$(printf 'A%.0s' $(seq 1 300))..." ]] || { echo "length ${#output}"; return 1; }
 }
 
 @test "format-error: other statuses keep the generic message with the server response" {

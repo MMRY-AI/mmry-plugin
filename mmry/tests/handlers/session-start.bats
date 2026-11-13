@@ -99,6 +99,44 @@ setup() {
     [[ "$output" != *'/mmry:setup'* ]]
 }
 
+@test "33716 session-start: a 402 carrying the renewal sentence hands it to the assistant word for word" {
+    local said="MMRY AI is renewing your credits right now. Try your request again in a minute."
+    export MOCK_CURL_HTTP_CODE="402"
+    export MOCK_CURL_RESPONSE="{\"error\":\"${said}\",\"code\":\"credits_exhausted\"}"
+    run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"\\\"${said}\\\""* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *'word for word'* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *'credits exhausted. Inform'* ]] || { echo "$output"; return 1; }
+    # Still one valid JSON document.
+    printf '%s' "$output" | "${MMRY_JQ:-jq}" -e '.hookSpecificOutput.additionalContext' >/dev/null || { echo "not JSON: $output"; return 1; }
+}
+
+@test "33716 session-start: a 402 with an empty or non-JSON body keeps today's fixed text" {
+    local body
+    for body in '' 'Payment Required' '{"code":"credits_exhausted"}'; do
+        export MOCK_CURL_HTTP_CODE="402"
+        export MOCK_CURL_RESPONSE="$body"
+        [[ -n "$body" ]] || export MOCK_CURL_RESPONSE=' '
+        run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+        [[ "$status" -eq 0 ]] || return 1
+        [[ "$output" == '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"MMRY AI credits exhausted. Inform the user their API credits have run out. Visit https://mmryai.com to add more credits or upgrade their plan."}}' ]] || { echo "body [$body] got: $output"; return 1; }
+    done
+}
+
+@test "33716 session-start: control characters and length in a 402 error are cleaned and capped" {
+    local long; long="$(printf 'B%.0s' $(seq 1 2000))"
+    export MOCK_CURL_HTTP_CODE="402"
+    export MOCK_CURL_RESPONSE="{\"error\":\"Renewing \\u001b[31mnow\\u0007\\u009b. ${long}\"}"
+    run bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh"
+    [[ "$status" -eq 0 ]] || return 1
+    local ctx; ctx="$(printf '%s' "$output" | "${MMRY_JQ:-jq}" -r '.hookSpecificOutput.additionalContext')" || { echo "not JSON: $output"; return 1; }
+    [[ "$ctx" != *$'\033'* && "$ctx" != *$'\a'* && "$ctx" != *$'\xc2\x9b'* ]] || { echo "a control character survived"; return 1; }
+    [[ "$output" != *'\u001b'* && "$output" != *'\u0007'* && "$output" != *'\u009b'* ]] || { echo "a control character survived escaped: $output"; return 1; }
+    local want="Renewing [31mnow. $(printf 'B%.0s' $(seq 1 282))..."
+    [[ "$ctx" == *"\"${want}\""* ]] || { echo "got: $ctx"; return 1; }
+}
+
 @test "session-start: 401 invalid credential warns and directs to setup (#30321)" {
     export MOCK_CURL_HTTP_CODE="401"
     export MOCK_CURL_RESPONSE='{"error":"unauthorized"}'
