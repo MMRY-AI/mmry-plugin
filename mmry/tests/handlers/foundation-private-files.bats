@@ -347,3 +347,46 @@ _copy_without_umask() {
     done
     (( seen == 1 )) || { echo "the mutant wrote no memories file"; return 1; }
 }
+
+# MUTATION CONTROLS FOR THE UPGRADE PATH (#33652, QA round 1 of PR #138). A copy of the plugin with one
+# of the two parts of the fix disabled, driven the same way: the matching check above must then fail.
+# Pure string replacement on the copy, refusing anything but exactly one occurrence.
+_copy_with_disabled() {
+    local fn="$1" root="$TEST_TMPDIR/mutant-$1" f t
+    mkdir -p "$root"
+    cp -R "$PLUGIN_ROOT/hooks-handlers" "$PLUGIN_ROOT/hooks" "$root/"
+    f="$root/hooks-handlers/lib-foundation-key.sh"
+    t="$(cat "$f"; printf x)"; t="${t%x}"
+    local a=$'\n'"${fn}() {"$'\n'
+    local rest="${t#*"$a"}"
+    [[ "$rest" != "$t" && "${rest#*"$a"}" == "$rest" ]] || { echo "${fn} is not defined exactly once in the copy: the mutation is a no-op" >&2; return 1; }
+    t="${t/"$a"/$'\n'"${fn}() { return 0"$'\n'"}"$'\n'"_mmry_mutant_was_${fn}() {"$'\n'}"
+    printf '%s' "$t" > "$f"
+    grep -q "^${fn}() { return 0" "$f" || { echo "the mutation did not land" >&2; return 1; }
+    printf '%s' "$root"
+}
+
+@test "#33652 control: with the owner-only repair disabled in a copy of the plugin, an older plugin's 644 prepared copy and session marker stay 644 (the upgrade checks bite)" {
+    _modes_observable || skip "POSIX modes are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    local root; root="$(_copy_with_disabled mmry_foundation_private_v)" || return 1
+    _u_plant_old
+    _cc_start "$_U_SID" "$root" >/dev/null
+    _cc_prompt "$_U_SID" "$root"
+    local first; IFS= read -r first < "$TEST_TMPDIR/$(_u_name prepared)" || true
+    [[ "$first" == "mmry-fnd-prepared v1 "* ]] || { echo "the mutant did not rewrite the prepared copy, so the control proves nothing: '$first'"; return 1; }
+    local k bad=""
+    for k in prepared session result log moment; do
+        [[ "$(_mode "$TEST_TMPDIR/$(_u_name "$k")")" == "644" ]] || bad+="$k "
+    done
+    [[ -z "$bad" ]] || { echo "the mutant still made these owner-only, so the checks would not notice the repair going: $bad"; return 1; }
+}
+
+@test "#33652 control: with the link and ownership check disabled in a copy of the plugin, a planted link IS written through (the link check bites)" {
+    _modes_observable || skip "POSIX modes and real symlinks are not observable under Git Bash on Windows; this runs on the Linux and macOS CI legs"
+    local root; root="$(_copy_with_disabled mmry_foundation_writable_name)" || return 1
+    local v="$TEST_TMPDIR/victim-session"
+    printf 'VICTIM session' > "$v"
+    ln -s "$v" "$TEST_TMPDIR/$(_u_name session)"
+    _cc_start "$_U_SID" "$root" >/dev/null
+    [[ "$(<"$v")" != "VICTIM session" ]] || { echo "the mutant did not write through the link: the link check would not notice going"; return 1; }
+}

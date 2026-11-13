@@ -377,3 +377,51 @@ mmry_foundation_shortening_name_v() {
     [[ -n "$_MMRY_FND_SESSION_PART" ]] || return 0
     _MMRY_FND_SHORTENING_NAME="${1}/mmry-foundation-shortening.${_MMRY_FND_SESSION_PART}.md"
 }
+
+# FILES AN OLDER PLUGIN LEFT READABLE BY OTHERS (#33652, QA round 1 of PR #138: R1 on the upgrade path).
+# umask 077 narrows only the files the plugin CREATES. Several of the account's files are rewritten IN
+# PLACE at a name that persists across prompts and sessions (the prepared copy, the result, the claim,
+# the session marker, the log, the moment report, the refresh check, the stored marker, the delivery
+# record, the memories file of a resumed session), and an open with O_TRUNC or O_APPEND keeps the mode
+# the file already has. On a shared Linux machine an older plugin created them at 644, so after the
+# upgrade they kept 644 and kept receiving the account's directives. Two things close it.
+#
+# 1. mmry_foundation_writable_name: every in-place write first asks whether the name may be written
+#    at all. Only nothing, or the caller's own regular file that is not a link, may be; a link, or a
+#    file another user owns, is refused and left as it is (in a sticky temp folder it cannot be
+#    removed, and writing through it would put the directives wherever it points). Builtins only.
+#
+# 2. mmry_foundation_private_v <dir>: brings every Foundation working file of this user in <dir> to
+#    600, with one chmod, and then leaves .mmry-foundation-private.<key>, created owner-only, so the
+#    question costs a test and no process ever after. A file is chmodded only after the builtins have
+#    seen it as this user's own regular file and not a link, so nothing is chmodded through a link.
+#    The marker is swept with the week-old files (session-start.sh), so the step runs again about
+#    weekly and catches a file an older plugin still running here created since. It runs at the
+#    session start, after its output is closed on Codex, and on a prompt only while the marker is
+#    missing. On Windows (Git Bash) there are no POSIX modes to narrow, so it does nothing there.
+mmry_foundation_writable_name() {
+    [[ -n "${1:-}" && ! -L "$1" ]] || return 1
+    [[ ! -e "$1" ]] || [[ -f "$1" && -O "$1" ]]
+}
+mmry_foundation_private_v() {
+    local d="${1:-}" m f had_c=0
+    local -a own=()
+    case "${OSTYPE:-}" in msys*|cygwin*|win32*) return 0 ;; esac
+    [[ -n "$d" && -d "$d" ]] || return 0
+    mmry_foundation_account_key_v
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
+    m="${d}/.mmry-foundation-private.${_MMRY_FND_ACCT}"
+    [[ -f "$m" && ! -L "$m" && -O "$m" ]] && return 0
+    for f in "$d"/mmry-foundation* "$d"/.mmry-foundation* "$d"/mmry-memories*; do
+        [[ -f "$f" && ! -L "$f" && -O "$f" ]] && own[${#own[@]}]="$f"
+    done
+    if (( ${#own[@]} > 0 )); then
+        chmod 600 -- "${own[@]}" 2>/dev/null || return 0
+    fi
+    [[ -e "$m" || -L "$m" ]] && return 0
+    case "$-" in *C*) had_c=1 ;; esac
+    set -C
+    { : > "$m"; } 2>/dev/null
+    (( had_c == 1 )) || set +C
+    return 0
+}

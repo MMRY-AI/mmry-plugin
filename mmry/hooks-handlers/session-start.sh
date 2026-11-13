@@ -293,10 +293,11 @@ fi
 # round 7: a process on Windows). The same file.
 if (( _mmry_codex == 1 )); then
     mmry_foundation_session_name_v "$MMRY_TMPDIR"
-    printf '%s' "$SESSION_ID" > "$_MMRY_FND_SESSION_NAME" 2>/dev/null || true
 else
-    printf '%s' "$SESSION_ID" > "$(mmry_foundation_session_path "$MMRY_TMPDIR")" 2>/dev/null || true
+    _MMRY_FND_SESSION_NAME="$(mmry_foundation_session_path "$MMRY_TMPDIR")"
 fi
+# Written in place, so never through a link or into another user's file (#33652).
+mmry_foundation_writable_name "$_MMRY_FND_SESSION_NAME" && { printf '%s' "$SESSION_ID" > "$_MMRY_FND_SESSION_NAME"; } 2>/dev/null || true
 # The id-less delivery record is this account's own now, mmry-foundation.status.<key>.none (#32915, QA
 # round 1, requirement 2); the bare name an older plugin writes is cleared as it always was. The keyed
 # name is the one mmry_foundation_record_path spells for no id, taken here from the library's global
@@ -324,16 +325,17 @@ unset _mmry_idless_status
 # session's file, and the model is never pointed at it) but is left for an older plugin still running
 # here, until it too is a week old.
 _mmry_fnd_sweep() {
-    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' -o -name 'mmry-foundation-moment.*' -o -name 'mmry-foundation-shortening.*' \) -mtime +7 -delete 2>/dev/null || true
+    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' -o -name 'mmry-foundation-moment.*' -o -name 'mmry-foundation-shortening.*' -o -name '.mmry-foundation-private.*' \) -mtime +7 -delete 2>/dev/null || true
 }
 # ON CODEX THE SWEEP RUNS AS THIS FILE ENDS, AFTER ITS OUTPUT IS CLOSED (#33062 fix round 7). It removes
 # week-old records and has nothing to do with the memories, and on Windows the find is two processes,
 # 0.5 to 2.4 s of the start's budget, measured. The EXIT trap closes stdout first, so the hand-over is
 # not held for it, and it runs on every way out of this file, as it ran before every one of them.
 if (( _mmry_codex == 1 )); then
-    trap 'exec >/dev/null; _mmry_fnd_sweep' EXIT
+    trap 'exec >/dev/null; _mmry_fnd_sweep; mmry_foundation_private_v "$MMRY_TMPDIR"' EXIT
 else
     _mmry_fnd_sweep
+    mmry_foundation_private_v "$MMRY_TMPDIR"
 fi
 
 # NOTE: Bug #9 fix removed the /tmp/mmry-session-dir and
@@ -418,11 +420,15 @@ fi
 # Byte for byte what the service sent (#33480): -b for a jq that would otherwise turn each newline it
 # writes, a memory's own included, into CR LF (_mmry_jqb_v; a native Windows jq).
 _mmry_jqb_v
+# Written in place: a link or another user's file at the name is not written through (#33652); the
+# write goes to /dev/null instead, as it would for a name that cannot be opened.
+_mmry_mem_out="$MEM_FILE"
+mmry_foundation_writable_name "$_mmry_mem_out" || _mmry_mem_out=/dev/null
 {
     echo "# MMRY AI — Loaded Memories (account ${_MMRY_FND_ACCT})"
     echo ""
     "$MMRY_JQ" ${_MMRY_JQB:+"$_MMRY_JQB"} -r '.[] | to_entries | map(.key + ": " + (.value | tostring)) | join("\n"), "---"' <<<"$MMRY_RESPONSE"
-} > "$MEM_FILE" 2>/dev/null
+} > "$_mmry_mem_out" 2>/dev/null
 
 # Count memories. Here, from the startup answer, on both hosts (#33480): the Foundation writer below
 # is now given the every-message answer, so its jq can no longer report this length for Codex as it
@@ -506,10 +512,10 @@ elif [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]]; then
     _fnd_esid="$(mmry_foundation_sid "$SESSION_ID")"
     _fnd_ekey="$(mmry_foundation_session_key "$MMRY_TMPDIR" "$SESSION_ID" || true)"
     mmry_foundation_session_part_v ""
-    printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
+    mmry_foundation_writable_name "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" && printf '%s' "$(mmry_foundation_session_token "$MMRY_TMPDIR" || true)" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
     if [[ -n "$_fnd_esid" ]]; then
         mmry_foundation_session_part_v "$_fnd_esid"
-        printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
+        mmry_foundation_writable_name "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" && printf '%s' "$_fnd_ekey" > "${MMRY_TMPDIR}/.mmry-foundation-empty-told.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
     fi
 fi
 

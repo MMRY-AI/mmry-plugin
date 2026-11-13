@@ -521,6 +521,8 @@ mmry_foundation_mark_stored() {
     local p
     p="$(mmry_foundation_stored_path "$1" "$2")" || return 1
     [[ "$3" =~ ^[0-9]+$ ]] || return 1
+    # Written in place, so never through a link or into another user's file (#33652).
+    mmry_foundation_writable_name "$p" || return 1
     printf '%s' "$3" > "$p" 2>/dev/null
 }
 
@@ -835,7 +837,7 @@ mmry_write_foundation_cache() {
         # real id too), so Codex's start pays no process for it.
         if [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]]; then
             mmry_foundation_session_part_v "$sid"
-            printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
+            mmry_foundation_writable_name "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" && printf '%s' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true
         else
             mmry_foundation_mark_stored "${cache%/*}" "$sid" "$entries" || true
         fi
@@ -951,6 +953,8 @@ mmry_foundation_note_moment() {
     [[ "$ov" == true || "$ov" == false ]] || ov="-"
     [[ "$fnd" =~ ^[0-9]+$ ]] || fnd="-"
     mmry_foundation_moment_report_name_v "$dir" "$moment"
+    # Written in place, so never through a link or into another user's file (#33652).
+    mmry_foundation_writable_name "$_MMRY_FND_MOMENT_REPORT_NAME" || return 0
     printf 'count=%s characters=%s over=%s foundation=%s\n' "$c" "$ch" "$ov" "$fnd" \
         > "$_MMRY_FND_MOMENT_REPORT_NAME" 2>/dev/null || true
     return 0
