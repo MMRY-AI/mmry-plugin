@@ -207,6 +207,7 @@ tests/structural/database-names-check.bats
 tests/structural/entry-batch-privacy.bats
 tests/structural/entry-surface.bats
 tests/structural/file-integrity.bats
+tests/structural/folder-deletes-check.bats
 tests/structural/formation-agent-scoped.bats
 tests/structural/formation-assign.bats
 tests/structural/formation-check-identity.bats
