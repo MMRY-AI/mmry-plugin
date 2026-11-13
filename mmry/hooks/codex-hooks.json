@@ -109,6 +109,18 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-waiting",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-waiting",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
