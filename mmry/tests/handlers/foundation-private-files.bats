@@ -394,7 +394,9 @@ _copy_with_disabled() {
     local a=$'\n'"${fn}() {"$'\n'
     local rest="${t#*"$a"}"
     [[ "$rest" != "$t" && "${rest#*"$a"}" == "$rest" ]] || { echo "${fn} is not defined exactly once in the copy: the mutation is a no-op" >&2; return 1; }
-    t="${t/"$a"/$'\n'"${fn}() { return 0"$'\n'"}"$'\n'"_mmry_mutant_was_${fn}() {"$'\n'}"
+    # The replacement is built first: bash 3.2 (macOS) does not expand $'..' inside ${t/pat/rep}.
+    local rep=$'\n'"${fn}() { return 0"$'\n'"}"$'\n'"_mmry_mutant_was_${fn}() {"$'\n'
+    t="${t/"$a"/$rep}"
     printf '%s' "$t" > "$f"
     grep -q "^${fn}() { return 0" "$f" || { echo "the mutation did not land" >&2; return 1; }
     printf '%s' "$root"
