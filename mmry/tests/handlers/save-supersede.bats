@@ -197,3 +197,48 @@ _process_lines() { grep 'memories/process' "$TEST_TMPDIR/curl-log.txt" 2>/dev/nu
     [[ "$output" == *"Whether memory 42 was replaced could not be confirmed, so it may still be active."* ]] || { echo "$output"; return 1; }
     [[ "$output" != *"NOT replaced"* ]] || { echo "contradicting line printed: $output"; return 1; }
 }
+
+# --- #33035: the database save is a correction route too -------------------------------------
+#
+# save-memory.sh with --database-name / --entry-fields / --entry-name and --supersedes reaches POST
+# /api/memories (mmry_create_memory), not /api/memories/process. The API now refuses a correction
+# naming a memory the caller cannot see on that route too, with the same 404 and the same words.
+# The plugin's half: say it exactly as the documented route says it, so the assistant reads one
+# answer whichever route it took, and never a NewMemoryID line for a save that did not happen.
+
+_REFUSAL_33035='{"message":"Nothing was saved. Memory 42 was not found, is no longer active, or is not one you can see, so it cannot be replaced. Save again without the replacement, or with the id of the memory you meant.","stored":0,"supersede":{"memoryId":42,"applied":false,"reason":"not-found"}}'
+
+_entry_save_33035() {
+    run bash "$SAVE" --tier Operational --category Fact --scope finance --topic "Physio co-pay" \
+        --content "It was 45 dollars" --database-name "Team expenses" \
+        --entry-fields '{"vendor":"Clinic","amount":45}' --supersedes 42
+}
+
+@test "33035: a database-save correction the API refuses saves nothing and says the server's words" {
+    export MOCK_CURL_HTTP_CODE="404"
+    export MOCK_CURL_RESPONSE="$_REFUSAL_33035"
+    _entry_save_33035
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" == "MMRY AI: Nothing was saved. Memory 42 was not found"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"Error (HTTP 404)"* ]] || { echo "raw dump printed: $output"; return 1; }
+    [[ "$output" != *"NewMemoryID"* ]] || { echo "reported a save: $output"; return 1; }
+}
+
+@test "33035: both correction routes print the same refusal for the same answer" {
+    export MOCK_CURL_HTTP_CODE="404"
+    export MOCK_CURL_RESPONSE="$_REFUSAL_33035"
+    _entry_save_33035
+    local entry_route="$output" entry_status="$status"
+    run bash "$SAVE" --context "It was 45 dollars" --supersedes 42
+    [ "$entry_status" -eq "$status" ] || { echo "exit $entry_status vs $status"; return 1; }
+    [[ "$entry_route" == "$output" ]] || { printf 'database save:\n%s\ndocumented:\n%s\n' "$entry_route" "$output"; return 1; }
+}
+
+@test "33035: a database save without --supersedes still reports an API error as before" {
+    export MOCK_CURL_HTTP_CODE="404"
+    export MOCK_CURL_RESPONSE='{"title":"Not Found"}'
+    run bash "$SAVE" --tier Operational --category Fact --scope finance --topic "Physio co-pay" \
+        --content "It was 45 dollars" --database-name "Team expenses"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Error (HTTP 404)"* ]] || { echo "$output"; return 1; }
+}

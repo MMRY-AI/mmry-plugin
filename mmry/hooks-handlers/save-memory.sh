@@ -157,6 +157,18 @@ if [[ -n "$DATABASE_NAME" || -n "$ENTRY_FIELDS" || -n "$ENTRY_NAME" ]]; then
         fi
         exit 0
     else
+        # A CORRECTION THE API REFUSED (#33035): a memory this person cannot see, which the API
+        # answers exactly as an id nobody issued. Said in the server's own words, the same line the
+        # documented route (--context with --supersedes) prints below, so the assistant reads one
+        # answer whichever route it took. The words begin "Nothing was saved."
+        refusal=""
+        if [[ -n "$SUPERSEDES" && "${MMRY_HTTP_CODE:-}" =~ ^4[0-9][0-9]$ && "${MMRY_HTTP_CODE}" != "401"               && "${MMRY_HTTP_CODE}" != "402" && -n "${MMRY_JQ:-}" && -n "$MMRY_RESPONSE" ]]; then
+            refusal="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.message // empty' 2>/dev/null || true)"
+        fi
+        if [[ -n "$refusal" ]]; then
+            echo "MMRY AI: ${refusal}" >&2
+            exit 1
+        fi
         _mmry_print_error "save"
         # A REFUSED ENTRY SAVE STORES NOTHING (#32002). Said here, beside the server's own words,
         # so the assistant does not report a save that did not happen. The SKILL describes it too.
