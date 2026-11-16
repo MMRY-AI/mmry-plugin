@@ -35,6 +35,9 @@ printf '%s %s %s\n' "$method" "$url" "$body" >> "$REQLOG"
 code=200; resp='{}'
 if [[ -n "${FAKE_FAIL_ALL:-}" ]]; then
     code=500; resp='{"error":"boom"}'
+elif [[ -n "${FAKE_402_BODY+set}" ]]; then
+    # #33716: every request answered 402 with this body, as the API does mid-renewal.
+    code=402; resp="$FAKE_402_BODY"
 else
 case "$method $url" in
     "POST "*/api/memories/process*)
@@ -421,6 +424,34 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [[ "$(text_of 430)" == *"Formation 77 closed out."* ]] || return 1
     grep -q '^POST http://fake.invalid/api/formations/77/debrief .*decided UPC is the key' "$REQLOG"
     [ ! -e "$TMPDIR/.mmry-formation-conv-A" ]
+}
+
+# ---- #33716 on Codex: the server's own sentence for a 402, through the tools Codex calls -----------
+# memory_search reaches the client's _mmry_print_error, memory_load reaches session-start.sh's 402
+# answer and formation_debrief reaches formation-debrief.sh: the three places the ticket changed.
+RENEWING_33716="MMRY AI is renewing your credits right now. Try your request again in a minute."
+
+@test "33716 codex: memory_search, memory_load and formation_debrief show the renewal sentence for a 402" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    export FAKE_402_BODY="{\"error\":\"${RENEWING_33716}\",\"code\":\"credits_exhausted\"}"
+    mcp "$(call 3371 memory_search '{"query":"refund"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3372 memory_load '{"working_dir":"'"$TEST_TMPDIR/proj"'"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3373 formation_debrief '{"summary":"Shipped the checkout; decided UPC is the key; nothing went wrong."}' '{"sessionId":"conv-A"}')"
+    [[ "$(text_of 3371)" == *"$RENEWING_33716"* ]] || { echo "search: $(text_of 3371)"; return 1; }
+    [[ "$(text_of 3371)" != *"Credits exhausted"* ]] || { echo "search: $(text_of 3371)"; return 1; }
+    [[ "$(text_of 3372)" == *"word for word: \"${RENEWING_33716}\""* ]] || { echo "load: $(text_of 3372)"; return 1; }
+    [[ "$(text_of 3373)" == *"${RENEWING_33716} Formation 77 was not closed out."* ]] || { echo "debrief: $(text_of 3373)"; return 1; }
+}
+
+@test "33716 codex: with an empty 402 body the same three tools keep today's fixed text" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    export FAKE_402_BODY=""
+    mcp "$(call 3374 memory_search '{"query":"refund"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3375 memory_load '{"working_dir":"'"$TEST_TMPDIR/proj"'"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3376 formation_debrief '{"summary":"Shipped the checkout; decided UPC is the key; nothing went wrong."}' '{"sessionId":"conv-A"}')"
+    [[ "$(text_of 3374)" == *"Credits exhausted. Your MMRY AI subscription has run out of API credits."* ]] || { echo "search: $(text_of 3374)"; return 1; }
+    [[ "$(text_of 3375)" == *"MMRY AI credits exhausted. Inform the user"* ]] || { echo "load: $(text_of 3375)"; return 1; }
+    [[ "$(text_of 3376)" == *"run out of API credits, so formation 77 was not closed out."* ]] || { echo "debrief: $(text_of 3376)"; return 1; }
 }
 
 @test "tool: formation_debrief refuses with no summary and sends nothing" {
