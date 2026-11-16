@@ -137,6 +137,6 @@ mmry_release_home() {
         return 0
     fi
 
-    rm -rf "$MMRY_TEST_HOME_BASE" 2>/dev/null || true
+    rm -rf "${MMRY_TEST_HOME_BASE:?}" 2>/dev/null || true
     unset MMRY_TEST_HOME_BASE
 }

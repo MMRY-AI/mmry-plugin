@@ -365,7 +365,7 @@ _eval_installed() {
 _stage_install() {
     # Usage: _stage_install <marker-contents>   Echoes the staged <root>/mmry directory.
     local root="$TEST_TMPDIR/staged-$1-$$"
-    rm -rf "$root"
+    rm -rf "${root:?}"
     mkdir -p "$root/mmry/hooks-handlers"
     cp "$LIB" "$root/mmry/hooks-handlers/lib-host.sh"
     printf '%s\n' "$1" > "$root/mmry/.mmry-host"

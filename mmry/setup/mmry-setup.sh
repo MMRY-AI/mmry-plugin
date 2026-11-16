@@ -561,7 +561,7 @@ else
     # Clear stale cache (local installs only)
     CACHE_DIR="${HOME}/.claude/plugins/cache/internal-plugins/mmry"
     if [[ -d "$CACHE_DIR" ]]; then
-        rm -rf "$CACHE_DIR"
+        rm -rf "${CACHE_DIR:?}"
         echo "  Plugin cache cleared."
     fi
 fi

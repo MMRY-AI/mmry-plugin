@@ -420,8 +420,10 @@ _codex_tree() {
         op="${base#formation-}"; op="${op%.sh}"
         # state and check are internal: state is the local session-to-formation record that the
         # other handlers read and write, and check is the delivery hook. Neither is an operation
-        # a customer performs, on either host - commands/formation.md names neither.
-        case "$op" in state|check) continue ;; esac
+        # a customer performs, on either host - commands/formation.md names neither. waiting
+        # (#33452) is a hook too: the Notification and PermissionRequest handler that tells the
+        # lead a member is waiting on a permission prompt. No customer runs it.
+        case "$op" in state|check|waiting) continue ;; esac
         # #31743: an operation MMRY's tool server covers is documented as the TOOL, and its
         # script must not be there to be reached for first. The rest are documented as scripts.
         # #32270 added remove (formation_remove) to the tool server, and #31410 status
@@ -444,7 +446,7 @@ _codex_tree() {
     # The other half of the parity. Without it the test above is satisfied by a skill that lists
     # every file in the directory, including the two that are not operations.
     local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" op
-    for op in state check; do
+    for op in state check waiting; do
         run grep -c "formation-${op}.sh" "$skill"
         assert_output "0"
     done

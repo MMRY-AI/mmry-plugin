@@ -24,8 +24,13 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO_SRC="$(cd "$PLUGIN_SRC/.." && pwd)"
-WORK="${TMPDIR:-/tmp}/mmry-33030-mut-$$"
-mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new 33030-mut || exit 2
+WORK="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 
 _rep() {
     local t; t="$(cat "$1"; printf x)"; t="${t%x}"
@@ -34,7 +39,7 @@ _rep() {
 }
 
 copy() {
-    rm -rf "$1"; mkdir -p "$1"
+    mmry_work_reset "$1" || exit 2
     cp -R "$REPO_SRC/.claude-plugin" "$1/"
     cp -R "$PLUGIN_SRC" "$1/mmry"
 }

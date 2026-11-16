@@ -19,8 +19,13 @@ S="hooks-handlers/session-start.sh"
 H="hooks-handlers/userpromptsubmit-foundation.sh"
 C="hooks-handlers/mmry-client.sh"
 SUITE="tests/structural/startup-memories-isolation.bats"
-WORK="${TMPDIR:-/tmp}/mmry-32915-mut-$$"
-mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new 32915-mut || exit 2
+WORK="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 
 # Replace the first occurrence of $2 with $3 in file $1; fail if $2 is not there.
 _rep() {
@@ -54,7 +59,7 @@ add failclosed-off "a session whose account or server cannot be identified loads
 add url-default-counts "an empty server address is taken as the default server, so the identity is never unknown for want of one" \
     '    [[ -n "$MMRY_API_URL" ]] && _MMRY_CFG_URL_GIVEN=1' \
     '    _MMRY_CFG_URL_GIVEN=1' "$C"
-add legacy-not-swept "the legacy machine-wide file is left out of the week-old sweep" \
+add legacy-not-swept "the startup memories files, the legacy machine-wide one and every keyed per-session one, are left out of the week-old sweep" \
     "-o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md'" \
     "" "$S"
 add log-unkeyed "the failure log goes back to the shared name" \
@@ -80,10 +85,10 @@ add supervisor-gate-off "the supervisor serves a set standing at the name an uni
         exit 0' \
     '    if false; then
         exit 0' "$H"
-add session-part-unkeyed "the account key is dropped from the id-less session part, so every marker made with no session id is shared again" \
+add session-part-unkeyed "the account key is dropped from every session part, so two accounts in one session, or with no session id, share every per-session marker again" \
     '_MMRY_FND_SESSION_PART="${_MMRY_FND_ACCT}.${v:-none}"' \
     '_MMRY_FND_SESSION_PART="${v:-none}"' "$K"
-add prepared-unkeyed "the prepared copy, claim, result and stored check go back to the bare token, shared across accounts with no session id" \
+add prepared-unkeyed "the prepared copy, claim, result and stored check drop the account key and go back to the bare session id, or the bare token when there is none, so two accounts share them on one id or with no id" \
     '    _FND_KEY="$_MMRY_FND_SESSION_PART"' \
     '    _FND_KEY="${_FND_STAMP:-none}"' "$H"
 # QA round 2 (#32915). F-B: the four notice markers made with no session id.
@@ -109,13 +114,13 @@ add auth-oauth-as-apikey "the library takes any credential for an API key, so th
     '    [[ -z "$auth" && -n "$key" ]] && auth="apikey"' \
     '    [[ -n "$key" ]] && auth="apikey"' "$K"
 # QA round 2 (#32915). F-A: the Codex writer's quick path.
-add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the token itself, so two Codex accounts with no session id share mmry-foundation.stored.unknown (QA probe5)" \
+add codex-stored-quick-unkeyed "the Codex writer's quick path spells the stored marker from the bare id or token, without the account key, so two Codex accounts share mmry-foundation.stored.unknown with no session id (QA probe5), or mmry-foundation.stored.<sid> on one id" \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${_MMRY_FND_SESSION_PART}" 2>/dev/null || true' \
     'printf '"'"'%s'"'"' "$entries" > "${cache%/*}/mmry-foundation.stored.${sid}" 2>/dev/null || true' "$C"
 
 run_suite() { ( cd "$1/tests" && PLUGIN_ROOT="$1" ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 
-copy() { rm -rf "$1"; mkdir -p "$1"; cp -R "$PLUGIN_SRC/." "$1/"; }
+copy() { mmry_work_reset "$1" || exit 2; cp -R "$PLUGIN_SRC/." "$1/"; }
 
 echo "baseline: the untouched copy"
 copy "$WORK/base"

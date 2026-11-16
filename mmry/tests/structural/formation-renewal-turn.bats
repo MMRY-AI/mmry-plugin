@@ -39,9 +39,9 @@ teardown() {
 _sid() { printf '%s' "$CLAUDE_SESSION_ID" | tr -c 'A-Za-z0-9._-' '_'; }
 
 _reset() {
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_sid)" "${TMPDIR}/.mmry-formation-poll-$(_sid)" \
-           "${TMPDIR}/.mmry-formation-renewed-$(_sid)" "${TMPDIR}/.mmry-formation-handover-$(_sid)" \
-           "${TMPDIR}/.mmry-renewal-turn-$(_sid)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_sid)" "${TMPDIR:?}/.mmry-formation-poll-$(_sid)" \
+           "${TMPDIR:?}/.mmry-formation-renewed-$(_sid)" "${TMPDIR:?}/.mmry-formation-handover-$(_sid)" \
+           "${TMPDIR:?}/.mmry-renewal-turn-$(_sid)"
     rm -f "${TMPDIR}/.mmry-stop-checked" "${TMPDIR}/.mmry-stop-count" "${TMPDIR}/.mmry-last-save"
 }
 
@@ -130,7 +130,7 @@ _stop_marker_age() {
 @test "control: before #31850 the same turn prompted for a save and polled the service" {
     # POSITIVE CONTROL. The handlers as develop shipped them (git show) replay the same turn.
     local base="${BATS_TEST_TMPDIR}/handlers-develop"
-    rm -rf "$base"; mkdir -p "$base"; cp "${HANDLERS}"/*.sh "$base"/
+    rm -rf "${base:?}"; mkdir -p "$base"; cp "${HANDLERS}"/*.sh "$base"/
     git -C "${BATS_TEST_DIRNAME}" show 0d5d967:mmry/hooks-handlers/stop-check.sh > "${base}/stop-check.sh" 2>/dev/null \
         || skip "the develop baseline 0d5d967 is not in this clone"
     git -C "${BATS_TEST_DIRNAME}" show 0d5d967:mmry/hooks-handlers/formation-check.sh > "${base}/formation-check.sh"
@@ -208,7 +208,7 @@ _stop_check_ms() {
 
 @test "control: a save check that always reads its payload is caught by the cost test" {
     local mutant="${BATS_TEST_TMPDIR}/handlers-alwaysread"
-    rm -rf "$mutant"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
+    rm -rf "${mutant:?}"; mkdir -p "$mutant"; cp "${HANDLERS}"/*.sh "$mutant"/
     perl -0777 -pi -e 's{\[\[ -n "\$any" \]\] \|\| return 1}{true}' "${mutant}/stop-check.sh"
     ! cmp -s "${mutant}/stop-check.sh" "${HANDLERS}/stop-check.sh" || { echo "mutation did not apply"; return 1; }
     local ms; ms="$(_stop_check_ms "$mutant")"

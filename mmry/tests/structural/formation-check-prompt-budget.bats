@@ -21,10 +21,10 @@ setup() {
     export CLAUDE_SESSION_ID="bats-31976-$$"
     unset CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID MMRY_HOST MMRY_JQ MMRY_FORMATION_MODE CLAUDE_PLUGIN_ROOT
     bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_SESSION_ID" || true
-    rm -rf "${TMPDIR}/.mmry-formation-cs-${CLAUDE_SESSION_ID}"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-${CLAUDE_SESSION_ID}"
     BODY='[{"senderRole":"lead","senderSessionID":"lead-1","senderUserID":1,"content":"PB-MSG review the claim","sentDate":"2026-10-10T01:00:00"}]'
     W="${BATS_TEST_TMPDIR}/pb"
-    rm -rf "$W"; mkdir -p "$W/bin"
+    rm -rf "${W:?}"; mkdir -p "$W/bin"
     REAL_JQ="$(bash -c "source '${HANDLERS}/lib-jq.sh' >/dev/null 2>&1; mmry_resolve_jq >/dev/null 2>&1; printf '%s' \"\$MMRY_JQ\"")"
     [[ "$REAL_JQ" == "jq" ]] && REAL_JQ="$(command -v jq)"
     # A curl that answers with BODY through -o, as the real one does, and logs the URL.

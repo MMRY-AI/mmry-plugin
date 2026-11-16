@@ -343,6 +343,17 @@ fi
 # nothing is marked, and no idle watch or lock is started. The parent's own next event delivers it,
 # exactly once, through the ordinary path below. No process is spent: the field came out of the
 # one jq call above.
+#
+# ---- THE MEMBER HAS CONTINUED (#33452) ---------------------------------------------------------
+# formation-waiting.sh leaves .mmry-waiting-<session> when it has told the service this member is
+# waiting on a permission prompt. Any later event of this session - a tool call, a prompt, a turn
+# ending, and a dispatched agent's tool call too, since an approved prompt there is the member
+# continuing - means the prompt was answered, so the flag is cleared and the lead told. HERE, BEFORE
+# THE AGENT TEST, because clearing is not delivery: it moves no read position and shows nothing.
+# Costs one file test when no marker is there, which is every event but the first after a prompt.
+if [[ -n "$session_id" && -f "${MMRY_TMPDIR}/.mmry-waiting-${session_id}" && -f "${HANDLER_DIR}/formation-waiting.sh" ]]; then
+    bash "${HANDLER_DIR}/formation-waiting.sh" --clear "$session_id" </dev/null >/dev/null 2>&1 || true
+fi
 [[ -z "$hook_agent_id" ]] || exit 0
 # Nothing proved the jq above (no payload, or one that did not parse): prove it the old way now.
 if [[ -n "$_fc_jq_unproved" ]]; then
@@ -582,7 +593,9 @@ _take() {
 # last thing a delivering check does before it exits, inside the budget. A lock holds nothing but its
 # pid file, so removing the two together is the same act.
 _drop() {
-    rm -rf -- "$1" 2>/dev/null || true
+    # Only ever a lock folder inside MMRY_TMPDIR: never empty, the root or MMRY_TMPDIR itself (#33618).
+    case "${1%/}" in ''|/|"${MMRY_TMPDIR%/}") return 0 ;; esac
+    rm -rf -- "${1:?}" 2>/dev/null || true
 }
 
 _acquire() {
@@ -1065,7 +1078,7 @@ case "$mode" in
             # its schedule, not at the slow end a renewal earns (#31721), and its listening limit
             # starts again from now (#31850). One test each, no process unless a marker is there.
             [[ -e "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" ]] \
-                && { rm -rf -- "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
+                && { rm -rf -- "${MMRY_TMPDIR:?}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
             [[ -e "$_renew_turn" ]] && { rm -f -- "$_renew_turn" 2>/dev/null || true; }
         fi
         _poll_once || exit 0
@@ -1175,7 +1188,7 @@ case "$mode" in
             if [[ "$_since" =~ ^[0-9]{1,12}$ ]] && (( _since <= _hook_start )); then
                 _chain_since=$_since
             fi
-            rm -rf -- "$_renew_marker" 2>/dev/null || true
+            rm -rf -- "${_renew_marker:?}" 2>/dev/null || true
         fi
 
         # The window ends 28 minutes after the hook started, or where the listening limit runs out if

@@ -13,7 +13,8 @@
 # ticket was filed against (the 33363 QA S1 probe). The fourth removes the reader's second guard.
 #
 # TEMP SAFETY (the 2026-11-08 temp-folder incident, and finding 2 of the 33363 QA): TMPDIR must be set
-# and must exist, or the run refuses to start; every rm is on a path guarded with ${WORK:?}.
+# and must exist, or the run refuses to start; the work folder is made and removed only through
+# tests/helpers/work-dir.bash (#33618).
 #
 # usage: bash mmry/tests/mutation/run-33617-mutations.sh [name ...]     exit 0 only if every one REFUSED.
 set -uo pipefail
@@ -23,13 +24,13 @@ HOOK="hooks-handlers/codex-hook.sh"
 FIRST="hooks-handlers/codex-first-prompt.sh"
 SUITE="tests/structural/codex-late-handoff-isolation.bats"
 
-if [[ -z "${TMPDIR:-}" || ! -d "${TMPDIR:-}" ]]; then
-    echo "REFUSED TO START: TMPDIR must be set to an existing directory (it is '${TMPDIR:-}')" >&2
-    exit 2
-fi
-WORK="${TMPDIR%/}/mmry-33617-mut-$$"
-mkdir -p "${WORK:?}" || exit 2
-trap 'rm -rf "${WORK:?}"' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new 33617-mut || exit 2
+WORK="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 
 # Replace the first occurrence of $2 with $3 in file $1; fail if $2 is not there.
 _rep() {
@@ -76,7 +77,7 @@ add guard_removed "the reader's second guard is gone: another account's memories
 
 run_suite() { ( cd "$1/tests" && PLUGIN_ROOT="$1" ./libs/bats-core/bin/bats "${SUITE#tests/}" ) > "$2" 2>&1; }
 
-copy() { rm -rf "${WORK:?}/${1:?}"; mkdir -p "$WORK/$1"; cp -R "$PLUGIN_SRC/." "$WORK/$1/"; }
+copy() { mmry_work_reset "$WORK/${1:?}" || exit 2; cp -R "$PLUGIN_SRC/." "$WORK/$1/"; }
 
 echo "baseline: the untouched copy"
 copy base

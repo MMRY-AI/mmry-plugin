@@ -647,8 +647,8 @@ _vendor_jq_dir() {
             *)                             expect_status=2 ;;
         esac
         bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-        rm -rf "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)" \
-               "${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)"
+        rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_safe_sid_for_test)" \
+               "${TMPDIR:?}/.mmry-formation-poll-$(_safe_sid_for_test)"
 
         printf '%s' "{\"session_id\":\"${CLAUDE_SESSION_ID}\",\"hook_event_name\":\"${event}\"}" \
             > "${BATS_TEST_TMPDIR}/payload.json"
@@ -699,7 +699,7 @@ _code_only() {
 _mutant_handler_dir() {
     local mutation="$1" base="${2:-$HANDLERS}"
     local dir="${BATS_TEST_TMPDIR}/handlers-mutant-${mutation}"
-    rm -rf "$dir"; mkdir -p "$dir"
+    rm -rf "${dir:?}"; mkdir -p "$dir"
     cp "${base}"/*.sh "$dir"/
     local f="${dir}/formation-check.sh"
 
@@ -760,8 +760,8 @@ _mutant_handler_dir() {
     local vendor; vendor="$(_vendor_jq_dir)"
     local mutant; mutant="$(_mutant_handler_dir bare-command-v-jq)"
 
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)" \
-           "${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_safe_sid_for_test)" \
+           "${TMPDIR:?}/.mmry-formation-poll-$(_safe_sid_for_test)"
     printf '%s' "{\"session_id\":\"${CLAUDE_SESSION_ID}\",\"hook_event_name\":\"SessionStart\"}" \
         > "${BATS_TEST_TMPDIR}/ctl-payload.json"
 
@@ -796,7 +796,7 @@ _mutant_handler_dir() {
 # between an overlap and a queue.
 _lagged_handler_dir() {
     local dir="${BATS_TEST_TMPDIR}/handlers-lagged"
-    rm -rf "$dir"; mkdir -p "$dir"
+    rm -rf "${dir:?}"; mkdir -p "$dir"
     cp "${HANDLERS}"/*.sh "$dir"/
     mv "${dir}/formation-state.sh" "${dir}/formation-state-real.sh"
     cat > "${dir}/formation-state.sh" <<'DOUBLE'
@@ -868,7 +868,7 @@ _run_overlap() {
     local sig="${BATS_TEST_TMPDIR}/overlap-b.read"
     local rel="${BATS_TEST_TMPDIR}/overlap-b.release"
     rm -f "$aerr" "$berr" "$sig" "$rel" "${BATS_TEST_TMPDIR}/overlap-b.count"
-    rm -rf "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)"
+    rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_safe_sid_for_test)"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
 
     env PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$VALID_TRANSMISSION" \
@@ -1058,8 +1058,8 @@ BSDSTAT
     local lock dir
     for lock in poll cs; do
         bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-        rm -rf "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)" \
-               "${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)"
+        rm -rf "${TMPDIR:?}/.mmry-formation-cs-$(_safe_sid_for_test)" \
+               "${TMPDIR:?}/.mmry-formation-poll-$(_safe_sid_for_test)"
         # A lock a killed hook left behind, well past any plausible age.
         dir="${TMPDIR}/.mmry-formation-${lock}-$(_safe_sid_for_test)"
         mkdir -p "$dir"
@@ -1122,7 +1122,7 @@ BSDSTAT
     local mutant; mutant="$(_mutant_handler_dir date-r-mtime)"
 
     local dir="${TMPDIR}/.mmry-formation-poll-$(_safe_sid_for_test)"
-    rm -rf "$dir" "${TMPDIR}/.mmry-formation-cs-$(_safe_sid_for_test)"
+    rm -rf "${dir:?}" "${TMPDIR:?}/.mmry-formation-cs-$(_safe_sid_for_test)"
     mkdir -p "$dir"
     touch -d "2020-01-01" "$dir" 2>/dev/null || touch -t 202001010000 "$dir"
 

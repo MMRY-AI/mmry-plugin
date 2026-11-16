@@ -369,7 +369,9 @@ controls pin.
 | not ok 16 | roster: the success footer hands a Codex customer three commands that all exist |
 | not ok 18 | surface: none of the four exposed handlers names a slash command on Codex |
 
-### 2. `the formation remedy names no command on either host`
+### 2. `the formation remedy names no command on Claude Code (the Codex branch is untouched)`
+
+(Labelled "the formation remedy names no command on either host" when this run was recorded. The edit only ever changed the Claude Code branch of mmry_host_formation_ref; the label was corrected in #33618.)
 
 The helper stops naming a command at all and prints "the formation X operation" instead. This is
 the mutation the Claude-side controls exist for: without them, "no slash command appears on Codex"

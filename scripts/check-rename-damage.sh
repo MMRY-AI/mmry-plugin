@@ -36,7 +36,7 @@ cd "$root" 2>/dev/null || { echo "check-rename-damage: cannot read $root" >&2; e
 git rev-parse --is-inside-work-tree > /dev/null 2>&1 || { echo "check-rename-damage: $root is not a git work tree" >&2; exit 2; }
 git rev-parse --verify --quiet "$base^{commit}" > /dev/null || { echo "check-rename-damage: no such base ref: $base (fetch it first)" >&2; exit 2; }
 
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+tmp="$(mktemp -d)"; trap 'rm -rf "${tmp:?}"' EXIT
 findings=0
 report() { findings=$((findings + 1)); printf '%s\n' "$1"; }
 

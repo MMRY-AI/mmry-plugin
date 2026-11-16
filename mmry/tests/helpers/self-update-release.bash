@@ -20,7 +20,7 @@ _release() {
     local version="$1" list="${2:-good}"
     local rel="$TEST_TMPDIR/remote/mmry-plugin-master/mmry"
     local listed_version="$version"
-    rm -rf "$TEST_TMPDIR/remote" "$TEST_TMPDIR/remote.tar.gz"
+    rm -rf "${TEST_TMPDIR:?}/remote" "${TEST_TMPDIR:?}/remote.tar.gz"
     mkdir -p "$rel/hooks-handlers" "$rel/.claude-plugin" "$rel/commands"
     cp "$PLUGIN_ROOT/hooks-handlers/self-update.sh" "$PLUGIN_ROOT/hooks-handlers/lib-jq.sh" \
        "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" "$PLUGIN_ROOT/hooks-handlers/lib-release-files.sh" \

@@ -10,8 +10,13 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_SRC="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-WORK="${TMPDIR:-/tmp}/mmry-33062-mut-$$"
-mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+# Work folder (#33618): made inside an existing TMPDIR by a checked mktemp, never in a fallback /tmp,
+# and removed only through mmry_work_dir_remove, which refuses anything it did not make.
+# shellcheck source=../helpers/work-dir.bash
+. "$SCRIPT_DIR/../helpers/work-dir.bash" || { echo "REFUSED TO START: tests/helpers/work-dir.bash is missing" >&2; exit 2; }
+mmry_work_dir_new 33062-mut || exit 2
+WORK="$MMRY_WORK_DIR"
+trap 'mmry_work_dir_remove "$WORK"' EXIT
 SUITE="handlers/codex-start-budget.bats"
 HOOK="mmry/hooks-handlers/codex-hook.sh"
 INIT="mmry/hooks-handlers/session-init.sh"
@@ -119,7 +124,7 @@ ALL=(no_deliver_first update_first register_first hook_holds_output start_holds_
 (( $# > 0 )) && ALL=("$@")
 
 copy() {
-    rm -rf "$1"; mkdir -p "$1"
+    mmry_work_reset "$1" || exit 2
     ( cd "$REPO_SRC" && tar cf - --exclude=.git . ) | ( cd "$1" && tar xf - )
 }
 # MUT_FILTER (a bats -f pattern) runs only the matching tests, for a machine where the whole suite per

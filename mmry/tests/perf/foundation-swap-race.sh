@@ -28,9 +28,10 @@ ROOT="${2:-$(cd "$(dirname "$0")/../.." && pwd)}"
 HOOK="$ROOT/hooks-handlers/userpromptsubmit-foundation.sh"
 [[ -f "$HOOK" ]] || { echo "no hook at $HOOK"; exit 2; }
 
-W="$(mktemp -d)"
+W="$(mktemp -d)" || W=""
+[[ -n "$W" && -d "$W" ]] || { echo "REFUSED TO START: could not create a work folder (TMPDIR is '${TMPDIR:-unset}'; #33618)" >&2; exit 2; }
 WPID=""
-trap '[[ -n "$WPID" ]] && kill "$WPID" 2>/dev/null; wait 2>/dev/null; rm -rf "$W"' EXIT
+trap '[[ -n "$WPID" ]] && kill "$WPID" 2>/dev/null; wait 2>/dev/null; rm -rf "${W:?}"' EXIT
 export HOME="$W/home" TMPDIR="$W" MMRY_TMPDIR="$W" MMRY_CONFIG_FILE="$W/mmry-config.json"
 mkdir -p "$HOME/.claude"
 unset CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID MMRY_API_KEY MMRY_API_URL
