@@ -100,6 +100,13 @@ live_plant() {
     fi
     id="$(printf '%s' "${resp%$'\n'*}" | "$LIVE_JQ" -r '.id // empty')"
     [[ -n "$id" ]] || { echo "planting '${topic}' returned no id" >&2; return 1; }
+    # SINCE #33480 A FOUNDATION MEMORY IS SENT ONLY ON THE MOMENTS AN ADMINISTRATOR CHOOSES, and a new
+    # one has none, so a memory planted without a choice is delivered nowhere and the J-011 specs failed
+    # on every run (#33982, measured 2026-11-17 on Integration). Choose the two moments a session start
+    # and its prompts read, as the Foundation Memories page does (an administrator key, no agent source).
+    resp="$(live_api PUT "/api/memories/${id}/foundation-moments" "$key" '{"moments":["conversation-start","every-message"]}')"
+    code="${resp##*$'\n'}"
+    [[ "$code" == "200" ]] || { echo "choosing the moments for '${topic}' returned HTTP ${code}" >&2; return 1; }
     printf '%s' "$id"
 }
 
