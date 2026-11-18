@@ -328,3 +328,112 @@ _line_for() { printf '%s\n' "$output" | tr -d '\r' | grep "m$1@x.y"; }
     [[ "$flat" == *"  12  Wingman  Availability: idle and ready, for 12 minutes."* ]] || { echo "$output"; return 1; }
     [ "$(printf '%s\n' "$flat" | tail -n 1)" = "$AVAIL_FOOTER" ] || { echo "$output"; return 1; }
 }
+
+# ---- #33848 (DD-192 in MMRY-AI/mmry): the wake line and the unread-message notice ------------------
+#
+# The service decides who cannot wake on its own and writes the wake line, naming the member and a host
+# name MMRY AI sets (Claude Code, Codex, a connected assistant), into the send answer's "wake" field, and
+# the lead's UNREAD MESSAGE notice as a system message directed at the lead's own entry, on the same path
+# as the quiet notices. Words cleared by cmo-mmry and approved by Eric, 2026-11-18. What this proves is
+# the plugin's half: the send reply shows the wake line whole, after the existing reply, on Claude Code
+# and on Codex, and only what the server sent; an answer with no wake line reads exactly as before; the
+# unread notice is shown in the lead's window on both hosts.
+
+WAKE_A='WAKE NEEDED. Member 505 >>> Seat C <<< runs on Codex and is not working right now, so it will not see this message until a person types in its window. Ask the person who runs that member to type anything there.'
+WAKE_A2='NO RECENT ACTIVITY. Member 506 >>> Seat D <<< on Claude Code has shown no recent activity in this Formation, so it may not see this message soon. Ask the person who runs that member to check on it.'
+UNREAD_LINE='UNREAD MESSAGE. A message to Member 505 >>> Seat C <<< has waited 15 minutes without being shown to it. Check on that member, or give the work to someone else.'
+SENT_LINE='Sent to member 505 in formation 4242, and to nobody else. They will see it after their next tool call, marked as directed at them.'
+
+# One send from the lead's window on host $1, answered with body $2, to member $3 (empty: the whole formation).
+_say() {
+    local host="$1" body="$2" to="${3-505}" bin
+    local -a args=("please take 33849")
+    [[ -n "$to" ]] && args+=("$to")
+    bin="$(_fake_curl_dir)"
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$LEAD_SID"
+    if [[ "$host" == "codex" ]]; then
+        PATH="${bin}:${PATH}" FAKE_CODE=201 FAKE_BODY="$body" MMRY_HOST=codex MMRY_FORMATION_MODE=tool \
+            CLAUDE_CODE_SESSION_ID="$LEAD_SID" CLAUDE_SESSION_ID="$LEAD_SID" CODEX_SESSION_ID="$LEAD_SID" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run bash "${HANDLERS}/formation-say.sh" "${args[@]}"
+    else
+        PATH="${bin}:${PATH}" FAKE_CODE=201 FAKE_BODY="$body" \
+            CLAUDE_CODE_SESSION_ID="$LEAD_SID" CLAUDE_SESSION_ID="$LEAD_SID" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run env -u MMRY_HOST bash "${HANDLERS}/formation-say.sh" "${args[@]}"
+    fi
+}
+
+# The send answer as the service writes it, with the wake line $1 then the safety line, or a null wake.
+_sent_body() {
+    if [[ -z "${1:-}" ]]; then
+        printf '{"transmissionId":77,"formationId":4242,"recipientMemberId":505,"stored":1,"wake":null}'
+    else
+        printf '{"transmissionId":77,"formationId":4242,"recipientMemberId":505,"stored":1,"wake":"%s\\n%s"}' "$1" "$CAVEAT_LINE"
+    fi
+}
+
+_line_no() { printf '%s\n' "$1" | tr -d '\r' | grep -nF -- "$2" | head -n 1 | cut -d: -f1; }
+
+@test "W1: on Claude Code a directed send to a member that cannot wake shows the wake line whole, after the reply" {
+    _say claude "$(_sent_body "$WAKE_A")"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$SENT_LINE"* ]] || { echo "$output"; return 1; }
+    local w s; w="$(_line_no "$output" "$WAKE_A")"; s="$(_line_no "$output" "$SENT_LINE")"
+    [[ -n "$w" && -n "$s" && "$w" -gt "$s" ]] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | tr -d '\r' | sed -n "$((w + 1))p")" = "$CAVEAT_LINE" ] || { echo "$output"; return 1; }
+}
+
+@test "W1: the no-recent-activity line names the host, as the server sent it" {
+    _say claude "$(_sent_body "$WAKE_A2")" 506
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$WAKE_A2"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"$CAVEAT_LINE"* ]] || { echo "$output"; return 1; }
+}
+
+@test "W2: on Codex the send reply shows the same wake line and safety line" {
+    _say codex "$(_sent_body "$WAKE_A")"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$WAKE_A"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"$CAVEAT_LINE"* ]] || { echo "$output"; return 1; }
+}
+
+@test "W3: a send to a listening member, and an answer from a server that sends no wake field, read exactly as before" {
+    _say claude "$(_sent_body '')"
+    [ "$status" -eq 0 ]
+    local with_null="$output"
+    _say claude '{"transmissionId":77,"stored":1}'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$with_null" ] || { echo "--- null"; echo "$with_null"; echo "--- absent"; echo "$output"; return 1; }
+    [[ "$output" != *"WAKE NEEDED"* && "$output" != *"NO RECENT ACTIVITY"* && "$output" != *">>>"* ]] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | grep -c .)" -eq 2 ] || { echo "$output"; return 1; }
+}
+
+@test "W4: a carriage return or control character in the wake line cannot overwrite or hide the reply" {
+    _say claude '{"transmissionId":77,"stored":1,"wake":"WAKE NEEDED. Member 505\r\u001b[2Kgone\u0085\nThe text between"}'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *$'\r'* && "$output" != *$'\e'* ]] || { printf '%s' "$output" | od -c | head; return 1; }
+    [[ "$output" == *"$SENT_LINE"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"WAKE NEEDED. Member 505"* ]] || { echo "$output"; return 1; }
+}
+
+@test "W5: a message to the whole formation shows no wake line" {
+    _say claude "$(_sent_body "$WAKE_A")" ""
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Sent to formation 4242."* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"WAKE NEEDED"* ]] || { echo "$output"; return 1; }
+}
+
+@test "U1: on Claude Code the lead's window shows the unread-message notice whole, directed to it" {
+    _check claude lead "$(_quiet_poll "$UNREAD_LINE")"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"[MMRY] DIRECTED TO YOU: ${UNREAD_LINE}"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"$CAVEAT_LINE"* ]] || { echo "$output"; return 1; }
+}
+
+@test "U1: on Codex the lead's window is given the unread-message notice as additionalContext" {
+    _check codex lead "$(_quiet_poll "$UNREAD_LINE")"
+    [ "$status" -eq 0 ]
+    local ctx; ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    [[ "$ctx" == *"[MMRY] DIRECTED TO YOU: ${UNREAD_LINE}"* ]] || { echo "$output"; return 1; }
+}
