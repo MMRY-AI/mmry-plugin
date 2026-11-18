@@ -85,18 +85,20 @@ _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
 # builds it. Wording approved by cmo-mmry 2026-11-17 (33898-wording-cmo-verdict.md): the shipped
 # sentence "The tool asking is <name>." stays; no new customer sentence.
 #   1. The part after " - " is a plain name: the sentence builds mcp__<server>__<it>.
-#   2. That name is sent only when it is ESTABLISHED EXACTLY: the transcript the payload names holds a
-#      call with exactly that name. The part after " - " may be a title, and a one-word title builds a
-#      name that is wrong, so the sentence alone is not enough. The transcript only confirms; it never
-#      supplies a name of its own (QA finding A1, round 2): not "the latest" call, not the only call of
-#      that server, not one of two parallel calls. A subagent's prompt names the MAIN transcript while
-#      its calls are in the subagent's own, so picking a call from there would name the wrong tool.
-#      Only a fixed string is searched for; nothing of any call's input is read.
-#   3. Anything else (no " - ", text after "(MCP)", a title, no readable transcript, a transcript
-#      without that exact call, or a built name that breaks the field rule) sends NO name, and the
-#      lead's sentence is left out, exactly as when no name arrives (the cmo-mmry fallback). Never a cut
-#      or cleaned name: a shortened name could name the wrong tool. Where Claude Code fires its
-#      PermissionRequest hook, 33900's ask record supplies the exact name instead.
+#   2. That name is sent only when the transcript the payload names ties it to THIS prompt (QA finding
+#      C1, lead 439's ruling 2026-11-18): the call with that name is STILL WAITING (no tool_result
+#      carries its id) and it is the ONLY still-waiting call of that server in the transcript
+#      (_mmry_waiting_open_call). The part after " - " may be a title, and a one-word title can build
+#      the real name of ANOTHER tool of the server, or a name that is no tool at all; neither is the
+#      one still-waiting call, so neither is sent. The transcript only confirms; it never supplies a
+#      name of its own: not "the latest" call, not one of two parallel calls. A subagent's prompt
+#      names the MAIN transcript while its calls are in the subagent's own, so it gets no name.
+#      Calls are read by parsing each line as JSON, never by matching text in a call's input.
+#   3. Anything else (no " - ", text after "(MCP)", a title, no readable transcript, no still-waiting
+#      call of that name, two or more still-waiting calls of that server, or a built name that breaks
+#      the field rule) sends NO name, and the lead's sentence is left out, exactly as when no name
+#      arrives (the cmo-mmry fallback). Never a cut or cleaned name: a shortened name could name the
+#      wrong tool.
 # Codex's PermissionRequest carries tool_name itself, and for an MCP tool it is already
 # mcp__<server>__<tool> (the Codex CLI's own naming rule), so it passes through the same field rule.
 #
@@ -115,21 +117,61 @@ _MMRY_WAITING_SENTENCE_JQ='
       else [((($m | capture("permission to use (?<t>[^ ]+)")) // {t: ""}) | .t), ""]
       end'
 
+# _mmry_waiting_open_call MCP_PREFIX TRANSCRIPT_PATH  (#33898 round 3, QA finding C1)
+# Sets MMRY_WAITING_OPEN to the name of THE still-waiting call of that server in the transcript, or
+# empty. A call is still waiting when no tool_result in the transcript carries its id. Empty unless
+# there is exactly one such call (two parallel calls of one server, even of one tool, give none).
+# Calls are found by parsing each transcript line as JSON and reading message.content[] blocks of
+# type tool_use (name, id) and tool_result (tool_use_id), never by matching raw text, so a name or id
+# inside some call's input is not a call. grep -F only narrows the lines jq parses; nothing of any
+# call's input reaches a shell variable.
+_mmry_waiting_open_call() {
+    local prefix="${1:-}" tp="${2:-}" uses="" ids="" open="" oid="" id n
+    local -a pat=()
+    MMRY_WAITING_OPEN=""
+    [[ "$prefix" =~ ^mcp__[A-Za-z0-9_-]+__$ && -f "$tp" && -r "$tp" && -n "${MMRY_JQ:-}" ]] || return 0
+    uses="$(grep -F -- "\"${prefix}" "$tp" 2>/dev/null | "$MMRY_JQ" -R -r --arg p "$prefix" '
+        (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
+        | select(type == "object" and .type == "tool_use" and (.id | type) == "string" and (.name | type) == "string")
+        | select((.name | startswith($p)) and (.id | test("^[A-Za-z0-9_-]{1,100}$")))
+        | "\(.id) \(.name)"' 2>/dev/null || true)"
+    # No sort: on Windows the PATH a hook sees can put sort.exe first. A Windows jq may end lines CR LF.
+    uses="${uses//$'\r'/}"
+    [[ -n "$uses" ]] || return 0
+    while read -r id n; do
+        [[ -n "$id" ]] && pat+=(-e "\"${id}\"")
+    done <<< "$uses"
+    ids="$(grep -F "${pat[@]}" -- "$tp" 2>/dev/null | "$MMRY_JQ" -R -r '
+        (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
+        | select(type == "object" and .type == "tool_result" and (.tool_use_id | type) == "string")
+        | .tool_use_id' 2>/dev/null || true)"
+    ids="${ids//$'\r'/}"
+    while read -r id n; do
+        [[ -n "$id" ]] || continue
+        [[ $'\n'"${ids}"$'\n' == *$'\n'"${id}"$'\n'* ]] && continue
+        # The same call written twice is one call.
+        [[ "$id" == "$oid" ]] && continue
+        # A second still-waiting call (another id) of this server: no single call to name.
+        [[ -z "$open" ]] || return 0
+        open="$n" oid="$id"
+    done <<< "$uses"
+    MMRY_WAITING_OPEN="$open"
+}
+
 # mmry_waiting_tool_name EVENT CODEX_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH
-# Sets MMRY_WAITING_TOOL to the asking tool's bare name, or empty. One small fork-free path for every
-# ordinary tool; the transcript is read only for an MCP sentence.
+# Sets MMRY_WAITING_TOOL to the asking tool's bare name, or empty, and MMRY_WAITING_OPEN as above for an
+# MCP sentence. One small fork-free path for every ordinary tool; the transcript is read only for an
+# MCP sentence.
 mmry_waiting_tool_name() {
-    local event="${1:-}" ptool="${2:-}" name="${3:-}" prefix="${4:-}" tp="${5:-}" hit=""
-    MMRY_WAITING_TOOL=""
+    local event="${1:-}" ptool="${2:-}" name="${3:-}" prefix="${4:-}" tp="${5:-}"
+    MMRY_WAITING_TOOL="" MMRY_WAITING_OPEN=""
     if [[ "$event" == "PermissionRequest" ]]; then
         name="$ptool"
     elif [[ -n "$prefix" ]]; then
-        # An MCP sentence: the built name stands only if the transcript holds that exact call.
-        if [[ "$prefix" =~ ^mcp__[A-Za-z0-9_-]+__$ && "$name" == "$prefix"* \
-              && "$name" =~ $_MMRY_WAITING_TOOL_RE && -f "$tp" && -r "$tp" ]]; then
-            grep -qF -- "\"name\":\"${name}\"" < <(tail -c 262144 -- "$tp" 2>/dev/null || true) && hit=1
-        fi
-        [[ -n "$hit" ]] || name=""
+        # An MCP sentence: the built name stands only if it is the name of the one still-waiting call
+        # of its server in the transcript (C1).
+        _mmry_waiting_open_call "$prefix" "$tp"
+        [[ -n "$MMRY_WAITING_OPEN" && "$name" == "$MMRY_WAITING_OPEN" ]] || name=""
     fi
     # A name that is not bare, or too long, is dropped, never trimmed into one.
     [[ "$name" =~ $_MMRY_WAITING_TOOL_RE ]] || name=""

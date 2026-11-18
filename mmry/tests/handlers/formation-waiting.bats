@@ -392,8 +392,8 @@ _ask_record() { # $1 tool name
     printf 'asker -\ntool %s\ninput -\nat %s\n' "$1" "$(date +%s)" > "$TEST_TMPDIR/.mmry-asking-$SID"
 }
 
-# #33898 round 2 (QA finding A1): the name is sent only when it is established EXACTLY: the sentence
-# builds it and the session's own transcript holds a call with exactly that name. The transcript never
+# #33898 round 2 (QA finding A1), tightened in round 3 (C1, below): the sentence builds the name and
+# the session's own transcript must hold it as the one still-waiting call of its server. The transcript never
 # supplies a name of its own, so a title, another call of the same server, or a subagent's call that is
 # not in the main transcript all send no name, and the lead's tool sentence is left out.
 
@@ -443,6 +443,11 @@ _ask_record() { # $1 tool name
     _answered "$tp" toolu_1 toolu_2
     run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
     [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+    # The waiting call written to the transcript twice (one id) is still one call.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    tail -n 3 "$tp" | head -n 1 >> "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$tp" "$BODIES"; return 1; }
 }
 
 # #33898 round 3 (QA finding C1, lead 439's ruling 2026-11-18): the transcript must tie the name to
