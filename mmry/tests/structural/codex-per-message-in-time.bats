@@ -423,6 +423,56 @@ _registrations_windows() {
     done
 }
 
+# A ! IN A PATH ENTRY IS A CHARACTER, NEVER A VARIABLE (QA round 2, new requirement 1). The round-2 walk
+# copied each entry with delayed expansion on, so cmd expanded !NAME! inside it: !CD!\tools became the
+# project's own tools folder, and a git.exe and bin\bash.exe planted there ran as the hook, which
+# develop's where.exe never did. A lone ! was dropped, so C:\...\pl!ain\cmd was read as C:\...\plain\cmd.
+# Every entry below must be read as written: none is an absolute folder that holds git.exe, so the real
+# Git after them must run the handler.
+@test "33967 security windows: a PATH entry holding !NAME! or a lone ! is read as written, never as a folder in the project" {
+    _is_windows || skip "Windows only: needs cmd.exe"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+    local gitcmd; gitcmd="$(_git_cmd_dir)" || skip "no Git for Windows cmd folder at /cmd"
+    local root="$TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+    # The plant: tools\git.exe and bin\bash.exe in the project (bash is the vendored jq, which says
+    # "jq: error" when handed a script), and the same under a sibling "plain" for the lone-! case.
+    local project="$TEST_TMPDIR/customer project"
+    mkdir -p "$project/tools" "$project/sub" "$project/bin" "$TEST_TMPDIR/plain/cmd" "$TEST_TMPDIR/plain/bin" "$TEST_TMPDIR/pl!ain/cmd"
+    cp "$jq" "$project/tools/git.exe"; cp "$jq" "$project/bin/bash.exe"
+    cp "$jq" "$TEST_TMPDIR/plain/cmd/git.exe"; cp "$jq" "$TEST_TMPDIR/plain/bin/bash.exe"
+    local wproject wtmp drive winroot
+    wproject="$(cygpath -w "$project")"; wtmp="$(cygpath -w "$TEST_TMPDIR")"; winroot="$(cygpath -w "$root")"
+    drive="${wproject:0:2}"
+    # label | folder the hook runs from | the entry, as a batch file spells it
+    local -a cases=(
+        "cd|$wproject|!CD!\\tools"
+        "cd-dot|$wproject|!CD!\\.\\tools"
+        "cd-substring|$wproject|!CD:~0!\\tools"
+        "cd-trailing|$wproject|!__CD__!tools"
+        "drive-cwd|$wproject|!=$drive!\\tools"
+        "cd-parent|$wproject\\sub|!CD!\\..\\tools"
+        "cd-alone|$wproject\\tools|!CD!"
+        "lone-bang|$wproject|$wtmp\\pl!ain\\cmd"
+    )
+    local c label from entry f out bad=0
+    for c in "${cases[@]}"; do
+        IFS='|' read -r label from entry <<< "$c"
+        f="$TEST_TMPDIR/bang-$label.cmd"
+        printf '%s\r\n' '@echo off' "cd /d \"$from\"" "set \"PATH=$entry;%SystemRoot%\\System32;$gitcmd\"" \
+            "call \"$winroot\\hooks-handlers\\codex-hook.cmd\" stop-check" 'echo EXIT=%ERRORLEVEL%' > "$f"
+        out="$(env -u NoDefaultCurrentDirectoryInExePath cmd //d //c "$(cygpath -w "$f")" < /dev/null 2>&1 | tr -d '\r')"
+        echo "$label ($entry): $out" >&3
+        [[ "$out" != *"jq: error"* ]] || { echo "$label: the launcher ran a planted bash for the entry $entry: $out"; bad=1; continue; }
+        [[ "$out" == *"REACHED handler=[stop-check]"* ]] || { echo "$label: the launcher did not reach the handler: $out"; bad=1; continue; }
+        [[ "$out" == *"EXIT=0"* ]] || { echo "$label: the launcher did not exit 0: $out"; bad=1; continue; }
+    done
+    (( bad == 0 ))
+}
+
 # =============================================================================================
 # PATH AS IT REALLY IS (Windows, QA round 1): QUOTED, UNBALANCED, OR HOLDING % OR ^
 # =============================================================================================
@@ -470,17 +520,19 @@ _launch_with_path() {
     (( bad == 0 ))
 }
 
-@test "33967 path windows: the walk itself reads a quoted entry, and entries holding % or ^, as written" {
+@test "33967 path windows: the walk itself reads a quoted entry, and entries holding % or ^ or !, as written" {
     # Each fake Git root comes before the real one, and its bin\bash.exe is a copy of the vendored jq,
     # which says "jq: error" when handed a script. Seeing that proves the PATH walk chose the entry; the
     # registry and the standard folders, which come after it, would choose the real Git instead.
+    # bang!git (QA round 2): a Git installed under a folder holding ! is found where it is, as
+    # where.exe on develop found it, because the entry is read as written.
     _is_windows || skip "Windows only: needs cmd.exe"
     local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
     [[ -f "$jq" ]] || skip "vendored Windows jq not present"
     local gitcmd; gitcmd="$(_git_cmd_dir)" || skip "no Git for Windows cmd folder at /cmd"
-    local -a labels=(quoted percent caret) dirs=("fake git" "pct%OS%git" "caret^git")
+    local -a labels=(quoted percent caret bang) dirs=("fake git" "pct%OS%git" "caret^git" "bang!git")
     local i d w entry out bad=0
-    for i in 0 1 2; do
+    for i in 0 1 2 3; do
         d="$TEST_TMPDIR/${dirs[$i]}"
         mkdir -p "$d/cmd" "$d/bin"
         cp "$jq" "$d/cmd/git.exe"; cp "$jq" "$d/bin/bash.exe"
