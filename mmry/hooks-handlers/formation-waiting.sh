@@ -606,7 +606,12 @@ else
                 # checked when the sentence names none. A name the sentence already established
                 # stands. A record that disagrees with the sentence and is not confirmed: no name.
                 # The clear's own identity (asker, exact, input) is 33900's and unchanged.
-                _mmry_waiting_asked_name "$_k_tool" "$tool" "$mprefix" "$tpath"
+                # A bare word (no MCP sentence) is judged against the record as it was before the
+                # built-in list (#33898 round 3b): the list applies only when there is no fresh record
+                # naming a tool, so the record gets the word itself, not the list's answer.
+                _s_name="$tool"
+                [[ -n "$mprefix" ]] || _s_name="$MMRY_WAITING_WORD"
+                _mmry_waiting_asked_name "$_k_tool" "$_s_name" "$mprefix" "$tpath"
                 tool="$MMRY_WAITING_TOOL"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
             fi
