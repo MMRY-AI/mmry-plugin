@@ -164,6 +164,17 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-waiting.sh\" --ask",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

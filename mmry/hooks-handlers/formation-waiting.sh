@@ -133,14 +133,39 @@ mmry_waiting_tool_name() {
 }
 
 _mmry_waiting_marker() { MMRY_WAITING_MARKER="${MMRY_TMPDIR}/.mmry-waiting-$1"; }
+_mmry_waiting_ask_path() { MMRY_WAITING_ASK="${MMRY_TMPDIR}/.mmry-asking-$1"; }
 
 # THE ONE WAY A MARKER IS DELETED (#33901). A file, never a folder, named only from a session id that
 # passes the id rule, inside a TMPDIR that must be set: ${MMRY_TMPDIR:?} stops the shell before rm
-# runs if it ever is not (scripts/check-folder-deletes.sh, #33618).
+# runs if it ever is not (scripts/check-folder-deletes.sh, #33618). The ask record (#33900) goes with it.
 _mmry_waiting_forget() {
     [[ "${1:-}" =~ $_MMRY_WAITING_SID_RE ]] || return 0
-    rm -f -- "${MMRY_TMPDIR:?}/.mmry-waiting-${1}" || true
+    rm -f -- "${MMRY_TMPDIR:?}/.mmry-waiting-${1}" "${MMRY_TMPDIR:?}/.mmry-asking-${1}" || true
 }
+
+# ---- WHICH PROMPT, AND WHO ASKED (#33900) -----------------------------------------------------
+# The waiting state clears only when the prompt it waits on is answered, or the person sends a new
+# prompt. Measured on Claude Code 2.1.322 (the #33900 PR description), a prompt stays open while these
+# arrive in the same session, and NONE of them answers it:
+#   a background agent's PostToolUse        carries that agent's agent_id
+#   a parallel tool of the same agent        the same agent_id (none on the main thread), another tool_name
+#   another agent's SubagentStop             that agent's agent_id
+#   the main turn's Stop                     while a background agent's own prompt is open
+#   a background agent's completion          injected as a UserPromptSubmit whose prompt is <task-notification>
+# What does answer it:
+#   Allow    the asked tool's PostToolUse, from the agent that asked, with the asked tool_name
+#   Deny     no PostToolUse at all; the asking agent's turn ends next (Stop on the main thread)
+#   the person's next prompt (UserPromptSubmit)
+# So the marker records who asked (agent_id, empty for the main thread) and the asked tool's exact name
+# when it is known. Claude Code's Notification carries neither: no agent_id even when a subagent asks,
+# and the tool's display name ("Ping" for mcp__probe__ping in an SDK host). Claude Code's own
+# PermissionRequest hook carries both, about 0.2 s after the ask and 6 to 14 s before the Notification,
+# so it is registered to write a small ask record (.mmry-asking-<session>: the agent and the tool name,
+# nothing else, no call) that the Notification then reads. Codex's PermissionRequest is the raise
+# itself and carries both (agent_id only for a thread-spawned subagent).
+# The clear rule is in --answer below; formation-check.sh hands it every event while a marker exists.
+_MMRY_WAITING_ASK_FRESH_SECS=300
+
 
 # Load what a call needs: the host resolver, the credential check, jq and the client. Returns 1 when
 # anything is missing, and the caller exits 0.
@@ -164,33 +189,149 @@ if [[ "${1:-}" == "--forget" ]]; then
     exit 0
 fi
 
-# ---- --clear: the member has continued ------------------------------------------------------
-if [[ "${1:-}" == "--clear" ]]; then
-    sid="${2:-}"
-    [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
+# The clear itself: ask the service to clear the flag (it tells the lead "APPROVAL ANSWERED.", DD-187
+# point 3) and remove the marker. Returns; the caller exits.
+_mmry_waiting_clear() {
+    local sid="$1" fid="" mid="" _a _rest _ans=""
     _mmry_waiting_marker "$sid"
-    [[ -f "$MMRY_WAITING_MARKER" ]] || exit 0
-    fid="" mid=""
+    [[ -f "$MMRY_WAITING_MARKER" ]] || return 0
     { read -r fid mid || true; } < "$MMRY_WAITING_MARKER"
     if ! [[ "$fid" =~ ^[0-9]+$ && "$mid" =~ ^[0-9]+$ ]]; then
-        _mmry_waiting_forget "$sid"; exit 0
+        _mmry_waiting_forget "$sid"; return 0
     fi
     # The prompt has been answered, whatever the service says next (#33901). Recorded first, so a
     # clear that does not go through leaves a marker the next raise knows is over, not one that
     # silences the next prompt.
-    _ans=""
     while IFS=' ' read -r _a _rest || [[ -n "$_a" ]]; do
         [[ "$_a" == "answered" ]] && _ans=1
     done < "$MMRY_WAITING_MARKER"
     [[ -n "$_ans" ]] || printf 'answered %s\n' "$(date +%s || echo 0)" >> "$MMRY_WAITING_MARKER" || true
-    _mmry_waiting_load >/dev/null || exit 0
+    _mmry_waiting_load >/dev/null || return 0
     mmry_clear_formation_member_waiting "$fid" "$mid" "$sid" >/dev/null || true
     # Cleared (2xx), or the service will never accept this clear (the member left, the formation
     # closed, the entry is not this session's): the marker goes. No answer, a 5xx or a 429: it stays,
-    # and the member's next event asks again.
+    # and the next answering event asks again.
     case "${MMRY_HTTP_CODE:-000}" in
         2??|400|403|404) _mmry_waiting_forget "$sid" ;;
     esac
+    return 0
+}
+
+# ---- --clear SID: clear now, whatever the event (kept for callers that know the prompt is over) ---
+if [[ "${1:-}" == "--clear" ]]; then
+    [[ "${2:-}" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
+    _mmry_waiting_clear "$2"
+    exit 0
+fi
+
+# ---- --answer SID [EVENT] [MODE]: does this event answer the prompt? (#33900) ------------------
+# formation-check.sh runs this, with the event's payload on stdin, for every event of a session that
+# has a marker. EVENT is the payload's hook_event_name as formation-check.sh read it, MODE its
+# MMRY_FORMATION_MODE (the suite's way of naming an event without a payload). See WHICH PROMPT, AND WHO
+# ASKED above for the measurements behind each line of the rule.
+if [[ "${1:-}" == "--answer" ]]; then
+    sid="${2:-}" ev="${3:-}" mode="${4:-}"
+    [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
+    _mmry_waiting_marker "$sid"
+    [[ -f "$MMRY_WAITING_MARKER" ]] || exit 0
+    agent="" ptool="" tasknote="" hasbg="" running=""
+    payload=""
+    if [[ ! -t 0 && -f "${HANDLER_DIR}/lib-hookread.sh" ]] && source "${HANDLER_DIR}/lib-hookread.sh"; then
+        mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
+        payload="${MMRY_HOOK_PAYLOAD:-}"
+    fi
+    if [[ "$payload" == *'{'* ]] && [[ -f "${HANDLER_DIR}/lib-jq.sh" ]] && source "${HANDLER_DIR}/lib-jq.sh" \
+       && { [[ -n "${MMRY_JQ:-}" ]] || mmry_resolve_jq >/dev/null; } && [[ -n "${MMRY_JQ:-}" ]]; then
+        # Six fields, the unit separator between them (see the raise below for why not a tab). The
+        # prompt is reduced to one yes or no, so no prompt text reaches a shell variable.
+        _afields='[(.hook_event_name // "" | tostring), (.agent_id // "" | tostring), (.tool_name // "" | tostring),
+                   (if ((.prompt // "") | tostring | startswith("<task-notification>")) then "1" else "" end),
+                   (if (type == "object" and has("background_tasks")) then "1" else "" end),
+                   ((.background_tasks // []) | if type == "array" then map(select(((.status // "") | tostring) == "running") | (.id // "" | tostring)) | join(",") else "" end)]
+                  | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
+        parsed="$("$MMRY_JQ" -r "$_afields" <<< "$payload" || true)"
+        if [[ "$parsed" == *$'\037'* ]]; then
+            IFS=$'\037' read -r _pev agent ptool tasknote hasbg running <<< "$parsed" || true
+            [[ -n "$_pev" ]] && ev="$_pev"
+        fi
+    fi
+    if [[ -z "$ev" ]]; then
+        case "$mode" in
+            start)  ev="SessionStart" ;;
+            prompt) ev="UserPromptSubmit" ;;
+            idle)   ev="Stop" ;;
+            tool)   ev="PostToolUse" ;;
+        esac
+    fi
+    # A session start has no prompt of an earlier process still open (#33901): forget, no call.
+    if [[ "$ev" == "SessionStart" ]]; then
+        _mmry_waiting_forget "$sid"; exit 0
+    fi
+    # Who asked, and for which tool, as the raise recorded it ("-" or absent: the main thread, or a
+    # tool whose exact name was not known).
+    asker="" mtool=""
+    while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
+        case "$_a" in
+            asker) asker="$_b" ;;
+            tool)  mtool="$_b" ;;
+        esac
+    done < "$MMRY_WAITING_MARKER"
+    [[ "$asker" == "-" ]] && asker=""
+    [[ "$mtool" == "-" ]] && mtool=""
+    answered=""
+    case "$ev" in
+        UserPromptSubmit)
+            # The person's next prompt. Not a background agent's completion notice, which Claude Code
+            # injects as a prompt while another agent's approval can still be open.
+            [[ -n "$tasknote" ]] || answered=1 ;;
+        PostToolUse)
+            # The asked tool ran: same agent, and the same tool when its name is known.
+            [[ "$agent" == "$asker" && ( -z "$mtool" || "$ptool" == "$mtool" ) ]] && answered=1 ;;
+        Stop)
+            # The asking agent's turn ended (after a Deny there is no PostToolUse: measured). For a
+            # background agent's prompt, the main turn's end answers it only when that agent is no longer
+            # running; without a background_tasks list there is no telling, and it waits for another event.
+            if [[ "$agent" == "$asker" ]]; then
+                answered=1
+            elif [[ -z "$agent" && -n "$asker" && -n "$hasbg" && ",${running}," != *",${asker},"* ]]; then
+                answered=1
+            fi ;;
+        SubagentStop)
+            [[ -n "$asker" && "$agent" == "$asker" ]] && answered=1 ;;
+    esac
+    [[ -n "$answered" ]] || exit 0
+    _mmry_waiting_clear "$sid"
+    exit 0
+fi
+
+# ---- --ask: Claude Code's PermissionRequest; record who asked and for which tool (#33900) --------
+# No call, nothing printed (Claude Code reads this hook's stdout as an approval decision, exactly as
+# Codex does), and nothing kept but the agent id and the tool's bare name. A session in no formation
+# stops at one file test.
+if [[ "${1:-}" == "--ask" ]]; then
+    [[ ! -t 0 ]] || exit 0
+    _env_sid="${CLAUDE_CODE_SESSION_ID:-}"
+    if [[ "$_env_sid" =~ $_MMRY_WAITING_SID_RE && ! -f "${MMRY_TMPDIR}/.mmry-formation-${_env_sid}" ]]; then
+        exit 0
+    fi
+    [[ -f "${HANDLER_DIR}/lib-hookread.sh" ]] || exit 0
+    source "${HANDLER_DIR}/lib-hookread.sh" || exit 0
+    mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
+    payload="${MMRY_HOOK_PAYLOAD:-}"
+    [[ "$payload" == *'"PermissionRequest"'* ]] || exit 0
+    source "${HANDLER_DIR}/lib-jq.sh" || exit 0
+    mmry_resolve_jq >/dev/null || exit 0
+    [[ -n "${MMRY_JQ:-}" ]] || exit 0
+    parsed="$("$MMRY_JQ" -r '[(.session_id // "" | tostring), (.hook_event_name // "" | tostring), (.agent_id // "" | tostring), (.tool_name // "" | tostring)] | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")' <<< "$payload" || true)"
+    [[ "$parsed" == *$'\037'* ]] || exit 0
+    IFS=$'\037' read -r sid event agent tool <<< "$parsed" || true
+    [[ "$event" == "PermissionRequest" ]] || exit 0
+    [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
+    [[ -f "${MMRY_TMPDIR}/.mmry-formation-${sid}" ]] || exit 0
+    [[ "$agent" =~ $_MMRY_WAITING_SID_RE ]] || agent="-"
+    [[ "$tool" =~ $_MMRY_WAITING_TOOL_RE ]] || tool="-"
+    _mmry_waiting_ask_path "$sid"
+    printf 'asker %s\ntool %s\nat %s\n' "$agent" "$tool" "$(date +%s || echo 0)" > "$MMRY_WAITING_ASK" || true
     exit 0
 fi
 
@@ -215,7 +356,7 @@ source "${HANDLER_DIR}/lib-jq.sh" || exit 0
 mmry_resolve_jq >/dev/null || exit 0
 [[ -n "${MMRY_JQ:-}" ]] || exit 0
 
-# Eight fields in one jq call, joined by the ASCII unit separator (0x1F), each with that character and
+# Nine fields in one jq call, joined by the ASCII unit separator (0x1F), each with that character and
 # line breaks removed, so a crafted value cannot shift the fields after it. NOT a tab: a tab is IFS
 # whitespace, so read collapses empty fields and every later field moves one place left (seen red: the
 # tool name arrived empty on every event). The message is reduced here, by _MMRY_WAITING_SENTENCE_JQ, to
@@ -223,11 +364,11 @@ mmry_resolve_jq >/dev/null || exit 0
 _fields='[(.session_id // "" | tostring), (.hook_event_name // "" | tostring),
           (.notification_type // "" | tostring), (.tool_name // "" | tostring),
           ((.message // "" | tostring) | '"$_MMRY_WAITING_SENTENCE_JQ"'),
-          (.turn_id // "" | tostring), (.transcript_path // "" | tostring)]
+          (.turn_id // "" | tostring), (.transcript_path // "" | tostring), (.agent_id // "" | tostring)]
          | flatten | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
 parsed="$("$MMRY_JQ" -r "$_fields" <<< "$payload" || true)"
 [[ "$parsed" == *$'\037'* ]] || exit 0
-IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath <<< "$parsed" || true
+IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent <<< "$parsed" || true
 
 case "$event" in
     Notification)
@@ -249,6 +390,41 @@ fi
 
 [[ -n "$sid" ]] || sid="$(mmry_session_id || true)"
 [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
+
+# Who asked, and the asked tool's exact name when known (#33900, WHICH PROMPT, AND WHO ASKED above).
+# Codex: from this payload. Claude Code: from the ask record its PermissionRequest left moments ago,
+# which also gives the lead the exact name where the sentence has only a display name; without a fresh
+# record, the main thread and no exact name (the clear then waits for the main thread's own events).
+asker="" exact=""
+if [[ "$event" == "PermissionRequest" ]]; then
+    [[ "$pagent" =~ $_MMRY_WAITING_SID_RE ]] && asker="$pagent"
+    exact="$tool"
+else
+    _mmry_waiting_ask_path "$sid"
+    if [[ -f "$MMRY_WAITING_ASK" ]]; then
+        _k_asker="" _k_tool="" _k_at="" _k_used=""
+        while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
+            case "$_a" in
+                asker) _k_asker="$_b" ;;
+                tool)  _k_tool="$_b" ;;
+                at)    _k_at="$_b" ;;
+            esac
+        done < "$MMRY_WAITING_ASK"
+        _now="$(date +%s || echo 0)"
+        if [[ "$_k_at" =~ ^[0-9]+$ && "$_now" =~ ^[0-9]+$ ]] && (( _now - _k_at <= _MMRY_WAITING_ASK_FRESH_SECS )); then
+            _k_used=1
+            [[ "$_k_asker" =~ $_MMRY_WAITING_SID_RE ]] && asker="$_k_asker"
+            if [[ "$_k_tool" =~ $_MMRY_WAITING_TOOL_RE ]]; then
+                tool="$_k_tool"; exact="$_k_tool"
+            fi
+        fi
+        rm -f -- "${MMRY_TMPDIR:?}/.mmry-asking-${sid}" || true
+        # The ask record names this prompt, so a different one (another agent, another tool) is told
+        # apart from the marker's (#33901's key). A second report of the same prompt finds the record
+        # already used, keeps the key "cc", and stays one call.
+        [[ -z "$_k_used" ]] || key="cc:${asker:--}:${exact:--}"
+    fi
+fi
 
 # A member at all? One file test, and a session in no formation stops here with no call.
 [[ -f "${HANDLER_DIR}/formation-state.sh" ]] || exit 0
@@ -272,7 +448,7 @@ if [[ -f "$MMRY_WAITING_MARKER" ]]; then
     _stale=""
     [[ "$_m_fid" == "$fid" ]] || _stale=1
     [[ -z "$_m_ans" ]] || _stale=1
-    [[ "$key" != codex:* || "$_m_key" == "$key" ]] || _stale=1
+    [[ "$key" == "cc" || "$_m_key" == "$key" ]] || _stale=1
     [[ -n "$_stale" ]] || exit 0
 fi
 
@@ -288,6 +464,7 @@ mid="${own%% *}"; role="${own#* }"
 [[ "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" != "lead" ]] || exit 0
 
 if mmry_set_formation_member_waiting "$fid" "$mid" "$sid" "$tool" >/dev/null; then
-    printf '%s %s\nprompt %s %s\n' "$fid" "$mid" "$key" "$(date +%s || echo 0)" > "$MMRY_WAITING_MARKER" || true
+    printf '%s %s\nprompt %s %s\nasker %s\ntool %s\n' "$fid" "$mid" "$key" "$(date +%s || echo 0)" \
+        "${asker:--}" "${exact:--}" > "$MMRY_WAITING_MARKER" || true
 fi
 exit 0

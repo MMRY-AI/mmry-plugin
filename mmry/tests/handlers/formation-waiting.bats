@@ -589,13 +589,13 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     run _ask "$(_cc_ask Bash "$SUB" "curl -H Authorization: $PLANTED")"
     [ "$status" -eq 0 ]
     [ -z "$output" ] || { echo "printed (Claude Code would read it as a decision): $output"; return 1; }
-    [ -n "$(ls "$TEST_TMPDIR"/.mmry-waiting-ask-* 2>/dev/null)" ] || { echo "no ask record"; return 1; }
+    [ -n "$(ls "$TEST_TMPDIR"/.mmry-asking-* 2>/dev/null)" ] || { echo "no ask record"; return 1; }
     ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "planted string stored"; return 1; }
     [ ! -s "$URLS" ] || { echo "the ask record made a call"; cat "$URLS"; return 1; }
     bash "$HH/formation-state.sh" clear "$SID" >/dev/null
-    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*
     run _ask "$(_cc_ask Bash)"
-    [ -z "$(ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null)" ] || { echo "a non-member got an ask record"; return 1; }
+    [ -z "$(ls "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-* 2>/dev/null)" ] || { echo "a non-member got an ask record"; return 1; }
 }
 
 @test "X-13 33900: hooks.json registers Claude Code's PermissionRequest for the ask record" {
