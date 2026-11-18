@@ -733,8 +733,9 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
 @test "X-18 33900 req1 (B2): hooks.json registers SubagentStop to the waiting answer, gated on this session's waiting marker" {
     local cmd
     cmd="$("$(command -v jq)" -r '[.hooks.SubagentStop[]?.hooks[]?.command] | join("\n")' "$PLUGIN_ROOT/hooks/hooks.json")"
-    [[ "$cmd" == *'formation-waiting.sh'*'--answer-hook'* ]] || { echo "registered: [$cmd]"; return 1; }
+    [[ "$cmd" == *'/hooks-handlers/formation-waiting.sh'* && "$cmd" == *' --answer-hook'* ]] || { echo "registered: [$cmd]"; return 1; }
     [[ "$cmd" == *'.mmry-waiting-'* ]] || { echo "not gated: [$cmd]"; return 1; }
+    [[ "$cmd" != *'formation-check'* ]] || { echo "runs the formation poller: [$cmd]"; return 1; }
 }
 
 @test "X-19 33900 req1 (B2): Claude Code, a subagent's Deny clears through the registered SubagentStop hook, and only for that agent" {
