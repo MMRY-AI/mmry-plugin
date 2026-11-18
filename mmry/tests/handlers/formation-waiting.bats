@@ -993,3 +993,30 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     run _waiting "$(_permission_request apply_patch '')"
     grep -q '"toolName":"apply_patch"' "$BODIES" || { cat "$BODIES"; return 1; }
 }
+
+@test "X-26 33898 round 3b in the 33900 stack: with a fresh ask record the word is judged as before; a stale record counts as none and the built-in list applies" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" Agent
+    # A fresh record that agrees with a word off the built-in list: sent, exactly as at c0d8f18.
+    _leftover_ask Frobnicate
+    _waiting "$(_notification_tp 'Claude needs your permission to use Frobnicate' "$tp")"
+    [ "$(_tool_sent)" = "Frobnicate" ] || { cat "$BODIES"; return 1; }
+    # A fresh MCP record with no waiting call of its server and the display word: no name (X-24's rule).
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    _leftover_ask mcp__probe__echo
+    _waiting "$(_notification_tp 'Claude needs your permission to use Echo' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A record older than the freshness window is no record: Echo is off the list, so no name.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    printf 'asker -\ntool Echo\ninput -\nat %s\n' "$(( $(date +%s) - 3600 ))" > "$TEST_TMPDIR/.mmry-asking-$SID"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Echo' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # No record, a subagent's Bash prompt: Bash.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*; : > "$BODIES"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+}
