@@ -154,7 +154,7 @@ tests/handlers/stop-check.bats
 tests/handlers/userpromptsubmit-foundation.bats
 tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
-tests/helpers/formation-waiting.bash
+tests/helpers/formation-waiting-helpers.sh
 tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
 tests/helpers/live-foundation.bash

@@ -2,10 +2,10 @@
 # formation-waiting-record.bats - which tool the lead is told about when Claude Code fired its
 # PermissionRequest hook (the ask record, #33900) and the round-4 naming rules (#33898). Split from
 # formation-waiting.bats in #33900 round 4 to keep each file under the 64000-byte limit; the shared
-# setup and helpers are in helpers/formation-waiting.bash.
+# setup and helpers are in helpers/formation-waiting-helpers.sh.
 
 load '../helpers/test-helper'
-load '../helpers/formation-waiting'
+load '../helpers/formation-waiting-helpers.sh'
 
 
 # #33898 C1 in the 33900 stack (round 3): a fresh ask record names an MCP tool only when the transcript

@@ -1,4 +1,4 @@
-# formation-waiting.bash - shared setup and helpers for formation-waiting.bats and
+# formation-waiting-helpers.sh - shared setup and helpers for formation-waiting.bats and
 # formation-waiting-record.bats (#33452, #33898, #33900). Split out in #33900 round 4 so neither
 # test file reaches the 64000-byte limit (structural/test-file-size.bats).
 

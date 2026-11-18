@@ -19,7 +19,7 @@
 
 load '../helpers/test-helper'
 
-load '../helpers/formation-waiting'
+load '../helpers/formation-waiting-helpers.sh'
 
 # ---------------------------------------------------------------------------------------------
 # TC1: one call naming the member, and none where there is nothing to tell
