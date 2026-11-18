@@ -303,6 +303,28 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
     [ "$(_count_polls)" -eq 0 ] || return 1
 }
 
+@test "TC1: with listening off, a compaction after the one window does not open another" {
+    _clock_start
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    # Off: one window after the member's turn. Here the window is killed 5 s in (the compaction).
+    _bg_watch "$HANDLERS" Stop FAKE_BODY='[]' MMRY_FORMATION_LISTEN_MINUTES=off MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=1
+    _kill_bg
+    # A compaction inside that window finishes it ...
+    _clock_advance 60
+    : > "$URLS"
+    _on_clock "$HANDLERS" MMRY_FORMATION_MODE=rearm FAKE_BODY="$DIRECTED" MMRY_FORMATION_LISTEN_MINUTES=off MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=5
+    [ "$FC_RC" -eq 2 ] || { echo "a compaction inside the off window did not listen: ${FC_RC} ${FC_OUT}"; return 1; }
+    [[ "$FC_OUT" == *"CR-DIRECTED"* ]] || return 1
+    # ... and one after it does not open another.
+    _bg_watch "$HANDLERS" Stop FAKE_BODY='[]' MMRY_FORMATION_LISTEN_MINUTES=off MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=1
+    _kill_bg
+    _clock_start; _clock_advance 900
+    : > "$URLS"
+    _on_clock "$HANDLERS" MMRY_FORMATION_MODE=rearm FAKE_BODY="$DIRECTED" MMRY_FORMATION_LISTEN_MINUTES=off MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=5
+    [ "$FC_RC" -eq 0 ] || { echo "a compaction opened a second window with listening off: ${FC_RC} ${FC_OUT}"; return 1; }
+    [ "$(_count_polls)" -eq 0 ]
+}
+
 @test "TC1: an after-compaction event that names a dispatched agent does nothing (#31991)" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     run _fire "$HANDLERS" PostCompact ',"trigger":"auto","agent_id":"a1b2","agent_type":"general-purpose"' \
