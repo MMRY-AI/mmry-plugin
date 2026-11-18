@@ -10,8 +10,9 @@
 # TWO WAYS IN, ONE PAYLOAD READ:
 #   Claude Code  the Notification hook, notification_type "permission_prompt". The payload carries no
 #                tool field, only a sentence ("Claude needs your permission to use Bash"); the tool's
-#                name is the one bare word after "permission to use", or for an MCP tool the name
-#                built from the sentence (THE TOOL'S NAME below, #33898), or nothing.
+#                name is the one bare word after "permission to use" when it is a built-in tool's
+#                name, or for an MCP tool the name built from the sentence (THE TOOL'S NAME below,
+#                #33898), or nothing.
 #   Codex        the PermissionRequest hook (Codex CLI 0.165.0 and later): tool_name is in the payload.
 #                CODEX READS THIS HOOK'S STDOUT AS AN APPROVAL DECISION, so this handler prints
 #                NOTHING, ever: no stdout, no stderr. An empty answer leaves Codex's own prompt in place.
@@ -71,6 +72,17 @@ _MMRY_WAITING_TOOL_RE='^[A-Za-z0-9_.:-]{1,64}$'
 # A session id this handler keys a marker by: the shape every Claude Code and Codex id has. Anything
 # else gets no marker and no call, so a marker name can never be built from unusual text.
 _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
+
+# Claude Code's built-in tools (#33898 round 3b, lead 439's ruling 2026-11-18). Without a fresh ask
+# record, the one word after "permission to use" is sent only when it is on this list. Measured on
+# Claude Code 2.1.322, an MCP prompt's sentence can be a bare display word ("use Echo": the client's
+# display name is the tool's last "__" part, "_" made a space, each word capitalised), which cannot be
+# told from a built-in's name, so any other word sends no name and the lead's tool sentence is left out.
+# Source: the Claude Code tools reference, https://code.claude.com/docs/en/tools-reference (the
+# built-in tools table, read 2026-11-18), plus the older names the 2.1.322 client still handles, read
+# from the client: Task (the Agent tool's former name), MultiEdit, LS, BashOutput and KillShell.
+# A built-in's name has no "_", so its display name is the name itself. Matched exactly.
+_MMRY_WAITING_BUILTIN_TOOLS=' Agent Artifact AskUserQuestion Bash CronCreate CronDelete CronList Edit EndConversation EnterPlanMode EnterWorktree ExitPlanMode ExitWorktree Glob Grep ListAgents ListMcpResourcesTool LSP Monitor NotebookEdit PowerShell PushNotification Read ReadMcpResourceTool RemoteTrigger ReportFindings ScheduleWakeup SendFeedback SendMessage SendUserFile ShareOnboardingGuide Skill SubagentHandback TaskCreate TaskGet TaskList TaskOutput TaskStop TaskUpdate TodoWrite ToolSearch WaitForMcpServers WebFetch WebSearch Workflow Write Task MultiEdit LS BashOutput KillShell '
 
 # ---- THE TOOL'S NAME (#33898) -----------------------------------------------------------------
 # Claude Code's sentence (2.1.322, read from the client) is "Claude needs your permission to use X",
@@ -160,11 +172,12 @@ _mmry_waiting_open_call() {
 
 # mmry_waiting_tool_name EVENT CODEX_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH
 # Sets MMRY_WAITING_TOOL to the asking tool's bare name, or empty, and MMRY_WAITING_OPEN as above for an
-# MCP sentence. One small fork-free path for every ordinary tool; the transcript is read only for an
-# MCP sentence.
+# MCP sentence. A sentence's bare word is sent only when it is a built-in tool's name
+# (_MMRY_WAITING_BUILTIN_TOOLS); MMRY_WAITING_WORD keeps the word itself either way. One small fork-free
+# path for every ordinary tool; the transcript is read only for an MCP sentence.
 mmry_waiting_tool_name() {
     local event="${1:-}" ptool="${2:-}" name="${3:-}" prefix="${4:-}" tp="${5:-}"
-    MMRY_WAITING_TOOL="" MMRY_WAITING_OPEN=""
+    MMRY_WAITING_TOOL="" MMRY_WAITING_OPEN="" MMRY_WAITING_WORD=""
     if [[ "$event" == "PermissionRequest" ]]; then
         name="$ptool"
     elif [[ -n "$prefix" ]]; then
@@ -172,6 +185,11 @@ mmry_waiting_tool_name() {
         # of its server in the transcript (C1).
         _mmry_waiting_open_call "$prefix" "$tp"
         [[ -n "$MMRY_WAITING_OPEN" && "$name" == "$MMRY_WAITING_OPEN" ]] || name=""
+    else
+        # The bare word (round 3b): kept in MMRY_WAITING_WORD for a fresh ask record to confirm, and
+        # sent on its own only when it is a built-in tool's name.
+        [[ "$name" =~ $_MMRY_WAITING_TOOL_RE ]] && MMRY_WAITING_WORD="$name"
+        [[ "$_MMRY_WAITING_BUILTIN_TOOLS" == *" ${name} "* ]] || name=""
     fi
     # A name that is not bare, or too long, is dropped, never trimmed into one.
     [[ "$name" =~ $_MMRY_WAITING_TOOL_RE ]] || name=""
