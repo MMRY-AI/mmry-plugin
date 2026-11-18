@@ -196,7 +196,7 @@ _assert_customer_typography() {
     line="$(grep -F '**The lead hears who has gone quiet.**' "$skill")"
     [[ -n "$line" ]] || { echo "the Codex skill does not mention quiet-member notices"; return 1; }
     [[ "$line" == *"A lead on Codex or a connected assistant sees these notices on its next action, not while idle."* ]] || { echo "$line"; return 1; }
-    [[ "$line" == *"A member waiting on an approval prompt is never reported quiet."* ]] || { echo "$line"; return 1; }
+    [[ "$line" == *"A member waiting on an approval prompt is never reported as quiet."* ]] || { echo "$line"; return 1; }
     [ "$line" = "$(grep -F '**The lead hears who has gone quiet.**' "$page")" ]
     _assert_customer_typography "$line"
 }
