@@ -379,6 +379,18 @@ _transcript() { # $1 path, $2.. tool names
         printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_%s","name":"%s","input":{"note":"%s"}}]}}\n' "$i" "$n" "$PLANTED" >> "$tp"
     done
 }
+# The tool_result Claude Code writes when a call has run (answered), one per id.
+_answered() { # $1 path, $2.. tool_use ids
+    local tp="$1" id; shift
+    for id in "$@"; do
+        printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"done"}]}}\n' "$id" >> "$tp"
+    done
+}
+# A fresh ask record as 33900's --ask writes it (.mmry-asking-<session>), here left over from an
+# earlier prompt. 33898 alone never reads one; the stack must not let it supply a name on its own.
+_ask_record() { # $1 tool name
+    printf 'asker -\ntool %s\ninput -\nat %s\n' "$1" "$(date +%s)" > "$TEST_TMPDIR/.mmry-asking-$SID"
+}
 
 # #33898 round 2 (QA finding A1): the name is sent only when it is established EXACTLY: the sentence
 # builds it and the session's own transcript holds a call with exactly that name. The transcript never
@@ -423,12 +435,77 @@ _transcript() { # $1 path, $2.. tool names
     ! grep -q 'memory_search' "$BODIES" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "another tool was named"; return 1; }
 }
 
-@test "W-34 33898 req1 (A1): the exact call is named even when another call of the server is the latest" {
+@test "W-34 33898 req1 (A1, C1): the one still-waiting exact call is named, past answered calls of the server and of that tool" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # toolu_1 memory_save (answered), toolu_2 memory_search (answered), toolu_3 memory_save (waiting).
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search mcp__mmry__memory_save
+    _answered "$tp" toolu_1 toolu_2
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+# #33898 round 3 (QA finding C1, lead 439's ruling 2026-11-18): the transcript must tie the name to
+# THIS prompt. A name is sent only when its call is still waiting (no tool_result carries its id) and
+# is the only still-waiting call of its server in the transcript; otherwise the sentence is left out.
+# A leftover ask record never supplies a name on its own.
+
+@test "W-37 33898 req1 (C1, probe P-01): a bare-word title equal to another tool's real name sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # read_file ran earlier and was answered; write_file, whose title is "read_file", is the one asking.
+    _transcript "$tp" mcp__acme__read_file mcp__acme__write_file
+    _answered "$tp" toolu_1
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - read_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-38 33898 req1 (C1, probe P-02): a name string inside another call's input is not a call, and sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"mcp__acme__write_file","input":{"meta":{"name":"mcp__acme__Save"}}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-39 33898 req1 (C1): a leftover ask record never supplies a name on its own" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The record and the transcript name a call that has already been answered.
+    _transcript "$tp" mcp__acme__write_file
+    _answered "$tp" toolu_1
+    _ask_record mcp__acme__write_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - write_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A titled MCP prompt with a leftover record naming a tool of that server: no name.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _ask_record mcp__acme__write_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Write a file (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A built-in prompt with a leftover record naming another tool: the prompt's own word, never the record's.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _ask_record Bash
+    run _waiting "$(_notification_tp 'Claude needs your permission to use Edit' "$tp")"
+    [ "$(_tool_sent)" = "Edit" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 3 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-40 33898 req1 (C1): two still-waiting calls of one server send no name, even when one matches exactly" {
     JQ_BIN="$(command -v jq)"
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search
     run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
-    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # Two waiting calls of the same tool are no better: either could be the one asking.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
 }
 
 @test "W-35 33898 req1 (A1, probe QA-2): a titled tool called in parallel with another tool of the server sends no name" {
