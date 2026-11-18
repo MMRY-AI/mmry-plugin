@@ -219,6 +219,7 @@ tests/structural/formation-check-identity.bats
 tests/structural/formation-check-prompt-budget.bats
 tests/structural/formation-check-timeout.bats
 tests/structural/formation-claim.bats
+tests/structural/formation-compaction-rearm.bats
 tests/structural/formation-delivery.bats
 tests/structural/formation-directed.bats
 tests/structural/formation-gate.bats
