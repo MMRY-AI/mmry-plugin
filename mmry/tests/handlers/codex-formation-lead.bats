@@ -187,3 +187,16 @@ _assert_customer_typography() {
     _assert_lead_notice_start "$text"
     bash "$HH/formation-state.sh" clear "conv-srv-$$" >/dev/null 2>&1 || true
 }
+
+# #33846 (DD-189 in MMRY-AI/mmry). A Codex lead is also told when a working member goes quiet, leaves
+# with its work unfinished, or is active again. It hears that, like every member message, on its next
+# action; the Codex skill says so in the words the command page uses.
+@test "33846: the Codex skill tells a Codex lead it hears quiet-member notices on its next action, as Claude Code's page does" {
+    local skill="$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" page="$PLUGIN_ROOT/commands/formation.md" line
+    line="$(grep -F '**The lead hears who has gone quiet.**' "$skill")"
+    [[ -n "$line" ]] || { echo "the Codex skill does not mention quiet-member notices"; return 1; }
+    [[ "$line" == *"A lead on Codex or a connected assistant sees this on its next action, not while idle."* ]] || { echo "$line"; return 1; }
+    [[ "$line" == *"A member waiting on an approval prompt is never reported quiet."* ]] || { echo "$line"; return 1; }
+    [ "$line" = "$(grep -F '**The lead hears who has gone quiet.**' "$page")" ]
+    _assert_customer_typography "$line"
+}
