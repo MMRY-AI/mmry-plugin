@@ -395,7 +395,7 @@ _tool_result() { # $1 path, $2.. tool_use ids
 }
 # A fresh ask record as 33900's --ask writes it (.mmry-asking-<session>), here left over from an
 # earlier prompt. 33898 alone never reads one; the stack must not let it supply a name on its own.
-_ask_record() { # $1 tool name
+_leftover_ask() { # $1 tool name
     printf 'asker -\ntool %s\ninput -\nat %s\n' "$1" "$(date +%s)" > "$TEST_TMPDIR/.mmry-asking-$SID"
 }
 
@@ -488,13 +488,13 @@ _ask_record() { # $1 tool name
     # The record and the transcript name a call that has already been answered.
     _transcript "$tp" mcp__acme__write_file
     _tool_result "$tp" toolu_1
-    _ask_record mcp__acme__write_file
+    _leftover_ask mcp__acme__write_file
     run _waiting "$(_notification_tp 'Claude needs your permission to use acme - write_file (MCP)' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     # A titled MCP prompt with a leftover record naming a tool of that server: no name.
     : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
-    _ask_record mcp__acme__write_file
+    _leftover_ask mcp__acme__write_file
     run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Write a file (MCP)' "$tp")"
     [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
