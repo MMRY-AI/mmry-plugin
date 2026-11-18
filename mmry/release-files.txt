@@ -197,6 +197,7 @@ tests/run-tests.sh
 tests/setup_suite.bash
 tests/structural/CODEX-MUTATIONS.md
 tests/structural/bash32-portability.bats
+tests/structural/codex-approval-gate.bats
 tests/structural/codex-customer-strings.bats
 tests/structural/codex-desktop-trust-claim.bats
 tests/structural/codex-docs-and-eol.bats
