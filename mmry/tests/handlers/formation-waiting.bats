@@ -203,11 +203,13 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 # TC4: the tool name, never the prompt
 # ---------------------------------------------------------------------------------------------
 
-@test "W-12 a prompt for a command carrying a planted secret sends and keeps the tool name only" {
+@test "W-12 a prompt for a command carrying a planted secret sends no name and nothing of the command" {
+    # Round 4 (lead 439, ruling 3): text after the word means it is not exactly one list entry, so no name.
+    JQ_BIN="$(command -v jq)"
     run _waiting "$(_notification permission_prompt "Claude needs your permission to use Bash with curl -H Authorization: $PLANTED")"
     [ "$status" -eq 0 ]
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    grep -q '"toolName":"Bash"' "$BODIES" || { cat "$BODIES"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
     ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "planted string stored"; return 1; }
     [[ "$output" != *"$PLANTED"* ]]
@@ -1019,4 +1021,31 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*; : > "$BODIES"
     _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-44 33898 req1 (round 4, D1): a multi-word display name with no ask record sends no name, never its first word" {
+    JQ_BIN="$(command -v jq)"
+    local w n=0
+    # Claude Code 2.1.322 shows an untitled MCP tool read_file as "Read File" (QA round 3, measured).
+    for w in 'Read File' 'Write File' 'Edit File' 'Task Create' 'Bash Exec' 'Grep Search'; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $w"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
+}
+
+@test "W-45 33898 req1 (round 4, security F3): a list word followed by a newline and more text sends no name" {
+    JQ_BIN="$(command -v jq)"
+    # The JSON escape \n: the message the handler reads carries a real newline after the word. The
+    # second form (a space, then the newline) sent Edit before round 4; the first was already refused.
+    local m n=0
+    for m in 'Edit\nEndConversation' 'Edit \nEndConversation' 'Edit\r\n'; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $m")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $m"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
 }
