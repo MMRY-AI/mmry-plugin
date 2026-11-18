@@ -407,3 +407,129 @@ _registrations_windows() {
         [[ "$out" == *"REACHED handler=[stop-check]"* ]] || { echo "$f: the launcher did not reach the handler: $out"; return 1; }
     done
 }
+
+# =============================================================================================
+# PATH AS IT REALLY IS (Windows, QA round 1): QUOTED, UNBALANCED, OR HOLDING % OR ^
+# =============================================================================================
+# The builtin PATH walk must read PATH as written. In round 1 it expanded %PATH% while cmd was still
+# parsing the line and then re-parsed each entry through `call`, so a quoted Git entry
+# ("C:\Program Files\Git\cmd";...) made every hook exit 255 with `=1" was unexpected at this time.`,
+# a quoted or unbalanced entry before Git's made every hook exit 0 without running, and an entry
+# holding % or ^ was changed before it was looked in. where.exe, which it replaced, read all of these.
+
+_git_cmd_dir() { [[ -f /cmd/git.exe ]] && cygpath -w /cmd; }
+
+# The real launcher, a stand-in codex-hook.sh that only reports, and PATH set inside cmd so nothing
+# converts it on the way. $1 the PATH as a batch file must spell it (a literal % written %%), $2 a label.
+_launch_with_path() {
+    local root="$TEST_TMPDIR/plugin root" f="$TEST_TMPDIR/path-$2.cmd"
+    if [[ ! -f "$root/hooks-handlers/codex-hook.sh" ]]; then
+        mkdir -p "$root/hooks-handlers"
+        cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+        printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+    fi
+    printf '%s\r\n' '@echo off' "set \"PATH=$1\"" \
+        "call \"$(cygpath -w "$root")\\hooks-handlers\\codex-hook.cmd\" stop-check" 'echo EXIT=%ERRORLEVEL%' > "$f"
+    cmd //d //c "$(cygpath -w "$f")" < /dev/null 2>&1 | tr -d '\r'
+}
+
+@test "33967 path windows: a quoted Git entry, or a quoted or unbalanced entry before Git's, still runs the handler" {
+    _is_windows || skip "Windows only: needs cmd.exe"
+    local gitcmd; gitcmd="$(_git_cmd_dir)" || skip "no Git for Windows cmd folder at /cmd"
+    mkdir -p "$TEST_TMPDIR/some tools"
+    local tools; tools="$(cygpath -w "$TEST_TMPDIR/some tools")"
+    local -a labels=(quoted-git quoted-before unbalanced-before)
+    local -a paths=(
+        "\"$gitcmd\";%SystemRoot%\\System32;%SystemRoot%"
+        "%SystemRoot%\\System32;\"$tools\";$gitcmd;%SystemRoot%"
+        "%SystemRoot%\\System32;C:\\odd\"dir;$gitcmd;%SystemRoot%"
+    )
+    local i out bad=0
+    for i in 0 1 2; do
+        out="$(_launch_with_path "${paths[$i]}" "${labels[$i]}")"
+        echo "${labels[$i]}: $out" >&3
+        [[ "$out" != *"unexpected"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
+        [[ "$out" == *"REACHED handler=[stop-check]"* ]] || { echo "${labels[$i]}: the launcher did not run the handler: $out"; bad=1; continue; }
+        [[ "$out" == *"EXIT=0"* ]] || { echo "${labels[$i]}: the launcher did not exit 0: $out"; bad=1; continue; }
+    done
+    (( bad == 0 ))
+}
+
+@test "33967 path windows: the walk itself reads a quoted entry, and entries holding % or ^, as written" {
+    # Each fake Git root comes before the real one, and its bin\bash.exe is a copy of the vendored jq,
+    # which says "jq: error" when handed a script. Seeing that proves the PATH walk chose the entry; the
+    # registry and the standard folders, which come after it, would choose the real Git instead.
+    _is_windows || skip "Windows only: needs cmd.exe"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+    local gitcmd; gitcmd="$(_git_cmd_dir)" || skip "no Git for Windows cmd folder at /cmd"
+    local -a labels=(quoted percent caret) dirs=("fake git" "pct%OS%git" "caret^git")
+    local i d w entry out bad=0
+    for i in 0 1 2; do
+        d="$TEST_TMPDIR/${dirs[$i]}"
+        mkdir -p "$d/cmd" "$d/bin"
+        cp "$jq" "$d/cmd/git.exe"; cp "$jq" "$d/bin/bash.exe"
+        w="$(cygpath -w "$d")\\cmd"
+        [[ -f "$d/cmd/git.exe" && -f "$d/bin/bash.exe" ]] || { echo "premise: could not build $d"; bad=1; continue; }
+        case "${labels[$i]}" in
+            quoted) entry="\"$w\"" ;;
+            percent) entry="${w//%/%%}" ;;
+            *) entry="$w" ;;
+        esac
+        out="$(_launch_with_path "$entry;$gitcmd;%SystemRoot%\\System32" "${labels[$i]}")"
+        echo "${labels[$i]}: $out" >&3
+        [[ "$out" != *"unexpected"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
+        [[ "$out" == *"jq: error"* ]] || { echo "${labels[$i]}: the walk did not choose the entry as written ($w): $out"; bad=1; continue; }
+    done
+    (( bad == 0 ))
+}
+
+# =============================================================================================
+# THE sh FORM (every platform, QA round 1): A SOURCED HANDLER RUNS WITH POSIX MODE OFF
+# =============================================================================================
+# The `command` form in codex-hooks.json starts codex-hook.sh with sh. On macOS sh is bash 3.2 in
+# POSIX mode, where process substitution does not parse, and userpromptsubmit-foundation.sh uses it.
+# A child bash used to clear POSIX mode; a sourced subshell inherits it unless it turns it off.
+
+_sh_fire() { # $1 plugin root, $2 handler args (word-split), $3 output file
+    # shellcheck disable=SC2086
+    _payload | env -u MMRY_CONFIG_FILE -u MMRY_HOST -u MMRY_CODEX_HOOK_STARTED CODEX_HOME="$CODEX_DIR" \
+        sh "$1/hooks-handlers/codex-hook.sh" $2 > "$3" 2>/dev/null
+}
+
+@test "33967 sh form: the sourced per-message handlers run with POSIX mode off" {
+    local root="$TEST_TMPDIR/probe root" h out
+    mkdir -p "$root"
+    cp -R "$PLUGIN_ROOT/hooks-handlers" "$root/"
+    for h in stop-check userpromptsubmit-foundation; do
+        printf '#!/usr/bin/env bash\ncase ":$SHELLOPTS:" in *:posix:*) echo "%s POSIX=on" ;; *) echo "%s POSIX=off" ;; esac\n' "$h" "$h" > "$root/hooks-handlers/$h.sh"
+    done
+    # Where sh is bash it arrives in POSIX mode (macOS, Git for Windows); where it is dash, codex-hook.sh
+    # starts bash itself and this test cannot see the difference, which is said, not hidden.
+    if sh -c '[ -n "${BASH_VERSION:-}" ]'; then echo "sh is bash here: the probe can tell" >&3
+    else echo "sh is not bash here: codex-hook.sh re-runs itself in bash, POSIX mode is off either way" >&3; fi
+    for h in "stop-check" "userpromptsubmit-foundation --part 1"; do
+        _sh_fire "$root" "$h" "$TEST_TMPDIR/probe.out"
+        out="$(tr -d '\r' < "$TEST_TMPDIR/probe.out")"
+        echo "$h: $out" >&3
+        [[ "$out" == *"${h%% *} POSIX=off"* ]] || { echo "$h ran with POSIX mode on, or not at all: $out"; return 1; }
+    done
+}
+
+@test "33967 sh form: Foundation parts started by sh, as the command form registers them, deliver the whole set" {
+    _seed_set
+    local k pids=()
+    for k in 1 2 3 4 5 6; do _sh_fire "$PLUGIN_ROOT" "userpromptsubmit-foundation --part $k" "$TEST_TMPDIR/sh$k.json" & pids+=("$!"); done
+    wait "${pids[@]}"
+    local joined="" ctx n=0
+    for k in 1 2 3 4 5 6; do
+        [[ -z "$(_sysmsg "$TEST_TMPDIR/sh$k.json")" ]] || { echo "part $k showed the person: $(_sysmsg "$TEST_TMPDIR/sh$k.json")"; return 1; }
+        ctx="$(_ctx "$TEST_TMPDIR/sh$k.json")"; ctx="${ctx%.}"
+        [[ "$ctx" == *"This is PART $k OF "* ]] || continue
+        joined+="${ctx#*if their versions differ, tell the user.$'\n\n'}"
+        n=$(( n + 1 ))
+    done
+    local want; want="$(cat "$CACHE"; printf .)"; want="${want%.}"; want="${want%$'\n'}"
+    echo "sh form: ${n} parts, ${#joined} of ${#want} bytes" >&3
+    [[ "$joined" == "$want" ]] || { echo "the sh form did not deliver the whole set (${n} parts, ${#joined} of ${#want} bytes)"; return 1; }
+}
