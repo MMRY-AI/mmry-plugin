@@ -1,6 +1,6 @@
 Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>`
 
 ## What This Does
 
@@ -575,6 +575,20 @@ session's own place, the script says so and stops listening here, as `leave` wou
 **Report what the script reports.** On success it prints when and by whom the member was removed,
 read back from the server. On a refusal it prints the server's own reason: a member who has already
 left, one that is not in this formation, and a formation already closed out each read differently.
+
+### queue
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" add "<description>" [--host codex|claude-code]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" list
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" take <pieceId>
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" decline <pieceId>
+```
+
+- `add`: Queue a piece of work for this Formation (lead only). Name a host to offer it only to members on that host.
+- `list`: Show the queue: each piece, the host it needs, and who took it and when.
+- `take`: Take the queued piece you were offered. It becomes your assignment.
+- `decline`: Turn down the queued piece you were offered. It goes back to the queue for the next member.
 
 ### status
 

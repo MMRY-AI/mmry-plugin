@@ -275,7 +275,8 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
                 read -r _mmry_marker_host || _mmry_marker_host=""
                 read -r _mmry_marker_home || true
             } < "$_mmry_marker" 2>/dev/null
-            _mmry_marker_home="${_mmry_marker_home%$''}"
+            _mmry_marker_home="${_mmry_marker_home%$'
+'}"
             _mmry_marker_host="${_mmry_marker_host:0:64}"
             _mmry_marker_host="${_mmry_marker_host//[[:space:]]/}"
             if [[ "$_mmry_marker_host" == "codex" ]]; then
@@ -677,6 +678,8 @@ mmry_host_tool_ref() {
         formation_start|formation_assign|formation_report|formation_debrief) ;;
         # #32270: removing a member whose session has dropped.
         formation_remove) ;;
+        # #33849: the work queue.
+        formation_queue_add|formation_queue_list|formation_queue_take|formation_queue_decline) ;;
         *) return 1 ;;
     esac
     printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
@@ -746,6 +749,21 @@ _mmry_host_formation_tool() {
             else
                 mmry_host_tool_ref formation_remove "with member_id (from the roster)"
             fi
+            ;;
+        # #33849. "queue <verb> [piece id]": the verb names the tool, a piece id becomes piece_id.
+        queue)
+            case "${1:-}" in
+                add)  mmry_host_tool_ref formation_queue_add "with description (and host, codex or claude-code)" ;;
+                list) mmry_host_tool_ref formation_queue_list ;;
+                take|decline)
+                    if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+                        mmry_host_tool_ref "formation_queue_$1" "with piece_id $2"
+                    else
+                        mmry_host_tool_ref "formation_queue_$1" "with piece_id"
+                    fi
+                    ;;
+                *) return 1 ;;
+            esac
             ;;
         say)
             if (( $# == 0 )); then

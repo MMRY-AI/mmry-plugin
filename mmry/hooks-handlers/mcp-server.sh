@@ -303,6 +303,49 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Remove a member from the coordination group", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false}
   },
   {
+    "name": "formation_queue_add",
+    "title": "Queue a piece of work",
+    "description": "Queue a piece of work in the Formation you lead, with an optional host it needs. Only the lead can add.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "description": {"type": "string", "description": "The piece of work, up to 500 characters."},
+        "host": {"type": "string", "enum": ["codex", "claude-code"], "description": "Optional: codex or claude-code."}
+      },
+      "required": ["description"]
+    },
+    "annotations": {"title": "Queue a piece of work", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
+  },
+  {
+    "name": "formation_queue_list",
+    "title": "List the queued work",
+    "description": "List the Formation'"'"'s queued work: each piece, the host it needs, and who took it and when.",
+    "inputSchema": {"type": "object", "properties": {}},
+    "annotations": {"title": "List the queued work", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
+    "name": "formation_queue_take",
+    "title": "Take a queued piece",
+    "description": "Take the queued piece you were offered; it becomes your assignment. If another member took it first, you are told and nothing changes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"piece_id": {"type": "integer", "description": "The piece id from the offer."}},
+      "required": ["piece_id"]
+    },
+    "annotations": {"title": "Take a queued piece", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
+  },
+  {
+    "name": "formation_queue_decline",
+    "title": "Decline a queued piece",
+    "description": "Decline the queued piece you were offered; it returns to the queue.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"piece_id": {"type": "integer", "description": "The piece id from the offer."}},
+      "required": ["piece_id"]
+    },
+    "annotations": {"title": "Decline a queued piece", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
+  },
+  {
     "name": "formation_status",
     "title": "Show this conversation'"'"'s coordination group status",
     "description": "Show which formation this conversation is in, its own member id and name, and every member with its name beside its member id. Reading it also delivers anything waiting.",
@@ -374,6 +417,12 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "formation_debrief" then ["formation-debrief.sh", (str("summary") | need("summary"))]
    elif $n == "formation_remove" then
       ["formation-remove.sh", (int("member_id") | need("member_id"))] + (if int("formation_id") == null then [] else [int("formation_id")] end)
+   elif $n == "formation_queue_add" then
+      ["formation-queue.sh", "add", (str("description") | need("description"))]
+      + (if (str("host") // "") != "" then ["--host", (str("host") | if IN("codex","claude-code") then . else error("host must be codex or claude-code") end)] else [] end)
+   elif $n == "formation_queue_list" then ["formation-queue.sh", "list"]
+   elif $n == "formation_queue_take" then ["formation-queue.sh", "take", (int("piece_id") | need("piece_id"))]
+   elif $n == "formation_queue_decline" then ["formation-queue.sh", "decline", (int("piece_id") | need("piece_id"))]
    elif $n == "formation_roster" then ["formation-roster.sh"]
    elif $n == "formation_status" then ["formation-status.sh"]
    elif $n == "formation_leave" then ["formation-leave.sh"]

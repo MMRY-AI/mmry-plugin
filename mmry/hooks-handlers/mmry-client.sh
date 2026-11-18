@@ -1981,6 +1981,39 @@ mmry_remove_formation_member() {
     _mmry_request DELETE "/api/formations/${formation_id}/members/${member_id}"
 }
 
+# ---- #33849 (DD-193): the Formation work queue -------------------------------------------------
+# The lead queues pieces of work; a member that becomes idle and ready is offered the next one that
+# suits its host on its own next check, and takes or declines it. Who may do what is the server's
+# decision (only the lead adds; a member takes or declines from its own session). Nothing here says
+# who is asking.
+
+mmry_add_formation_queue_piece() {
+    # Usage: mmry_add_formation_queue_piece FORMATION_ID SESSION_ID DESCRIPTION [HOST]
+    local formation_id="$1" session_id="$2" description="$3" host="${4:-}"
+    local body
+    body="$(_mmry_build_json "sessionId" "$session_id" "description" "$description" "host" "$host")"
+    _mmry_request POST "/api/formations/${formation_id}/queue" "$body"
+}
+
+mmry_get_formation_queue() {
+    # Usage: mmry_get_formation_queue FORMATION_ID SESSION_ID
+    local formation_id="$1" session_id="$2"
+    _mmry_request GET "/api/formations/${formation_id}/queue?sessionId=$(_mmry_urlencode "$session_id")"
+}
+
+mmry_take_formation_queue_piece() {
+    # Usage: mmry_take_formation_queue_piece FORMATION_ID SESSION_ID PIECE_ID
+    local formation_id="$1" session_id="$2" piece_id="$3"
+    _mmry_request POST "/api/formations/${formation_id}/queue/${piece_id}/take" "$(_mmry_build_json "sessionId" "$session_id")"
+}
+
+mmry_decline_formation_queue_piece() {
+    # Usage: mmry_decline_formation_queue_piece FORMATION_ID SESSION_ID PIECE_ID
+    local formation_id="$1" session_id="$2" piece_id="$3"
+    _mmry_request POST "/api/formations/${formation_id}/queue/${piece_id}/decline" "$(_mmry_build_json "sessionId" "$session_id")"
+}
+# ---- end #33849 ---------------------------------------------------------------------------------
+
 mmry_update_formation_member_progress() {
     # Usage: mmry_update_formation_member_progress FORMATION_ID MEMBER_ID SESSION_ID PROGRESS [NOTE]
     #
