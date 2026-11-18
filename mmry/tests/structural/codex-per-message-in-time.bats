@@ -66,6 +66,16 @@ _stamp_ago() {
     printf '%d:%s:%s.50' "$((10#$h))" "$m" "$s"
 }
 
+# THE LAUNCH STAMP NEEDS BASH'S OWN CLOCK (QA round 2, macOS CI). Only codex-hook.cmd writes the stamp,
+# on Windows, and codex-hook.sh reads it with printf %(...)T, which bash has from 4.2. On the bash 3.2
+# a Mac ships there is no stamp in real use and none can be read, so the launch is 0 and the deadlines
+# are as before, by design. A held launch cannot be set up there, so these tests say so and skip; they
+# run on Windows and Linux.
+_needs_launch_clock() {
+    (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )) && return 0
+    skip "bash ${BASH_VERSION}: no builtin clock to read a launch stamp, which only Windows writes"
+}
+
 _registered() { # $1 event, $2 handler text, $3 field
     node -e '
         const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -112,6 +122,7 @@ _slow() {
 # =============================================================================================
 
 @test "33967 R1+R2: Foundation parts whose launch used 12 s, with a set check that never finishes, end quietly inside 20 s" {
+    _needs_launch_clock
     _seed_set
     # The verification of the set never finishes: cksum is slow, as every process start was in TC5.
     _slow cksum 60
@@ -155,6 +166,7 @@ _slow() {
 }
 
 @test "33967 R1: a Foundation part whose launch used 17 s ends at once, says nothing, and the next prompt is told" {
+    _needs_launch_clock
     # Too late to do anything inside 20 s with Codex's own launch in hand: no work at all this turn.
     _seed_set
     _slow cksum 60
@@ -174,6 +186,7 @@ _slow() {
 }
 
 @test "33967 R1: a Foundation part with a launch of 8 s still gives the set its whole time from launch, not 10 s on top" {
+    _needs_launch_clock
     # The deadline counts from the launch, so the part ends about 10 s after launch plus its tail; a
     # deadline that ignored the launch would end 18 s after it plus the same tail.
     _seed_set
@@ -192,6 +205,7 @@ _slow() {
 }
 
 @test "33967 R1: stop-check with every process start slowed to 1.5 s still ends inside its 10 s limit" {
+    _needs_launch_clock
     local limit; limit="$(_registered UserPromptSubmit stop-check timeout)"
     [[ "$limit" =~ ^[0-9]+$ ]] || { echo "no stop-check limit: $limit"; return 1; }
     local p; for p in dirname basename stat date head tr touch sed cat mkdir rm mv awk jq cygpath uname id; do _slow "$p" 1.5; done
@@ -208,6 +222,7 @@ _slow() {
 }
 
 @test "33967 R2: stop-check whose launch already used most of its 10 s ends at once, quietly, and prompts on the next message" {
+    _needs_launch_clock
     local limit; limit="$(_registered UserPromptSubmit stop-check timeout)"
     local launch=$(( limit - CODEX_LAUNCH_MARGIN - 1 )) stamp; stamp="$(_stamp_ago "$launch")"
     local start=$SECONDS
