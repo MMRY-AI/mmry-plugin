@@ -125,7 +125,8 @@ rem    builtins: each PATH entry in order, the first holding git.exe with Git's 
 rem    levels up. ONLY ABSOLUTE ENTRIES (X:\ or \\server), which is what $PATH: gave where.exe: an
 rem    entry such as "." or "tools" would name a folder in the customer's project, and a git.exe planted
 rem    there must never choose the bash (security, #31245 QA round 10).
-if defined PATH for %%P in ("%PATH:;=" "%") do if not defined MMRY_GIT_BASH call :from_path_entry "%%~P"
+rem    PATH IS READ AS WRITTEN (#33967 QA round 1): the walk is in :from_path, at the end of this file.
+if defined PATH call :from_path
 
 if not defined MMRY_GIT_BASH call :from_registry HKLM
 if not defined MMRY_GIT_BASH call :from_registry HKCU
@@ -140,17 +141,43 @@ if not defined MMRY_GIT_BASH goto :no_git
 "%MMRY_GIT_BASH%" "%~dp0codex-hook.sh" %*
 exit /b %ERRORLEVEL%
 
-:from_path_entry
-set "MMRY_PE=%~1"
-if not defined MMRY_PE exit /b 0
-set "MMRY_PE_ABS="
-if "%MMRY_PE:~1,2%"==":\" set "MMRY_PE_ABS=1"
-if "%MMRY_PE:~0,2%"=="\\" set "MMRY_PE_ABS=1"
-if not defined MMRY_PE_ABS exit /b 0
-if "%MMRY_PE:~-1%"=="\" set "MMRY_PE=%MMRY_PE:~0,-1%"
-if not exist "%MMRY_PE%\git.exe" exit /b 0
-if exist "%MMRY_PE%\..\bin\bash.exe" set "MMRY_GIT_BASH=%MMRY_PE%\..\bin\bash.exe"
-if not defined MMRY_GIT_BASH if exist "%MMRY_PE%\..\..\bin\bash.exe" set "MMRY_GIT_BASH=%MMRY_PE%\..\..\bin\bash.exe"
+rem THE PATH WALK, READING PATH AS WRITTEN (#33967 QA round 1). Round 1 split PATH with a percent
+rem substitution, which cmd expands BEFORE it parses the line, and handed each entry to a `call`, which
+rem parses it a second time. So a quote in PATH, legal and common ("C:\Program Files\Git\cmd";...), broke
+rem the line: a quoted Git entry made every hook exit 255 with `=1" was unexpected at this time.`, and a
+rem quoted or unbalanced entry before Git's made every hook exit 0 without running. A percent sign or a
+rem caret in an entry was changed by the second parse, so that entry was never looked in. where.exe read
+rem all of these. (No percent sign is written in these lines: cmd expands them even in a rem.)
+rem   - Delayed expansion (!...!) puts a value in after cmd has parsed the line, so nothing in PATH is
+rem     ever read as cmd syntax: not a quote, an ampersand, a bracket, a percent sign or a caret.
+rem   - Quotes are taken out first. Windows' own search ignores them, and the walk then splits only on
+rem     the semicolons. An entry quoted because it holds a semicolon splits in two; neither half holds
+rem     git.exe, and the registry below is used, as for any PATH without Git.
+rem   - Each entry is handled inside the loop, never handed to `call`, which would parse it again.
+rem   - Not covered: a ! in an entry, which delayed expansion reads as a variable. That entry is not
+rem     found and the registry below is used: it fails safe, and never runs anything.
+rem   - endlocal and the set that carries the answer out are one line, so the answer is read before
+rem     endlocal and set after it, with delayed expansion off again.
+:from_path
+setlocal enabledelayedexpansion
+set "MMRY_FOUND="
+set "MMRY_PS=!PATH:"=!"
+for %%P in ("!MMRY_PS:;=" "!") do if not defined MMRY_FOUND (
+    set "MMRY_PE=%%~P"
+    if defined MMRY_PE (
+        set "MMRY_PE_ABS="
+        if "!MMRY_PE:~1,2!"==":\" set "MMRY_PE_ABS=1"
+        if "!MMRY_PE:~0,2!"=="\\" set "MMRY_PE_ABS=1"
+        if defined MMRY_PE_ABS (
+            if "!MMRY_PE:~-1!"=="\" set "MMRY_PE=!MMRY_PE:~0,-1!"
+            if exist "!MMRY_PE!\git.exe" (
+                if exist "!MMRY_PE!\..\bin\bash.exe" set "MMRY_FOUND=!MMRY_PE!\..\bin\bash.exe"
+                if not defined MMRY_FOUND if exist "!MMRY_PE!\..\..\bin\bash.exe" set "MMRY_FOUND=!MMRY_PE!\..\..\bin\bash.exe"
+            )
+        )
+    )
+)
+endlocal & set "MMRY_GIT_BASH=%MMRY_FOUND%"
 exit /b 0
 
 :from_registry

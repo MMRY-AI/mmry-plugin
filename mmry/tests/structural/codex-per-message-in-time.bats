@@ -448,7 +448,7 @@ _launch_with_path() {
     for i in 0 1 2; do
         out="$(_launch_with_path "${paths[$i]}" "${labels[$i]}")"
         echo "${labels[$i]}: $out" >&3
-        [[ "$out" != *"unexpected"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
+        [[ "$out" != *"was unexpected at this time"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
         [[ "$out" == *"REACHED handler=[stop-check]"* ]] || { echo "${labels[$i]}: the launcher did not run the handler: $out"; bad=1; continue; }
         [[ "$out" == *"EXIT=0"* ]] || { echo "${labels[$i]}: the launcher did not exit 0: $out"; bad=1; continue; }
     done
@@ -478,7 +478,7 @@ _launch_with_path() {
         esac
         out="$(_launch_with_path "$entry;$gitcmd;%SystemRoot%\\System32" "${labels[$i]}")"
         echo "${labels[$i]}: $out" >&3
-        [[ "$out" != *"unexpected"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
+        [[ "$out" != *"was unexpected at this time"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
         [[ "$out" == *"jq: error"* ]] || { echo "${labels[$i]}: the walk did not choose the entry as written ($w): $out"; bad=1; continue; }
     done
     (( bad == 0 ))

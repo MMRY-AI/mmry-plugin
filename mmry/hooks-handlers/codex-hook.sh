@@ -515,7 +515,11 @@ case "$HANDLER_NAME" in
         #    fork and an exec, two Windows processes. A subshell, not this shell, so the handler's exit
         #    code is still discarded below, and it runs as a plain statement, never in an || list, where
         #    bash would ignore the handler's own set -e.
-        ( source "$TARGET" "$@" )
+        #    POSIX MODE OFF FIRST (#33967 QA round 1), as _mmry_codex_ss does for session-start.sh. The
+        #    `command` form starts this file with sh, which on macOS is bash 3.2 in POSIX mode, and a
+        #    child bash used to clear it; a sourced subshell inherits it, and bash 3.2 in POSIX mode
+        #    does not parse the process substitutions userpromptsubmit-foundation.sh uses.
+        ( set +o posix; source "$TARGET" "$@" )
         ;;
     *)
         bash "$TARGET" "$@"
