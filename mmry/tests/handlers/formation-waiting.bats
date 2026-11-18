@@ -766,6 +766,31 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     done
 }
 
+@test "X-23 33900 (B2): on Windows, Codex's registered Stop command starts no bash while no waiting marker exists" {
+    # Behaviour of the cmd gate added to codex-hook.cmd: a stand-in codex-hook.sh beside the real
+    # launcher reports whether it was reached. Codex's Stop ends every turn, so with no prompt open the
+    # gate must exit before looking for Git's bash.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs cmd.exe" ;; esac
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+    local root="$TEST_TMPDIR/cmdroot" tdir="$TEST_TMPDIR/cmdtmp"
+    mkdir -p "$root/hooks-handlers" "$tdir"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED args=[$*]"\n' > "$root/hooks-handlers/codex-hook.sh"
+    local registered winroot wtmp cmdline
+    registered="$("$(command -v jq)" -r '.hooks.Stop[0].hooks[0].commandWindows' "$PLUGIN_ROOT/hooks/codex-hooks.json" | tr -d '\r')"
+    winroot="$(cygpath -w "$root")"; wtmp="$(cygpath -w "$tdir")"
+    cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+    # The registered line, unchanged, in a batch file: Git Bash would escape its quotes on a cmd.exe
+    # command line.
+    printf '@%s\r\n' "$cmdline" > "$root/run.bat"
+    local bat; bat="$(cygpath -w "$root/run.bat")"
+    run env TMPDIR="$wtmp" MSYS_NO_PATHCONV=1 cmd.exe /d /c "$bat" < /dev/null
+    [[ "$output" != *REACHED* ]] || { echo "bash started with no marker: $output"; return 1; }
+    : > "$tdir/.mmry-waiting-some-session"
+    run env TMPDIR="$wtmp" MSYS_NO_PATHCONV=1 cmd.exe /d /c "$bat" < /dev/null
+    [[ "$output" == *"REACHED args=[formation-waiting --answer-hook]"* ]] || { echo "not reached with a marker: $output"; return 1; }
+}
+
 @test "X-21 33900 req1 (B2): Codex, a Deny on the main thread clears on the asking turn's Stop, and no other turn's Stop" {
     _waiting "$(_codex_ask Bash)"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
