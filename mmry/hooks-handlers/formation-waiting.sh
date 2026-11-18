@@ -152,7 +152,7 @@ _MMRY_WAITING_SENTENCE_JQ='
 _mmry_waiting_open_call() {
     local prefix="${1:-}" tp="${2:-}" uses="" ids="" open="" oid="" id n
     local -a pat=()
-    MMRY_WAITING_OPEN=""
+    MMRY_WAITING_OPEN="" MMRY_WAITING_SEEN=" "
     [[ "$prefix" =~ ^mcp__[A-Za-z0-9_-]+__$ && -f "$tp" && -r "$tp" && -n "${MMRY_JQ:-}" ]] || return 0
     uses="$(grep -F -- "\"${prefix}" "$tp" 2>/dev/null | "$MMRY_JQ" -R -r --arg p "$prefix" '
         (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
@@ -163,7 +163,7 @@ _mmry_waiting_open_call() {
     uses="${uses//$'\r'/}"
     [[ -n "$uses" ]] || return 0
     while read -r id n; do
-        [[ -n "$id" ]] && pat+=(-e "\"${id}\"")
+        [[ -n "$id" ]] && pat+=(-e "\"${id}\"") && MMRY_WAITING_SEEN+="${n} "
     done <<< "$uses"
     ids="$(grep -F "${pat[@]}" -- "$tp" 2>/dev/null | "$MMRY_JQ" -R -r '
         (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
@@ -208,24 +208,41 @@ mmry_waiting_tool_name() {
     MMRY_WAITING_TOOL="$name"
 }
 
-# _mmry_waiting_asked_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH  (#33898 C1 in 33900)
-# Sets MMRY_WAITING_TOOL to the name to send when a fresh ask record exists. The record never supplies
-# a name on its own: an MCP name in it must be the one still-waiting call of its server in the
-# transcript (_mmry_waiting_open_call); a built-in name in it must equal the sentence's word.
+# _mmry_waiting_asked_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH  (#33898 C1, round 4)
+# Sets MMRY_WAITING_TOOL to the name to send when a fresh ask record exists. Lead 439's ruling (b),
+# 2026-11-18: a fresh record wins only when the sentence gives no confirmed name.
+#   - A built-in's record (no mcp__): a built-in's sentence is exactly its name, so the record is
+#     this prompt's only when it equals the sentence's whole word. Otherwise no name.
+#   - The sentence confirms a list name (a built-in) and the record names another tool: no name.
+#   - The sentence's MCP name, confirmed by the transcript, equals the record: that name.
+#   - Otherwise (a multi-word display name such as Read File, a display word off the list, a title,
+#     or a confirmed MCP name the record contradicts, QA's D2): the record wins, under C1's transcript
+#     test where the transcript holds the record's call. It is sent when that call is the one
+#     still-waiting call of its server, and when the transcript holds no call of that name at all (a
+#     subagent's call is in the subagent's own transcript). A call the transcript holds answered, or
+#     beside another still-waiting call of its server, sends no name (W-39, X-24, X-25).
+#   - An MCP sentence of another server than the record's: the record is not this prompt's.
 _mmry_waiting_asked_name() {
     local rec="${1:-}" name="${2:-}" prefix="${3:-}" tp="${4:-}" rest rp
-    MMRY_WAITING_TOOL="$name"
-    # The sentence's own MCP name, confirmed by the transcript: it stands.
-    [[ -n "$prefix" && -n "$name" ]] && return 0
-    if [[ "$rec" == mcp__* ]]; then
-        rest="${rec#mcp__}"; rp="mcp__${rest%%__*}__"
-        MMRY_WAITING_TOOL=""
-        # An MCP sentence of another server: the record is not this prompt's.
-        [[ -z "$prefix" || "$rp" == "$prefix" ]] || return 0
-        [[ "$rp" == "$prefix" ]] || _mmry_waiting_open_call "$rp" "$tp"
+    MMRY_WAITING_TOOL=""
+    if [[ "$rec" != mcp__* ]]; then
+        [[ -n "$name" && "$rec" == "$name" ]] && MMRY_WAITING_TOOL="$rec"
+        return 0
+    fi
+    [[ -z "$prefix" && -n "$name" && "$_MMRY_WAITING_BUILTIN_TOOLS" == *" ${name} "* ]] && return 0
+    if [[ -n "$prefix" && -n "$name" && "$name" == "$rec" ]]; then
+        MMRY_WAITING_TOOL="$rec"
+        return 0
+    fi
+    rest="${rec#mcp__}"; rp="mcp__${rest%%__*}__"
+    [[ -z "$prefix" || "$rp" == "$prefix" ]] || return 0
+    _mmry_waiting_open_call "$rp" "$tp"
+    if [[ "$MMRY_WAITING_SEEN" == *" ${rec} "* ]]; then
+        # The transcript holds the record's call: C1, it must be the one still-waiting call.
         [[ -n "$MMRY_WAITING_OPEN" && "$rec" == "$MMRY_WAITING_OPEN" ]] && MMRY_WAITING_TOOL="$rec"
-    elif [[ "$rec" != "$name" ]]; then
-        MMRY_WAITING_TOOL=""
+    else
+        # No call of that name in this transcript (a subagent's call, or none readable): the record.
+        MMRY_WAITING_TOOL="$rec"
     fi
     return 0
 }
@@ -586,6 +603,7 @@ if [[ "$event" == "PermissionRequest" ]]; then
     fi
 else
     _mmry_waiting_ask_path "$sid"
+    _k_named=""
     if [[ -f "$MMRY_WAITING_ASK" ]]; then
         _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input=""
         while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
@@ -601,18 +619,14 @@ else
             _k_used=1
             [[ "$_k_asker" =~ $_MMRY_WAITING_SID_RE ]] && asker="$_k_asker"
             if [[ "$_k_tool" =~ $_MMRY_WAITING_TOOL_RE ]]; then
-                exact="$_k_tool"
-                # The NAME SENT (#33898 C1): a record can be left over from an earlier prompt, so it
-                # never supplies a name on its own. An MCP name in the record is sent only when the
-                # transcript holds it as the one still-waiting call of its server (THE TOOL'S NAME,
-                # point 2). Measured on Claude Code 2.1.322, an MCP prompt's sentence can be a bare
-                # display word ("use Echo", "use Ping"), so the record's own server is the one
-                # checked when the sentence names none. A name the sentence already established
-                # stands. A record that disagrees with the sentence and is not confirmed: no name.
+                exact="$_k_tool" _k_named=1
+                # The NAME SENT (#33898 C1, round 4): see _mmry_waiting_asked_name. A fresh record wins
+                # only when the sentence gives no confirmed name (lead 439's ruling (b), 2026-11-18);
+                # a record that contradicts a confirmed list name, or whose call the transcript holds
+                # answered or beside another still-waiting call of its server, sends no name. The
+                # sentence's whole word is passed (MMRY_WAITING_WORD), not the list's answer. A record
+                # whose name breaks the field rule is no record here, and the list rule stands.
                 # The clear's own identity (asker, exact, input) is 33900's and unchanged.
-                # A bare word (no MCP sentence) is judged against the record as it was before the
-                # built-in list (#33898 round 3b): the list applies only when there is no fresh record
-                # naming a tool, so the record gets the word itself, not the list's answer.
                 _s_name="$tool"
                 [[ -n "$mprefix" ]] || _s_name="$MMRY_WAITING_WORD"
                 _mmry_waiting_asked_name "$_k_tool" "$_s_name" "$mprefix" "$tpath"
@@ -625,6 +639,11 @@ else
         # apart from the marker's (#33901's key). A second report of the same prompt finds the record
         # already used, keeps the key "cc", and stays one call.
         [[ -z "$_k_used" ]] || key="cc:${asker:--}:${exact:--}"
+    fi
+    # No record naming a tool (round 4, lead 439's ruling 4): an MCP sentence whose title is a list
+    # name is judged by the list rule, and its whole text is not one list entry, so no name.
+    if [[ -z "$_k_named" && -n "$mprefix" && -n "$tool" && "$_MMRY_WAITING_BUILTIN_TOOLS" == *" ${tool#"$mprefix"} "* ]]; then
+        tool=""
     fi
 fi
 
