@@ -195,63 +195,177 @@ _slow() {
 # =============================================================================================
 # BUDGET (Windows): PROCESSES PER PER-MESSAGE HOOK, COUNTED BY THE OPERATING SYSTEM
 # =============================================================================================
-# TC5's condition: a configured Codex install, no Foundation set, no Formation. Each registered
-# commandWindows run the way Codex's PowerShell runs it (cmd /d /c ... with the payload on stdin),
-# inside a job object that counts every process the OS creates. One firing first, uncounted, so the
-# counted one is an ordinary prompt and not the first one.
+# Each registered commandWindows run the way Codex's PowerShell runs it (cmd /d /c ... with the payload
+# on stdin), inside a job object that counts every process the OS creates.
 #
 # THE BUDGETS, and where each process goes after #33967:
 #   cmd 1, Git's bin\bash.exe wrapper 1, bash 1, codex-hook.sh's subshell for the handler 1 = 4
 #   stop-check: 4, and nothing of its own
-#   Foundation parts 2-6: 4, and the rename of the outcome record (mv: fork and exec) 2 = 6
-#   Foundation part 1: 6, and three forks for the host's command names in its notice = 9
+#   Foundation parts 2-6, no set (TC5's account): 4, and the rename of the outcome record (mv: fork
+#     and exec) 2 = 6
+#   Foundation part 1, no set: 6, and three forks for the host's command names in its notice = 9
 #   codex-first-prompt and formation-check: cmd alone, their gates = 1
-# Before #33967: 1, 13, 10 x5, 1, 18; 84 for all nine together.
-declare -gA BUDGET=(
-    [codex-first-prompt]=1
-    ["userpromptsubmit-foundation --part 1"]=9
-    ["userpromptsubmit-foundation --part 2"]=6
-    ["userpromptsubmit-foundation --part 3"]=6
-    ["userpromptsubmit-foundation --part 4"]=6
-    ["userpromptsubmit-foundation --part 5"]=6
-    ["userpromptsubmit-foundation --part 6"]=6
-    [formation-check]=1
-    [stop-check]=4
-)
+# Before #33967 (develop beb0b24), the same count: 1, 13, 10 x5, 1, 18; 83 for all nine.
+# Exact, so one helper process added back to the launcher, codex-hook.sh or stop-check turns this red
+# (run-codex-mutations.sh, the [33967 budget] experiments).
+_budget() {
+    case "$1" in
+        codex-first-prompt|formation-check) echo 1 ;;
+        "userpromptsubmit-foundation --part 1") echo 9 ;;
+        "userpromptsubmit-foundation --part "[2-6]) echo 6 ;;
+        stop-check) echo 4 ;;
+        *) echo "" ;;
+    esac
+}
+# With a prepared Foundation set (a customer who has Foundation memories), on an ordinary prompt: the
+# launcher 4, and the served path 5. Before #33967 (develop beb0b24): 13 a part, 78 for six.
+_budget_set() {
+    case "$1" in
+        "userpromptsubmit-foundation --part 1") echo 9 ;;
+        "userpromptsubmit-foundation --part "[2-6]) echo 9 ;;
+        *) echo "" ;;
+    esac
+}
 
-@test "33967 budget windows: every per-message Codex hook starts no more processes than its budget" {
-    _is_windows || skip "Windows only: counts processes with a Windows job object"
-    command -v pwsh >/dev/null 2>&1 || skip "no pwsh"
-    local counter; counter="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/count-processes.ps1")"
-    # The plugin as Codex installs it, in a private Codex home.
+# The plugin as Codex installs it, in a private Codex home; sets WROOT.
+_install_codex_copy() {
     local root="$CODEX_DIR/plugins/cache/mmry-plugin/mmry/local"
     mkdir -p "$root"
     ( cd "$PLUGIN_ROOT" && tar -cf - --exclude=./tests . ) | ( cd "$root" && tar -xf - )
-    local wroot wpay
-    wroot="$(cygpath -w "$root")"
+    WROOT="$(cygpath -w "$root")"
+}
+
+# Count one registered commandWindows; $1 the registration, $2 where its stdout goes. Echoes the count.
+_count_registered() {
+    local c="$1" out="$2" counter wpay
+    counter="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/count-processes.ps1")"
     _payload > "$TEST_TMPDIR/payload.json"
     wpay="$(cygpath -w "$TEST_TMPDIR/payload.json")"
-    local -a lines; mapfile -t lines < <(node -e '
+    c="${c//\$\{PLUGIN_ROOT\}/$WROOT}"
+    env -u MMRY_CONFIG_FILE CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$(cygpath -w "$TMPDIR")" HOME="$(cygpath -w "$HOME")" \
+        pwsh -NoProfile -File "$counter" -CommandLine "cmd.exe /d /s /c \"${c#cmd /d /c } < \"$wpay\" > \"$(cygpath -w "$out")\"\"" \
+        < /dev/null 2>/dev/null | tr -d '\r' | sed -n 's/.*PROCESSES=\([0-9]*\).*/\1/p' | tail -1
+}
+
+_registrations_windows() {
+    node -e '
         const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
         for (const g of d.hooks.UserPromptSubmit) for (const h of g.hooks) console.log(h.commandWindows);
-    ' "$HOOKS")
-    (( ${#lines[@]} == 9 )) || { echo "expected 9 per-message registrations, found ${#lines[@]}"; return 1; }
-    local c label cmdline got total=0 over=""
-    for c in "${lines[@]}"; do
-        c="${c%$'\r'}"
+    ' "$HOOKS" | tr -d '\r'
+}
+
+@test "33967 budget windows: every per-message Codex hook starts no more processes than its budget" {
+    # TC5's condition: a configured Codex install, no Foundation set, no Formation. One firing first,
+    # uncounted, so the counted one is an ordinary prompt and not the first.
+    _is_windows || skip "Windows only: counts processes with a Windows job object"
+    command -v pwsh >/dev/null 2>&1 || skip "no pwsh"
+    _install_codex_copy
+    local c label got want total=0 n=0 over=""
+    while IFS= read -r c; do
+        [[ -n "$c" ]] || continue
+        n=$(( n + 1 ))
         label="${c##*codex-hook.cmd\" }"
-        [[ -n "${BUDGET[$label]:-}" ]] || { echo "no budget for [$label]"; return 1; }
-        c="${c//\$\{PLUGIN_ROOT\}/$wroot}"
-        cmdline="cmd.exe /d /s /c \"${c#cmd /d /c } < \"$wpay\"\""
-        env -u MMRY_CONFIG_FILE CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$(cygpath -w "$TMPDIR")" HOME="$(cygpath -w "$HOME")" \
-            pwsh -NoProfile -File "$counter" -CommandLine "$cmdline" < /dev/null > /dev/null 2>&1
-        got="$(env -u MMRY_CONFIG_FILE CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$(cygpath -w "$TMPDIR")" HOME="$(cygpath -w "$HOME")" \
-            pwsh -NoProfile -File "$counter" -CommandLine "$cmdline" < /dev/null 2>/dev/null | tr -d '\r' | sed -n 's/.*PROCESSES=\([0-9]*\).*/\1/p' | tail -1)"
+        want="$(_budget "$label")"
+        [[ -n "$want" ]] || { echo "no budget for [$label]"; return 1; }
+        _count_registered "$c" "$TEST_TMPDIR/first.out" >/dev/null
+        got="$(_count_registered "$c" "$TEST_TMPDIR/counted.out")"
         [[ "$got" =~ ^[0-9]+$ ]] || { echo "the counter did not answer for [$label]"; return 1; }
-        echo "$(printf '%-40s' "$label") ${got} processes (budget ${BUDGET[$label]})" >&3
+        echo "$(printf '%-40s' "$label") ${got} processes (budget ${want})" >&3
         total=$(( total + got ))
-        (( got <= BUDGET[$label] )) || over+=" [$label: $got > ${BUDGET[$label]}]"
-    done
+        (( got <= want )) || over="${over} [$label: $got > $want]"
+    done < <(_registrations_windows)
     echo "all nine: ${total} processes" >&3
+    (( n == 9 )) || { echo "expected 9 per-message registrations, found $n"; return 1; }
     [[ -z "$over" ]] || { echo "over budget:$over"; return 1; }
+}
+
+@test "33967 budget windows: with a Foundation set, an ordinary prompt's parts start no more than their budget, and deliver it whole" {
+    _is_windows || skip "Windows only: counts processes with a Windows job object"
+    command -v pwsh >/dev/null 2>&1 || skip "no pwsh"
+    _install_codex_copy
+    _seed_set
+    local k c pids=()
+    # The prompt that prepares the set, uncounted, all six together as Codex starts them.
+    for k in 1 2 3 4 5 6; do
+        c="$(_registered UserPromptSubmit "--part $k" commandWindows)"
+        _count_registered "$c" "$TEST_TMPDIR/prep$k.json" >/dev/null &
+        pids+=("$!")
+    done
+    wait "${pids[@]}"
+    local got want over="" total=0 joined="" ctx
+    for k in 1 2 3 4 5 6; do
+        c="$(_registered UserPromptSubmit "--part $k" commandWindows)"
+        got="$(_count_registered "$c" "$TEST_TMPDIR/served$k.json")"
+        want="$(_budget_set "userpromptsubmit-foundation --part $k")"
+        [[ "$got" =~ ^[0-9]+$ ]] || { echo "the counter did not answer for part $k"; return 1; }
+        echo "with a set, part $k: ${got} processes (budget ${want})" >&3
+        total=$(( total + got ))
+        (( got <= want )) || over="${over} [part $k: $got > $want]"
+        ctx="$(_ctx "$TEST_TMPDIR/served$k.json")"; ctx="${ctx%.}"
+        joined="${joined}${ctx#*if their versions differ, tell the user.$'\n\n'}"
+    done
+    echo "with a set, six parts: ${total} processes" >&3
+    [[ -z "$over" ]] || { echo "over budget:$over"; return 1; }
+    local wantset; wantset="$(cat "$CACHE"; printf .)"; wantset="${wantset%.}"; wantset="${wantset%$'\n'}"
+    [[ "$joined" == "$wantset" ]] || { echo "the counted prompt did not deliver the set whole (${#joined} of ${#wantset} bytes)"; return 1; }
+}
+
+@test "33967 stamp windows: the launch time reaches the per-message handlers through cmd and codex-hook.sh" {
+    # The real launcher and the real codex-hook.sh, with stand-ins for the two per-message handlers that
+    # only report what they were handed. Without the stamp a handler on Windows cannot know how much of
+    # its limit the launch already used.
+    _is_windows || skip "Windows only: needs cmd.exe"
+    local root="$TEST_TMPDIR/stamp root" h out
+    mkdir -p "$root"
+    cp -R "$PLUGIN_ROOT/hooks-handlers" "$root/"
+    for h in stop-check userpromptsubmit-foundation; do
+        printf '#!/usr/bin/env bash\necho "HANDED %s LAUNCH=[${MMRY_HOOK_LAUNCH_SECS:-unset}] STAMP=[${MMRY_CODEX_HOOK_STARTED:-unset}]"\n' "$h" > "$root/hooks-handlers/$h.sh"
+    done
+    local wroot; wroot="$(cygpath -w "$root")"
+    for h in "stop-check" "userpromptsubmit-foundation --part 1"; do
+        # shellcheck disable=SC2086
+        out="$(_payload | env -u MMRY_CODEX_HOOK_STARTED -u MMRY_HOOK_LAUNCH_SECS CODEX_HOME="$(cygpath -w "$CODEX_DIR")" \
+            cmd //d //c "${wroot}\\hooks-handlers\\codex-hook.cmd" $h 2>&1 | tr -d '\r')"
+        echo "$h: $out" >&3
+        [[ "$out" =~ HANDED\ ${h%% *}\ LAUNCH=\[([0-9]+)\]\ STAMP=\[\ ?[0-9]{1,2}:[0-9]{2}:[0-9]{2} ]] || {
+            echo "$h was not handed the launch time: $out"; return 1; }
+        (( BASH_REMATCH[1] <= 60 )) || { echo "$h was handed an implausible launch: ${BASH_REMATCH[1]}"; return 1; }
+    done
+}
+
+# =============================================================================================
+# SECURITY (Windows): THE BUILTIN PATH SCAN NEVER CHOOSES A GIT IN THE CUSTOMER'S PROJECT
+# =============================================================================================
+# where.exe $PATH:git.exe searched PATH only. Its replacement walks PATH with builtins, and a PATH entry
+# that is not absolute ("." or "tools") names a folder in the project Codex runs the hook from. A
+# git.exe and a bin\bash.exe planted there must never be chosen; only absolute entries count.
+
+@test "33967 security windows: a relative PATH entry naming a folder in the project never chooses its bash" {
+    _is_windows || skip "Windows only: needs cmd.exe"
+    local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
+    [[ -f "$jq" ]] || skip "vendored Windows jq not present"
+    local root="$TEST_TMPDIR/plugin root"
+    mkdir -p "$root/hooks-handlers"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
+    # The plant: tools\git.exe and bin\bash.exe in the project; the bash is a copy of the vendored jq,
+    # which announces itself with "jq: error" when handed a script path.
+    local project="$TEST_TMPDIR/customer project"
+    mkdir -p "$project/tools" "$project/sub/tools" "$project/bin"
+    cp "$jq" "$project/tools/git.exe"; cp "$jq" "$project/sub/tools/git.exe"; cp "$jq" "$project/bin/bash.exe"
+    local gitcmd winroot out f
+    gitcmd="$(cygpath -w "$(dirname "$(command -v git)")")"
+    winroot="$(cygpath -w "$root")"
+    # Relative entries first on PATH, a real Git after them; run from the project, then a subfolder.
+    # PATH and the folder are set inside cmd, so nothing converts them on the way.
+    printf '@echo off\r\ncd /d "%s"\r\nset "PATH=tools;.;sub\\tools;%%SystemRoot%%\\System32;%s"\r\ncall "%s\\hooks-handlers\\codex-hook.cmd" stop-check\r\n' \
+        "$(cygpath -w "$project")" "$gitcmd" "$winroot" > "$TEST_TMPDIR/from-project.cmd"
+    printf '@echo off\r\ncd /d "%s"\r\nset "PATH=tools;..\\tools;%%SystemRoot%%\\System32;%s"\r\ncall "%s\\hooks-handlers\\codex-hook.cmd" stop-check\r\n' \
+        "$(cygpath -w "$project/sub")" "$gitcmd" "$winroot" > "$TEST_TMPDIR/from-sub.cmd"
+    for f in from-project from-sub; do
+        out="$(env -u NoDefaultCurrentDirectoryInExePath cmd //d //c "$(cygpath -w "$TEST_TMPDIR/$f.cmd")" < /dev/null 2>&1 | tr -d '\r')"
+        echo "$f: $out" >&3
+        [[ "$out" != *"jq: error"* ]] || { echo "$f: the launcher ran the bash planted in the project: $out"; return 1; }
+        [[ "$out" == *"REACHED handler=[stop-check]"* ]] || { echo "$f: the launcher did not reach the handler: $out"; return 1; }
+    done
 }
