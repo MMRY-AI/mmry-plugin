@@ -351,8 +351,15 @@ fi
 # continuing - means the prompt was answered, so the flag is cleared and the lead told. HERE, BEFORE
 # THE AGENT TEST, because clearing is not delivery: it moves no read position and shows nothing.
 # Costs one file test when no marker is there, which is every event but the first after a prompt.
+# EXCEPT A SESSION START (#33901): a session that starts, or resumes after a crash, has no prompt of an
+# earlier process still open, so the marker is removed with no call (--forget). Clearing would tell the
+# lead an approval was answered when nobody answered it.
 if [[ -n "$session_id" && -f "${MMRY_TMPDIR}/.mmry-waiting-${session_id}" && -f "${HANDLER_DIR}/formation-waiting.sh" ]]; then
-    bash "${HANDLER_DIR}/formation-waiting.sh" --clear "$session_id" </dev/null >/dev/null 2>&1 || true
+    if [[ "$hook_event" == "SessionStart" || ( -z "$hook_event" && "${MMRY_FORMATION_MODE:-}" == "start" ) ]]; then
+        bash "${HANDLER_DIR}/formation-waiting.sh" --forget "$session_id" </dev/null >/dev/null 2>&1 || true
+    else
+        bash "${HANDLER_DIR}/formation-waiting.sh" --clear "$session_id" </dev/null >/dev/null 2>&1 || true
+    fi
 fi
 [[ -z "$hook_agent_id" ]] || exit 0
 # Nothing proved the jq above (no payload, or one that did not parse): prove it the old way now.
