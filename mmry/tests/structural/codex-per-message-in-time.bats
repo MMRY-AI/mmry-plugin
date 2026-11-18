@@ -154,11 +154,31 @@ _slow() {
     [[ "$ctx" == *"PREVIOUS turn"*"cut short"* ]] || { echo "the next turn was not told the last one went without the set: ${ctx:0:300}"; return 1; }
 }
 
-@test "33967 R1: a Foundation part with a launch of 6 s still gives the set its whole time from launch, not 10 s on top" {
-    # The deadline counts from the launch, so the parts end by about 10 s after launch, not 16.
+@test "33967 R1: a Foundation part whose launch used 17 s ends at once, says nothing, and the next prompt is told" {
+    # Too late to do anything inside 20 s with Codex's own launch in hand: no work at all this turn.
     _seed_set
     _slow cksum 60
-    local launch=6 stamp; stamp="$(_stamp_ago "$launch")"
+    local launch=17 stamp; stamp="$(_stamp_ago "$launch")"
+    local start=$SECONDS
+    _codex_fire "userpromptsubmit-foundation --part 1" "$stamp" "$TEST_TMPDIR/p1.json"; local rc=$?
+    local elapsed=$(( SECONDS - start ))
+    echo "launch ${launch}s + part 1 ${elapsed}s" >&3
+    (( rc == 0 )) || { echo "exited $rc"; return 1; }
+    (( launch + elapsed + CODEX_LAUNCH_MARGIN <= 20 )) || { echo "part 1 ended $(( launch + elapsed ))s after launch"; return 1; }
+    [[ ! -s "$TEST_TMPDIR/p1.json" ]] || { echo "a part with no time left still spoke: $(head -c 300 "$TEST_TMPDIR/p1.json")"; return 1; }
+    rm -f "$SHIMS/cksum"
+    _codex_fire "userpromptsubmit-foundation --part 1" "" "$TEST_TMPDIR/next1.json"
+    local ctx; ctx="$(_ctx "$TEST_TMPDIR/next1.json")"
+    [[ "$ctx" == *"PREVIOUS turn"*"cut short"* ]] || { echo "the next prompt was not told: ${ctx:0:300}"; return 1; }
+    [[ "$ctx" == *"This is PART 1 OF "* ]] || { echo "the next prompt did not restate the set: ${ctx:0:300}"; return 1; }
+}
+
+@test "33967 R1: a Foundation part with a launch of 8 s still gives the set its whole time from launch, not 10 s on top" {
+    # The deadline counts from the launch, so the part ends about 10 s after launch plus its tail; a
+    # deadline that ignored the launch would end 18 s after it plus the same tail.
+    _seed_set
+    _slow cksum 60
+    local launch=8 stamp; stamp="$(_stamp_ago "$launch")"
     local start=$SECONDS
     _codex_fire "userpromptsubmit-foundation --part 1" "$stamp" "$TEST_TMPDIR/p1.json"
     local elapsed=$(( SECONDS - start ))
@@ -167,7 +187,7 @@ _slow() {
     # assistant. A part that finished early would pass the bound below whatever the deadline counts.
     local ctx; ctx="$(_ctx "$TEST_TMPDIR/p1.json")"
     [[ "$ctx" == *"cut short"* ]] || { echo "premise: part 1 did not reach its deadline: ${ctx:0:300}"; return 1; }
-    (( launch + elapsed <= 10 + 4 )) || { echo "part 1 ended $(( launch + elapsed ))s after launch: its deadline did not count the launch"; return 1; }
+    (( launch + elapsed <= 10 + 5 )) || { echo "part 1 ended $(( launch + elapsed ))s after launch: its deadline did not count the launch"; return 1; }
     [[ -z "$(_sysmsg "$TEST_TMPDIR/p1.json")" ]] || { echo "showed the person: $(_sysmsg "$TEST_TMPDIR/p1.json")"; return 1; }
 }
 
@@ -286,6 +306,14 @@ _registrations_windows() {
     done < <(_registrations_windows)
     echo "all nine: ${total} processes" >&3
     (( n == 9 )) || { echo "expected 9 per-message registrations, found $n"; return 1; }
+    # stop-check above was counted on its quiet path (the uncounted firing had just prompted). Its other
+    # path, the firing that prompts and stamps its marker, has the same budget.
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-count"
+    got="$(_count_registered "$(_registered UserPromptSubmit stop-check commandWindows)" "$TEST_TMPDIR/firing.out")"
+    echo "$(printf '%-40s' "stop-check, firing") ${got} processes (budget $(_budget stop-check))" >&3
+    [[ "$(_ctx "$TEST_TMPDIR/firing.out")" == *"Save what is new since the last memory"* ]] || {
+        echo "premise: the counted stop-check did not fire: $(cat "$TEST_TMPDIR/firing.out")"; return 1; }
+    (( got <= $(_budget stop-check) )) || over="${over} [stop-check firing: $got > $(_budget stop-check)]"
     [[ -z "$over" ]] || { echo "over budget:$over"; return 1; }
 }
 
