@@ -10,7 +10,8 @@
 # TWO WAYS IN, ONE PAYLOAD READ:
 #   Claude Code  the Notification hook, notification_type "permission_prompt". The payload carries no
 #                tool field, only a sentence ("Claude needs your permission to use Bash"); the tool's
-#                name is the one bare word after "permission to use", or nothing.
+#                name is the one bare word after "permission to use", or for an MCP tool the name
+#                built from the sentence (THE TOOL'S NAME below, #33898), or nothing.
 #   Codex        the PermissionRequest hook (Codex CLI 0.165.0 and later): tool_name is in the payload.
 #                CODEX READS THIS HOOK'S STDOUT AS AN APPROVAL DECISION, so this handler prints
 #                NOTHING, ever: no stdout, no stderr. An empty answer leaves Codex's own prompt in place.
@@ -70,6 +71,66 @@ _MMRY_WAITING_TOOL_RE='^[A-Za-z0-9_.:-]{1,64}$'
 # A session id this handler keys a marker by: the shape every Claude Code and Codex id has. Anything
 # else gets no marker and no call, so a marker name can never be built from unusual text.
 _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
+
+# ---- THE TOOL'S NAME (#33898) -----------------------------------------------------------------
+# Claude Code's sentence (2.1.322, read from the client) is "Claude needs your permission to use X",
+# where X is the tool's display name. For a built-in tool that is its name (Bash, Write). For an MCP
+# tool it is "<server> - <title or name> (MCP)": the server as configured (a plugin's server is
+# plugin:<plugin>:<server>) and the tool's annotation title when it has one, its name otherwise. The
+# first word, which is all this used to take, is therefore the SERVER, and the lead was told "mmry".
+#
+# The name sent for an MCP tool is the one Claude Code itself uses, in permission settings and in
+# every PostToolUse: mcp__<server>__<tool>, the server with every character outside A-Z a-z 0-9 _ -
+# made "_" (and, for a "claude.ai " server, runs of "_" made one and the ends trimmed), as Claude Code
+# builds it. Wording approved by cmo-mmry 2026-11-17 (33898-wording-cmo-verdict.md): the shipped
+# sentence "The tool asking is <name>." stays; no new customer sentence.
+#   1. The part after " - " is a plain name: mcp__<server>__<it>.
+#   2. Whatever it is, when the transcript the payload names holds a call to an mcp__<server>__ tool,
+#      that call's name is preferred: the one the sentence built if it is there, otherwise the latest.
+#      A title ("Save a file") cannot be turned into a name, and a one-word title would turn into a
+#      wrong one; the call in the transcript is the name itself. Only the matched name is read out of
+#      the transcript, never anything of the call's input.
+#   3. Anything else (no " - ", text after "(MCP)", a title and no call to read, or a built name that
+#      breaks the field rule) sends NO name, and the lead's sentence is left out, exactly as when no
+#      name arrives. Never a cut or cleaned name: a shortened name could name the wrong tool.
+# Codex's PermissionRequest carries tool_name itself, and for an MCP tool it is already
+# mcp__<server>__<tool> (the Codex CLI's own naming rule), so it passes through the same field rule.
+#
+# This jq turns the message into [name, mcp-prefix]; mmry_waiting_tool_name finishes the job. 33900
+# reuses both, so the name the marker records is the name the asked tool's PostToolUse carries.
+_MMRY_WAITING_SENTENCE_JQ='
+    def ccname: gsub("[^A-Za-z0-9_-]"; "_");
+    . as $m
+    | if ($m | test("\\(MCP\\)")) then
+        (($m | capture("permission to use (?<s>.+?) - (?<t>.+?) ?\\(MCP\\)$")) // {s: "", t: ""}) as $c
+        | if $c.s == "" then ["", ""]
+          else ($c.s | ccname
+                | if ($c.s | startswith("claude.ai ")) then gsub("_+"; "_") | ltrimstr("_") | rtrimstr("_") else . end) as $srv
+               | [(if ($c.t | test("^[A-Za-z0-9_-]+$")) then "mcp__\($srv)__\($c.t)" else "" end), "mcp__\($srv)__"]
+          end
+      else [((($m | capture("permission to use (?<t>[^ ]+)")) // {t: ""}) | .t), ""]
+      end'
+
+# mmry_waiting_tool_name EVENT CODEX_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH
+# Sets MMRY_WAITING_TOOL to the asking tool's bare name, or empty. One small fork-free path for every
+# ordinary tool; the transcript is read only for an MCP sentence.
+mmry_waiting_tool_name() {
+    local event="${1:-}" ptool="${2:-}" name="${3:-}" prefix="${4:-}" tp="${5:-}" line n last="" hit=""
+    MMRY_WAITING_TOOL=""
+    if [[ "$event" == "PermissionRequest" ]]; then
+        name="$ptool"
+    elif [[ -n "$prefix" && "$prefix" =~ ^mcp__[A-Za-z0-9_-]+__$ && -f "$tp" && -r "$tp" ]]; then
+        while IFS= read -r line; do
+            n="${line#\"name\":\"}"; n="${n%\"}"
+            last="$n"
+            [[ -n "$name" && "$n" == "$name" ]] && hit=1
+        done < <(tail -c 262144 -- "$tp" | grep -o "\"name\":\"${prefix}[A-Za-z0-9_-]*\"" || true)
+        [[ -n "$hit" || -z "$last" ]] || name="$last"
+    fi
+    # A name that is not bare, or too long, is dropped, never trimmed into one.
+    [[ "$name" =~ $_MMRY_WAITING_TOOL_RE ]] || name=""
+    MMRY_WAITING_TOOL="$name"
+}
 
 _mmry_waiting_marker() { MMRY_WAITING_MARKER="${MMRY_TMPDIR}/.mmry-waiting-$1"; }
 
@@ -154,31 +215,29 @@ source "${HANDLER_DIR}/lib-jq.sh" || exit 0
 mmry_resolve_jq >/dev/null || exit 0
 [[ -n "${MMRY_JQ:-}" ]] || exit 0
 
-# Six fields in one jq call, joined by the ASCII unit separator (0x1F), each with that character and
+# Eight fields in one jq call, joined by the ASCII unit separator (0x1F), each with that character and
 # line breaks removed, so a crafted value cannot shift the fields after it. NOT a tab: a tab is IFS
 # whitespace, so read collapses empty fields and every later field moves one place left (seen red: the
-# tool name arrived empty on every event). The message is reduced here to the one word after
-# "permission to use", so the rest of the sentence never reaches a shell variable.
+# tool name arrived empty on every event). The message is reduced here, by _MMRY_WAITING_SENTENCE_JQ, to
+# a tool name and an MCP name prefix, so the rest of the sentence never reaches a shell variable.
 _fields='[(.session_id // "" | tostring), (.hook_event_name // "" | tostring),
           (.notification_type // "" | tostring), (.tool_name // "" | tostring),
-          ((.message // "" | tostring) | (capture("permission to use (?<t>[^ ]+)") // {t: ""}) | .t),
-          (.turn_id // "" | tostring)]
-         | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
+          ((.message // "" | tostring) | '"$_MMRY_WAITING_SENTENCE_JQ"'),
+          (.turn_id // "" | tostring), (.transcript_path // "" | tostring)]
+         | flatten | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
 parsed="$("$MMRY_JQ" -r "$_fields" <<< "$payload" || true)"
 [[ "$parsed" == *$'\037'* ]] || exit 0
-IFS=$'\037' read -r sid event ntype ptool mtool turn <<< "$parsed" || true
+IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath <<< "$parsed" || true
 
-tool=""
 case "$event" in
     Notification)
-        [[ "$ntype" == "permission_prompt" ]] || exit 0
-        tool="$mtool" ;;
-    PermissionRequest)
-        tool="$ptool" ;;
+        [[ "$ntype" == "permission_prompt" ]] || exit 0 ;;
+    PermissionRequest) ;;
     *) exit 0 ;;
 esac
-# A name that is not bare is dropped, never trimmed into one.
-[[ "$tool" =~ $_MMRY_WAITING_TOOL_RE ]] || tool=""
+# The asking tool's name, or none (#33898): see THE TOOL'S NAME above.
+mmry_waiting_tool_name "$event" "$ptool" "$mtool" "$mprefix" "$tpath"
+tool="$MMRY_WAITING_TOOL"
 
 # Which prompt this is (#33901, A MARKER NEVER OUTLIVES ITS PROMPT above). A turn id that is not the
 # plain id shape is not used, so the key, like the marker's name, is never built from unusual text.
