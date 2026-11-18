@@ -51,8 +51,8 @@ set -euo pipefail
 # did: under Git Bash on a loaded Windows machine each process start took about a second, and this file
 # started ten of them (dirname, stat, date, head, tr, touch, sed), even on the early way out. Every one
 # is now a builtin: the directory by parameter expansion, the clock by printf, files by read and
-# redirection, the escaping by parameter expansion. The marker carries its own time, so its age needs
-# no stat; a marker without one (an older version, a test's touch) is still aged by stat, once.
+# redirection, the escaping by parameter expansion. The marker's time is also recorded beside it, so
+# its age needs no stat while the marker is not older than that record (see _mmry_sc_marker_at).
 #
 # AND A LAUNCH THAT ALREADY USED THE TIME DOES NOTHING (#33967). MMRY_HOOK_LAUNCH_SECS is what the
 # launcher measured before handing over (codex-hook.sh on Codex; unset, so 0, elsewhere). From 6 s of
@@ -147,18 +147,28 @@ if _mmry_sc_renewal_turn; then
 fi
 
 # The marker's time: the one it carries (#33967), else its mtime by stat, as before.
+# THE MARKER'S MTIME STAYS THE AUTHORITY. Its time is also written to a file beside it, written FIRST,
+# and that record is believed only while the marker is not older than it: [[ -ot ]] is a builtin
+# comparison of the two mtimes, so the ordinary prompt reads the time with no process. A marker whose
+# mtime was moved back afterwards (touch -t, as the suites do), or one with no record beside it (an
+# older version's), is older than the record or has none, and is aged by stat as it always was.
+_MMRY_SC_AT_FILE="${MARKER}.at"
 _mmry_sc_marker_at() {
-    _mmry_sc_first "$MARKER"
-    if [[ "$_MMRY_SC_LINE" =~ ^[0-9]{1,12}$ ]]; then
-        _MMRY_SC_AT="$_MMRY_SC_LINE"
-    else
-        _MMRY_SC_AT="$(_mmry_mtime "$MARKER")"
+    if [[ -f "$_MMRY_SC_AT_FILE" && -f "$MARKER" && ! "$MARKER" -ot "$_MMRY_SC_AT_FILE" ]]; then
+        _mmry_sc_first "$_MMRY_SC_AT_FILE"
+        if [[ "$_MMRY_SC_LINE" =~ ^[0-9]{1,12}$ ]]; then
+            _MMRY_SC_AT="$_MMRY_SC_LINE"
+            return 0
+        fi
     fi
+    _MMRY_SC_AT="$(_mmry_mtime "$MARKER")"
 }
-# Stamp the marker with the time, by redirection: no touch.
+# Stamp the marker by redirection, no touch: the record first, then the marker, so the marker is never
+# older than its record.
 _mmry_sc_stamp() {
     _mmry_sc_now
-    printf '%s\n' "$_MMRY_SC_NOW" > "$MARKER" 2>/dev/null
+    printf '%s\n' "$_MMRY_SC_NOW" > "$_MMRY_SC_AT_FILE" 2>/dev/null
+    : > "$MARKER" 2>/dev/null
 }
 
 # Cross-platform mtime helper
