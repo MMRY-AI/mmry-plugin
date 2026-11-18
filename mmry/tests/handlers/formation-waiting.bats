@@ -697,7 +697,7 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
 }
 
 @test "X-07 33900 req3: a subagent's own prompt clears on that subagent's call to the asked tool; with no transcript the record alone names no tool (33898 C1)" {
-    _cc_raise mcp__probe__ping "$SUB" 'probe - Ping (MCP)'
+    _cc_raise mcp__probe__ping "$SUB" Ping
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     # Round 3 (#33898 C1, lead 439 2026-11-18): the ask record never supplies a name on its own, and a
     # subagent's call is not in the main transcript, so the lead's tool sentence is left out.
@@ -893,20 +893,47 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     _cleared_once
 }
 
-@test "X-24 33898 C1 in the 33900 stack: a fresh ask record names a titled MCP tool only when the transcript holds it as the one still-waiting call of its server" {
+# #33898 C1 in the 33900 stack (round 3): a fresh ask record names an MCP tool only when the transcript
+# holds it as the one still-waiting call of its server. Claude Code 2.1.322 was measured sending an MCP
+# prompt's sentence as a bare display word ("use Echo", "use Ping"; captures s1, s3, s5), so both that
+# shape and the "<server> - <title> (MCP)" shape are covered.
+@test "X-24 33898 C1 in the 33900 stack: a fresh ask record names an MCP tool only when the transcript holds it as the one still-waiting call of its server" {
+    local tp="$TEST_TMPDIR/transcript.jsonl" m
+    for m in 'Ping' 'probe - Ping the probe (MCP)'; do
+        rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"; : > "$URLS"; : > "$NOTICES"
+        _transcript "$tp" mcp__probe__ping
+        _ask "$(_cc_ask mcp__probe__ping)" || true
+        _waiting "$(_notification_tp "Claude needs your permission to use $m" "$tp")"
+        [ "$(_puts)" -eq 1 ] || { echo "for: $m"; cat "$URLS"; return 1; }
+        "$(command -v jq)" -e '.toolName == "mcp__probe__ping"' < "$BODIES" >/dev/null || { echo "for: $m"; cat "$BODIES"; return 1; }
+        _check "$(_cc_post mcp__probe__ping)" || true
+        _cleared_once
+        # The same record once the call has been answered (a leftover): no name.
+        rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+        _tool_result "$tp" toolu_1
+        _ask "$(_cc_ask mcp__probe__ping)" || true
+        _waiting "$(_notification_tp "Claude needs your permission to use $m" "$tp")"
+        "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
+}
+
+@test "X-25 33898 C1 in the 33900 stack: two still-waiting calls of the record's server, or a record that disagrees with a built-in prompt, send no name" {
     local tp="$TEST_TMPDIR/transcript.jsonl"
-    _transcript "$tp" mcp__probe__ping
+    # Measured shape s3: slow_read and ping both waiting when ping's prompt shows.
+    _transcript "$tp" mcp__probe__slow_read mcp__probe__ping
     _ask "$(_cc_ask mcp__probe__ping)" || true
-    _waiting "$(_notification_tp 'Claude needs your permission to use probe - Ping the server (MCP)' "$tp")"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Ping' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    "$(command -v jq)" -e '.toolName == "mcp__probe__ping"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
-    # The asked call ran (its tool_result is in the transcript): the same record no longer names it.
-    _check "$(_cc_post mcp__probe__ping)" || true
-    _cleared_once
-    : > "$BODIES"
-    _tool_result "$tp" toolu_1
-    _ask "$(_cc_ask mcp__probe__ping)" || true
-    _waiting "$(_notification_tp 'Claude needs your permission to use probe - Ping the server (MCP)' "$tp")"
+    "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
+    # A leftover Bash record and an Edit prompt: the record is not this prompt's, so no name.
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    _ask_record Bash
+    _waiting "$(_notification_tp 'Claude needs your permission to use Edit' "$tp")"
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
     "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
+    # A record that agrees with the built-in prompt: the word is sent.
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    _ask_record Bash
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    "$(command -v jq)" -e '.toolName == "Bash"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
 }
