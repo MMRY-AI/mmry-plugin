@@ -28,7 +28,9 @@ rem
 rem `@echo off` is load-bearing. With echo on, cmd.exe writes each command line to stdout, and
 rem stdout is what Codex hands the model.
 
-setlocal enableextensions
+setlocal enableextensions disabledelayedexpansion
+rem Delayed expansion off for the whole file, whatever the machine's registry default (#33967 QA round
+rem 2): a ! in PATH, in the answer :from_path carries back, or in an argument is then a character.
 rem THE SESSION START'S CLOCK STARTS HERE (#33062). Codex cuts the SessionStart hook off at 30 s
 rem counted from when it starts this file, and on a loaded machine finding and starting Git's bash
 rem took 4 to 7 s of that. codex-hook.sh counts its budget from this time when it can read it. A
@@ -154,16 +156,26 @@ rem   - Quotes are taken out first. Windows' own search ignores them, and the wa
 rem     the semicolons. An entry quoted because it holds a semicolon splits in two; neither half holds
 rem     git.exe, and the registry below is used, as for any PATH without Git.
 rem   - Each entry is handled inside the loop, never handed to `call`, which would parse it again.
-rem   - Not covered: a ! in an entry, which delayed expansion reads as a variable. That entry is not
-rem     found and the registry below is used: it fails safe, and never runs anything.
-rem   - endlocal and the set that carries the answer out are one line, so the answer is read before
-rem     endlocal and set after it, with delayed expansion off again.
+rem   - A ! IN AN ENTRY IS A CHARACTER (#33967 QA round 2). Round 2 copied each entry with delayed
+rem     expansion on, so cmd expanded !NAME! inside it. That was wrong, and so was its comment, which
+rem     said such an entry was not found and failed safe: !CD!\tools became the project's own tools
+rem     folder, and a git.exe and bin\bash.exe planted there ran as the hook (likewise !__CD__!tools,
+rem     the drive's current folder !=C:!, and !CD! alone); a lone ! was dropped, so C:\x\pl!ain\cmd was
+rem     looked in as C:\x\plain\cmd. Now each entry is copied with delayed expansion OFF, so it is
+rem     taken as written: !CD!\tools is not absolute and is skipped, and a Git installed under a
+rem     folder holding ! is found where it is, as where.exe found it. Delayed expansion is turned on
+rem     again only to test the copy, and a value read that way is never read a second time.
+rem   - The answer leaves straight from the loop: endlocal back to the caller, whose delayed expansion
+rem     is off, and the set on the same line, so a ! in the answer stays a !. Then exit /b, which
+rem     ends the walk at the first match.
 :from_path
 setlocal enabledelayedexpansion
-set "MMRY_FOUND="
 set "MMRY_PS=!PATH:"=!"
-for %%P in ("!MMRY_PS:;=" "!") do if not defined MMRY_FOUND (
+for %%P in ("!MMRY_PS:;=" "!") do (
+    setlocal disabledelayedexpansion
     set "MMRY_PE=%%~P"
+    setlocal enabledelayedexpansion
+    set "MMRY_HIT="
     if defined MMRY_PE (
         set "MMRY_PE_ABS="
         if "!MMRY_PE:~1,2!"==":\" set "MMRY_PE_ABS=1"
@@ -171,13 +183,15 @@ for %%P in ("!MMRY_PS:;=" "!") do if not defined MMRY_FOUND (
         if defined MMRY_PE_ABS (
             if "!MMRY_PE:~-1!"=="\" set "MMRY_PE=!MMRY_PE:~0,-1!"
             if exist "!MMRY_PE!\git.exe" (
-                if exist "!MMRY_PE!\..\bin\bash.exe" set "MMRY_FOUND=!MMRY_PE!\..\bin\bash.exe"
-                if not defined MMRY_FOUND if exist "!MMRY_PE!\..\..\bin\bash.exe" set "MMRY_FOUND=!MMRY_PE!\..\..\bin\bash.exe"
+                if exist "!MMRY_PE!\..\bin\bash.exe" set "MMRY_HIT=!MMRY_PE!\..\bin\bash.exe"
+                if not defined MMRY_HIT if exist "!MMRY_PE!\..\..\bin\bash.exe" set "MMRY_HIT=!MMRY_PE!\..\..\bin\bash.exe"
             )
         )
     )
+    if defined MMRY_HIT for /f "delims=" %%H in ("!MMRY_HIT!") do endlocal & endlocal & endlocal & set "MMRY_GIT_BASH=%%H" & exit /b 0
+    endlocal & endlocal
 )
-endlocal & set "MMRY_GIT_BASH=%MMRY_FOUND%"
+endlocal
 exit /b 0
 
 :from_registry
