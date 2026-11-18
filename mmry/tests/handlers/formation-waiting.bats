@@ -698,12 +698,13 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     _cleared_once
 }
 
-@test "X-07 33900 req3: a subagent's own prompt clears on that subagent's call to the asked tool; with no transcript the record alone names no tool (33898 C1)" {
+@test "X-07 33900 req3: a subagent's own prompt clears on that subagent's call to the asked tool; with no transcript holding the call, the fresh record names it (33898 round 4)" {
     _cc_raise mcp__probe__ping "$SUB" Ping
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    # Round 3 (#33898 C1, lead 439 2026-11-18): the ask record never supplies a name on its own, and a
-    # subagent's call is not in the main transcript, so the lead's tool sentence is left out.
-    "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
+    # Round 4 (#33898, lead 439's ruling (b) 2026-11-18): the sentence's word, Ping, is off the list, so
+    # it confirms no name and the fresh record wins; no transcript holds the subagent's call to refuse
+    # it (C1's test applies only where the transcript holds the record's call: X-24, X-25, W-39).
+    "$(command -v jq)" -e '.toolName == "mcp__probe__ping"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
     _check "$(_cc_post mcp__probe__ping)" || true
     _held
     _check "$(_cc_post mcp__probe__ping "$SUB")" || true
