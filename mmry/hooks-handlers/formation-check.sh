@@ -650,7 +650,10 @@ _fc_find_notice() {
     _fc_clock || return 1
     ago=$(( (_fc_now - since + 30) / 60 )); unit="minutes"
     if (( ago >= 120 )); then ago=$(( (ago + 30) / 60 )); unit="hours"; fi
-    _fc_notice="MMRY FORMATION LISTENING HAD STOPPED (formation ${formation_id}). The background watch that keeps this session listening while it sits idle stopped about ${ago} ${unit} ago, before its set limit, so a message sent to this session after that was not shown when it arrived. Nothing sent to it was lost. Listening has resumed: the watch starts again when this turn ends, as it does after every turn, so if it ever stops, end your turn to resume it. To see anything still waiting now, run /mmry:formation status. If you were waiting on an answer from the lead, check whether it already came."
+    # The status command as this host spells it (codex-customer-strings.bats): one process, and only
+    # when there is a notice to give.
+    local status_cmd; status_cmd="$(mmry_host_formation_ref status)"
+    _fc_notice="MMRY FORMATION LISTENING HAD STOPPED (formation ${formation_id}). The background watch that keeps this session listening while it sits idle stopped about ${ago} ${unit} ago, before its set limit, so a message sent to this session after that was not shown when it arrived. Nothing sent to it was lost. Listening has resumed: the watch starts again when this turn ends, as it does after every turn, so if it ever stops, end your turn to resume it. To see anything still waiting now, run ${status_cmd}. If you were waiting on an answer from the lead, check whether it already came."
     return 0
 }
 
