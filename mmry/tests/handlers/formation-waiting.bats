@@ -380,7 +380,7 @@ _transcript() { # $1 path, $2.. tool names
     done
 }
 # The tool_result Claude Code writes when a call has run (answered), one per id.
-_answered() { # $1 path, $2.. tool_use ids
+_tool_result() { # $1 path, $2.. tool_use ids
     local tp="$1" id; shift
     for id in "$@"; do
         printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"done"}]}}\n' "$id" >> "$tp"
@@ -440,7 +440,7 @@ _ask_record() { # $1 tool name
     local tp="$TEST_TMPDIR/transcript.jsonl"
     # toolu_1 memory_save (answered), toolu_2 memory_search (answered), toolu_3 memory_save (waiting).
     _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search mcp__mmry__memory_save
-    _answered "$tp" toolu_1 toolu_2
+    _tool_result "$tp" toolu_1 toolu_2
     run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
     [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
     # The waiting call written to the transcript twice (one id) is still one call.
@@ -460,7 +460,7 @@ _ask_record() { # $1 tool name
     local tp="$TEST_TMPDIR/transcript.jsonl"
     # read_file ran earlier and was answered; write_file, whose title is "read_file", is the one asking.
     _transcript "$tp" mcp__acme__read_file mcp__acme__write_file
-    _answered "$tp" toolu_1
+    _tool_result "$tp" toolu_1
     run _waiting "$(_notification_tp 'Claude needs your permission to use acme - read_file (MCP)' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
@@ -480,7 +480,7 @@ _ask_record() { # $1 tool name
     local tp="$TEST_TMPDIR/transcript.jsonl"
     # The record and the transcript name a call that has already been answered.
     _transcript "$tp" mcp__acme__write_file
-    _answered "$tp" toolu_1
+    _tool_result "$tp" toolu_1
     _ask_record mcp__acme__write_file
     run _waiting "$(_notification_tp 'Claude needs your permission to use acme - write_file (MCP)' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
