@@ -106,6 +106,10 @@ _MMRY_WAITING_BUILTIN_TOOLS=' Agent Artifact AskUserQuestion Bash CronCreate Cro
 #      name of its own: not "the latest" call, not one of two parallel calls. A subagent's prompt
 #      names the MAIN transcript while its calls are in the subagent's own, so it gets no name.
 #      Calls are read by parsing each line as JSON, never by matching text in a call's input.
+# A sentence without "(MCP)" gives a word only when the WHOLE text after "permission to use" is one
+# word, to the very end of the message (round 4, QA finding D1, lead 439's ruling 2): an untitled MCP
+# tool read_file is shown as "Read File", and its first word, Read, is a built-in's name. Text after
+# the word, a second word or a newline, gives no word at all.
 #   3. Anything else (no " - ", text after "(MCP)", a title, no readable transcript, no still-waiting
 #      call of that name, two or more still-waiting calls of that server, or a built name that breaks
 #      the field rule) sends NO name, and the lead's sentence is left out, exactly as when no name
@@ -126,7 +130,7 @@ _MMRY_WAITING_SENTENCE_JQ='
                 | if ($c.s | startswith("claude.ai ")) then gsub("_+"; "_") | ltrimstr("_") | rtrimstr("_") else . end) as $srv
                | [(if ($c.t | test("^[A-Za-z0-9_-]+$")) then "mcp__\($srv)__\($c.t)" else "" end), "mcp__\($srv)__"]
           end
-      else [((($m | capture("permission to use (?<t>[^ ]+)")) // {t: ""}) | .t), ""]
+      else [((($m | capture("permission to use (?<t>[^\\s]+)\\z")) // {t: ""}) | .t), ""]
       end'
 
 # _mmry_waiting_open_call MCP_PREFIX TRANSCRIPT_PATH  (#33898 round 3, QA finding C1)
