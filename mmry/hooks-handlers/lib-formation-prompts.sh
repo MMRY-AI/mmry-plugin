@@ -60,7 +60,9 @@ mmry_formation_save_outcome_prompt() {
 # the label, the duration and the footer, each once. formation-roster.sh and formation-status.sh
 # both read them from here. Cleared by cmo-mmry and approved by Eric, 2026-11-18.
 #
-# THE DURATION IS IN MINUTES, the approved form ("for 12 minutes"); one minute is singular. With no
+# THE DURATION: under 60 minutes in minutes ("for 12 minutes"); from 60 minutes in hours and minutes
+# ("for 1 hour", "for 2 hours 15 minutes"), singular units, no zero part (cmo-mmry follow-up,
+# 2026-11-18, because the roster is often heard aloud). With no
 # stored start, or under a minute, the state is shown alone ("Availability: unknown."), never
 # "since unknown". A member that has left, a lead and a server that sends no availability show
 # nothing, so an older server's roster reads exactly as before. A value that is not a short plain
@@ -83,6 +85,11 @@ def mmry_iso_epoch: tostring | .[0:19] as $s
         | ($era * 146097 + $doe - 719468) * 86400
           + ($s[11:13] | tonumber) * 3600 + ($s[14:16] | tonumber) * 60 + ($s[17:19] | tonumber)
       end;
+def mmry_unit($n; $one; $many): ($n | tostring) + " " + (if $n == 1 then $one else $many end);
+def mmry_duration_words: ((. / 60) | floor) as $h | (. - $h * 60) as $mm
+    | if $h == 0 then mmry_unit($mm; "minute"; "minutes")
+      elif $mm == 0 then mmry_unit($h; "hour"; "hours")
+      else mmry_unit($h; "hour"; "hours") + " " + mmry_unit($mm; "minute"; "minutes") end;
 def mmry_availability_word:
     if .leftDate != null then null
     elif ((.availability // null) | type) != "string" then null
@@ -94,7 +101,7 @@ def mmry_availability_suffix:
       else ((.availabilitySince // null) | if . == null then null else mmry_iso_epoch end) as $t
         | (if $t == null then null else (((now - $t) / 60) | floor) end) as $m
         | "  Availability: " + $w
-          + (if $m == null or $m < 1 then "" elif $m == 1 then ", for 1 minute" else ", for " + ($m | tostring) + " minutes" end)
+          + (if $m == null or $m < 1 then "" else ", for " + ($m | mmry_duration_words) end)
           + "."
       end;
 def mmry_roster_has_availability: [(.members // [])[] | mmry_availability_word | select(. != null)] | length > 0;
