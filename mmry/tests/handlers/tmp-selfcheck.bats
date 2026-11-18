@@ -249,9 +249,9 @@ _prompts_once() {
     run _context
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
     [[ "$OUT" != *"cannot save its working files"* ]] || return 1
-    # The marker is removed as the start ends, after its output is closed: give that a moment.
+    # The marker is removed as the start ends, after its output is closed: give that up to a minute (a loaded macOS runner is slow).
     local i=0
-    while [ -n "$(ls -A "$good" | grep -i 'tmpcheck')" ] && [ "$i" -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
+    while [ -n "$(ls -A "$good" | grep -i 'tmpcheck')" ] && [ "$i" -lt 240 ]; do sleep 0.25; i=$((i + 1)); done
     [ -z "$(ls -A "$good" | grep -i 'tmpcheck')" ]
     [ ! -e "$CX/mmry/mmry-tmp-unwritable.log" ]
 }

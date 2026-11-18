@@ -701,5 +701,8 @@ fi
 # same call Claude Code makes above, with the same id and directory; it only happens later.
 if (( _mmry_codex == 1 )); then
     exec >/dev/null
+    # The #33468 marker goes first, before the registration's request: on a start that ends here it is the
+    # only thing left to remove, and it is removed by this line, not by the exit trap alone.
+    _mmry_tmpcheck_cleanup
     mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
 fi
