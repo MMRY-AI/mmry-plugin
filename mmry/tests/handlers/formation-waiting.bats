@@ -648,7 +648,14 @@ _leftover_ask() { # $1 tool name
 
 @test "W-45 33898 req1 (round 4, security F3): a list word followed by a newline and more text sends no name" {
     JQ_BIN="$(command -v jq)"
-    run _waiting "$(_notification permission_prompt $'Claude needs your permission to use Edit\nEndConversation')"
-    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # The JSON escape \n: the message the handler reads carries a real newline after the word. The
+    # second form (a space, then the newline) sent Edit before round 4; the first was already refused.
+    local m n=0
+    for m in 'Edit\nEndConversation' 'Edit \nEndConversation' 'Edit\r\n'; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $m")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $m"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
 }
