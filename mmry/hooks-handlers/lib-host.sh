@@ -1095,11 +1095,12 @@ mmry_host_codex_access_hint() {
     # Not for setup ($1 given), which has no tool.
     if [[ -z "${1:-}" ]]; then
         echo "network access. If this was a save, search, retire or reload, or a"
-        echo "formation start, join, say, assign, progress report, roster, status, report, debrief, remove a"
+        echo "formation start, join, say, assign, queued work, progress report, roster, status, report, debrief, remove a"
         echo "member or leave, do not ask for access: call the matching mmry_plugin tool instead (memory_save,"
         echo "memory_search, memory_retire, memory_load,"
         echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
         echo "formation_roster, formation_status, formation_report, formation_debrief, formation_remove,"
+        echo "formation_queue_add, formation_queue_list, formation_queue_take, formation_queue_decline,"
         echo "formation_leave), which needs"
         echo "none. For anything else, call request_permissions with"
     else
