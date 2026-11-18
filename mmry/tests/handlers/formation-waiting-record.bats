@@ -83,7 +83,7 @@ load '../helpers/formation-waiting-helpers.sh'
     _transcript "$tp" Agent
     run _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
-    for w in Edit WebFetch NotebookEdit PowerShell Task MultiEdit; do
+    for w in Edit WebFetch NotebookEdit PowerShell Task MultiEdit Read; do
         _check "$(_event UserPromptSubmit)" || true
         : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
         run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
@@ -242,4 +242,20 @@ load '../helpers/formation-waiting-helpers.sh'
     printf 'asker -\ntool Read\ninput -\nat %s\n' "$(( $(date +%s) - 3600 ))" > "$TEST_TMPDIR/.mmry-asking-$SID"
     _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
     [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "X-32 33898 round 4 (ruling (b), QA T4) in the 33900 stack: a sentence that confirms a list name and a fresh record naming another MCP tool send no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl" w n=0
+    # The transcript holds only the waiting Agent call, so the record's call is in no transcript here.
+    _transcript "$tp" Agent
+    for w in Edit Bash Read; do
+        n=$((n + 1))
+        _check "$(_event UserPromptSubmit)" || true
+        rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+        _leftover_ask mcp__probe__ping
+        _waiting "$(_notification_tp "Claude needs your permission to use $w" "$tp")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $w"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
 }
