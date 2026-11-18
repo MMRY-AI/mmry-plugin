@@ -40,8 +40,10 @@ setup() {
     cp "$CODEX_DIR/mmry-config.json" "$MMRY_CONFIG_FILE"
     SET="$(fnd_set_file)"
     CACHE="$TEST_TMPDIR/mmry-foundation.md"
-    SHIMS="$TEST_TMPDIR/shims"
-    mkdir -p "$SHIMS"
+    # A POSIX spelling, whatever TMPDIR looks like: a PATH entry spelled C:/... is split at its colon,
+    # and the slow stand-ins below would then never be found, so every held condition would pass empty.
+    mkdir -p "$TEST_TMPDIR/shims"
+    SHIMS="$(cd "$TEST_TMPDIR/shims" && pwd)"
     unset MMRY_HOST MMRY_JQ CODEX_SESSION_ID CODEX_THREAD_ID CLAUDE_SESSION_ID CLAUDE_CODE_SESSION_ID MMRY_CODEX_HOOK_STARTED MMRY_HOOK_LAUNCH_SECS
     export MMRY_NO_SELF_UPDATE=1
     SID="cdx33967-$$-${BATS_TEST_NUMBER}"
@@ -99,6 +101,10 @@ _slow() {
     real="$(command -v "$name")" || return 0
     printf '#!/usr/bin/env bash\nsleep %s\nexec "%s" "$@"\n' "$secs" "$real" > "$SHIMS/$name"
     chmod +x "$SHIMS/$name"
+    # THE PREMISE: the handler, run with this PATH, finds the slow one. A held condition the handler
+    # never meets passes for the wrong reason.
+    [[ "$(PATH="$SHIMS:$PATH" command -v "$name")" == "$SHIMS/$name" ]] || {
+        echo "premise: PATH does not resolve $name to the slow stand-in"; return 1; }
 }
 
 # =============================================================================================
@@ -157,6 +163,10 @@ _slow() {
     _codex_fire "userpromptsubmit-foundation --part 1" "$stamp" "$TEST_TMPDIR/p1.json"
     local elapsed=$(( SECONDS - start ))
     echo "launch ${launch}s + part 1 ${elapsed}s" >&3
+    # THE PREMISE: the set check really never finished, so the part ran to its deadline and told the
+    # assistant. A part that finished early would pass the bound below whatever the deadline counts.
+    local ctx; ctx="$(_ctx "$TEST_TMPDIR/p1.json")"
+    [[ "$ctx" == *"cut short"* ]] || { echo "premise: part 1 did not reach its deadline: ${ctx:0:300}"; return 1; }
     (( launch + elapsed <= 10 + 4 )) || { echo "part 1 ended $(( launch + elapsed ))s after launch: its deadline did not count the launch"; return 1; }
     [[ -z "$(_sysmsg "$TEST_TMPDIR/p1.json")" ]] || { echo "showed the person: $(_sysmsg "$TEST_TMPDIR/p1.json")"; return 1; }
 }
