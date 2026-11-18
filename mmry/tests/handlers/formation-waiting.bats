@@ -574,3 +574,59 @@ _leftover_ask() { # $1 tool name
     _waiting "$(_notification permission_prompt 'Claude needs your permission to use Write')"
     [ "$(_tool_sent)" = "Write" ] || { cat "$BODIES"; return 1; }
 }
+
+# #33898 round 3b (lead 439's ruling 2026-11-18): without a fresh ask record, the one word after
+# "permission to use" is sent only when it is a Claude Code built-in tool's name
+# (_MMRY_WAITING_BUILTIN_TOOLS). On Claude Code 2.1.322 an MCP prompt's sentence can be a bare display
+# word ("use Echo"), which cannot be told from a built-in's name, so any other word sends no name and
+# the lead's tool sentence is left out. Codex's PermissionRequest carries tool_name and is unchanged.
+
+@test "W-41 33898 req1 (3b): an MCP display word, use Echo, with no ask record and no matching call sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # No transcript at all.
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use Echo')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A transcript holding only other calls (a built-in, and an answered call of another server).
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _transcript "$tp" Bash mcp__other__thing
+    _tool_result "$tp" toolu_2
+    run _waiting "$(_notification_tp 'Claude needs your permission to use Ping' "$tp")"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'Ping\|Echo' "$BODIES" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "a display word was sent or stored"; return 1; }
+}
+
+@test "W-42 33898 req2 (3b): use Bash still sends Bash, also for a subagent's prompt, and other built-ins send their names" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl" w
+    # A subagent's prompt: the main transcript holds only the waiting Agent call, not the Bash call.
+    _transcript "$tp" Agent
+    run _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    for w in Edit WebFetch NotebookEdit PowerShell Task MultiEdit; do
+        _check "$(_event UserPromptSubmit)" || true
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
+        [ "$(_tool_sent)" = "$w" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
+}
+
+@test "W-43 33898 req1 (3b): a word that is not a built-in tool's name sends no name; Codex's tool_name is unchanged" {
+    JQ_BIN="$(command -v jq)"
+    local w n=0
+    # Memory is the first word of mcp__mmry__memory_save's display name, Memory Save. bash is not
+    # Bash: the names are matched exactly.
+    for w in Frobnicate Memory bash Code; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $w"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
+    # Codex names its tool in the payload, so a name off the list still passes the field rule.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_permission_request apply_patch '')"
+    grep -q '"toolName":"apply_patch"' "$BODIES" || { cat "$BODIES"; return 1; }
+}
