@@ -78,8 +78,10 @@ rem THE APPROVAL HOOK GOES THROUGH THE SAME GATE (#33903). formation-waiting, th
 rem hook, has work only for a Formation member, and it runs on every approval prompt for every person.
 rem Without this a person in no Formation paid where.exe, reg.exe, bash and the library, 0.9 to 1.6 s
 rem measured, on each prompt before formation-waiting.sh found nothing to do. The sh form in
-rem hooks/codex-hooks.json carries the identical gate the formation-check entries carry.
-if /i "%~1"=="formation-waiting" goto :formation_gate
+rem hooks/codex-hooks.json carries the identical gate the formation-check entries carry. Only the
+rem raise, formation-waiting with no second argument; any other formation-waiting entry keeps its own
+rem gate.
+if /i "%~1"=="formation-waiting" if "%~2"=="" goto :formation_gate
 if /i not "%~1"=="formation-check" goto :after_formation_gate
 :formation_gate
 set "MMRY_MEMBER="

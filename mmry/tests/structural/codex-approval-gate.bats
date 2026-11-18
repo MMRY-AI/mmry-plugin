@@ -219,7 +219,7 @@ _run_real() {
 @test "33903 gate: the Windows launcher sends formation-waiting through the membership gate before any program starts" {
     local code wait_line gate_line first_prog
     code="$(tr -d '\r' < "${HANDLERS}/codex-hook.cmd" | grep -n -v -i '^[[:space:]]*rem\b' | grep -v -i '^[0-9]*:[[:space:]]*rem$')"
-    wait_line="$(grep -m1 'if /i "%~1"=="formation-waiting" goto :formation_gate' <<< "$code" | cut -d: -f1)"
+    wait_line="$(grep -m1 'if /i "%~1"=="formation-waiting" if "%~2"=="" goto :formation_gate' <<< "$code" | cut -d: -f1)"
     gate_line="$(grep -m1 'if /i not "%~1"=="formation-check" goto :after_formation_gate' <<< "$code" | cut -d: -f1)"
     first_prog="$(grep -m1 -i -E 'where\.exe|reg\.exe|findstr|bash\.exe|codex-hook\.sh' <<< "$code" | cut -d: -f1)"
     [[ -n "$wait_line" && -n "$gate_line" && -n "$first_prog" ]] || { echo "lines not found: [$wait_line] [$gate_line] [$first_prog]"; return 1; }
@@ -262,4 +262,19 @@ _run_real() {
     printf '4242\n' > "${TMPDIR}/.mmry-formation-${SID}"
     out="$(env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "${FAKE_ROOT}/hooks-handlers/codex-hook.cmd")" formation-waiting < /dev/null 2>&1 | tr -d '\r')"
     [[ "$out" == *"LAUNCHER-REACHED formation-waiting"* ]] || { echo "membership: the launcher did not reach the handler: $out"; return 1; }
+}
+
+@test "33903 scope windows: only the raise is gated; formation-waiting with another argument is left to its own gate" {
+    # The Stop-time answer hook (formation-waiting --answer-hook, #33900) carries its own gate on the
+    # waiting marker. This change gates the PermissionRequest raise only, so with a waiting marker and
+    # no membership file the answer hook still reaches the handler.
+    _is_windows || skip "Windows only: needs cmd.exe"
+    _standin_root
+    local wtmp; wtmp="$(cygpath -w "$TMPDIR")"
+    : > "${TMPDIR}/.mmry-waiting-${SID}"
+    local out
+    out="$(env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "${FAKE_ROOT}/hooks-handlers/codex-hook.cmd")" formation-waiting --answer-hook < /dev/null 2>&1 | tr -d '\r')"
+    [[ "$out" == *"LAUNCHER-REACHED formation-waiting --answer-hook"* ]] || { echo "the answer hook was stopped by the membership gate: $out"; return 1; }
+    out="$(env TMPDIR="$wtmp" cmd //d //c "$(cygpath -w "${FAKE_ROOT}/hooks-handlers/codex-hook.cmd")" formation-waiting < /dev/null 2>&1 | tr -d '\r')"
+    [[ "$out" != *REACHED* ]] || { echo "the raise went on with no membership file: $out"; return 1; }
 }
