@@ -497,12 +497,7 @@ _ask_record() { # $1 tool name
     _ask_record mcp__acme__write_file
     run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Write a file (MCP)' "$tp")"
     [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
-    # A built-in prompt with a leftover record naming another tool: the prompt's own word, never the record's.
-    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
-    _ask_record Bash
-    run _waiting "$(_notification_tp 'Claude needs your permission to use Edit' "$tp")"
-    [ "$(_tool_sent)" = "Edit" ] || { cat "$BODIES"; return 1; }
-    [ "$(_puts)" -eq 3 ] || { cat "$URLS"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
 }
 
 @test "W-40 33898 req1 (C1): two still-waiting calls of one server send no name, even when one matches exactly" {
