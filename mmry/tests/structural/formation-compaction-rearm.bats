@@ -389,7 +389,7 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
     # How to resume, and where to look.
     [[ "$FC_OUT" == *"end your turn"* ]] || { echo "the notice does not say how to resume: ${FC_OUT}"; return 1; }
     [[ "$FC_OUT" == *"/mmry:formation status"* ]] || return 1
-    [[ "$FC_OUT" == *"about 31 minutes ago"* ]] || { echo "the notice does not say when it stopped: ${FC_OUT}"; return 1; }
+    [[ "$FC_OUT" == *"about 30 minutes ago"* ]] || { echo "the notice does not say when it stopped: ${FC_OUT}"; return 1; }
 }
 
 @test "TC3: a watch killed outright before its limit: the next turn is told it stopped and has resumed" {
