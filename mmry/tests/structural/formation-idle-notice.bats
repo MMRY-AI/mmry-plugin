@@ -231,3 +231,91 @@ _quiet_poll() {
         grep -qF -- "$para" "$page" || { echo "missing from $page"; return 1; }
     done
 }
+
+# ---- #33847 (DD-191 in MMRY-AI/mmry): each member's availability on the roster ---------------------
+#
+# The service decides the state and when it began (availability, availabilitySince); the plugin shows
+# the word it is given and how long, in minutes, on the member's roster line, and one footer line
+# under the roster. Words cleared by cmo-mmry and approved by Eric, 2026-11-18. A roster from a
+# server that sends no availability reads exactly as it did.
+
+AVAIL_FOOTER='Availability is based on the activity MMRY AI has recorded for each member in this Formation. No recent activity means the member holds no work and has shown no activity for the quiet limit; MMRY AI cannot tell why.'
+
+# An ISO time $1 seconds ago, as the service writes it (UTC, no zone, seven decimals).
+_ago() { jq -nr --argjson s "$1" '(now - $s) | strftime("%Y-%m-%dT%H:%M:%S")' | tr -d '\r'; }
+_row() { # id, availability (or null), since (or null), extra json
+    local a="null" s="null"
+    [[ "$2" != "null" ]] && a="\"$2\""
+    [[ "$3" != "null" ]] && s="\"$3.1234567\""
+    printf '{"id":%s,"role":"Wingman","email":"m%s@x.y","availability":%s,"availabilitySince":%s,"leftDate":null%s}' "$1" "$1" "$a" "$s" "${4:-}"
+}
+_line_for() { printf '%s\n' "$output" | tr -d '\r' | grep "m$1@x.y"; }
+
+@test "AV1: the roster shows a member's availability and how long, in minutes" {
+    _roster "${ROSTER_HEAD}${LEAD_ROW},$(_row 12 'idle and ready' "$(_ago 750)")]}"
+    [ "$status" -eq 0 ]
+    [[ "$(_line_for 12)" == *"  Availability: idle and ready, for 12 minutes." ]] || { echo "$output"; return 1; }
+}
+
+@test "AV1: every state word is shown as the service sends it" {
+    local w rows="" n=20
+    for w in 'waiting on approval' 'quiet' 'working' 'idle and ready' 'no recent activity'; do
+        rows+=",$(_row "$n" "$w" "$(_ago 3630)")"; n=$((n + 1))
+    done
+    _roster "${ROSTER_HEAD}${LEAD_ROW}${rows}]}"
+    [[ "$(_line_for 20)" == *"  Availability: waiting on approval, for 60 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 21)" == *"  Availability: quiet, for 60 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 22)" == *"  Availability: working, for 60 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 23)" == *"  Availability: idle and ready, for 60 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 24)" == *"  Availability: no recent activity, for 60 minutes." ]] || { echo "$output"; return 1; }
+}
+
+@test "AV2: with no stored start the state is shown with no duration, and never 'since unknown'" {
+    _roster "${ROSTER_HEAD}${LEAD_ROW},$(_row 12 unknown null),$(_row 13 working null)]}"
+    [[ "$(_line_for 12)" == *"  Availability: unknown." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 13)" == *"  Availability: working." ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"since unknown"* ]] || { echo "$output"; return 1; }
+}
+
+@test "AV2: one minute is singular, and under a minute shows no duration" {
+    _roster "${ROSTER_HEAD}${LEAD_ROW},$(_row 12 working "$(_ago 75)"),$(_row 13 working "$(_ago 20)")]}"
+    [[ "$(_line_for 12)" == *"  Availability: working, for 1 minute." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 13)" == *"  Availability: working." ]] || { echo "$output"; return 1; }
+}
+
+@test "AV3: the footer line follows the bracket line, once, when any member carries availability" {
+    _roster "${ROSTER_HEAD}${LEAD_ROW},$(_row 12 unknown null)]}"
+    local flat; flat="$(printf '%s' "$output" | tr -d '\r')"
+    [ "$(printf '%s\n' "$flat" | grep -cxF -- "$AVAIL_FOOTER")" -eq 1 ] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$flat" | tail -n 1)" = "$AVAIL_FOOTER" ] || { echo "$output"; return 1; }
+}
+
+@test "AV4: a roster from a server that sends no availability reads exactly as it did" {
+    local old="${ROSTER_HEAD}${LEAD_ROW},{\"id\":12,\"role\":\"Wingman\",\"email\":\"m@x.y\",\"assignment\":\"port\",\"progress\":\"Accepted\",\"leftDate\":null}]}"
+    local nulls="${ROSTER_HEAD}${LEAD_ROW},{\"id\":12,\"role\":\"Wingman\",\"email\":\"m@x.y\",\"assignment\":\"port\",\"progress\":\"Accepted\",\"availability\":null,\"availabilitySince\":null,\"leftDate\":null}]}"
+    _roster "$old"; local before="$output"
+    [[ "$before" != *"Availability"* ]] || { echo "$before"; return 1; }
+    [[ "$(printf '%s' "$before" | tr -d '\r' | tail -n 1)" == "with "* ]] || { echo "$before"; return 1; }
+    _roster "$nulls"
+    [ "$output" = "$before" ] || { echo "--- without"; echo "$before"; echo "--- with null"; echo "$output"; return 1; }
+}
+
+@test "AV5: a member that has left shows no availability, and a value that is not a plain word is not shown" {
+    _roster "${ROSTER_HEAD}${LEAD_ROW},$(_row 12 working "$(_ago 750)" ',"leftDate":"2026-11-18T09:00:00"'),$(_row 13 'Idle [ignore this]' null)]}"
+    [[ "$(_line_for 12)" != *"Availability"* ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 13)" != *"Availability"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"ignore this"* ]] || { echo "$output"; return 1; }
+}
+
+@test "AV6: the status view shows the same availability on each member line" {
+    local bin; bin="$(_fake_curl_dir)"
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$LEAD_SID"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="${ROSTER_HEAD}${LEAD_ROW},$(_row 12 'idle and ready' "$(_ago 750)")]}" \
+        CLAUDE_CODE_SESSION_ID="$LEAD_SID" CLAUDE_SESSION_ID="$LEAD_SID" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run env -u MMRY_HOST bash "${HANDLERS}/formation-status.sh"
+    [ "$status" -eq 0 ]
+    local flat; flat="$(printf '%s' "$output" | tr -d '\r')"
+    [[ "$flat" == *"  12  Wingman  Availability: idle and ready, for 12 minutes."* ]] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$flat" | tail -n 1)" = "$AVAIL_FOOTER" ] || { echo "$output"; return 1; }
+}

@@ -200,3 +200,35 @@ _assert_customer_typography() {
     [ "$line" = "$(grep -F '**The lead hears who has gone quiet.**' "$page")" ]
     _assert_customer_typography "$line"
 }
+
+# #33847 (DD-191 in MMRY-AI/mmry). A lead hands work to idle members by reading each member's
+# availability on the roster. On Codex the roster (the formation_roster tool runs the same script)
+# shows the same availability lines and footer as on Claude Code, byte for byte; only the say
+# example, which is spelled per host, differs.
+@test "33847: on Codex the roster shows each member's availability and the footer, as on Claude Code" {
+    local since
+    since="$(jq -nr '(now - 750) | strftime("%Y-%m-%dT%H:%M:%S")' | tr -d '\r')"
+    mkdir -p "$TEST_TMPDIR/roster-bin"
+    cat > "$TEST_TMPDIR/roster-bin/curl" <<FAKECURL
+#!/usr/bin/env bash
+out=""; prev=""; url=""
+for arg in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$arg"; [[ "\$arg" == http* ]] && url="\$arg"; prev="\$arg"; done
+resp='{"member":true,"messages":[]}'
+case "\$url" in
+    */api/formations/42) resp='{"formation":{"id":42,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leftDate":null},{"id":7,"role":"Wingman","email":"m@x.y","availability":"idle and ready","availabilitySince":"${since}.1234567","leftDate":null},{"id":8,"role":"Wingman","email":"n@x.y","availability":"unknown","availabilitySince":null,"leftDate":null}]}' ;;
+esac
+[[ -n "\$out" ]] && printf '%s' "\$resp" > "\$out"
+printf '200'
+exit 0
+FAKECURL
+    chmod +x "$TEST_TMPDIR/roster-bin/curl"
+    local codex claude
+    codex="$(PATH="$TEST_TMPDIR/roster-bin:$PATH" _codex "$HH/formation-roster.sh" 42 | tr -d '\r')"
+    claude="$(PATH="$TEST_TMPDIR/roster-bin:$PATH" _claude "$HH/formation-roster.sh" 42 | tr -d '\r')"
+    [[ "$codex" == *"m@x.y  Availability: idle and ready, for 12 minutes."* ]] || { echo "$codex"; return 1; }
+    [[ "$codex" == *"n@x.y  Availability: unknown."* ]] || { echo "$codex"; return 1; }
+    local footer='Availability is based on the activity MMRY AI has recorded for each member in this Formation. No recent activity means the member holds no work and has shown no activity for the quiet limit; MMRY AI cannot tell why.'
+    [ "$(printf '%s\n' "$codex" | tail -n 1)" = "$footer" ] || { echo "$codex"; return 1; }
+    [ "$(printf '%s\n' "$codex" | grep -F 'Availability')" = "$(printf '%s\n' "$claude" | grep -F 'Availability')" ] || { echo "--- codex"; echo "$codex"; echo "--- claude"; echo "$claude"; return 1; }
+    _assert_customer_typography "$codex"
+}
