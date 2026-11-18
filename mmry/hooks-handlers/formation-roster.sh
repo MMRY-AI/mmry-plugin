@@ -25,6 +25,9 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+# shellcheck source=/dev/null
+# #33847: the availability label, duration and footer, held once.
+source "${HANDLER_DIR}/lib-formation-prompts.sh"
 
 formation_id="${1:-}"
 
@@ -68,6 +71,9 @@ if ! mmry_get_formation "$formation_id"; then
     exit 1
 fi
 
+# #33847: kept apart, because the read-status call below replaces MMRY_RESPONSE before the footer.
+_mmry_roster_response="$MMRY_RESPONSE"
+
 if [[ -z "${MMRY_JQ:-}" ]]; then
     # No safe way to read it, so hand over what came back rather than half-parsing it.
     echo "$MMRY_RESPONSE"
@@ -90,7 +96,9 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # #33452: a member waiting on a permission prompt in its own window carries waitingSince (and the
 # tool's bare name in waitingTool when its client knew it), and its line says so, so the lead knows
 # to ask the person at that window. A server that does not send the fields shows no mark.
-printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
+# #33847 (DD-191): each live member's availability, the word the service sends and how long it has
+# held, from lib-formation-prompts.sh. A server that does not send it shows no mark.
+printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}"'
     (.members // [])
     | sort_by(.leftDate != null, .id)
     | .[]
@@ -104,6 +112,7 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}"'
          then "  (waiting on a permission prompt since " + ((.waitingSince | tostring)[11:16]) + " UTC"
               + (if (.waitingTool // null) != null then ", for " + (.waitingTool | tostring) else "" end) + ")"
          else "" end)
+      + mmry_availability_suffix
       + (if .leftDate == null then ""
          elif .removedByEmail then "   (removed by " + .removedByEmail + "; cannot be addressed)"
          elif .removedByUserId then "   (removed; cannot be addressed)"
@@ -178,4 +187,8 @@ printf 'and the message goes to the whole formation.\n'
 printf 'The state in brackets is the last thing that member reported. Report your own with\n'
 printf '%s, and read the whole account\n' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
 printf 'with %s.\n' "$(mmry_host_formation_ref report)"
+# #33847: what availability rests on, said once, and only under a roster that carries it.
+if [[ "$(printf '%s' "$_mmry_roster_response" | "$MMRY_JQ" -r "${MMRY_JQ_AVAILABILITY_DEFS}"' mmry_roster_has_availability' 2>/dev/null | tr -d '\r')" == "true" ]]; then
+    printf '%s\n' "$MMRY_FORMATION_AVAILABILITY_FOOTER"
+fi
 exit 0
