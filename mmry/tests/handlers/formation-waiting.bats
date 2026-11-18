@@ -1004,12 +1004,15 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     _leftover_ask Frobnicate
     _waiting "$(_notification_tp 'Claude needs your permission to use Frobnicate' "$tp")"
     [ "$(_tool_sent)" = "Frobnicate" ] || { cat "$BODIES"; return 1; }
-    # A fresh MCP record with no waiting call of its server and the display word: no name (X-24's rule).
+    # A fresh MCP record whose call the main transcript does not hold (a subagent's call) and a display
+    # word off the list: the sentence confirms no name, so the record wins (round 4, lead ruling (b);
+    # until round 4 this sent no name). A record whose call the transcript holds answered, or alongside
+    # another still-waiting call of its server, still sends none (X-24, X-25).
     _check "$(_event UserPromptSubmit)" || true
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
     _leftover_ask mcp__probe__echo
     _waiting "$(_notification_tp 'Claude needs your permission to use Echo' "$tp")"
-    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    [ "$(_tool_sent)" = "mcp__probe__echo" ] || { cat "$BODIES"; return 1; }
     # A record older than the freshness window is no record: Echo is off the list, so no name.
     _check "$(_event UserPromptSubmit)" || true
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
@@ -1066,4 +1069,64 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
     [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     ! grep -q 'xxxxxxxx' "$BODIES" || { echo "the record's name was sent"; return 1; }
+}
+
+# Round 4, lead 439's ruling (b), 2026-11-18: a fresh ask record wins only when the sentence gives no
+# confirmed name (a multi-word display name such as Read File, or the D2 title case). When the sentence
+# confirms a list name and the record names a different tool, no name. W-39, X-24 and X-25 stand.
+
+@test "X-28 33898 round 4 (D2) in the 33900 stack: a subagent's titled tool against a running main-thread call of the title's name sends the record's tool" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # QA probe QP-03: the main thread's mcp__acme__read_file is still running; a subagent asks for
+    # mcp__acme__write_file, whose title is read_file. The fresh record names write_file.
+    _transcript "$tp" mcp__acme__read_file
+    _leftover_ask mcp__acme__write_file
+    _waiting "$(_notification_tp 'Claude needs your permission to use acme - read_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "mcp__acme__write_file" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "X-29 33898 round 4 (D1) in the 33900 stack: a fresh MCP record names a multi-word display name's tool, also for a subagent's call" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The main thread's own call, still waiting.
+    _transcript "$tp" mcp__probe__read_file
+    _leftover_ask mcp__probe__read_file
+    _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
+    [ "$(_tool_sent)" = "mcp__probe__read_file" ] || { cat "$BODIES"; return 1; }
+    # A subagent's call: the main transcript holds only the waiting Agent call.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    _transcript "$tp" Agent
+    _leftover_ask mcp__probe__read_file
+    _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
+    [ "$(_tool_sent)" = "mcp__probe__read_file" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "X-30 33898 round 4 (ruling 4) in the 33900 stack: with no record, an MCP title equal to a list name sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # mcp__acme__Read is the one still-waiting call, but its sentence's whole text is not one list entry.
+    _transcript "$tp" mcp__acme__Read
+    rm -f "$TEST_TMPDIR"/.mmry-asking-*
+    _waiting "$(_notification_tp 'Claude needs your permission to use acme - Read (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "X-31 33898 round 4 (D1) in the 33900 stack: a leftover or stale Read record and use Read File send no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" Agent
+    # A fresh record of the built-in Read: a built-in's sentence is exactly its name, so not this prompt's.
+    _leftover_ask Read
+    _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A record older than the freshness window is no record: the list rule, no name.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    printf 'asker -\ntool Read\ninput -\nat %s\n' "$(( $(date +%s) - 3600 ))" > "$TEST_TMPDIR/.mmry-asking-$SID"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
 }
