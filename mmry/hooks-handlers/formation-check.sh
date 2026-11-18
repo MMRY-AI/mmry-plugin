@@ -677,6 +677,13 @@ _fc_listen_end() {
     _fc_listen_read || return 0
     [[ "$_lr_pid" == "$$" ]] || return 0
     [[ -n "${_handover_dir:-}" && -d "${_handover_dir:-}" ]] && _fc_watch_end="handed"
+    # A watch that ends because this session is no longer in this formation (it left, joined
+    # another, or the service said so and the record was removed) has left, whatever the path.
+    if [[ "$_fc_watch_end" == "stopped" ]]; then
+        if ! mmry_formation_state_read "$session_id" || [[ "$MMRY_FS_FORMATION" != "$formation_id" ]]; then
+            _fc_watch_end="left"
+        fi
+    fi
     case "$_fc_watch_end" in
         left) rm -f -- "$_listen_rec" 2>/dev/null || true ;;
         *) _fc_listen_write "$_fc_watch_end" "${_now:-${_idle_entry:-$_lr_stamp}}" ;;
@@ -1256,9 +1263,12 @@ case "$mode" in
                 _fc_find_notice || true
             fi
         fi
-        if ! _poll_once; then
+        # With no notice owed, the path is exactly as it was: formation-check-timeout.bats builds its
+        # mark-first control by matching this `_poll_once || exit 0` line, so it stays one line.
+        if [[ -z "$_fc_notice" ]]; then
+            _poll_once || exit 0
+        elif ! _poll_once; then
             # Nothing to show but the notice: it goes on its own, then nothing else happens.
-            [[ -n "$_fc_notice" ]] || exit 0
             "$MMRY_JQ" -n --arg ev "$_event_name" --arg note "$_fc_notice" \
                 '{hookSpecificOutput:{hookEventName:$ev, additionalContext:$note}}' 2>/dev/null || exit 0
             _fc_consume_notice
@@ -1454,8 +1464,8 @@ case "$mode" in
         while :; do
             # LEAVING STOPS THE WATCH (#31721). One file read, no process: the record is gone after
             # /mmry:formation leave, and names another formation after a join elsewhere.
-            mmry_formation_state_read "$session_id" || { _fc_watch_end="left"; exit 0; }
-            [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || { _fc_watch_end="left"; exit 0; }
+            mmry_formation_state_read "$session_id" || exit 0
+            [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || exit 0
             # A watch whose lock was reclaimed is no longer the watcher (#31850). It leaves without
             # touching the lock, which belongs to the watch that took it.
             _fc_holds_poller || { _held_poller=""; exit 0; }
@@ -1504,17 +1514,9 @@ case "$mode" in
         # the service anything. The member's next turn starts listening again.
         (( _renew == 1 )) || { _fc_watch_end="limit"; exit 0; }
         _fc_holds_poller || { _held_poller=""; exit 0; }
-        if ! _idle_confirmed_member; then
-            # Not a member any more (the record is gone or names another formation): it has left.
-            # Otherwise membership could not be confirmed, and that is an early stop (#33256): the
-            # member's next turn is told, and a compaction before then starts the watch again.
-            if mmry_formation_state_read "$session_id" && [[ "$MMRY_FS_FORMATION" == "$formation_id" ]]; then
-                _fc_watch_end="stopped"
-            else
-                _fc_watch_end="left"
-            fi
-            exit 0
-        fi
+        # Membership the service cannot confirm stops the watch early (#33256): the EXIT trap records
+        # "stopped", or "left" when the service said this session is no longer a member.
+        _idle_confirmed_member || exit 0
         _fc_watch_end="woke"
         mkdir "$_renew_marker" 2>/dev/null || true
         # The next watch carries this chain's start forward, so the limit counts from the last turn.
