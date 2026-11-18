@@ -103,10 +103,10 @@ _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
 #      call of that name, two or more still-waiting calls of that server, or a built name that breaks
 #      the field rule) sends NO name, and the lead's sentence is left out, exactly as when no name
 #      arrives (the cmo-mmry fallback). Never a cut or cleaned name: a shortened name could name the
-#      wrong tool. Where Claude Code fired its PermissionRequest hook, 33900's ask record can give a
-#      titled tool's exact name, but only under the same test: it must be the one still-waiting call
-#      of the sentence's server. A record never supplies a name on its own, and never replaces a
-#      built-in tool's word.
+#      wrong tool. Where Claude Code fired its PermissionRequest hook, 33900's ask record can give an
+#      MCP tool's exact name, but only under the same test: it must be the one still-waiting call of
+#      its server (_mmry_waiting_record_name). A record never supplies a name on its own; a record
+#      that disagrees with the sentence and is not confirmed sends no name.
 # Codex's PermissionRequest carries tool_name itself, and for an MCP tool it is already
 # mcp__<server>__<tool> (the Codex CLI's own naming rule), so it passes through the same field rule.
 #
@@ -184,6 +184,28 @@ mmry_waiting_tool_name() {
     # A name that is not bare, or too long, is dropped, never trimmed into one.
     [[ "$name" =~ $_MMRY_WAITING_TOOL_RE ]] || name=""
     MMRY_WAITING_TOOL="$name"
+}
+
+# _mmry_waiting_record_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH  (#33898 C1 in 33900)
+# Sets MMRY_WAITING_TOOL to the name to send when a fresh ask record exists. The record never supplies
+# a name on its own: an MCP name in it must be the one still-waiting call of its server in the
+# transcript (_mmry_waiting_open_call); a built-in name in it must equal the sentence's word.
+_mmry_waiting_record_name() {
+    local rec="${1:-}" name="${2:-}" prefix="${3:-}" tp="${4:-}" rest rp
+    MMRY_WAITING_TOOL="$name"
+    # The sentence's own MCP name, confirmed by the transcript: it stands.
+    [[ -n "$prefix" && -n "$name" ]] && return 0
+    if [[ "$rec" == mcp__* ]]; then
+        rest="${rec#mcp__}"; rp="mcp__${rest%%__*}__"
+        MMRY_WAITING_TOOL=""
+        # An MCP sentence of another server: the record is not this prompt's.
+        [[ -z "$prefix" || "$rp" == "$prefix" ]] || return 0
+        [[ "$rp" == "$prefix" ]] || _mmry_waiting_open_call "$rp" "$tp"
+        [[ -n "$MMRY_WAITING_OPEN" && "$rec" == "$MMRY_WAITING_OPEN" ]] && MMRY_WAITING_TOOL="$rec"
+    elif [[ "$rec" != "$name" ]]; then
+        MMRY_WAITING_TOOL=""
+    fi
+    return 0
 }
 
 _mmry_waiting_marker() { MMRY_WAITING_MARKER="${MMRY_TMPDIR}/.mmry-waiting-$1"; }
@@ -559,11 +581,15 @@ else
             if [[ "$_k_tool" =~ $_MMRY_WAITING_TOOL_RE ]]; then
                 exact="$_k_tool"
                 # The NAME SENT (#33898 C1): a record can be left over from an earlier prompt, so it
-                # never supplies a name on its own. It names an MCP prompt's tool only when the
-                # transcript holds it as the one still-waiting call of the sentence's server (THE
-                # TOOL'S NAME, point 2); a built-in prompt keeps its own word. The clear's own
-                # identity (asker, exact, input) is 33900's and unchanged.
-                [[ -n "$mprefix" && -n "$MMRY_WAITING_OPEN" && "$_k_tool" == "$MMRY_WAITING_OPEN" ]] && tool="$_k_tool"
+                # never supplies a name on its own. An MCP name in the record is sent only when the
+                # transcript holds it as the one still-waiting call of its server (THE TOOL'S NAME,
+                # point 2). Measured on Claude Code 2.1.322, an MCP prompt's sentence can be a bare
+                # display word ("use Echo", "use Ping"), so the record's own server is the one
+                # checked when the sentence names none. A name the sentence already established
+                # stands. A record that disagrees with the sentence and is not confirmed: no name.
+                # The clear's own identity (asker, exact, input) is 33900's and unchanged.
+                _mmry_waiting_record_name "$_k_tool" "$tool" "$mprefix" "$tpath"
+                tool="$MMRY_WAITING_TOOL"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
             fi
         fi
