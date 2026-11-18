@@ -263,11 +263,20 @@ _line_for() { printf '%s\n' "$output" | tr -d '\r' | grep "m$1@x.y"; }
         rows+=",$(_row "$n" "$w" "$(_ago 3630)")"; n=$((n + 1))
     done
     _roster "${ROSTER_HEAD}${LEAD_ROW}${rows}]}"
-    [[ "$(_line_for 20)" == *"  Availability: waiting on approval, for 60 minutes." ]] || { echo "$output"; return 1; }
-    [[ "$(_line_for 21)" == *"  Availability: quiet, for 60 minutes." ]] || { echo "$output"; return 1; }
-    [[ "$(_line_for 22)" == *"  Availability: working, for 60 minutes." ]] || { echo "$output"; return 1; }
-    [[ "$(_line_for 23)" == *"  Availability: idle and ready, for 60 minutes." ]] || { echo "$output"; return 1; }
-    [[ "$(_line_for 24)" == *"  Availability: no recent activity, for 60 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 20)" == *"  Availability: waiting on approval, for 1 hour." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 21)" == *"  Availability: quiet, for 1 hour." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 22)" == *"  Availability: working, for 1 hour." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 23)" == *"  Availability: idle and ready, for 1 hour." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 24)" == *"  Availability: no recent activity, for 1 hour." ]] || { echo "$output"; return 1; }
+}
+
+@test "AV1: from 60 minutes the duration is in hours and minutes, singular units, no zero part (#33847 CMO follow-up)" {
+    _roster "${ROSTER_HEAD}${LEAD_ROW},$(_row 12 working "$(_ago 7230)"),$(_row 13 quiet "$(_ago 8130)"),$(_row 14 working "$(_ago 3690)"),$(_row 15 working "$(_ago 3570)"),$(_row 16 working "$(_ago 3930)")]}"
+    [[ "$(_line_for 12)" == *"  Availability: working, for 2 hours." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 13)" == *"  Availability: quiet, for 2 hours 15 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 14)" == *"  Availability: working, for 1 hour 1 minute." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 15)" == *"  Availability: working, for 59 minutes." ]] || { echo "$output"; return 1; }
+    [[ "$(_line_for 16)" == *"  Availability: working, for 1 hour 5 minutes." ]] || { echo "$output"; return 1; }
 }
 
 @test "AV2: with no stored start the state is shown with no duration, and never 'since unknown'" {
