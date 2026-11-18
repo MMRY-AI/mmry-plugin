@@ -370,29 +370,88 @@ _notification_tp() { # $1 message, $2 transcript path
     printf '{"session_id":"%s","transcript_path":"%s","cwd":"/x","hook_event_name":"Notification","notification_type":"permission_prompt","message":"%s"}' "$SID" "$2" "$1"
 }
 _tool_sent() { "$JQ_BIN" -r '.toolName // "<none>"' < "$BODIES" | head -1; }
+# A transcript whose latest assistant message calls each named tool (one tool_use per name, in order).
+_transcript() { # $1 path, $2.. tool names
+    local tp="$1" n i=0; shift
+    : > "$tp"
+    for n in "$@"; do
+        i=$((i + 1))
+        printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_%s","name":"%s","input":{"note":"%s"}}]}}\n' "$i" "$n" "$PLANTED" >> "$tp"
+    done
+}
+
+# #33898 round 2 (QA finding A1): the name is sent only when it is established EXACTLY: the sentence
+# builds it and the session's own transcript holds a call with exactly that name. The transcript never
+# supplies a name of its own, so a title, another call of the same server, or a subagent's call that is
+# not in the main transcript all send no name, and the lead's tool sentence is left out.
 
 @test "W-26 33898 req1: the MCP sentence names the tool, mcp__mmry__memory_save, not the server" {
     JQ_BIN="$(command -v jq)"
-    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
 }
 
 @test "W-27 33898 req1: a plugin's MCP server is named as Claude Code names it, mcp__plugin_<plugin>_<server>__<tool>" {
     JQ_BIN="$(command -v jq)"
-    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use plugin:mmry:mmry - memory_save (MCP)')"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__plugin_mmry_mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:mmry:mmry - memory_save (MCP)' "$tp")"
     [ "$(_tool_sent)" = "mcp__plugin_mmry_mmry__memory_save" ] || { cat "$BODIES"; return 1; }
 }
 
-@test "W-28 33898 req1: a tool shown by its title is named from the call in the transcript" {
+@test "W-28 33898 req1 (A1): a tool shown by its title sends no name, even with a call of that server in the transcript" {
     JQ_BIN="$(command -v jq)"
     local tp="$TEST_TMPDIR/transcript.jsonl"
-    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"mcp__plugin_acme_files__save_file","input":{"path":"/secret/'"$PLANTED"'"}}]}}' > "$tp"
+    _transcript "$tp" mcp__plugin_acme_files__save_file
     run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    [ "$(_tool_sent)" = "mcp__plugin_acme_files__save_file" ] || { cat "$BODIES"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
     ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+}
+
+@test "W-33 33898 req1 (A1, probe QA-1): a transcript holding only ANOTHER call of the server sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_search
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'memory_search' "$BODIES" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "another tool was named"; return 1; }
+}
+
+@test "W-34 33898 req1 (A1): the exact call is named even when another call of the server is the latest" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-35 33898 req1 (A1, probe QA-2): a titled tool called in parallel with another tool of the server sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"mcp__plugin_acme_files__save_file","input":{}},{"type":"tool_use","id":"toolu_2","name":"mcp__plugin_acme_files__list_files","input":{}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-36 33898 req1 (A1): a subagent's prompt, its call absent from the main transcript or no transcript at all, sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The main thread called nothing of this server; the subagent's call lives in its own transcript.
+    _transcript "$tp" Bash
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # No readable transcript: nothing establishes the name.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
 }
 
 @test "W-29 33898 req1: an MCP sentence that cannot be read sends no name, and the member is still reported" {
