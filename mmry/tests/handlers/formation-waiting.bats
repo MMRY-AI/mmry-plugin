@@ -277,3 +277,81 @@ _HEAD='{"formation":{"id":4242,"objective":"o"},"members":[{"id":3,"role":"Lead"
     [ "$output" = "$before" ] || { echo "--- absent"; echo "$before"; echo "--- null"; echo "$output"; return 1; }
     [[ "$output" != *"permission prompt"* ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# #33901: a marker left by a crash, a failed clear, an earlier turn or a departure never silences the
+# next prompt, and one prompt is still one call
+# ---------------------------------------------------------------------------------------------
+
+_permission_request_turn() { # $1 tool_name, $2 turn_id
+    printf '{"session_id":"%s","transcript_path":null,"cwd":"/x","hook_event_name":"PermissionRequest","model":"gpt-5","permission_mode":"default","turn_id":"%s","tool_name":"%s","tool_input":{"command":"ls","description":"run it"}}' "$SID" "$2" "$1"
+}
+
+@test "W-19 33901 req1: a marker a crashed process left is removed at session start without a clear call, and the next prompt makes exactly one call" {
+    # What the process that crashed while its prompt was open left behind.
+    printf '%s\n' "4242 31" > "$TEST_TMPDIR/.mmry-waiting-$SID"
+    run _check "$(_event SessionStart)"
+    [ "$(_deletes)" -eq 0 ] || { echo "a session start sent a clear"; cat "$URLS"; return 1; }
+    [ -z "$(_marker)" ] || { echo "marker kept at session start: $(_marker)"; return 1; }
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ -n "$(_marker)" ]
+}
+
+@test "W-20 33901 req1: a marker whose clear did not go through does not silence the next prompt" {
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    # The member answered and carried on, but the service did not confirm the clear: the marker stays.
+    FAKE_CLEAR_CODE=500 _check "$(_event PostToolUse)" || true
+    [ -n "$(_marker)" ] || { echo "marker dropped on a 500"; return 1; }
+    # The next prompt is a new one, and the lead must hear about it: exactly one more call.
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    # ...and that prompt reported twice is still one call.
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-21 33901 req1: Codex, a marker from an earlier turn does not silence a prompt in a new turn" {
+    _waiting "$(_permission_request_turn Bash turn-0001)"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    run _waiting "$(_permission_request_turn Bash turn-0002)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-22 33901 req1: a marker naming another formation does not silence a prompt in this one" {
+    printf '%s\n' "9999 77" > "$TEST_TMPDIR/.mmry-waiting-$SID"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    read -r f m < "$TEST_TMPDIR/.mmry-waiting-$SID"
+    [ "$f $m" = "4242 31" ] || { echo "marker not replaced: $f $m"; return 1; }
+}
+
+@test "W-23 33901 req2: leaving the formation while waiting removes that session's marker, and no other" {
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ -n "$(_marker)" ] || { echo "no marker to leave with"; return 1; }
+    printf '%s\n' "4242 55" > "$TEST_TMPDIR/.mmry-waiting-other-session-1"
+    run bash "$HH/formation-leave.sh"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ ! -e "$TEST_TMPDIR/.mmry-waiting-$SID" ] || { echo "marker left after leave"; return 1; }
+    [ -f "$TEST_TMPDIR/.mmry-waiting-other-session-1" ] || { echo "another session's marker was removed"; return 1; }
+}
+
+@test "W-24 33901 req2: after leaving and joining again, the first prompt tells the lead" {
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    run bash "$HH/formation-leave.sh"
+    bash "$HH/formation-state.sh" set 4242 "$SID" >/dev/null
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-25 33901 req3: two reports of one prompt make one call, for Claude Code and for Codex" {
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    _check "$(_event PostToolUse)" || true
+    [ "$(_deletes)" -eq 1 ] || { cat "$URLS"; return 1; }
+    _waiting "$(_permission_request_turn Bash turn-0003)"
+    _waiting "$(_permission_request_turn Bash turn-0003)"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
