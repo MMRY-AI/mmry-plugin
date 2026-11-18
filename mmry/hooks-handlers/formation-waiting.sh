@@ -84,15 +84,19 @@ _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
 # made "_" (and, for a "claude.ai " server, runs of "_" made one and the ends trimmed), as Claude Code
 # builds it. Wording approved by cmo-mmry 2026-11-17 (33898-wording-cmo-verdict.md): the shipped
 # sentence "The tool asking is <name>." stays; no new customer sentence.
-#   1. The part after " - " is a plain name: mcp__<server>__<it>.
-#   2. Whatever it is, when the transcript the payload names holds a call to an mcp__<server>__ tool,
-#      that call's name is preferred: the one the sentence built if it is there, otherwise the latest.
-#      A title ("Save a file") cannot be turned into a name, and a one-word title would turn into a
-#      wrong one; the call in the transcript is the name itself. Only the matched name is read out of
-#      the transcript, never anything of the call's input.
-#   3. Anything else (no " - ", text after "(MCP)", a title and no call to read, or a built name that
-#      breaks the field rule) sends NO name, and the lead's sentence is left out, exactly as when no
-#      name arrives. Never a cut or cleaned name: a shortened name could name the wrong tool.
+#   1. The part after " - " is a plain name: the sentence builds mcp__<server>__<it>.
+#   2. That name is sent only when it is ESTABLISHED EXACTLY: the transcript the payload names holds a
+#      call with exactly that name. The part after " - " may be a title, and a one-word title builds a
+#      name that is wrong, so the sentence alone is not enough. The transcript only confirms; it never
+#      supplies a name of its own (QA finding A1, round 2): not "the latest" call, not the only call of
+#      that server, not one of two parallel calls. A subagent's prompt names the MAIN transcript while
+#      its calls are in the subagent's own, so picking a call from there would name the wrong tool.
+#      Only a fixed string is searched for; nothing of any call's input is read.
+#   3. Anything else (no " - ", text after "(MCP)", a title, no readable transcript, a transcript
+#      without that exact call, or a built name that breaks the field rule) sends NO name, and the
+#      lead's sentence is left out, exactly as when no name arrives (the cmo-mmry fallback). Never a cut
+#      or cleaned name: a shortened name could name the wrong tool. Where Claude Code fires its
+#      PermissionRequest hook, 33900's ask record supplies the exact name instead.
 # Codex's PermissionRequest carries tool_name itself, and for an MCP tool it is already
 # mcp__<server>__<tool> (the Codex CLI's own naming rule), so it passes through the same field rule.
 #
@@ -115,17 +119,17 @@ _MMRY_WAITING_SENTENCE_JQ='
 # Sets MMRY_WAITING_TOOL to the asking tool's bare name, or empty. One small fork-free path for every
 # ordinary tool; the transcript is read only for an MCP sentence.
 mmry_waiting_tool_name() {
-    local event="${1:-}" ptool="${2:-}" name="${3:-}" prefix="${4:-}" tp="${5:-}" line n last="" hit=""
+    local event="${1:-}" ptool="${2:-}" name="${3:-}" prefix="${4:-}" tp="${5:-}" hit=""
     MMRY_WAITING_TOOL=""
     if [[ "$event" == "PermissionRequest" ]]; then
         name="$ptool"
-    elif [[ -n "$prefix" && "$prefix" =~ ^mcp__[A-Za-z0-9_-]+__$ && -f "$tp" && -r "$tp" ]]; then
-        while IFS= read -r line; do
-            n="${line#\"name\":\"}"; n="${n%\"}"
-            last="$n"
-            [[ -n "$name" && "$n" == "$name" ]] && hit=1
-        done < <(tail -c 262144 -- "$tp" | grep -o "\"name\":\"${prefix}[A-Za-z0-9_-]*\"" || true)
-        [[ -n "$hit" || -z "$last" ]] || name="$last"
+    elif [[ -n "$prefix" ]]; then
+        # An MCP sentence: the built name stands only if the transcript holds that exact call.
+        if [[ "$prefix" =~ ^mcp__[A-Za-z0-9_-]+__$ && "$name" == "$prefix"* \
+              && "$name" =~ $_MMRY_WAITING_TOOL_RE && -f "$tp" && -r "$tp" ]]; then
+            grep -qF -- "\"name\":\"${name}\"" < <(tail -c 262144 -- "$tp" 2>/dev/null || true) && hit=1
+        fi
+        [[ -n "$hit" ]] || name=""
     fi
     # A name that is not bare, or too long, is dropped, never trimmed into one.
     [[ "$name" =~ $_MMRY_WAITING_TOOL_RE ]] || name=""
