@@ -1049,3 +1049,21 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
         [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
     done
 }
+
+@test "X-27 33898 round 4 in the 33900 stack (lead ruling 5, QA T2): a fresh record whose name breaks the field rule counts as none, and the list rule applies" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl" long
+    _transcript "$tp" Agent
+    long="mcp__probe__$(printf 'x%.0s' $(seq 1 64))"
+    # A 76-character record and a built-in prompt: the list's answer, Bash.
+    _leftover_ask "$long"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    # The same record and a multi-word display name: the list rule gives no name, never the record's.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    _leftover_ask "$long"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Read File' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'xxxxxxxx' "$BODIES" || { echo "the record's name was sent"; return 1; }
+}
