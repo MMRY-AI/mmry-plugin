@@ -156,8 +156,16 @@ _mmry_src="${BASH_SOURCE[0]//\\//}"
 HANDLER_DIR="${_mmry_src%/*}"
 [[ "$HANDLER_DIR" == "$_mmry_src" ]] && HANDLER_DIR="."
 [[ -n "$HANDLER_DIR" ]] || HANDLER_DIR="/"
+# WITHOUT A PROCESS (#33967). This was `$(cd "$HANDLER_DIR" && pwd)`, a fork, and on Windows every hook
+# takes this branch, because codex-hook.cmd hands bash a C:\ path. A cd there and back in this shell
+# gives the same logical answer, $PWD, with no process.
 case "${HANDLER_DIR}/" in
-    /*//*|*/./*|*/../*|[!/]*) HANDLER_DIR="$(cd "$HANDLER_DIR" && pwd)" || exit 0 ;;
+    /*//*|*/./*|*/../*|[!/]*)
+        _mmry_here="$PWD"
+        cd -- "$HANDLER_DIR" 2>/dev/null || exit 0
+        HANDLER_DIR="$PWD"
+        cd -- "$_mmry_here" 2>/dev/null || true
+        ;;
 esac
 [[ "$HANDLER_DIR" == /* ]] || exit 0
 PLUGIN_ROOT="${HANDLER_DIR%/*}"
@@ -479,6 +487,39 @@ fi
 # model something, it prints it; there is no other channel, and pretending otherwise is what put
 # "Hook failed" in front of a customer every turn.
 set +e
-bash "$TARGET" "$@"
+case "$HANDLER_NAME" in
+    userpromptsubmit-foundation|stop-check)
+        # THE PER-MESSAGE CHECKS, IN TIME ON WINDOWS (#33967). Codex starts these on every message and
+        # cuts them off at their registered limits (20 s and 10 s), and in the 33452 TC5 proof a message
+        # sent while Codex was working timed out both: on a loaded Windows machine each process start
+        # took about a second, and each check started eight before its own code ran.
+        #
+        # 1. HOW LONG THE LAUNCH TOOK, for the handler to take off its own deadline. codex-hook.cmd
+        #    records the time as its first step (a builtin); this is the seconds since, by bash's own
+        #    clock, no process. Unknown (the sh form, or a stamp that cannot be read) is 0.
+        _mmry_launch=0
+        _mmry_t0="${MMRY_CODEX_HOOK_STARTED:-}"; _mmry_t0="${_mmry_t0// /}"; _mmry_t0="${_mmry_t0%%[.,]*}"
+        _mmry_re_t0='^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$'
+        if [[ "$_mmry_t0" =~ $_mmry_re_t0 ]]; then
+            _mmry_t0s=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} ))
+            _mmry_now=""
+            printf -v _mmry_now '%(%H:%M:%S)T' -1 2>/dev/null || _mmry_now=""
+            if [[ "$_mmry_now" =~ $_mmry_re_t0 ]]; then
+                _mmry_launch=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} - _mmry_t0s ))
+                (( _mmry_launch >= 0 )) || _mmry_launch=$(( _mmry_launch + 86400 ))
+                (( _mmry_launch <= 120 )) || _mmry_launch=0
+            fi
+        fi
+        export MMRY_HOOK_LAUNCH_SECS="$_mmry_launch"
+        # 2. THE HANDLER IN A SUBSHELL OF THIS SHELL, not a new bash: one fork where a child bash is a
+        #    fork and an exec, two Windows processes. A subshell, not this shell, so the handler's exit
+        #    code is still discarded below, and it runs as a plain statement, never in an || list, where
+        #    bash would ignore the handler's own set -e.
+        ( source "$TARGET" "$@" )
+        ;;
+    *)
+        bash "$TARGET" "$@"
+        ;;
+esac
 set -e
 exit 0

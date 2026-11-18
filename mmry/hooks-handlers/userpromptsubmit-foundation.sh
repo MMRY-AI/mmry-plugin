@@ -1325,6 +1325,25 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
     DEADLINE="${MMRY_FOUNDATION_DEADLINE_SECS:-10}"
     [[ "$DEADLINE" =~ ^[0-9]+$ ]] && (( DEADLINE > 0 )) || DEADLINE=10
 
+    # THE DEADLINE COUNTS FROM THE LAUNCH, NOT FROM THIS SHELL (#33967). The host's limit starts when it
+    # starts the hook, and on a loaded Windows machine the processes that bring this file up (Codex's
+    # PowerShell, the launcher, Git's bash) took about ten seconds before this shell's clock started: in
+    # the 33452 TC5 proof every part then ran to the 20 s limit and the person saw "hook timed out".
+    # MMRY_HOOK_LAUNCH_SECS is what the launcher measured before handing over (codex-hook.sh on Codex;
+    # unset, and so 0, wherever nobody measures it). It comes off the deadline. A launch that has already
+    # used the whole deadline and its tail does no work at all: it leaves the cut-short marker, says
+    # nothing to the person, and the next prompt tells the assistant and restates the set.
+    _FND_LAUNCH="${MMRY_HOOK_LAUNCH_SECS:-0}"
+    [[ "$_FND_LAUNCH" =~ ^[0-9]{1,3}$ ]] || _FND_LAUNCH=0
+    if (( _FND_LAUNCH > 0 )); then
+        if (( _FND_LAUNCH >= DEADLINE + 2 )); then
+            _mmry_fnd_mark_cut
+            exit 0
+        fi
+        DEADLINE=$(( DEADLINE - _FND_LAUNCH ))
+        (( DEADLINE >= 1 )) || DEADLINE=1
+    fi
+
     # A marker left behind by a previous firing means that firing never reached its own
     # exit, the harness killed the whole handler, so that turn ran without directives
     # and nobody was told. Report it now.

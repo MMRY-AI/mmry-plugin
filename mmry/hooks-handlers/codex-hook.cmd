@@ -33,8 +33,11 @@ rem THE SESSION START'S CLOCK STARTS HERE (#33062). Codex cuts the SessionStart 
 rem counted from when it starts this file, and on a loaded machine finding and starting Git's bash
 rem took 4 to 7 s of that. codex-hook.sh counts its budget from this time when it can read it. A
 rem builtin `set`: it starts no process.
-if /i "%~1"=="session-init" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
-if /i "%~1"=="codex-first-prompt" set "MMRY_CODEX_HOOK_STARTED=%TIME%"
+rem EVERY HANDLER'S CLOCK, NOT ONLY THE SESSION START'S (#33967). The per-message checks have limits
+rem too (the Foundation parts 20 s, stop-check 10 s), and in the 33452 TC5 proof the launch took most
+rem of them: codex-hook.sh hands the seconds since this stamp to those handlers, which take them off
+rem their own deadlines.
+set "MMRY_CODEX_HOOK_STARTED=%TIME%"
 rem THE LATE-MEMORIES GATE (#33062 fix round 1; moved by #33231, DD-182). codex-first-prompt runs on
 rem every prompt and has work only when a session start ran out of time and left a
 rem .mmry-codex-late.<key>.<session> marker, so with none it exits here, before where.exe, reg.exe or
@@ -115,10 +118,14 @@ set "MMRY_HANDLER=%~1"
 if "%MMRY_HANDLER%"=="" exit /b 0
 set "MMRY_GIT_BASH="
 
-for /f "delims=" %%G in ('%MMRY_SYS32%\where.exe $PATH:git.exe 2^>nul') do (
-    if not defined MMRY_GIT_BASH if exist "%%~dpG..\bin\bash.exe" set "MMRY_GIT_BASH=%%~dpG..\bin\bash.exe"
-    if not defined MMRY_GIT_BASH if exist "%%~dpG..\..\bin\bash.exe" set "MMRY_GIT_BASH=%%~dpG..\..\bin\bash.exe"
-)
+rem 1. THE git.exe ON PATH, FOUND WITHOUT A PROCESS (#33967). This was `for /f` over
+rem    `where.exe $PATH:git.exe`, which is two processes on every hook (the cmd that `for /f` starts and
+rem    where.exe), and on a loaded machine each is about a second of a hook's limit. The same search in
+rem    builtins: each PATH entry in order, the first holding git.exe with Git's bin\bash.exe one or two
+rem    levels up. ONLY ABSOLUTE ENTRIES (X:\ or \\server), which is what $PATH: gave where.exe: an
+rem    entry such as "." or "tools" would name a folder in the customer's project, and a git.exe planted
+rem    there must never choose the bash (security, #31245 QA round 10).
+if defined PATH for %%P in ("%PATH:;=" "%") do if not defined MMRY_GIT_BASH call :from_path_entry "%%~P"
 
 if not defined MMRY_GIT_BASH call :from_registry HKLM
 if not defined MMRY_GIT_BASH call :from_registry HKCU
@@ -132,6 +139,19 @@ if not defined MMRY_GIT_BASH goto :no_git
 
 "%MMRY_GIT_BASH%" "%~dp0codex-hook.sh" %*
 exit /b %ERRORLEVEL%
+
+:from_path_entry
+set "MMRY_PE=%~1"
+if not defined MMRY_PE exit /b 0
+set "MMRY_PE_ABS="
+if "%MMRY_PE:~1,2%"==":\" set "MMRY_PE_ABS=1"
+if "%MMRY_PE:~0,2%"=="\\" set "MMRY_PE_ABS=1"
+if not defined MMRY_PE_ABS exit /b 0
+if "%MMRY_PE:~-1%"=="\" set "MMRY_PE=%MMRY_PE:~0,-1%"
+if not exist "%MMRY_PE%\git.exe" exit /b 0
+if exist "%MMRY_PE%\..\bin\bash.exe" set "MMRY_GIT_BASH=%MMRY_PE%\..\bin\bash.exe"
+if not defined MMRY_GIT_BASH if exist "%MMRY_PE%\..\..\bin\bash.exe" set "MMRY_GIT_BASH=%MMRY_PE%\..\..\bin\bash.exe"
+exit /b 0
 
 :from_registry
 for /f "tokens=2,*" %%A in ('%MMRY_SYS32%\reg.exe query "%~1\SOFTWARE\GitForWindows" /v InstallPath 2^>nul ^| %MMRY_SYS32%\findstr.exe /i "InstallPath"') do (
