@@ -74,7 +74,16 @@ rem MEMBERSHIP FILES ONLY (#31844). The locks and markers that share the prefix 
 rem (a crashed holder, an older version), and every one of them opened this gate. Each match is
 rem handed to :gate_consider, at the end of this file, which ignores those names. `call` to a label
 rem starts no process either.
+rem THE APPROVAL HOOK GOES THROUGH THE SAME GATE (#33903). formation-waiting, the Codex PermissionRequest
+rem hook, has work only for a Formation member, and it runs on every approval prompt for every person.
+rem Without this a person in no Formation paid where.exe, reg.exe, bash and the library, 0.9 to 1.6 s
+rem measured, on each prompt before formation-waiting.sh found nothing to do. The sh form in
+rem hooks/codex-hooks.json carries the identical gate the formation-check entries carry. Only the
+rem raise, formation-waiting with no second argument; any other formation-waiting entry keeps its own
+rem gate.
+if /i "%~1"=="formation-waiting" if "%~2"=="" goto :formation_gate
 if /i not "%~1"=="formation-check" goto :after_formation_gate
+:formation_gate
 set "MMRY_MEMBER="
 if not defined TMPDIR goto :gate_usertemp
 set "MMRY_GATE_DIR=%TMPDIR%"
