@@ -348,8 +348,11 @@ fi
 # formation-waiting.sh leaves .mmry-waiting-<session> when it has told the service this member is
 # waiting on a permission prompt. While it is there, every event of this session goes to
 # formation-waiting.sh --answer with its payload, and the flag is cleared, and the lead told, ONLY
-# when the event answers that prompt: the asked tool's PostToolUse from the agent that asked, the
-# asking agent's turn ending (a Deny leaves no PostToolUse), or the person's next prompt. It used to
+# when the event answers that prompt: the asked CALL's PostToolUse (the agent that asked, the asked
+# tool, and the asked call's input, compared by digest; a parallel call of the same tool does not
+# answer), the asking agent's turn ending (a Deny leaves no PostToolUse), or the person's next prompt.
+# A subagent's end, and every Codex turn's end, are not served here: formation-waiting.sh --answer-hook
+# is registered on those itself (Claude Code's SubagentStop, Codex's Stop and SubagentStop). It used to
 # clear on ANY later event, a dispatched agent's tool call included, and a background agent or a
 # parallel tool finishing while the prompt was still open told the lead "APPROVAL ANSWERED." when
 # nobody had answered (#33900; DD-187 amended). A session start forgets the marker with no call
