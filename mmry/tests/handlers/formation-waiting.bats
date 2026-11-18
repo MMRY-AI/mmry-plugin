@@ -927,13 +927,13 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
     # A leftover Bash record and an Edit prompt: the record is not this prompt's, so no name.
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
-    _ask_record Bash
+    _leftover_ask Bash
     _waiting "$(_notification_tp 'Claude needs your permission to use Edit' "$tp")"
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
     "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
     # A record that agrees with the built-in prompt: the word is sent.
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
-    _ask_record Bash
+    _leftover_ask Bash
     _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     "$(command -v jq)" -e '.toolName == "Bash"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
 }

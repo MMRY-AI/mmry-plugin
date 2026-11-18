@@ -105,7 +105,7 @@ _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
 #      arrives (the cmo-mmry fallback). Never a cut or cleaned name: a shortened name could name the
 #      wrong tool. Where Claude Code fired its PermissionRequest hook, 33900's ask record can give an
 #      MCP tool's exact name, but only under the same test: it must be the one still-waiting call of
-#      its server (_mmry_waiting_record_name). A record never supplies a name on its own; a record
+#      its server (_mmry_waiting_asked_name). A record never supplies a name on its own; a record
 #      that disagrees with the sentence and is not confirmed sends no name.
 # Codex's PermissionRequest carries tool_name itself, and for an MCP tool it is already
 # mcp__<server>__<tool> (the Codex CLI's own naming rule), so it passes through the same field rule.
@@ -186,11 +186,11 @@ mmry_waiting_tool_name() {
     MMRY_WAITING_TOOL="$name"
 }
 
-# _mmry_waiting_record_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH  (#33898 C1 in 33900)
+# _mmry_waiting_asked_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH  (#33898 C1 in 33900)
 # Sets MMRY_WAITING_TOOL to the name to send when a fresh ask record exists. The record never supplies
 # a name on its own: an MCP name in it must be the one still-waiting call of its server in the
 # transcript (_mmry_waiting_open_call); a built-in name in it must equal the sentence's word.
-_mmry_waiting_record_name() {
+_mmry_waiting_asked_name() {
     local rec="${1:-}" name="${2:-}" prefix="${3:-}" tp="${4:-}" rest rp
     MMRY_WAITING_TOOL="$name"
     # The sentence's own MCP name, confirmed by the transcript: it stands.
@@ -588,7 +588,7 @@ else
                 # checked when the sentence names none. A name the sentence already established
                 # stands. A record that disagrees with the sentence and is not confirmed: no name.
                 # The clear's own identity (asker, exact, input) is 33900's and unchanged.
-                _mmry_waiting_record_name "$_k_tool" "$tool" "$mprefix" "$tpath"
+                _mmry_waiting_asked_name "$_k_tool" "$tool" "$mprefix" "$tpath"
                 tool="$MMRY_WAITING_TOOL"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
             fi
