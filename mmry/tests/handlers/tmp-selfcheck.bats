@@ -187,7 +187,7 @@ _prompts_once() {
     local rec="$HOME/.claude/mmry/mmry-tmp-unwritable.log"
     [ -f "$rec" ]
     [ "$(wc -l < "$rec" | tr -d ' ')" -eq 1 ]
-    [[ "$(cat "$rec")" == *"$BAD"* ]]
+    [[ "$(cat "$rec")" == *"$BAD"* ]] || return 1
     _cx_start "$BAD"
     [ "$RC" -eq 0 ]
     [ -z "$ERR" ] || { echo "stderr: $ERR"; return 1; }
@@ -237,7 +237,7 @@ _prompts_once() {
     [ "$RC" -eq 0 ]
     run _context
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
-    [[ "$OUT" != *"cannot save its working files"* ]]
+    [[ "$OUT" != *"cannot save its working files"* ]] || return 1
     [ -z "$(ls -A "$good" | grep -i 'tmpcheck')" ]
     [ ! -e "$HOME/.claude/mmry/mmry-tmp-unwritable.log" ]
 }
@@ -248,7 +248,7 @@ _prompts_once() {
     [ "$RC" -eq 0 ]
     run _context
     assert_output --regexp '^MMRY AI loaded 1 memories\. Read them now: '
-    [[ "$OUT" != *"cannot save its working files"* ]]
+    [[ "$OUT" != *"cannot save its working files"* ]] || return 1
     # The marker is removed as the start ends, after its output is closed: give that a moment.
     local i=0
     while [ -n "$(ls -A "$good" | grep -i 'tmpcheck')" ] && [ "$i" -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
