@@ -142,10 +142,12 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 }
 
 @test "W-06 a tool name that is not a bare name is left out, and the member is still reported" {
-    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    # #33898: this case used the MCP sentence and accepted the server name "mmry"; the MCP form now has
+    # its own cases (W-26 on). A word that is not a bare name is still left out, never trimmed.
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash;id')"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    ! grep -q 'toolName' "$BODIES" || grep -q '"toolName":"mmry"' "$BODIES" || { cat "$BODIES"; return 1; }
-    ! grep -q 'memory_save (MCP)' "$BODIES" || { cat "$BODIES"; return 1; }
+    ! grep -q 'toolName' "$BODIES" || grep -q '"toolName":null' "$BODIES" || { cat "$BODIES"; return 1; }
+    ! grep -q 'Bash' "$BODIES" || { cat "$BODIES"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -354,4 +356,85 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
     _waiting "$(_permission_request_turn Bash turn-0003)"
     _waiting "$(_permission_request_turn Bash turn-0003)"
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33898: for an MCP tool the lead is told the tool's own name, mcp__<server>__<tool>, or no name.
+# The sentences are Claude Code's own (2.1.322): "Claude needs your permission to use <server> -
+# <tool title or name> (MCP)", the server as configured (a plugin's is plugin:<plugin>:<server>), and
+# the tool name the server part normalised exactly as Claude Code builds it (any character outside
+# A-Z a-z 0-9 _ - becomes _).
+# ---------------------------------------------------------------------------------------------
+
+_notification_tp() { # $1 message, $2 transcript path
+    printf '{"session_id":"%s","transcript_path":"%s","cwd":"/x","hook_event_name":"Notification","notification_type":"permission_prompt","message":"%s"}' "$SID" "$2" "$1"
+}
+_tool_sent() { "$JQ_BIN" -r '.toolName // "<none>"' < "$BODIES" | head -1; }
+
+@test "W-26 33898 req1: the MCP sentence names the tool, mcp__mmry__memory_save, not the server" {
+    JQ_BIN="$(command -v jq)"
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-27 33898 req1: a plugin's MCP server is named as Claude Code names it, mcp__plugin_<plugin>_<server>__<tool>" {
+    JQ_BIN="$(command -v jq)"
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use plugin:mmry:mmry - memory_save (MCP)')"
+    [ "$(_tool_sent)" = "mcp__plugin_mmry_mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-28 33898 req1: a tool shown by its title is named from the call in the transcript" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"mcp__plugin_acme_files__save_file","input":{"path":"/secret/'"$PLANTED"'"}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "mcp__plugin_acme_files__save_file" ] || { cat "$BODIES"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+}
+
+@test "W-29 33898 req1: an MCP sentence that cannot be read sends no name, and the member is still reported" {
+    JQ_BIN="$(command -v jq)"
+    for m in 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' \
+             'Claude needs your permission to use mmry (MCP)' \
+             'Claude needs your permission to use mmry - memory_save (MCP) and more'; do
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "$m")"
+        [ "$(grep -c '^PUT ' "$BODIES" "$URLS" | tail -1 | cut -d: -f2)" -ge 1 ] || { cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
+    [ "$(_puts)" -eq 3 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-30 33898 req1: a server and tool longer than 64 characters send no name, never a shortened one" {
+    JQ_BIN="$(command -v jq)"
+    local srv="a-very-long-mcp-server-name-for-testing" tl="an_equally_long_tool_name_here"
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use $srv - $tl (MCP)")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'mcp__a-very' "$BODIES" || { echo "a shortened name was sent"; return 1; }
+}
+
+@test "W-31 33898 req3: a planted secret after the MCP tool name reaches neither the call, the marker nor the output" {
+    JQ_BIN="$(command -v jq)"
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use mmry - memory_save (MCP) $PLANTED")"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use mmry - memory_save $PLANTED (MCP)")"
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+}
+
+@test "W-32 33898 req2: Bash and Write send exactly the names they sent before" {
+    JQ_BIN="$(command -v jq)"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    _check "$(_event UserPromptSubmit)" || true
+    : > "$BODIES"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Write')"
+    [ "$(_tool_sent)" = "Write" ] || { cat "$BODIES"; return 1; }
 }
