@@ -150,6 +150,7 @@ tests/handlers/session-start-reload.bats
 tests/handlers/session-start.bats
 tests/handlers/setup_suite.bash
 tests/handlers/stop-check.bats
+tests/handlers/tmp-selfcheck.bats
 tests/handlers/userpromptsubmit-foundation.bats
 tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
