@@ -457,13 +457,17 @@ _registrations_windows() {
         "cd-parent|$wproject\\sub|!CD!\\..\\tools"
         "cd-alone|$wproject\\tools|!CD!"
         "lone-bang|$wproject|$wtmp\\pl!ain\\cmd"
+        "cd-delayed-default|$wproject|!CD!\\tools|von"
     )
-    local c label from entry f out bad=0
+    # cd-delayed-default: the launcher started by a cmd whose delayed expansion is on, as on a machine
+    # whose registry turns it on by default (cmd /v:on stands in for that).
+    local c label from entry how start f out bad=0
     for c in "${cases[@]}"; do
-        IFS='|' read -r label from entry <<< "$c"
+        IFS='|' read -r label from entry how <<< "$c"
+        start="call"; [[ "$how" == von ]] && start="cmd /v:on /d /c"
         f="$TEST_TMPDIR/bang-$label.cmd"
         printf '%s\r\n' '@echo off' "cd /d \"$from\"" "set \"PATH=$entry;%SystemRoot%\\System32;$gitcmd\"" \
-            "call \"$winroot\\hooks-handlers\\codex-hook.cmd\" stop-check" 'echo EXIT=%ERRORLEVEL%' > "$f"
+            "$start \"$winroot\\hooks-handlers\\codex-hook.cmd\" stop-check" 'echo EXIT=%ERRORLEVEL%' > "$f"
         out="$(env -u NoDefaultCurrentDirectoryInExePath cmd //d //c "$(cygpath -w "$f")" < /dev/null 2>&1 | tr -d '\r')"
         echo "$label ($entry): $out" >&3
         [[ "$out" != *"jq: error"* ]] || { echo "$label: the launcher ran a planted bash for the entry $entry: $out"; bad=1; continue; }
@@ -485,7 +489,8 @@ _registrations_windows() {
 _git_cmd_dir() { [[ -f /cmd/git.exe ]] && cygpath -w /cmd; }
 
 # The real launcher, a stand-in codex-hook.sh that only reports, and PATH set inside cmd so nothing
-# converts it on the way. $1 the PATH as a batch file must spell it (a literal % written %%), $2 a label.
+# converts it on the way. $1 the PATH as a batch file must spell it (a literal % written %%), $2 a label,
+# $3 how the launcher is started (default call; "cmd /v:on /d /c" for a cmd whose delayed expansion is on).
 _launch_with_path() {
     local root="$TEST_TMPDIR/plugin root" f="$TEST_TMPDIR/path-$2.cmd"
     if [[ ! -f "$root/hooks-handlers/codex-hook.sh" ]]; then
@@ -494,7 +499,7 @@ _launch_with_path() {
         printf '#!/usr/bin/env bash\necho "REACHED handler=[$1]"\n' > "$root/hooks-handlers/codex-hook.sh"
     fi
     printf '%s\r\n' '@echo off' "set \"PATH=$1\"" \
-        "call \"$(cygpath -w "$root")\\hooks-handlers\\codex-hook.cmd\" stop-check" 'echo EXIT=%ERRORLEVEL%' > "$f"
+        "${3:-call} \"$(cygpath -w "$root")\\hooks-handlers\\codex-hook.cmd\" stop-check" 'echo EXIT=%ERRORLEVEL%' > "$f"
     cmd //d //c "$(cygpath -w "$f")" < /dev/null 2>&1 | tr -d '\r'
 }
 
@@ -525,14 +530,15 @@ _launch_with_path() {
     # which says "jq: error" when handed a script. Seeing that proves the PATH walk chose the entry; the
     # registry and the standard folders, which come after it, would choose the real Git instead.
     # bang!git (QA round 2): a Git installed under a folder holding ! is found where it is, as
-    # where.exe on develop found it, because the entry is read as written.
+    # where.exe on develop found it, because the entry is read as written; also when the cmd that starts
+    # the launcher has delayed expansion on (a machine whose registry turns it on by default).
     _is_windows || skip "Windows only: needs cmd.exe"
     local jq="$PLUGIN_ROOT/vendor/jq/jq-windows-amd64.exe"
     [[ -f "$jq" ]] || skip "vendored Windows jq not present"
     local gitcmd; gitcmd="$(_git_cmd_dir)" || skip "no Git for Windows cmd folder at /cmd"
-    local -a labels=(quoted percent caret bang) dirs=("fake git" "pct%OS%git" "caret^git" "bang!git")
-    local i d w entry out bad=0
-    for i in 0 1 2 3; do
+    local -a labels=(quoted percent caret bang bang-delayed-default) dirs=("fake git" "pct%OS%git" "caret^git" "bang!git" "bang!git")
+    local i d w entry how out bad=0
+    for i in 0 1 2 3 4; do
         d="$TEST_TMPDIR/${dirs[$i]}"
         mkdir -p "$d/cmd" "$d/bin"
         cp "$jq" "$d/cmd/git.exe"; cp "$jq" "$d/bin/bash.exe"
@@ -543,7 +549,8 @@ _launch_with_path() {
             percent) entry="${w//%/%%}" ;;
             *) entry="$w" ;;
         esac
-        out="$(_launch_with_path "$entry;$gitcmd;%SystemRoot%\\System32" "${labels[$i]}")"
+        how="call"; [[ "${labels[$i]}" == *-delayed-default ]] && how="cmd /v:on /d /c"
+        out="$(_launch_with_path "$entry;$gitcmd;%SystemRoot%\\System32" "${labels[$i]}" "$how")"
         echo "${labels[$i]}: $out" >&3
         [[ "$out" != *"was unexpected at this time"* ]] || { echo "${labels[$i]}: cmd could not parse the launcher: $out"; bad=1; continue; }
         [[ "$out" == *"jq: error"* ]] || { echo "${labels[$i]}: the walk did not choose the entry as written ($w): $out"; bad=1; continue; }
