@@ -225,7 +225,7 @@ _quiet_poll() {
 }
 
 @test "Q4: the command page and the Codex skill say the lead hears who has gone quiet, in the same words" {
-    local para='**The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member'"'"'s assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.'
+    local para='**The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member'"'"'s assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.'
     local page
     for page in "${BATS_TEST_DIRNAME}/../../commands/formation.md" "${BATS_TEST_DIRNAME}/../../skills-codex/memory-system/SKILL.md"; do
         grep -qF -- "$para" "$page" || { echo "missing from $page"; return 1; }
