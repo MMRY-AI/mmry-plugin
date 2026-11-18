@@ -103,7 +103,10 @@ _MMRY_WAITING_SID_RE='^[A-Za-z0-9._-]{1,100}$'
 #      call of that name, two or more still-waiting calls of that server, or a built name that breaks
 #      the field rule) sends NO name, and the lead's sentence is left out, exactly as when no name
 #      arrives (the cmo-mmry fallback). Never a cut or cleaned name: a shortened name could name the
-#      wrong tool.
+#      wrong tool. Where Claude Code fired its PermissionRequest hook, 33900's ask record can give a
+#      titled tool's exact name, but only under the same test: it must be the one still-waiting call
+#      of the sentence's server. A record never supplies a name on its own, and never replaces a
+#      built-in tool's word.
 # Codex's PermissionRequest carries tool_name itself, and for an MCP tool it is already
 # mcp__<server>__<tool> (the Codex CLI's own naming rule), so it passes through the same field rule.
 #
@@ -524,7 +527,8 @@ fi
 
 # Who asked, and the asked tool's exact name when known (#33900, WHICH PROMPT, AND WHO ASKED above).
 # Codex: from this payload. Claude Code: from the ask record its PermissionRequest left moments ago,
-# which also gives the lead the exact name where the sentence has only a display name; without a fresh
+# which also gives the lead the exact name where the sentence has only a display name, but only when
+# the transcript confirms it as the one still-waiting call of that server (#33898 C1); without a fresh
 # record, the main thread and no exact name (the clear then waits for the main thread's own events).
 asker="" exact="" input="" mturn=""
 if [[ "$event" == "PermissionRequest" ]]; then
@@ -553,7 +557,13 @@ else
             _k_used=1
             [[ "$_k_asker" =~ $_MMRY_WAITING_SID_RE ]] && asker="$_k_asker"
             if [[ "$_k_tool" =~ $_MMRY_WAITING_TOOL_RE ]]; then
-                tool="$_k_tool"; exact="$_k_tool"
+                exact="$_k_tool"
+                # The NAME SENT (#33898 C1): a record can be left over from an earlier prompt, so it
+                # never supplies a name on its own. It names an MCP prompt's tool only when the
+                # transcript holds it as the one still-waiting call of the sentence's server (THE
+                # TOOL'S NAME, point 2); a built-in prompt keeps its own word. The clear's own
+                # identity (asker, exact, input) is 33900's and unchanged.
+                [[ -n "$mprefix" && -n "$MMRY_WAITING_OPEN" && "$_k_tool" == "$MMRY_WAITING_OPEN" ]] && tool="$_k_tool"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
             fi
         fi

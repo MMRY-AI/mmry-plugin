@@ -701,9 +701,12 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     _cleared_once
 }
 
-@test "X-07 33900 req3: a subagent's own prompt clears on that subagent's call to the asked tool, and the lead is told the exact tool" {
-    _cc_raise mcp__probe__ping "$SUB" Ping
-    "$(command -v jq)" -e '.toolName == "mcp__probe__ping"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
+@test "X-07 33900 req3: a subagent's own prompt clears on that subagent's call to the asked tool; with no transcript the record alone names no tool (33898 C1)" {
+    _cc_raise mcp__probe__ping "$SUB" 'probe - Ping (MCP)'
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    # Round 3 (#33898 C1, lead 439 2026-11-18): the ask record never supplies a name on its own, and a
+    # subagent's call is not in the main transcript, so the lead's tool sentence is left out.
+    "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
     _check "$(_cc_post mcp__probe__ping)" || true
     _held
     _check "$(_cc_post mcp__probe__ping "$SUB")" || true
@@ -893,4 +896,22 @@ _running_bg() { printf '[{"id":"%s","type":"subagent","status":"running","descri
     run _stophook "$(_codex_subagent_stop thread-sub-2)"
     [ -z "$output" ] || { echo "printed: $output"; return 1; }
     _cleared_once
+}
+
+@test "X-24 33898 C1 in the 33900 stack: a fresh ask record names a titled MCP tool only when the transcript holds it as the one still-waiting call of its server" {
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__probe__ping
+    _ask "$(_cc_ask mcp__probe__ping)" || true
+    _waiting "$(_notification_tp 'Claude needs your permission to use probe - Ping the server (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    "$(command -v jq)" -e '.toolName == "mcp__probe__ping"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
+    # The asked call ran (its tool_result is in the transcript): the same record no longer names it.
+    _check "$(_cc_post mcp__probe__ping)" || true
+    _cleared_once
+    : > "$BODIES"
+    _tool_result "$tp" toolu_1
+    _ask "$(_cc_ask mcp__probe__ping)" || true
+    _waiting "$(_notification_tp 'Claude needs your permission to use probe - Ping the server (MCP)' "$tp")"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    "$(command -v jq)" -e '.toolName == null' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
 }
