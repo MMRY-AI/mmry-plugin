@@ -278,11 +278,14 @@ source "${HANDLER_DIR}/lib-hookread.sh" 2>/dev/null || exit 0
 session_id=""
 hook_event=""
 hook_agent_id=""
+hook_source=""
 hook_read_status="notty"
-# The three fields this hook takes from the payload, in ONE jq call. agent_id is the third (#31991):
+# The four fields this hook takes from the payload, in ONE jq call. agent_id is the third (#31991):
 # see THE SESSION ITSELF, NOT AN AGENT IT DISPATCHED, below the parse. tostring, so an id that ever
-# arrives as a number is still seen as present.
-_fc_payload_fields='[(.session_id // ""), (.hook_event_name // ""), (.agent_id // "" | tostring)] | @tsv'
+# arrives as a number is still seen as present. source is the fourth (#33256): SessionStart says
+# "compact" when it follows a compaction, and that is the re-arm, not the sweep (see SESSIONSTART
+# "compact" IS THE RE-ARM, where the mode is chosen).
+_fc_payload_fields='[(.session_id // ""), (.hook_event_name // ""), (.agent_id // "" | tostring), (.source // "" | tostring)] | @tsv'
 if [[ ! -t 0 ]]; then
     mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
     payload="${MMRY_HOOK_PAYLOAD:-}"
@@ -312,7 +315,13 @@ if [[ ! -t 0 ]]; then
             session_id="${parsed%%$'	'*}"
             _fc_rest="${parsed#*$'	'}"
             hook_event="${_fc_rest%%$'	'*}"
-            [[ "$_fc_rest" == *$'	'* ]] && hook_agent_id="${_fc_rest#*$'	'}"
+            if [[ "$_fc_rest" == *$'	'* ]]; then
+                _fc_rest="${_fc_rest#*$'	'}"
+                hook_agent_id="${_fc_rest%%$'	'*}"
+                [[ "$_fc_rest" == *$'	'* ]] && hook_source="${_fc_rest#*$'	'}"
+                # The last field carries a jq.exe CR on Windows, if any; nothing else can.
+                hook_source="${hook_source%$'\r'}"
+            fi
             # It answered, so it runs: the client's mmry_resolve_jq need not ask again.
             if [[ -n "$_fc_jq_unproved" ]]; then
                 _MMRY_JQ_VERIFIED="$MMRY_JQ"; export MMRY_JQ; _fc_jq_unproved=""
@@ -411,6 +420,15 @@ session_id="${session_id:-$(mmry_session_id)}"
 # both the correct answer for one input and the failure mode for all the others cannot be told apart
 # from the outside, and that is precisely how the macOS defect passed for healthy. PostToolUse is now
 # matched by name, and reaching the catch-all means the event was not resolved.
+#
+# SESSIONSTART "compact" IS THE RE-ARM (#33256). Claude Code fires SessionStart with source "compact"
+# after every compaction, an idle one included. hooks.json registers this handler for it alone, matcher
+# "compact", with "asyncRewake": true and the Stop budget, so it is the one event after an idle
+# compaction that can still wake the session; see AFTER A COMPACTION, THE WATCH IS STARTED AGAIN in the
+# idle mode. The sweep registration is matched to every other source, so a compaction runs this handler
+# once, here, and never in the 15 s sweep. NOT PostCompact: Claude Code 2.1.75 and older reject a
+# plugin hooks file that names it, and drop every hook in it (Seat D, 2026-11-19). Both 2.1.75 and
+# 2.1.322 background an asyncRewake SessionStart hook and wake the session on its exit 2, as for Stop.
 mode="${MMRY_FORMATION_MODE:-}"
 if [[ -z "$mode" ]]; then
     case "$hook_event" in
@@ -429,6 +447,12 @@ if [[ -z "$mode" ]]; then
             fi
             ;;
     esac
+    # Claude Code only. Codex has no asyncRewake and no idle watch to start (see the idle mode), so a
+    # Codex SessionStart sweeps on every source, as it always has.
+    if [[ "$hook_event" == "SessionStart" && "$hook_source" == "compact" ]]; then
+        _mmry_host_resolve
+        [[ "$_MMRY_HOST_V" == "codex" ]] || mode="rearm"
+    fi
 fi
 
 # ---- 1. Are we in a formation at all? One file test, then out. Key state by the resolved id. ----
@@ -541,6 +565,147 @@ _poller_dir="${MMRY_TMPDIR}/.mmry-formation-poll-${_safe_sid}"
 _held_mutex=""
 _held_poller=""
 
+# ---- THE LISTENING RECORD: how the last watch ended (#33256) ----------------------------------
+# On 2026-10-30 a member's watch stopped, the idle session then compacted itself, and nothing started
+# listening again for 53.7 hours; nobody was told. Two things were missing: a way to start the watch
+# again when no turn ends (the SessionStart "compact" re-arm in the idle mode), and a way to tell a watch that
+# stopped early from one that stopped at its set limit (this record).
+#
+# One line, ".mmry-listen-<session>": STATE PID CHAIN STAMP FORMATION. Not named .mmry-formation-*,
+# which the hooks.json gate would take for a membership record. Written by the watch holding the poll
+# lock, with printf, so it costs no process: when the watch starts, before every sleep, and once more
+# as it ends (from the EXIT trap). STATE is
+#   live     a watch is listening, as of STAMP (a watch killed outright, which no trap survives, leaves
+#            this behind with a dead PID: that is an early stop)
+#   woke     it woke the session, with a message or a renewal; that turn's Stop starts the next watch
+#   handed   it stood down for a newer watch (the HANDOVER)
+#   limit    it reached its set limit, or the one window "off" allows: the quiet stop of #31850
+#   stopped  it stopped early: the renewal could not be confirmed, or something failed
+#   noticed  an early stop the member has already been told about
+# CHAIN is when the member's last turn began the listening chain, so a watch started again after a
+# compaction keeps the limit counting from that turn and not from the compaction.
+#
+# ".mmry-listen-notice-<session>" (STAMP FORMATION) is a stop found by the watch that follows it,
+# owed to the member's next turn: its next prompt, or the next message or renewal that wakes it.
+_listen_rec="${MMRY_TMPDIR}/.mmry-listen-${_safe_sid}"
+_listen_notice="${MMRY_TMPDIR}/.mmry-listen-notice-${_safe_sid}"
+_fc_watch_end=""
+_fc_rec_chain=0
+_fc_notice=""
+_fc_notice_from=""
+
+# Reads the record into _lr_*. Returns 1 when there is none or it is not well formed. A read builtin.
+_fc_listen_read() {
+    _lr_state=""; _lr_pid=""; _lr_chain=""; _lr_stamp=""; _lr_formation=""
+    local extra=""
+    [[ -f "$_listen_rec" ]] || return 1
+    { IFS=' ' read -r _lr_state _lr_pid _lr_chain _lr_stamp _lr_formation extra || true; } < "$_listen_rec" 2>/dev/null || return 1
+    _lr_formation="${_lr_formation%$'\r'}"
+    [[ "$_lr_state" =~ ^(live|woke|handed|limit|stopped|noticed)$ && "$_lr_pid" =~ ^[0-9]{1,10}$ \
+        && "$_lr_chain" =~ ^[0-9]{1,12}$ && "$_lr_stamp" =~ ^[0-9]{1,12}$ && "$_lr_formation" =~ ^[0-9]{1,12}$ ]]
+}
+
+_fc_listen_write() {
+    printf '%s %s %s %s %s\n' "$1" "$$" "$_fc_rec_chain" "$2" "$formation_id" > "$_listen_rec" 2>/dev/null || true
+}
+
+# The time, from a process only when asked, into _fc_now. Returns 1 if the clock cannot be read.
+_fc_clock() {
+    [[ -n "${_fc_now:-}" ]] && return 0
+    _fc_now="$(date +%s 2>/dev/null || printf '0')"
+    [[ "$_fc_now" =~ ^[0-9]+$ ]] || { _fc_now=""; return 1; }
+}
+
+# True when the record shows this formation's listening stopped BEFORE its set limit, longer ago than
+# a handover can take (_IDLE_LOCK_STALE); _lr_stamp is then about when. A watch whose pid is alive is
+# listening, unless its record is older than any watch can live (a reused pid, see
+# _IDLE_LOCK_BACKSTOP), which is only asked when the caller has already read the clock: the prompt
+# check does not, so a person typing while a watch listens costs no process here.
+_fc_listen_notice_due() {
+    _fc_listen_read || return 1
+    [[ "$_lr_formation" == "$formation_id" ]] || return 1
+    case "$_lr_state" in
+        stopped) ;;
+        live)
+            [[ "$_lr_pid" != "$$" ]] || return 1
+            if kill -0 "$_lr_pid" 2>/dev/null; then
+                [[ -n "${_fc_now:-}" ]] || return 1
+                (( _fc_now - _lr_stamp > _IDLE_LOCK_BACKSTOP )) || return 1
+            fi
+            ;;
+        *) return 1 ;;
+    esac
+    _fc_clock || return 1
+    (( _fc_now - _lr_stamp > _IDLE_LOCK_STALE ))
+}
+
+# Finds the notice owed to this turn, without consuming it: the one a watch left, or one this check
+# finds in the record itself. Sets _fc_notice and _fc_notice_from ("marker" or "record").
+_fc_find_notice() {
+    _fc_notice=""; _fc_notice_from=""
+    local since="" form="" ago unit
+    if [[ -f "$_listen_notice" ]]; then
+        { IFS=' ' read -r since form || true; } < "$_listen_notice" 2>/dev/null || true
+        form="${form%$'\r'}"
+        if [[ "$since" =~ ^[0-9]{1,12}$ && "$form" == "$formation_id" ]]; then
+            _fc_notice_from="marker"
+        else
+            # Another formation's, or unreadable: not this member's to be told.
+            rm -f -- "$_listen_notice" 2>/dev/null || true
+            since=""
+        fi
+    fi
+    if [[ -z "$since" ]] && _fc_listen_notice_due; then
+        since="$_lr_stamp"; _fc_notice_from="record"
+    fi
+    [[ -n "$since" ]] || return 1
+    _fc_clock || return 1
+    ago=$(( (_fc_now - since + 30) / 60 )); unit="minutes"
+    if (( ago >= 120 )); then ago=$(( (ago + 30) / 60 )); unit="hours"; fi
+    # The status command as this host spells it (codex-customer-strings.bats): one process, and only
+    # when there is a notice to give.
+    local status_cmd; status_cmd="$(mmry_host_formation_ref status)"
+    _fc_notice="MMRY FORMATION LISTENING HAD STOPPED (formation ${formation_id}). The background watch that keeps this session listening while it sits idle stopped about ${ago} ${unit} ago, before its set limit, so a message sent to this session after that was not shown when it arrived. Nothing sent to it was lost. Listening has resumed: the watch starts again when this turn ends, as it does after every turn, so if it ever stops, end your turn to resume it. To see anything still waiting now, run ${status_cmd}. If you were waiting on an answer from the lead, check whether it already came."
+    return 0
+}
+
+# The notice has been shown: it is not owed again. A record found by the prompt check is marked
+# "noticed", keeping its chain for a later re-arm, unless a watch has since taken it over.
+_fc_consume_notice() {
+    case "$_fc_notice_from" in
+        marker) rm -f -- "$_listen_notice" 2>/dev/null || true ;;
+        record)
+            if _fc_listen_read && [[ "$_lr_state" == "stopped" || "$_lr_state" == "live" ]]; then
+                printf 'noticed %s %s %s %s\n' "$_lr_pid" "$_lr_chain" "$_lr_stamp" "$_lr_formation" \
+                    > "$_listen_rec" 2>/dev/null || true
+            fi
+            ;;
+    esac
+    _fc_notice=""; _fc_notice_from=""
+}
+
+# From the EXIT trap of a watch that held the poll lock: write how it ended, if the record is still
+# its own (a watch that took the lock over writes its own). A watch that exits while a newer one is
+# waiting on the handover has handed over, whatever the path it left by.
+_fc_listen_end() {
+    [[ -n "$_fc_watch_end" && -n "$_held_poller" ]] || return 0
+    _fc_listen_read || return 0
+    [[ "$_lr_pid" == "$$" ]] || return 0
+    [[ -n "${_handover_dir:-}" && -d "${_handover_dir:-}" ]] && _fc_watch_end="handed"
+    # A watch that ends because this session is no longer in this formation (it left, joined
+    # another, or the service said so and the record was removed) has left, whatever the path.
+    if [[ "$_fc_watch_end" == "stopped" ]]; then
+        if ! mmry_formation_state_read "$session_id" || [[ "$MMRY_FS_FORMATION" != "$formation_id" ]]; then
+            _fc_watch_end="left"
+        fi
+    fi
+    case "$_fc_watch_end" in
+        left) rm -f -- "$_listen_rec" 2>/dev/null || true ;;
+        *) _fc_listen_write "$_fc_watch_end" "${_now:-${_idle_entry:-$_lr_stamp}}" ;;
+    esac
+    return 0
+}
+
 # Epoch mtime of a path, on GNU and on BSD. Echoes 0 when it cannot be read.
 #
 # `date -r PATH` is NOT this (#31196 QA round 2). It is a GNU extension; on BSD and macOS `date -r`
@@ -648,6 +813,8 @@ _release_mutex() {
 }
 
 _release_all() {
+    # The listening record first, while the poll lock is still this watch's (#33256).
+    _fc_listen_end || true
     [[ -n "$_held_mutex"  ]] && _drop "$_mutex_dir"
     [[ -n "$_held_poller" ]] && _drop "$_poller_dir"
     return 0
@@ -1071,6 +1238,21 @@ case "$mode" in
         if [[ "$mode" == "start" ]]; then
             _event_name="SessionStart"
             _preamble="These formation messages arrived while this session was not running, so they were never shown. They may be stale; check before acting."
+            _mmry_host_resolve
+            if [[ "$_MMRY_HOST_V" != "codex" ]]; then
+                # AFTER A COMPACTION (#33256), the session has not restarted and may be idle. A sweep
+                # here would put the messages into its context WITHOUT waking it and mark them seen,
+                # so the re-armed watch would find nothing to wake it with: the member would be shown
+                # them only when somebody next typed. A compaction is the re-arm (the mode is chosen
+                # above), so it never reaches here from the payload; this guard is for a start mode
+                # forced with source "compact", and it leaves the messages and asks nothing. On
+                # 2026-10-31 this step ran 17.6 s and was cancelled.
+                [[ "$hook_source" == "compact" ]] && exit 0
+                # A session that started or resumed had no watch while it was not running; the sweep
+                # says so. An old record of the watch it had before is not an early stop to report.
+                [[ -e "$_listen_rec" ]] && { rm -f -- "$_listen_rec" 2>/dev/null || true; }
+                [[ -e "$_listen_notice" ]] && { rm -f -- "$_listen_notice" 2>/dev/null || true; }
+            fi
         else
             _event_name="UserPromptSubmit"
             _preamble="These formation messages were sent while this session was idle and had not yet been shown. They may be stale; check before acting."
@@ -1090,20 +1272,37 @@ case "$mode" in
             [[ -e "${MMRY_TMPDIR}/.mmry-formation-renewed-${_safe_sid}" ]] \
                 && { rm -rf -- "${MMRY_TMPDIR:?}/.mmry-formation-renewed-${_safe_sid}" 2>/dev/null || true; }
             [[ -e "$_renew_turn" ]] && { rm -f -- "$_renew_turn" 2>/dev/null || true; }
+            # LISTENING THAT STOPPED EARLY IS SAID, ON THIS TURN (#33256 requirement 3). Two file tests
+            # when there is nothing to say; a process only when the record says a watch stopped.
+            if [[ -e "$_listen_notice" || -e "$_listen_rec" ]]; then
+                _fc_find_notice || true
+            fi
         fi
-        _poll_once || exit 0
+        # With no notice owed, the path is exactly as it was: formation-check-timeout.bats builds its
+        # mark-first control by matching this `_poll_once || exit 0` line, so it stays one line.
+        if [[ -z "$_fc_notice" ]]; then
+            _poll_once || exit 0
+        elif ! _poll_once; then
+            # Nothing to show but the notice: it goes on its own, then nothing else happens.
+            "$MMRY_JQ" -n --arg ev "$_event_name" --arg note "$_fc_notice" \
+                '{hookSpecificOutput:{hookEventName:$ev, additionalContext:$note}}' 2>/dev/null || exit 0
+            _fc_consume_notice
+            exit 0
+        fi
         # A here-string, not `printf | jq`, which was one more process before the person's prompt
         # could go (#31976). A here-string ends with one newline the block never has (it ends with
-        # "transmitting."), so .[:-1] takes exactly that newline off and the text is unchanged.
+        # "transmitting."), so .[:-1] takes exactly that newline off and the text is unchanged. The
+        # notice, when there is one, follows the block; with none, the text is byte for byte as before.
         "$MMRY_JQ" -Rs \
-            --arg ev "$_event_name" --arg pre "$_preamble" \
-            '{hookSpecificOutput:{hookEventName:$ev, additionalContext:($pre + "\n\n" + .[:-1])}}' \
+            --arg ev "$_event_name" --arg pre "$_preamble" --arg note "$_fc_notice" \
+            '{hookSpecificOutput:{hookEventName:$ev, additionalContext:($pre + "\n\n" + .[:-1] + (if $note == "" then "" else "\n\n" + $note end))}}' \
             <<< "$FORMATION_BLOCK" 2>/dev/null || exit 0
         _mark_shown
+        [[ -z "$_fc_notice" ]] || _fc_consume_notice
         exit 0
         ;;
 
-    idle)
+    idle|rearm)
         # Stop: the whole point of #31196. The registration carries "asyncRewake": true, so Claude
         # Code backgrounds this process as the session goes idle and wakes the model if it exits 2.
         # That is what lets a member who is sitting doing nothing be told something, which no
@@ -1133,6 +1332,8 @@ case "$mode" in
         # picked up instead by the PostToolUse and UserPromptSubmit routes on the next thing that
         # happens. NOT hookSpecificOutput: stop.command.output.schema.json has no such property.
         if [[ "$(mmry_host)" == "codex" ]]; then
+            # Codex registers no after-compaction re-arm and has no idle watch to start again.
+            [[ "$mode" == "rearm" ]] && exit 0
             _poll_once || exit 0
             printf '%s\n' "$FORMATION_BLOCK" >&2 || exit 0
             _mark_shown
@@ -1144,6 +1345,36 @@ case "$mode" in
         _idle_entry="$(date +%s 2>/dev/null || printf '0')"
         [[ "$_idle_entry" =~ ^[0-9]+$ ]] || exit 0
         _hook_start=$(( _idle_entry - SECONDS ))
+        _fc_now=$_idle_entry
+
+        # AFTER A COMPACTION, THE WATCH IS STARTED AGAIN (#33256 requirements 1 and 2). Claude Code can
+        # compact an idle session on its own, and after that no turn ends, so no Stop fires to start a
+        # watch. On 2026-10-30 a member whose watch had stopped was compacted while idle and then heard
+        # nothing for 53.7 hours. SessionStart "compact" is registered with "asyncRewake": true and the Stop
+        # budget, so this watch can wake the session exactly as a Stop watch does. It starts only
+        # where there is no live watch and listening has not reached its set limit:
+        #   a live watch (its pid alive, its record touched within _IDLE_LOCK_STALE): leave it be,
+        #     the compaction did not stop it;
+        #   a watch that reached its limit, or the one window "off" allows: the member's next turn
+        #     starts listening again, as #31850 has it; a compaction is not a turn;
+        #   anything else (no record, killed, stopped early, woke a turn that never ended): listen.
+        # It follows no new work, so it starts at the slow end of the schedule as a renewal does, and
+        # its limit counts from the member's last turn (the record's chain), not from the compaction.
+        _rearm_chain=""
+        if [[ "$mode" == "rearm" ]]; then
+            if _fc_listen_read && [[ "$_lr_formation" == "$formation_id" ]]; then
+                case "$_lr_state" in
+                    limit) exit 0 ;;
+                    live)
+                        if [[ "$_lr_pid" != "$$" ]] && kill -0 "$_lr_pid" 2>/dev/null \
+                            && (( _idle_entry - _lr_stamp <= _IDLE_LOCK_STALE )); then
+                            exit 0
+                        fi
+                        ;;
+                esac
+                (( _lr_chain > 0 && _lr_chain <= _hook_start )) && _rearm_chain=$_lr_chain
+            fi
+        fi
         # HANDOVER (#31721 requirement 3). A watch lives for up to 28 minutes, so a member that ends a
         # later turn usually finds the previous watch still running - and by then that watch may be
         # asking only once a minute, which would make a reply to the turn that just ended slower than
@@ -1179,8 +1410,16 @@ case "$mode" in
             fi
         fi
         _held_poller=1
+        # From here every way out records how this watch ended (#33256); a path that names no other
+        # ending is an early stop.
+        _fc_watch_end="stopped"
         # Whatever asked a PREVIOUS holder to stand down is not addressed to this one.
         rmdir "$_handover_dir" 2>/dev/null || true
+        # A watch that stopped before its set limit, found by the watch that follows it, is owed to
+        # the member's next turn (#33256 requirement 3). Asked before this watch's record replaces it.
+        if _fc_listen_notice_due; then
+            printf '%s %s\n' "$_lr_stamp" "$formation_id" > "$_listen_notice" 2>/dev/null || true
+        fi
 
         # A watch that follows a renewal starts at the slow end of the schedule: the renewal turn
         # asked nobody anything, so nothing is about to be answered (#31721 requirement 4). The
@@ -1190,8 +1429,15 @@ case "$mode" in
         # THE LISTENING LIMIT COUNTS FROM THE MEMBER'S LAST TURN (#31850). A watch that follows a
         # renewal inherits the time its chain began, which the renewal wrote into the marker; any
         # other watch follows real work - a typed prompt, a delivered message - and begins a chain.
+        # A watch started again after a compaction follows no work either (#33256): it starts at the
+        # slow end and carries on the chain the listening record kept.
         _chain_since=$_hook_start
-        if [[ -d "$_renew_marker" ]]; then
+        if [[ "$mode" == "rearm" ]]; then
+            _offset=$_IDLE_LATE_UNTIL
+            [[ -n "$_rearm_chain" ]] && _chain_since=$_rearm_chain
+        fi
+        # The renewal marker belongs to the Stop of the turn a renewal woke; a re-arm leaves it there.
+        if [[ "$mode" != "rearm" && -d "$_renew_marker" ]]; then
             _lock_is_stale "$_renew_marker" 120 || _offset=$_IDLE_LATE_UNTIL
             _since=""
             { IFS= read -r _since || true; } 2>/dev/null < "${_renew_marker}/since" || true
@@ -1203,15 +1449,26 @@ case "$mode" in
 
         # The window ends 28 minutes after the hook started, or where the listening limit runs out if
         # that is sooner. Only a window that ends with listening still left to do may renew.
+        # This watch's record, from now on (#33256): live, carrying the chain.
+        _fc_rec_chain=$_chain_since
+        _fc_listen_write live "$_idle_entry"
+
         _fc_listen_setting
         _deadline=$(( _hook_start + MMRY_IDLE_POLL_SECONDS ))
         _renew=1
         if (( _listen_secs == 0 )); then
             _renew=0
+            # With listening off, the member's last turn allows ONE window. A watch started again
+            # after a compaction finishes that window; it does not open another (#33256).
+            if [[ "$mode" == "rearm" && -n "$_rearm_chain" ]]; then
+                _listen_end=$(( _chain_since + MMRY_IDLE_POLL_SECONDS ))
+                (( _listen_end > _idle_entry )) || { _fc_watch_end="limit"; exit 0; }
+                (( _listen_end < _deadline )) && _deadline=$_listen_end
+            fi
         elif (( _listen_secs > 0 )); then
             _listen_end=$(( _chain_since + _listen_secs ))
             # The chain is already spent: nothing to listen for until the member's next turn.
-            (( _listen_end > _idle_entry )) || exit 0
+            (( _listen_end > _idle_entry )) || { _fc_watch_end="limit"; exit 0; }
             if (( _listen_end <= _deadline )); then
                 _deadline=$_listen_end
                 _renew=0
@@ -1229,8 +1486,16 @@ case "$mode" in
             _fc_holds_poller || { _held_poller=""; exit 0; }
 
             if _poll_once; then
+                # A stop owed to the member rides on the message that wakes it (#33256).
+                if [[ -e "$_listen_notice" ]]; then
+                    _fc_now="${_now:-$_idle_entry}"
+                    _fc_find_notice || true
+                    [[ "$_fc_notice_from" == "marker" ]] && FORMATION_BLOCK+=$'\n\n'"${_fc_notice}"
+                fi
                 printf '%s\n' "$FORMATION_BLOCK" >&2 || exit 0
                 _mark_shown
+                [[ "$_fc_notice_from" == "marker" ]] && _fc_consume_notice
+                _fc_watch_end="woke"
                 # The turn this wakes is real work, not a renewal (#31850).
                 [[ -e "$_renew_turn" ]] && { rm -f -- "$_renew_turn" 2>/dev/null || true; }
                 exit 2
@@ -1247,6 +1512,8 @@ case "$mode" in
             # never mistaken for a session that ended without leaving. -c: a record removed by leaving
             # in the meantime is not brought back by this.
             touch -c "$_poller_dir" "$MMRY_FS_PATH" 2>/dev/null || true
+            # And the listening record, by a redirect, no process (#33256).
+            _fc_listen_write live "$_now"
             # Sleep in slices, so a turn that has just ended can take over within 3 s (see HANDOVER).
             # A watch asked to stand down exits quietly: it does not renew, because the watch that
             # asked is already listening.
@@ -1260,9 +1527,12 @@ case "$mode" in
         [[ ! -d "$_handover_dir" ]] || exit 0
         # The listening limit is reached, or listening is off (#31850): stop quietly, without asking
         # the service anything. The member's next turn starts listening again.
-        (( _renew == 1 )) || exit 0
+        (( _renew == 1 )) || { _fc_watch_end="limit"; exit 0; }
         _fc_holds_poller || { _held_poller=""; exit 0; }
+        # Membership the service cannot confirm stops the watch early (#33256): the EXIT trap records
+        # "stopped", or "left" when the service said this session is no longer a member.
         _idle_confirmed_member || exit 0
+        _fc_watch_end="woke"
         mkdir "$_renew_marker" 2>/dev/null || true
         # The next watch carries this chain's start forward, so the limit counts from the last turn.
         printf '%s\n' "$_chain_since" > "${_renew_marker}/since" 2>/dev/null || true
@@ -1278,7 +1548,16 @@ case "$mode" in
         else
             _quiet="${MMRY_IDLE_POLL_SECONDS} seconds"
         fi
-        printf '%s\n' "MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with: Still listening. If you are waiting on the user's answer to a question, add that question on one more line; otherwise add nothing." >&2 || exit 0
+        _renew_text="MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with: Still listening. If you are waiting on the user's answer to a question, add that question on one more line; otherwise add nothing."
+        # A stop owed to the member, found when this watch started, is told on this turn (#33256).
+        # With none, the text is exactly as before.
+        if [[ -e "$_listen_notice" ]]; then
+            _fc_now="${_now:-$_idle_entry}"
+            _fc_find_notice || true
+            [[ "$_fc_notice_from" == "marker" ]] && _renew_text+=$'\n\n'"${_fc_notice}"
+        fi
+        printf '%s\n' "$_renew_text" >&2 || exit 0
+        [[ "$_fc_notice_from" == "marker" ]] && _fc_consume_notice
         exit 2
         ;;
 

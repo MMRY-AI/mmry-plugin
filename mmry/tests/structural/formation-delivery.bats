@@ -360,7 +360,9 @@ _safe_sid_for_test() {
 }
 
 @test "wired: the handler is registered on SessionStart for the missed-message sweep" {
-    run node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.SessionStart||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check"));process.exit(s.length===1?0:1);' "${BATS_TEST_DIRNAME}/../../hooks/hooks.json"
+    # One synchronous sweep. SessionStart also carries the after-compaction re-arm (#33256), which is
+    # asyncRewake and matched to "compact" only; formation-compaction-rearm.bats pins that one.
+    run node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const s=(d.hooks.SessionStart||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check")&&h.asyncRewake!==true&&h.async!==true);process.exit(s.length===1?0:1);' "${BATS_TEST_DIRNAME}/../../hooks/hooks.json"
     [ "$status" -eq 0 ]
 }
 

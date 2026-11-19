@@ -287,9 +287,11 @@ _fire_real() {
         MMRY_API_URL="$STUB_URL" bash "${HANDLERS}/formation-check.sh" </dev/null
 }
 
-# The registered budget for an event, from the shipped hooks.json.
+# The registered budget for an event, from the shipped hooks.json. Synchronous registrations only,
+# and exactly one: SessionStart also carries the after-compaction re-arm (#33256), asyncRewake on the
+# idle budget, which runs the "rearm" mode and never the "start" sweep these tests time.
 _registered_budget() {
-    node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=(d.hooks[process.argv[2]]||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check")).map(h=>h.timeout);console.log(t.length===1?t[0]:"none");' \
+    node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=(d.hooks[process.argv[2]]||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check")&&h.asyncRewake!==true).map(h=>h.timeout);console.log(t.length===1?t[0]:"none");' \
         "${BATS_TEST_DIRNAME}/../../hooks/hooks.json" "$1"
 }
 
@@ -360,7 +362,9 @@ _handler_figure() {
 
     local f got checked=0
     for f in hooks.json codex-hooks.json; do
-        got="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const o={};for(const[ev,gs]of Object.entries(d.hooks))for(const g of gs)for(const h of g.hooks)if(h.command.includes("formation-check"))o[ev]=h.timeout;console.log([o.UserPromptSubmit,o.SessionStart,o.PostToolUse].join(" "));' \
+        # Synchronous registrations only: the asyncRewake ones (Stop, SessionStart "compact", #33256)
+        # run on the idle budget, which formation-listen-limit.bats pins.
+        got="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const o={};for(const[ev,gs]of Object.entries(d.hooks))for(const g of gs)for(const h of g.hooks)if(h.command.includes("formation-check")&&h.asyncRewake!==true)o[ev]=h.timeout;console.log([o.UserPromptSubmit,o.SessionStart,o.PostToolUse].join(" "));' \
             "${BATS_TEST_DIRNAME}/../../hooks/${f}")"
         echo "${f}: UserPromptSubmit SessionStart PostToolUse = ${got}" >&3
         [ "$got" = "${ps_budget} ${ps_budget} ${tool_budget}" ] || { echo "${f} registers ${got}, the handler assumes ${ps_budget} ${ps_budget} ${tool_budget}"; return 1; }
