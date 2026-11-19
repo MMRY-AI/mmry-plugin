@@ -287,9 +287,11 @@ _fire_real() {
         MMRY_API_URL="$STUB_URL" bash "${HANDLERS}/formation-check.sh" </dev/null
 }
 
-# The registered budget for an event, from the shipped hooks.json.
+# The registered budget for an event, from the shipped hooks.json. Synchronous registrations only,
+# and exactly one: SessionStart also carries the after-compaction re-arm (#33256), asyncRewake on the
+# idle budget, which runs the "rearm" mode and never the "start" sweep these tests time.
 _registered_budget() {
-    node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=(d.hooks[process.argv[2]]||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check")).map(h=>h.timeout);console.log(t.length===1?t[0]:"none");' \
+    node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=(d.hooks[process.argv[2]]||[]).flatMap(g=>g.hooks).filter(h=>h.command.includes("formation-check")&&h.asyncRewake!==true).map(h=>h.timeout);console.log(t.length===1?t[0]:"none");' \
         "${BATS_TEST_DIRNAME}/../../hooks/hooks.json" "$1"
 }
 
