@@ -50,6 +50,7 @@ setup() {
 }
 
 teardown() {
+    _load_stop
     mmry_teardown_tmp "$TEST_TMPDIR"
 }
 
@@ -606,4 +607,139 @@ _sh_fire() { # $1 plugin root, $2 handler args (word-split), $3 output file
     local want; want="$(cat "$CACHE"; printf .)"; want="${want%.}"; want="${want%$'\n'}"
     echo "sh form: ${n} parts, ${#joined} of ${#want} bytes" >&3
     [[ "$joined" == "$want" ]] || { echo "the sh form did not deliver the whole set (${n} parts, ${#joined} of ${#want} bytes)"; return 1; }
+}
+
+# =============================================================================================
+# LOAD (Windows, opt-in, round 4): STOP-CHECK INSIDE ITS 10 s AT THE LIVE PROOF'S LOAD
+# =============================================================================================
+# THE FINDING (33967 live proof, 2026-11-18, Codex 0.169.0, head 3db1d57). Under a load of 1.48 to 1.65 s
+# per process start (`cmd /d /c exit 0` timed from Git Bash, the median of 5), a message sent mid-turn
+# started the nine per-message hooks, and stop-check failed at its 10 s limit in both windows, on the
+# turn's first message and on the steer. The other eight completed.
+#
+# This test does what that proof did, without Codex. It holds the machine at that load, then starts all
+# nine per-message hooks at once the way Codex does (powershell.exe -NoProfile -Command with each
+# registered commandWindows, the payload on stdin: helpers/codex-hook-group.ps1), and judges stop-check
+# by the clock against its limit in codex-hooks.json. The first group is uncounted: it is the turn's
+# first message, after which stop-check is in its quiet time, as it was for the steer. Then come
+# LOAD_QUIET_ROUNDS groups like the steer, and LOAD_FIRING_ROUNDS with stop-check's marker removed, so
+# that its prompting path is judged too. Every stop-check must end inside its limit, either silent or
+# with a whole save prompt. Each round also prints what the two hooks that start nothing past cmd took
+# (formation-check and codex-first-prompt with no Formation and no late start): that is Codex's own
+# PowerShell and cmd at this load, which no change to MMRY can make faster.
+#
+# OPT-IN (MMRY_TEST_LOAD=1): it loads this machine for about five minutes on purpose, so an ordinary run
+# skips it. The load workers are stopped in teardown, by pid, whatever the result. The window is
+# 1500 to 1650 ms, the live proof's; MMRY_TEST_LOAD_LOW and MMRY_TEST_LOAD_HIGH move it, for characterising
+# only: a run booked against the proof uses the default.
+LOAD_LOW="${MMRY_TEST_LOAD_LOW:-1500}"
+LOAD_HIGH="${MMRY_TEST_LOAD_HIGH:-1650}"
+LOAD_QUIET_ROUNDS=5
+LOAD_FIRING_ROUNDS=3
+
+# The live proof's measure: the median of 5 timed `cmd /d /c exit 0` starts, in ms.
+_load_sample() {
+    local i s e v=()
+    for i in 1 2 3 4 5; do
+        s=$(date +%s%N); cmd //d //c exit 0; e=$(date +%s%N)
+        v+=( $(( (e - s) / 1000000 )) )
+    done
+    printf '%s\n' "${v[@]}" | sort -n | sed -n 3p
+}
+_load_add() {
+    local i
+    for (( i = 0; i < $1; i++ )); do
+        ( while :; do cmd //d //c exit 0; done ) >/dev/null 2>&1 3>&- 4>&- &
+        echo "$!" >> "$TEST_TMPDIR/load.pids"
+    done
+}
+_load_drop_one() {
+    local p; p="$(tail -1 "$TEST_TMPDIR/load.pids")"
+    kill "$p" 2>/dev/null
+    sed -i '$d' "$TEST_TMPDIR/load.pids"
+}
+_load_stop() {
+    [[ -n "${TEST_TMPDIR:-}" && -f "$TEST_TMPDIR/load.pids" ]] || return 0
+    local p left=0
+    while read -r p; do kill "$p" 2>/dev/null; done < "$TEST_TMPDIR/load.pids"
+    sleep 2
+    while read -r p; do kill -0 "$p" 2>/dev/null && left=$(( left + 1 )); done < "$TEST_TMPDIR/load.pids"
+    echo "load workers left after stop: $left" >&3
+    rm -f "$TEST_TMPDIR/load.pids"
+}
+# Starts MMRY_TEST_LOAD_WORKERS workers (12) and adds or drops one at a time until the median is inside
+# the window. Sets LOAD_MS. Fails if the window is not reached in 14 samples.
+_load_calibrate() {
+    local n="${MMRY_TEST_LOAD_WORKERS:-12}" try
+    : > "$TEST_TMPDIR/load.pids"
+    _load_add "$n"
+    for (( try = 0; try < 14; try++ )); do
+        LOAD_MS="$(_load_sample)"
+        echo "load: $n workers, median ${LOAD_MS} ms per process start" >&3
+        if (( LOAD_MS < LOAD_LOW )); then _load_add 1; n=$(( n + 1 )); continue; fi
+        if (( LOAD_MS > LOAD_HIGH )); then _load_drop_one; n=$(( n - 1 )); sleep 2; continue; fi
+        return 0
+    done
+    return 1
+}
+
+# One message: the nine hooks at once. Sets SC_MS, SC_RC and SC_OUT (a POSIX path), and prints the round.
+_group() {
+    local label="$1" dir="$TEST_TMPDIR/group-$1" helper name ms lim rc file floor="" said
+    mkdir -p "$dir"
+    helper="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/codex-hook-group.ps1")"
+    env -u MMRY_CONFIG_FILE -u MMRY_HOST -u MMRY_CODEX_HOOK_STARTED -u MMRY_HOOK_LAUNCH_SECS \
+        CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$(cygpath -w "$TMPDIR")" HOME="$(cygpath -w "$HOME")" \
+        pwsh -NoProfile -File "$helper" -Root "$WROOT" -Payload "$(cygpath -w "$TEST_TMPDIR/payload.json")" \
+        -OutDir "$(cygpath -w "$dir")" < /dev/null 2>/dev/null | tr -d '\r' > "$dir/times"
+    SC_MS="" SC_RC="" SC_OUT=""
+    while IFS='|' read -r name ms lim rc file; do
+        case "$name" in
+            stop-check) SC_MS="$ms" SC_RC="$rc" SC_OUT="$(cygpath -u "$file")" ;;
+            formation-check|codex-first-prompt) floor="${floor}${floor:+, }${name} ${ms} ms" ;;
+        esac
+    done < "$dir/times"
+    said="silent"
+    [[ -s "$SC_OUT" ]] && said="a save prompt"
+    echo "$(printf '%-8s' "$label") stop-check ${SC_MS:-?} ms, exit ${SC_RC:-?}, ${said}; PowerShell and cmd alone: ${floor}" >&3
+}
+
+@test "33967 load windows: at the live proof's load, stop-check started with the other eight hooks as Codex starts them ends inside its 10 s limit" {
+    _is_windows || skip "Windows only: Codex's PowerShell launch, on a loaded Windows machine"
+    [[ "${MMRY_TEST_LOAD:-}" == 1 ]] || skip "opt-in (MMRY_TEST_LOAD=1): it loads this machine for about five minutes"
+    command -v pwsh >/dev/null 2>&1 || skip "no pwsh"
+    command -v powershell.exe >/dev/null 2>&1 || skip "no powershell.exe"
+    local limit; limit="$(_registered UserPromptSubmit stop-check timeout)"
+    [[ "$limit" =~ ^[0-9]+$ ]] || { echo "no stop-check limit: $limit"; return 1; }
+    _install_codex_copy
+    _payload > "$TEST_TMPDIR/payload.json"
+    _load_calibrate || { echo "premise: the load did not settle at ${LOAD_LOW} to ${LOAD_HIGH} ms per process start (last ${LOAD_MS} ms)"; return 1; }
+    local before="$LOAD_MS" r over="" bad=""
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-checked.cmd"
+    # The turn's first message: stop-check prompts and starts its quiet time.
+    _group first
+    [[ -f "$TMPDIR/.mmry-stop-checked" ]] || { echo "premise: the first message's stop-check did not stamp its marker"; return 1; }
+    for (( r = 1; r <= LOAD_QUIET_ROUNDS; r++ )); do
+        _group "steer$r"
+        [[ "$SC_MS" =~ ^[0-9]+$ ]] || { echo "the group helper did not report stop-check: $(cat "$TEST_TMPDIR/group-steer$r/times")"; return 1; }
+        (( SC_MS < limit * 1000 )) || over="${over} [steer $r: ${SC_MS} ms]"
+        (( SC_RC == 0 )) || bad="${bad} [steer $r exited ${SC_RC}]"
+        # Premise: inside its quiet time it says nothing. A prompt here means the round tested the wrong path.
+        [[ ! -s "$SC_OUT" ]] || bad="${bad} [steer $r prompted inside the quiet time: $(head -c 120 "$SC_OUT")]"
+    done
+    for (( r = 1; r <= LOAD_FIRING_ROUNDS; r++ )); do
+        rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-checked.cmd"
+        _group "prompt$r"
+        [[ "$SC_MS" =~ ^[0-9]+$ ]] || { echo "the group helper did not report stop-check: $(cat "$TEST_TMPDIR/group-prompt$r/times")"; return 1; }
+        (( SC_MS < limit * 1000 )) || over="${over} [prompting $r: ${SC_MS} ms]"
+        (( SC_RC == 0 )) || bad="${bad} [prompting $r exited ${SC_RC}]"
+        # Ending silently is allowed (a launch that used the time); speaking is allowed only whole.
+        if [[ -s "$SC_OUT" ]]; then
+            [[ "$(_ctx "$SC_OUT")" == *"Save what is new since the last memory"* ]] || bad="${bad} [prompting $r: not a whole save prompt: $(head -c 120 "$SC_OUT")]"
+        fi
+    done
+    LOAD_MS="$(_load_sample)"
+    echo "load: median ${before} ms per process start before the groups, ${LOAD_MS} ms after" >&3
+    [[ -z "$bad" ]] || { echo "stop-check misbehaved:$bad"; return 1; }
+    [[ -z "$over" ]] || { echo "stop-check took ${limit} s or more, its limit:$over"; return 1; }
 }
