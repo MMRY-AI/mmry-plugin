@@ -46,11 +46,45 @@
 
 set -euo pipefail
 
+# NO PROCESS ON ANY PATH CODEX TAKES (#33967). On Codex this runs on every message, beside the six
+# Foundation parts, and Codex stops it at 10 s with a "hook timed out" line. In the 33452 TC5 proof it
+# did: under Git Bash on a loaded Windows machine each process start took about a second, and this file
+# started ten of them (dirname, stat, date, head, tr, touch, sed), even on the early way out. Every one
+# is now a builtin: the directory by parameter expansion, the clock by printf, files by read and
+# redirection, the escaping by parameter expansion. The marker's time is also recorded beside it, so
+# its age needs no stat while the marker is not older than that record (see _mmry_sc_marker_at).
+#
+# AND A LAUNCH THAT ALREADY USED THE TIME DOES NOTHING (#33967). MMRY_HOOK_LAUNCH_SECS is what the
+# launcher measured before handing over (codex-hook.sh on Codex; unset, so 0, elsewhere). From 6 s of
+# a 10 s limit there is not time left to be sure of finishing, so this ends at once, quietly, and
+# touches nothing: the next message prompts instead.
+_mmry_sc_launch="${MMRY_HOOK_LAUNCH_SECS:-0}"
+[[ "$_mmry_sc_launch" =~ ^[0-9]{1,3}$ ]] || _mmry_sc_launch=0
+(( _mmry_sc_launch < 6 )) || exit 0
+
+# The clock, as a builtin where bash has one (4.2 and later); the bash 3.2 a Mac ships pays for date.
+_mmry_sc_now() {
+    if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
+        printf -v _MMRY_SC_NOW '%(%s)T' -1
+    else
+        _MMRY_SC_NOW="$(date +%s)"
+    fi
+}
+
+# The first line of a file, whitespace removed, by read: no head, no tr.
+_mmry_sc_first() {
+    _MMRY_SC_LINE=""
+    { IFS= read -r _MMRY_SC_LINE || true; } 2>/dev/null < "$1" || _MMRY_SC_LINE=""
+    _MMRY_SC_LINE="${_MMRY_SC_LINE//[[:space:]]/}"
+}
+
 # Optional, with the pre-#31245 behaviour as the fallback. This handler is reached through
 # hook-guard.sh from the COPIED handler directory, which is assembled by whoever did the copying
 # and is not guaranteed complete. A missing resolver must produce the directive this file has
 # always produced, not a dead hook.
-_mmry_sc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_mmry_sc_dir="${BASH_SOURCE[0]//\\//}"
+case "$_mmry_sc_dir" in */*) _mmry_sc_dir="${_mmry_sc_dir%/*}" ;; *) _mmry_sc_dir="." ;; esac
+[[ -n "$_mmry_sc_dir" ]] || _mmry_sc_dir="/"
 # shellcheck source=/dev/null
 # [[ -f ]] first (#31245 QA round 9): bash 3.2, the macOS bash, aborts under set -e when a sourced
 # file is missing, even inside an if, so the fallback below was unreachable exactly where it mattered.
@@ -59,6 +93,15 @@ if ! { [[ -f "${_mmry_sc_dir}/lib-host.sh" ]] && source "${_mmry_sc_dir}/lib-hos
     mmry_host_label() { printf 'Claude Code'; }
     mmry_host_script_ref() { printf '${CLAUDE_PLUGIN_ROOT}/hooks-handlers/%s' "$1"; }
 fi
+# The host and its name, read once and without a subshell where lib-host.sh resolved them (#33967).
+if declare -F _mmry_host_resolve >/dev/null 2>&1 && _mmry_host_resolve 2>/dev/null && [[ -n "${_MMRY_HOST_V:-}" ]]; then
+    _mmry_sc_host="$_MMRY_HOST_V"
+    _mmry_sc_label="${_MMRY_HOST_LABEL_V:-}"
+else
+    _mmry_sc_host="$(mmry_host)"
+    _mmry_sc_label=""
+fi
+[[ -n "$_mmry_sc_label" || "$_mmry_sc_host" != "codex" ]] || _mmry_sc_label="$(mmry_host_label)"
 
 TMPDIR="${TMPDIR:-/tmp}"
 MARKER="${TMPDIR}/.mmry-stop-checked"
@@ -96,11 +139,59 @@ _mmry_sc_renewal_turn() {
     { IFS= read -r at || true; } 2>/dev/null < "$f" || true
     rm -f -- "$f" 2>/dev/null || true
     [[ "$at" =~ ^[0-9]+$ ]] || return 1
-    (( $(date +%s) - at <= 900 ))
+    _mmry_sc_now
+    (( _MMRY_SC_NOW - at <= 900 ))
 }
 if _mmry_sc_renewal_turn; then
     exit 0
 fi
+
+# The marker's time: the one it carries (#33967), else its mtime by stat, as before.
+# THE MARKER'S MTIME STAYS THE AUTHORITY. Its time is also written to a file beside it, written FIRST,
+# and that record is believed only while the marker is not older than it: [[ -ot ]] is a builtin
+# comparison of the two mtimes, so the ordinary prompt reads the time with no process. A marker whose
+# mtime was moved back afterwards (touch -t, as the suites do), or one with no record beside it (an
+# older version's), is older than the record or has none, and is aged by stat as it always was.
+_MMRY_SC_AT_FILE="${MARKER}.at"
+_mmry_sc_marker_at() {
+    if [[ -f "$_MMRY_SC_AT_FILE" && -f "$MARKER" && ! "$MARKER" -ot "$_MMRY_SC_AT_FILE" ]]; then
+        _mmry_sc_first "$_MMRY_SC_AT_FILE"
+        if [[ "$_MMRY_SC_LINE" =~ ^[0-9]{1,12}$ ]]; then
+            _MMRY_SC_AT="$_MMRY_SC_LINE"
+            return 0
+        fi
+    fi
+    _MMRY_SC_AT="$(_mmry_mtime "$MARKER")"
+}
+# Stamp the marker by redirection, no touch: the record first, then the marker, so the marker is never
+# older than its record.
+#
+# AND A RECORD FOR THE WINDOWS LAUNCHER (#33967 round 4). codex-hook.cmd ends a quiet stop-check in cmd,
+# before Git's bash starts, from .mmry-stop-checked.cmd: this launch's seconds of the day and cmd's own
+# date, exactly as the launcher handed them over (MMRY_CODEX_HOOK_SECS, MMRY_CODEX_HOOK_DATE), so cmd
+# compares its own values and no clock or date arithmetic is shared. Written after the marker. Where they
+# were not handed over (Claude Code, the sh form, a %TIME% the launcher could not read) an old record is
+# emptied, so the launcher never trusts a stamp it did not make. Builtins only.
+#
+# AND THE LAUNCHER CAN SAY THIS FILE'S CODEX PROMPT ITSELF (#33967 round 5). :stop_check_say in
+# codex-hook.cmd does what the Codex path below does (the save-since silence, the stamp, the count, the
+# directive and its clauses) in cmd, when it can be sure, so the first message is not Git's bash past the
+# 10 s limit. A change to that path, its files or its words is a change to both: codex-per-message-in-
+# time.bats runs the two on the same state and requires the same words and files.
+_MMRY_SC_CMD_FILE="${MARKER}.cmd"
+_mmry_sc_stamp() {
+    _mmry_sc_now
+    printf '%s\n' "$_MMRY_SC_NOW" > "$_MMRY_SC_AT_FILE" 2>/dev/null
+    # The marker write keeps its old effect: if it fails, so does this function.
+    : > "$MARKER" 2>/dev/null || return
+    if [[ "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,5}$ && -n "${MMRY_CODEX_HOOK_DATE:-}" && "$MMRY_CODEX_HOOK_DATE" != *[$'\r\n']* ]] \
+        && (( 10#$MMRY_CODEX_HOOK_SECS < 86400 )); then
+        printf '%05d %s' "$(( 10#$MMRY_CODEX_HOOK_SECS ))" "$MMRY_CODEX_HOOK_DATE" > "$_MMRY_SC_CMD_FILE" 2>/dev/null
+    elif [[ -e "$_MMRY_SC_CMD_FILE" ]]; then
+        : > "$_MMRY_SC_CMD_FILE" 2>/dev/null
+    fi
+    return 0
+}
 
 # Cross-platform mtime helper
 _mmry_mtime() {
@@ -113,8 +204,8 @@ _mmry_mtime() {
 
 # Debounce check.
 if [[ -f "$MARKER" ]]; then
-    now=$(date +%s)
-    mtime=$(_mmry_mtime "$MARKER")
+    _mmry_sc_now; now="$_MMRY_SC_NOW"
+    _mmry_sc_marker_at; mtime="$_MMRY_SC_AT"
     age=$(( now - mtime ))
     if (( age < DEBOUNCE_SECONDS )); then
         exit 0
@@ -138,23 +229,23 @@ fi
 # debounce, a save recorded after it), and the branch went silent. Test case 4 says any change to
 # Claude Code behaviour is a defect in this task, so Claude Code keeps the master behaviour and
 # stop-check.bats pins it with a control that sets marker and save together.
-if [[ "$(mmry_host)" == "codex" && -f "$MARKER" && -f "$LAST_SAVE" ]]; then
-    _sc_marker_at=$(_mmry_mtime "$MARKER")
-    _sc_save_at=$(head -1 "$LAST_SAVE" 2>/dev/null | tr -d '[:space:]')
+if [[ "$_mmry_sc_host" == "codex" && -f "$MARKER" && -f "$LAST_SAVE" ]]; then
+    _mmry_sc_marker_at; _sc_marker_at="$_MMRY_SC_AT"
+    _mmry_sc_first "$LAST_SAVE"; _sc_save_at="$_MMRY_SC_LINE"
     if [[ "$_sc_save_at" =~ ^[0-9]+$ ]] && (( _sc_save_at >= _sc_marker_at )); then
-        touch "$MARKER" 2>/dev/null || true
+        _mmry_sc_stamp || true
         echo "0" > "$STOP_COUNT_FILE" 2>/dev/null || true
         exit 0
     fi
 fi
 
-touch "$MARKER"
+_mmry_sc_stamp
 
 # Increment the "firings since last save" counter. Resets when mmry-client.sh
 # calls _mmry_mark_save_success (which deletes the counter file).
 firings=0
 if [[ -f "$STOP_COUNT_FILE" ]]; then
-    firings=$(head -1 "$STOP_COUNT_FILE" 2>/dev/null | tr -d '[:space:]')
+    _mmry_sc_first "$STOP_COUNT_FILE"; firings="$_MMRY_SC_LINE"
     [[ "$firings" =~ ^[0-9]+$ ]] || firings=0
 fi
 firings=$(( firings + 1 ))
@@ -163,9 +254,9 @@ echo "$firings" > "$STOP_COUNT_FILE" 2>/dev/null || true
 # Last-save anchor for incremental phrasing.
 last_save_clause=""
 if [[ -f "$LAST_SAVE" ]]; then
-    last_save_ts=$(head -1 "$LAST_SAVE" 2>/dev/null | tr -d '[:space:]')
+    _mmry_sc_first "$LAST_SAVE"; last_save_ts="$_MMRY_SC_LINE"
     if [[ "$last_save_ts" =~ ^[0-9]+$ ]]; then
-        now=$(date +%s)
+        _mmry_sc_now; now="$_MMRY_SC_NOW"
         mins_since=$(( (now - last_save_ts) / 60 ))
         if (( mins_since < 1 )); then
             last_save_clause=" Your last save was under a minute ago; save only what is genuinely new since then, or skip."
@@ -185,8 +276,8 @@ fi
 # (#31245). On Claude Code it is empty, so the directive below is byte-for-byte the string this
 # file has always produced; precompact-check.sh still owns that job there.
 compaction_clause=""
-if [[ "$(mmry_host)" == "codex" ]]; then
-    compaction_clause=" $(mmry_host_label) gives MMRY no moment at compaction and no channel at session end, so this periodic prompt is the only warning you get: anything not saved can be lost when the conversation is trimmed."
+if [[ "$_mmry_sc_host" == "codex" ]]; then
+    compaction_clause=" ${_mmry_sc_label} gives MMRY no moment at compaction and no channel at session end, so this periodic prompt is the only warning you get: anything not saved can be lost when the conversation is trimmed."
 fi
 
 # Build the directive — one imperative line, explicit skip clause, anchored by last-save info
@@ -204,7 +295,7 @@ fi
 # running whichever script it had been pointed at before it found the tool, so this prompt, which
 # arrives on every turn with unsaved work, points at the tool. The Claude Code string is built
 # exactly as before.
-if [[ "$(mmry_host)" == "codex" ]]; then
+if [[ "$_mmry_sc_host" == "codex" ]]; then
     _mmry_save_how="call the mmry_plugin memory_save tool for each, with the memory as its content"
 else
     _mmry_save_how="call \"$(mmry_host_script_ref save-memory.sh)\" with --context for each"
@@ -232,16 +323,13 @@ DIRECTIVE="Save what is new since the last memory: identify decisions, findings,
 # mid-session (auto_compact), and a prompt delivered at session end cannot save anyone from a
 # trim that happened fifty turns earlier. The debounce above keeps it periodic rather than
 # per-turn.
-if [[ "$(mmry_host)" == "codex" ]]; then
-    if [[ -n "${MMRY_JQ:-}" ]] && "$MMRY_JQ" --version >/dev/null 2>&1; then
-        printf '%s' "$DIRECTIVE" | "$MMRY_JQ" -Rs \
-            '{hookSpecificOutput:{hookEventName:"UserPromptSubmit", additionalContext:.}}'
-    else
-        # No jq: escape by hand rather than stay silent. The directive is one line of prose, so
-        # backslashes and quotes are the only characters that can break the payload.
-        _sc_escaped="$(printf '%s' "$DIRECTIVE" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-        printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}' "$_sc_escaped"
-    fi
+if [[ "$_mmry_sc_host" == "codex" ]]; then
+    # Escaped by parameter expansion (#33967), not jq or sed: both were processes on every prompt that
+    # prompts. The directive is one line of fixed prose, numbers and the host's name, so backslashes and
+    # quotes are the only characters that can break the payload.
+    _sc_escaped="${DIRECTIVE//\\/\\\\}"
+    _sc_escaped="${_sc_escaped//\"/\\\"}"
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}' "$_sc_escaped"
     exit 0
 fi
 
