@@ -122,6 +122,7 @@ tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats
+tests/handlers/formation-waiting-busy.bats
 tests/handlers/formation-waiting.bats
 tests/handlers/foundation-31597-edges.bats
 tests/handlers/foundation-both-paths.bats
