@@ -519,6 +519,17 @@ case "$HANDLER_NAME" in
         #    `command` form starts this file with sh, which on macOS is bash 3.2 in POSIX mode, and a
         #    child bash used to clear it; a sourced subshell inherits it, and bash 3.2 in POSIX mode
         #    does not parse the process substitutions userpromptsubmit-foundation.sh uses.
+        # STOP-CHECK IN THIS SHELL, NOT A SUBSHELL (#33967 round 4). A subshell is a fork, and under Git
+        # Bash on a loaded Windows machine a fork costs about what a process start does; in the 33967
+        # live proof stop-check ran out its 10 s. stop-check is the last thing this script runs and sets
+        # no trap of its own, so the EXIT trap below discards its exit code exactly as the subshell did,
+        # and POSIX mode goes off here as it did there (#33967 round 2).
+        if [[ "$HANDLER_NAME" == stop-check ]]; then
+            set +o posix
+            trap 'exit 0' EXIT
+            source "$TARGET" "$@"
+            exit 0
+        fi
         ( set +o posix; source "$TARGET" "$@" )
         ;;
     *)

@@ -759,7 +759,9 @@ _group() {
 # The real launcher for stop-check, as Codex's PowerShell runs it, counted by a job object. $1 the TMPDIR
 # the hook sees, $2 the stdout file, $3 the stderr file. Echoes "<processes> <exit code>".
 _sc_count() {
-    local tmp="$1" out="$2" err="$3" counter wpay c
+    local tmp="$1" out="$2" err="$3" pre="" counter wpay c
+    # $4: a TMPDIR set inside cmd itself. Git Bash makes any TMPDIR it passes on absolute.
+    [[ -n "${4:-}" ]] && pre="set \"TMPDIR=$4\" & "
     counter="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/count-processes.ps1")"
     _payload > "$TEST_TMPDIR/payload.json"
     wpay="$(cygpath -w "$TEST_TMPDIR/payload.json")"
@@ -767,7 +769,7 @@ _sc_count() {
     c="${c//\$\{PLUGIN_ROOT\}/$WROOT}"
     env -u MMRY_CONFIG_FILE -u MMRY_CODEX_HOOK_STARTED -u MMRY_CODEX_HOOK_SECS -u MMRY_CODEX_HOOK_DATE \
         CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$tmp" HOME="$(cygpath -w "$HOME")" \
-        pwsh -NoProfile -File "$counter" -CommandLine "cmd.exe /d /s /c \"${c#cmd /d /c } < \"$wpay\" > \"$(cygpath -w "$out")\" 2> \"$(cygpath -w "$err")\"\"" \
+        pwsh -NoProfile -File "$counter" -CommandLine "cmd.exe /d /s /c \"${pre}${c#cmd /d /c } < \"$wpay\" > \"$(cygpath -w "$out")\" 2> \"$(cygpath -w "$err")\"\"" \
         < /dev/null 2>/dev/null | tr -d '\r' | sed -n 's/.*PROCESSES=\([0-9]*\) EXIT=\([0-9]*\).*/\1 \2/p' | tail -1
 }
 # cmd's own date, and the seconds of the day now, as the launcher computes them.
@@ -793,14 +795,15 @@ _sc_quiet_marker() {
     [[ -n "$date" ]] || { echo "premise: cmd gave no %DATE%"; return 1; }
     local wtmp; wtmp="$(cygpath -w "$TMPDIR")"
     local got rc n fails="" name rec
-    # name | record ("" for none) | marker (1 or 0) | expect: cmd (ends in cmd) or run (stop-check ran)
+    # name | record ("" for none; @N is "today, N s before now", made just before its run) | marker (1 or 0)
+    # | expect: cmd (ends in cmd) or run (stop-check ran)
     local -a cases=(
-        "fresh, 5 s old|$(printf '%05d %s' $(( sod - 5 )) "$date")|1|cmd"
-        "875 s old, inside the 880 s the launcher allows|$(printf '%05d %s' $(( sod - 875 )) "$date")|1|cmd"
-        "885 s old, past the 880 s the launcher allows|$(printf '%05d %s' $(( sod - 885 )) "$date")|1|run"
-        "from the future (a clock set back)|$(printf '%05d %s' $(( sod + 60 )) "$date")|1|run"
+        "fresh, 5 s old|@5|1|cmd"
+        "870 s old, inside the 880 s the launcher allows|@870|1|cmd"
+        "885 s old, past the 880 s the launcher allows|@885|1|run"
+        "from the future (a clock set back)|@-60|1|run"
         "another day's date|$(printf '%05d %s' $(( sod - 5 )) "Mon 01/01/2001")|1|run"
-        "no marker beside it|$(printf '%05d %s' $(( sod - 5 )) "$date")|0|run"
+        "no marker beside it|@5|0|run"
         "no record|NONE|1|run"
         "an empty record||1|run"
         "letters for seconds|abcde ${date}|1|run"
@@ -816,6 +819,7 @@ _sc_quiet_marker() {
         IFS='|' read -r name rec n want <<< "$c"
         rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-checked.cmd" "$TMPDIR"/.mmry-renewal-turn-*
         (( n == 1 )) && _sc_quiet_marker
+        [[ "$rec" == @* ]] && rec="$(printf '%05d %s' $(( $(_sod_now) - ${rec#@} )) "$date")"
         [[ "$rec" == NONE ]] || printf '%s' "$rec" > "$TMPDIR/.mmry-stop-checked.cmd"
         read -r got rc < <(_sc_count "$wtmp" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err")
         echo "$(printf '%-48s' "$name") ${got} process(es), exit ${rc}" >&3
@@ -834,18 +838,21 @@ _sc_quiet_marker() {
     done
     # A Formation renewal turn is stop-check's to spend, even inside the quiet time.
     rm -f "$TMPDIR/.mmry-stop-checked.cmd"; _sc_quiet_marker
-    printf '%05d %s' $(( sod - 5 )) "$date" > "$TMPDIR/.mmry-stop-checked.cmd"
+    printf '%05d %s' $(( $(_sod_now) - 5 )) "$date" > "$TMPDIR/.mmry-stop-checked.cmd"
     printf '%s\n' "$(date +%s)" > "$TMPDIR/.mmry-renewal-turn-${SID}"
     read -r got rc < <(_sc_count "$wtmp" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err")
     echo "$(printf '%-48s' "a renewal-turn marker waiting") ${got} process(es), exit ${rc}" >&3
     (( got > 1 )) || fails="${fails} [renewal turn: ended in cmd, stop-check should have spent the marker]"
     [[ ! -e "$TMPDIR/.mmry-renewal-turn-${SID}" ]] || fails="${fails} [renewal turn: the marker was not spent]"
-    # A TMPDIR the launcher cannot read as a Windows path (Git Bash's own form) is never trusted.
-    rm -f "$TMPDIR"/.mmry-renewal-turn-*; _sc_quiet_marker
-    printf '%05d %s' $(( sod - 5 )) "$date" > "$TMPDIR/.mmry-stop-checked.cmd"
-    read -r got rc < <(_sc_count "$TMPDIR" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err")
-    echo "$(printf '%-48s' "TMPDIR in Git Bash's form ($TMPDIR)") ${got} process(es), exit ${rc}" >&3
-    (( got > 1 )) || fails="${fails} [POSIX TMPDIR: ended in cmd]"
+    # A TMPDIR that is not an absolute Windows path is never trusted. It is set inside cmd: Git Bash would
+    # turn any TMPDIR it passes on into an absolute Windows path.
+    rm -f "$TMPDIR"/.mmry-renewal-turn-*
+    mkdir -p "$TEST_TMPDIR/rel/reltmp"
+    : > "$TEST_TMPDIR/rel/reltmp/.mmry-stop-checked"
+    printf '%05d %s' $(( $(_sod_now) - 5 )) "$date" > "$TEST_TMPDIR/rel/reltmp/.mmry-stop-checked.cmd"
+    read -r got rc < <(cd "$TEST_TMPDIR/rel" && _sc_count "$wtmp" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err" reltmp)
+    echo "$(printf '%-48s' "a relative TMPDIR (reltmp)") ${got} process(es), exit ${rc}" >&3
+    (( got > 1 )) || fails="${fails} [relative TMPDIR: ended in cmd]"
     [[ -z "$fails" ]] || { echo "wrong:$fails"; return 1; }
 }
 

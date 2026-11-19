@@ -40,6 +40,15 @@ rem too (the Foundation parts 20 s, stop-check 10 s), and in the 33452 TC5 proof
 rem of them: codex-hook.sh hands the seconds since this stamp to those handlers, which take them off
 rem their own deadlines.
 set "MMRY_CODEX_HOOK_STARTED=%TIME%"
+rem STOP-CHECK'S QUIET MESSAGE ENDS HERE, IN CMD (#33967 round 4). In the 33967 live proof (Codex
+rem 0.169.0 on Windows, a load of about 1.5 s per process start) stop-check failed at its 10 s limit on
+rem a message sent mid-turn, a message on which it had nothing to say. With nine hooks starting at
+rem once, Codex's own PowerShell and this cmd took about 8 s of the 10, and Git's bash took the rest.
+rem On most messages stop-check is inside its 15-minute quiet time, so :stop_check_quiet answers that
+rem from the record stop-check leaves beside its marker, with builtins only, and the hook ends here
+rem having started no process at all. Anything it cannot be sure of goes on to stop-check as before.
+if /i "%~1"=="stop-check" call :stop_check_quiet
+if /i "%~1"=="stop-check" if defined MMRY_SQ_QUIET exit /b 0
 rem THE LATE-MEMORIES GATE (#33062 fix round 1; moved by #33231, DD-182). codex-first-prompt runs on
 rem every prompt and has work only when a session start ran out of time and left a
 rem .mmry-codex-late.<key>.<session> marker, so with none it exits here, before where.exe, reg.exe or
@@ -223,4 +232,65 @@ if /i "%MMRY_GATE_NAME:~0,21%"==".mmry-formation-poll-" exit /b 0
 if /i "%MMRY_GATE_NAME:~0,25%"==".mmry-formation-handover-" exit /b 0
 if /i "%MMRY_GATE_NAME:~0,24%"==".mmry-formation-renewed-" exit /b 0
 set "MMRY_MEMBER=1"
+exit /b 0
+:stop_check_quiet
+rem Sets MMRY_SQ_QUIET only when stop-check, run now, would certainly say nothing and change nothing:
+rem   - its marker and the record beside it (.mmry-stop-checked.cmd, "SSSSS <date>", which stop-check
+rem     writes when it stamps the marker, from the two values below that this launcher handed it) are
+rem     both in the folder stop-check uses: TMPDIR, else TMP, else TEMP (Git's bash maps /tmp to the
+rem     user's temp folder), and only when that is an absolute Windows path;
+rem   - the record is from today by cmd's own %DATE%, and from 0 to 879 s before this launch. The quiet
+rem     time in stop-check.sh is 900 s from its own stamp. 20 s are kept in hand because stop-check,
+rem     had it run, would have run up to 10 s after this launch (Codex stops it at 10 s);
+rem   - no Formation renewal-turn marker is waiting: stop-check spends those, so it must run.
+rem It also hands stop-check this launch's seconds of the day and date (MMRY_CODEX_HOOK_SECS and
+rem MMRY_CODEX_HOOK_DATE), so the record is written in exactly the form read here: no clock or date
+rem arithmetic is shared between cmd and bash. A %TIME% that is not HH:MM:SS.cc in shape (a space for a
+rem leading zero, any one-character separators) hands over neither, and stop-check then writes no
+rem record. The record's text is compared with delayed expansion, so it is never parsed as commands.
+rem Builtins only: set, set /a, set /p, if, for /f over a string, call.
+set "MMRY_SQ_QUIET="
+set "MMRY_CODEX_HOOK_SECS="
+set "MMRY_CODEX_HOOK_DATE="
+set "MMRY_SQ_T=%MMRY_CODEX_HOOK_STARTED: =0%"
+if not "%MMRY_SQ_T:~11%"=="" exit /b 0
+set "MMRY_SQ_D8=%MMRY_SQ_T:~0,2%%MMRY_SQ_T:~3,2%%MMRY_SQ_T:~6,2%%MMRY_SQ_T:~9,2%"
+if "%MMRY_SQ_D8:~7,1%"=="" exit /b 0
+for /f "delims=0123456789" %%X in ("%MMRY_SQ_D8%x") do if not "%%X"=="x" exit /b 0
+for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~2,1%") do if "%%X"=="a" exit /b 0
+for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~5,1%") do if "%%X"=="a" exit /b 0
+for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~8,1%") do if "%%X"=="a" exit /b 0
+set /a "MMRY_SQ_H=1%MMRY_SQ_T:~0,2%-100, MMRY_SQ_M=1%MMRY_SQ_T:~3,2%-100, MMRY_SQ_S=1%MMRY_SQ_T:~6,2%-100"
+if %MMRY_SQ_H% gtr 23 exit /b 0
+if %MMRY_SQ_M% gtr 59 exit /b 0
+if %MMRY_SQ_S% gtr 59 exit /b 0
+if not defined DATE exit /b 0
+set /a "MMRY_CODEX_HOOK_SECS=MMRY_SQ_H*3600+MMRY_SQ_M*60+MMRY_SQ_S"
+set "MMRY_CODEX_HOOK_DATE=%DATE%"
+set "MMRY_SQ_DIR=%TEMP%"
+if defined TMP set "MMRY_SQ_DIR=%TMP%"
+if defined TMPDIR set "MMRY_SQ_DIR=%TMPDIR%"
+set "MMRY_SQ_ABS="
+if "%MMRY_SQ_DIR:~1,2%"==":\" set "MMRY_SQ_ABS=1"
+if "%MMRY_SQ_DIR:~0,2%"=="\\" set "MMRY_SQ_ABS=1"
+if not defined MMRY_SQ_ABS exit /b 0
+if "%MMRY_SQ_DIR:~-1%"=="\" set "MMRY_SQ_DIR=%MMRY_SQ_DIR:~0,-1%"
+if exist "%MMRY_SQ_DIR%\.mmry-renewal-turn-*" exit /b 0
+if not exist "%MMRY_SQ_DIR%\.mmry-stop-checked" exit /b 0
+if not exist "%MMRY_SQ_DIR%\.mmry-stop-checked.cmd" exit /b 0
+set "MMRY_SQ_REC="
+set /p "MMRY_SQ_REC=" 0<"%MMRY_SQ_DIR%\.mmry-stop-checked.cmd"
+if not defined MMRY_SQ_REC exit /b 0
+setlocal enabledelayedexpansion
+if not "!MMRY_SQ_REC:~5,1!"==" " goto :stop_check_loud
+set "MMRY_SQ_RS=!MMRY_SQ_REC:~0,5!"
+for /f "delims=0123456789" %%X in ("!MMRY_SQ_RS!x") do if not "%%X"=="x" goto :stop_check_loud
+if not "!MMRY_SQ_REC:~6!"=="!MMRY_CODEX_HOOK_DATE!" goto :stop_check_loud
+set /a "MMRY_SQ_AGE=MMRY_CODEX_HOOK_SECS-(1!MMRY_SQ_RS!-100000)"
+if !MMRY_SQ_AGE! lss 0 goto :stop_check_loud
+if !MMRY_SQ_AGE! geq 880 goto :stop_check_loud
+endlocal & set "MMRY_SQ_QUIET=1"
+exit /b 0
+:stop_check_loud
+endlocal
 exit /b 0

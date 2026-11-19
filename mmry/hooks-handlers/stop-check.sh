@@ -165,10 +165,26 @@ _mmry_sc_marker_at() {
 }
 # Stamp the marker by redirection, no touch: the record first, then the marker, so the marker is never
 # older than its record.
+#
+# AND A RECORD FOR THE WINDOWS LAUNCHER (#33967 round 4). codex-hook.cmd ends a quiet stop-check in cmd,
+# before Git's bash starts, from .mmry-stop-checked.cmd: this launch's seconds of the day and cmd's own
+# date, exactly as the launcher handed them over (MMRY_CODEX_HOOK_SECS, MMRY_CODEX_HOOK_DATE), so cmd
+# compares its own values and no clock or date arithmetic is shared. Written after the marker. Where they
+# were not handed over (Claude Code, the sh form, a %TIME% the launcher could not read) an old record is
+# emptied, so the launcher never trusts a stamp it did not make. Builtins only.
+_MMRY_SC_CMD_FILE="${MARKER}.cmd"
 _mmry_sc_stamp() {
     _mmry_sc_now
     printf '%s\n' "$_MMRY_SC_NOW" > "$_MMRY_SC_AT_FILE" 2>/dev/null
-    : > "$MARKER" 2>/dev/null
+    # The marker write keeps its old effect: if it fails, so does this function.
+    : > "$MARKER" 2>/dev/null || return
+    if [[ "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,5}$ && -n "${MMRY_CODEX_HOOK_DATE:-}" && "$MMRY_CODEX_HOOK_DATE" != *[$'\r\n']* ]] \
+        && (( 10#$MMRY_CODEX_HOOK_SECS < 86400 )); then
+        printf '%05d %s' "$(( 10#$MMRY_CODEX_HOOK_SECS ))" "$MMRY_CODEX_HOOK_DATE" > "$_MMRY_SC_CMD_FILE" 2>/dev/null
+    elif [[ -e "$_MMRY_SC_CMD_FILE" ]]; then
+        : > "$_MMRY_SC_CMD_FILE" 2>/dev/null
+    fi
+    return 0
 }
 
 # Cross-platform mtime helper
