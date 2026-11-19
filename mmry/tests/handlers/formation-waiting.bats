@@ -19,81 +19,7 @@
 
 load '../helpers/test-helper'
 
-PLANTED="PLANTED-SECRET-33452-sk-live-0f9c"
-
-setup() {
-    BIN="$TEST_TMPDIR/fake-bin"
-    BODIES="$TEST_TMPDIR/bodies"
-    URLS="$TEST_TMPDIR/urls"
-    mkdir -p "$BIN"
-    : > "$BODIES"; : > "$URLS"
-    cat > "$BIN/curl" <<'FAKECURL'
-#!/usr/bin/env bash
-# A fake MMRY AI. Records "METHOD URL" and every request body; answers like the service would.
-out=""; method="GET"; url=""; prev=""; body=""
-for arg in "$@"; do
-    case "$prev" in
-        -o) out="$arg" ;;
-        -X) method="$arg" ;;
-        --data-binary|-d|--data) if [[ "$arg" == @* ]]; then body="$(cat "${arg#@}")"; else body="$arg"; fi ;;
-    esac
-    case "$arg" in http://*|https://*) url="$arg" ;; esac
-    prev="$arg"
-done
-printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
-[[ -n "$body" ]] && printf '%s\n' "$body" >> "$FAKE_BODY_LOG"
-code=200; resp='{}'
-case "$method $url" in
-    "GET "*/api/formations/4242)
-        resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"'"${FAKE_OWN_ROLE:-Wingman}"'","leftDate":null}]}' ;;
-    "PUT "*/members/*/waiting)
-        resp='{"formationId":4242,"memberId":31,"waiting":true,"waitingSince":"2026-11-13T14:05:00","toolName":null,"leadTold":true,"outcome":"Set"}' ;;
-    "DELETE "*/members/*/waiting*)
-        code="${FAKE_CLEAR_CODE:-200}"
-        resp='{"formationId":4242,"memberId":31,"waiting":false,"leadTold":true,"outcome":"Cleared"}' ;;
-    "GET "*/transmissions/sent*) resp='{"formationId":4242,"member":true,"messages":[]}' ;;
-    "GET "*/transmissions*) resp='[]' ;;
-esac
-[[ -n "$out" ]] && printf '%s' "$resp" > "$out"
-printf '%s' "$code"
-exit 0
-FAKECURL
-    chmod +x "$BIN/curl"
-    export PATH="$BIN:$PATH"
-    export FAKE_URL_LOG="$URLS" FAKE_BODY_LOG="$BODIES"
-    export MMRY_API_KEY="fake-key" MMRY_API_URL="http://fake.invalid" MMRY_AUTH_METHOD="apikey"
-    export MMRY_NO_SELF_UPDATE=1
-    unset MMRY_HOST CODEX_HOME CODEX_SESSION_ID CODEX_THREAD_ID CLAUDE_SESSION_ID FAKE_OWN_ROLE FAKE_CLEAR_CODE MMRY_FORMATION_MODE
-    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/claudecfg"
-    mkdir -p "$CLAUDE_CONFIG_DIR"
-    SID="bbbb3333-waiting-$$"
-    export CLAUDE_CODE_SESSION_ID="$SID" FAKE_OWN_SID="$SID"
-    HH="$PLUGIN_ROOT/hooks-handlers"
-    bash "$HH/formation-state.sh" set 4242 "$SID" >/dev/null
-}
-
-teardown() {
-    bash "$HH/formation-state.sh" clear "$SID" >/dev/null 2>&1 || true
-    rm -f "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null || true
-    mmry_teardown_tmp "$TEST_TMPDIR"
-}
-
-# The payloads, as Claude Code and Codex send them.
-_notification() { # $1 notification_type, $2 message
-    printf '{"session_id":"%s","transcript_path":"/x","cwd":"/x","hook_event_name":"Notification","notification_type":"%s","message":"%s"}' "$SID" "$1" "$2"
-}
-_permission_request() { # $1 tool_name, $2 command
-    printf '{"session_id":"%s","transcript_path":null,"cwd":"/x","hook_event_name":"PermissionRequest","model":"gpt-5","permission_mode":"default","turn_id":"t1","tool_name":"%s","tool_input":{"command":"%s","description":"run it"}}' "$SID" "$1" "$2"
-}
-_event() { # $1 hook_event_name
-    printf '{"session_id":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"ls"}}' "$SID" "$1"
-}
-
-_waiting() { printf '%s' "$1" | bash "$HH/formation-waiting.sh"; }
-_check() { printf '%s' "$1" | bash "$HH/formation-check.sh"; }
-_puts() { grep -c '^PUT .*/api/formations/4242/members/31/waiting$' "$URLS" || true; }
-_deletes() { grep -c '^DELETE .*/api/formations/4242/members/31/waiting?sessionId=' "$URLS" || true; }
-_marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
+load '../helpers/formation-waiting-helpers.sh'
 
 # ---------------------------------------------------------------------------------------------
 # TC1: one call naming the member, and none where there is nothing to tell
@@ -142,18 +68,21 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 }
 
 @test "W-06 a tool name that is not a bare name is left out, and the member is still reported" {
-    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    # #33898: this case used the MCP sentence and accepted the server name "mmry"; the MCP form now has
+    # its own cases (W-26 on). A word that is not a bare name is still left out, never trimmed.
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash;id')"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    ! grep -q 'toolName' "$BODIES" || grep -q '"toolName":"mmry"' "$BODIES" || { cat "$BODIES"; return 1; }
-    ! grep -q 'memory_save (MCP)' "$BODIES" || { cat "$BODIES"; return 1; }
+    ! grep -q 'toolName' "$BODIES" || grep -q '"toolName":null' "$BODIES" || { cat "$BODIES"; return 1; }
+    ! grep -q 'Bash' "$BODIES" || { cat "$BODIES"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
 # TC3: the next tool call or prompt clears it
 # ---------------------------------------------------------------------------------------------
 
-@test "W-07 the next tool call clears the flag with one call, and only once" {
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+@test "W-07 the asked tool's call clears the flag with one call, and only once" {
+    # #33900: the call that clears is the asked one (its PermissionRequest is the ask record), not any call.
+    _cc_raise Bash
     run _check "$(_event PostToolUse)"
     [ "$(_deletes)" -eq 1 ] || { cat "$URLS"; return 1; }
     grep -q "waiting?sessionId=$SID" "$URLS"
@@ -175,7 +104,7 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 }
 
 @test "W-10 a clear the service did not confirm is kept for the next event; a refused one is dropped" {
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _cc_raise Bash
     FAKE_CLEAR_CODE=500 _check "$(_event PostToolUse)" || true
     [ -n "$(_marker)" ] || { echo "marker dropped on a 500"; return 1; }
     FAKE_CLEAR_CODE=404 _check "$(_event PostToolUse)" || true
@@ -184,7 +113,7 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 }
 
 @test "W-11 after a clear, the next prompt is reported again" {
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _cc_raise Bash
     _check "$(_event PostToolUse)" || true
     _waiting "$(_notification permission_prompt 'Claude needs your permission to use Edit')"
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
@@ -194,11 +123,13 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 # TC4: the tool name, never the prompt
 # ---------------------------------------------------------------------------------------------
 
-@test "W-12 a prompt for a command carrying a planted secret sends and keeps the tool name only" {
+@test "W-12 a prompt for a command carrying a planted secret sends no name and nothing of the command" {
+    # Round 4 (lead 439, ruling 3): text after the word means it is not exactly one list entry, so no name.
+    JQ_BIN="$(command -v jq)"
     run _waiting "$(_notification permission_prompt "Claude needs your permission to use Bash with curl -H Authorization: $PLANTED")"
     [ "$status" -eq 0 ]
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    grep -q '"toolName":"Bash"' "$BODIES" || { cat "$BODIES"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
     ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "planted string stored"; return 1; }
     [[ "$output" != *"$PLANTED"* ]]
@@ -299,7 +230,7 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
 }
 
 @test "W-20 33901 req1: a marker whose clear did not go through does not silence the next prompt" {
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _cc_raise Bash
     # The member answered and carried on, but the service did not confirm the clear: the marker stays.
     FAKE_CLEAR_CODE=500 _check "$(_event PostToolUse)" || true
     [ -n "$(_marker)" ] || { echo "marker dropped on a 500"; return 1; }
@@ -346,7 +277,7 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
 }
 
 @test "W-25 33901 req3: two reports of one prompt make one call, for Claude Code and for Codex" {
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _cc_raise Bash
     _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     _check "$(_event PostToolUse)" || true
@@ -354,4 +285,447 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
     _waiting "$(_permission_request_turn Bash turn-0003)"
     _waiting "$(_permission_request_turn Bash turn-0003)"
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33898: for an MCP tool the lead is told the tool's own name, mcp__<server>__<tool>, or no name.
+# The sentences are Claude Code's own (2.1.322): "Claude needs your permission to use <server> -
+# <tool title or name> (MCP)", the server as configured (a plugin's is plugin:<plugin>:<server>), and
+# the tool name the server part normalised exactly as Claude Code builds it (any character outside
+# A-Z a-z 0-9 _ - becomes _).
+# ---------------------------------------------------------------------------------------------
+
+# #33898 round 2 (QA finding A1), tightened in round 3 (C1, below): the sentence builds the name and
+# the session's own transcript must hold it as the one still-waiting call of its server. The transcript never
+# supplies a name of its own, so a title, another call of the same server, or a subagent's call that is
+# not in the main transcript all send no name, and the lead's tool sentence is left out.
+
+@test "W-26 33898 req1: the MCP sentence names the tool, mcp__mmry__memory_save, not the server" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-27 33898 req1: a plugin's MCP server is named as Claude Code names it, mcp__plugin_<plugin>_<server>__<tool>" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__plugin_mmry_mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:mmry:mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__plugin_mmry_mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-28 33898 req1 (A1): a tool shown by its title sends no name, even with a call of that server in the transcript" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__plugin_acme_files__save_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+}
+
+@test "W-33 33898 req1 (A1, probe QA-1): a transcript holding only ANOTHER call of the server sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_search
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'memory_search' "$BODIES" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "another tool was named"; return 1; }
+}
+
+@test "W-34 33898 req1 (A1, C1): the one still-waiting exact call is named, past answered calls of the server and of that tool" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # toolu_1 memory_save (answered), toolu_2 memory_search (answered), toolu_3 memory_save (waiting).
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search mcp__mmry__memory_save
+    _tool_result "$tp" toolu_1 toolu_2
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+    # The waiting call written to the transcript twice (one id) is still one call.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    tail -n 3 "$tp" | head -n 1 >> "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$tp" "$BODIES"; return 1; }
+}
+
+# #33898 round 3 (QA finding C1, lead 439's ruling 2026-11-18): the transcript must tie the name to
+# THIS prompt. A name is sent only when its call is still waiting (no tool_result carries its id) and
+# is the only still-waiting call of its server in the transcript; otherwise the sentence is left out.
+# A leftover ask record never supplies a name on its own.
+
+@test "W-37 33898 req1 (C1, probe P-01): a bare-word title equal to another tool's real name sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # read_file ran earlier and was answered; write_file, whose title is "read_file", is the one asking.
+    _transcript "$tp" mcp__acme__read_file mcp__acme__write_file
+    _tool_result "$tp" toolu_1
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - read_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-38 33898 req1 (C1, probe P-02): a name string inside another call's input is not a call, and sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"mcp__acme__write_file","input":{"meta":{"name":"mcp__acme__Save"}}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-39 33898 req1 (C1): a leftover ask record never supplies a name on its own" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The record and the transcript name a call that has already been answered.
+    _transcript "$tp" mcp__acme__write_file
+    _tool_result "$tp" toolu_1
+    _leftover_ask mcp__acme__write_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - write_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A titled MCP prompt with a leftover record naming a tool of that server: no name.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _leftover_ask mcp__acme__write_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Write a file (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-40 33898 req1 (C1): two still-waiting calls of one server send no name, even when one matches exactly" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # Two waiting calls of the same tool are no better: either could be the one asking.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-35 33898 req1 (A1, probe QA-2): a titled tool called in parallel with another tool of the server sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"mcp__plugin_acme_files__save_file","input":{}},{"type":"tool_use","id":"toolu_2","name":"mcp__plugin_acme_files__list_files","input":{}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-36 33898 req1 (A1): a subagent's prompt, its call absent from the main transcript or no transcript at all, sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The main thread called nothing of this server; the subagent's call lives in its own transcript.
+    _transcript "$tp" Bash
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # No readable transcript: nothing establishes the name.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-29 33898 req1: an MCP sentence that cannot be read sends no name, and the member is still reported" {
+    JQ_BIN="$(command -v jq)"
+    for m in 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' \
+             'Claude needs your permission to use mmry (MCP)' \
+             'Claude needs your permission to use mmry - memory_save (MCP) and more'; do
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "$m")"
+        [ "$(grep -c '^PUT ' "$BODIES" "$URLS" | tail -1 | cut -d: -f2)" -ge 1 ] || { cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
+    [ "$(_puts)" -eq 3 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-30 33898 req1: a server and tool longer than 64 characters send no name, never a shortened one" {
+    JQ_BIN="$(command -v jq)"
+    local srv="a-very-long-mcp-server-name-for-testing" tl="an_equally_long_tool_name_here"
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use $srv - $tl (MCP)")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'mcp__a-very' "$BODIES" || { echo "a shortened name was sent"; return 1; }
+}
+
+@test "W-31 33898 req3: a planted secret after the MCP tool name reaches neither the call, the marker nor the output" {
+    JQ_BIN="$(command -v jq)"
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use mmry - memory_save (MCP) $PLANTED")"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use mmry - memory_save $PLANTED (MCP)")"
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+}
+
+@test "W-32 33898 req2: Bash and Write send exactly the names they sent before" {
+    JQ_BIN="$(command -v jq)"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    _check "$(_event UserPromptSubmit)" || true
+    : > "$BODIES"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Write')"
+    [ "$(_tool_sent)" = "Write" ] || { cat "$BODIES"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33900: the waiting state clears only when the prompt it waits on is answered, or the member sends a
+# new prompt. Payload shapes are the ones measured on Claude Code 2.1.322 (PR description, measurement
+# table) and Codex's documented schema (codex-rs hooks/src/schema.rs). A background agent's tool call,
+# a parallel tool finishing, another agent ending and an injected task notification all arrive while a
+# prompt is still open, and none of them answers it.
+# ---------------------------------------------------------------------------------------------
+
+
+@test "X-01 33900 req1+2: a background agent's tool call while the main prompt is open clears nothing and tells the lead nothing" {
+    _cc_raise Bash
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    _check "$(_cc_post mcp__probe__slow_read "$BG")" || true
+    _check "$(_cc_post Bash "$BG")" || true
+    _held
+}
+
+@test "X-02 33900 req1+2: Codex, a subagent's tool call while the main prompt is open clears nothing" {
+    _waiting "$(_codex_ask Bash)"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    _check "$(_codex_post Bash thread-sub-2)" || true
+    _held
+}
+
+@test "X-03 33900 req1+2: a parallel tool of the same agent finishing while the prompt is open clears nothing" {
+    _cc_raise mcp__probe__ping "" Ping
+    _check "$(_cc_post mcp__probe__slow_read)" || true
+    _held
+}
+
+@test "X-04 33900 req1+2: another agent ending, or the main turn ending while the asking background agent still runs, clears nothing" {
+    _cc_raise Bash
+    _stophook "$(_cc_subagent_stop "$BG")" || true
+    _held
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$URLS"
+    _cc_raise Bash "$BG"
+    _check "$(_cc_stop "$(_running_bg "$BG")")" || true
+    _held
+}
+
+@test "X-05 33900 req1+2: a background agent's completion notice, injected as a prompt, clears nothing" {
+    _cc_raise Bash "$BG"
+    _check "$(_cc_prompt '<task-notification>\n<task-id>other</task-id>\n<status>completed</status>')" || true
+    _held
+}
+
+@test "X-06 33900 req3: Claude Code, the asked tool finishing clears once and tells the lead once" {
+    _cc_raise Bash
+    _check "$(_cc_post Bash)" || true
+    _cleared_once
+    _check "$(_cc_post Bash)" || true
+    _cleared_once
+}
+
+@test "X-07 33900 req3: a subagent's own prompt clears on that subagent's call to the asked tool; with no transcript holding the call, the fresh record names it (33898 round 4)" {
+    _cc_raise mcp__probe__ping "$SUB" Ping
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    # Round 4 (#33898, lead 439's ruling (b) 2026-11-18): the sentence's word, Ping, is off the list, so
+    # it confirms no name and the fresh record wins; no transcript holds the subagent's call to refuse
+    # it (C1's test applies only where the transcript holds the record's call: X-24, X-25, W-39).
+    "$(command -v jq)" -e '.toolName == "mcp__probe__ping"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
+    _check "$(_cc_post mcp__probe__ping)" || true
+    _held
+    _check "$(_cc_post mcp__probe__ping "$SUB")" || true
+    _cleared_once
+}
+
+@test "X-08 33900 req3: a new prompt from the person clears once, for Claude Code and for Codex" {
+    _cc_raise Bash "$BG"
+    _check "$(_cc_prompt 'please carry on')" || true
+    _cleared_once
+    : > "$URLS"; : > "$NOTICES"
+    _waiting "$(_codex_ask Bash)"
+    _check "$(_event UserPromptSubmit)" || true
+    _cleared_once
+}
+
+@test "X-09 33900 req3: Codex, the asked tool finishing clears once, from the agent that asked" {
+    _waiting "$(_codex_ask Bash thread-sub-2)"
+    _check "$(_codex_post Bash)" || true
+    _held
+    _check "$(_codex_post Bash thread-sub-2)" || true
+    _cleared_once
+}
+
+@test "X-10 33900 req1: after a Deny the turn ends with Stop (measured), which clears the main prompt once" {
+    _cc_raise Bash
+    _check "$(_cc_stop '[]')" || true
+    _cleared_once
+}
+
+@test "X-11 33900 req1: a subagent's prompt clears when the main turn ends with that agent no longer running, or when that agent stops" {
+    _cc_raise Bash "$SUB"
+    _check "$(_cc_stop '[]')" || true
+    _cleared_once
+    : > "$URLS"; : > "$NOTICES"
+    _cc_raise Bash "$BG"
+    _stophook "$(_cc_subagent_stop "$BG")" || true
+    _cleared_once
+}
+
+@test "X-12 33900: the ask record holds the agent and the tool name only, prints nothing, makes no call, and is not written for a non-member" {
+    run _ask "$(_cc_ask Bash "$SUB" "curl -H Authorization: $PLANTED")"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed (Claude Code would read it as a decision): $output"; return 1; }
+    [ -n "$(ls "$TEST_TMPDIR"/.mmry-asking-* 2>/dev/null)" ] || { echo "no ask record"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "planted string stored"; return 1; }
+    # #33900 A2: the asked call is identified by a one-way digest of its input, never the input itself.
+    grep -Eq '^input [0-9a-f]{64}$' "$TEST_TMPDIR"/.mmry-asking-* || { cat "$TEST_TMPDIR"/.mmry-asking-*; return 1; }
+    ! grep -rq 'curl' "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "the command was stored"; return 1; }
+    [ ! -s "$URLS" ] || { echo "the ask record made a call"; cat "$URLS"; return 1; }
+    bash "$HH/formation-state.sh" clear "$SID" >/dev/null
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*
+    run _ask "$(_cc_ask Bash)"
+    [ -z "$(ls "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-* 2>/dev/null)" ] || { echo "a non-member got an ask record"; return 1; }
+}
+
+@test "X-13 33900: hooks.json registers Claude Code's PermissionRequest for the ask record" {
+    run "$(command -v jq)" -r '[.hooks.PermissionRequest[]?.hooks[]?.command] | join("\n")' "$PLUGIN_ROOT/hooks/hooks.json"
+    [[ "$output" == *'formation-waiting.sh'*'--ask'* ]] || { echo "registered: [$output]"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33900 round 2. A2: the clear is tied to the ASKED CALL, not to any call of the same name. Neither
+# Claude Code's PermissionRequest (measured, 2.1.322: no tool_use_id) nor Codex's (schema.rs) carries a
+# tool_use_id, so the closest exact identifier is the asked call's input, which the asked call's
+# PostToolUse repeats (measured on Claude Code for every asked call; Codex from source: the shell
+# command). Only a one-way digest of it is kept. B2: a subagent's Deny and a Codex Deny clear through
+# the registered SubagentStop and Codex Stop hooks.
+# ---------------------------------------------------------------------------------------------
+
+@test "X-14 33900 req1 (A2): a parallel call of the SAME tool by the same agent, finishing after the notice, clears nothing; the asked call does" {
+    _ask "$(_cc_ask Bash "" "rm -rf build")"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    _check "$(_cc_post Bash "" '{"command":"ls -la"}')" || true
+    _held
+    _check "$(_cc_post Bash "" '{"command":"rm -rf build"}')" || true
+    _cleared_once
+}
+
+@test "X-15 33900 req1 (A2): a subagent's parallel call of the same MCP tool clears nothing; its asked call does" {
+    _ask "$(_cc_ask_in mcp__probe__ping "$SUB" '{"host":"a.example"}')"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Ping')"
+    _check "$(_cc_post mcp__probe__ping "$SUB" '{"host":"b.example"}')" || true
+    _held
+    _check "$(_cc_post mcp__probe__ping "$SUB" '{"host":"a.example"}')" || true
+    _cleared_once
+}
+
+@test "X-16 33900 req1+3 (A2): Codex, a parallel shell command clears nothing; the asked command clears once" {
+    _waiting "$(_codex_ask Bash "" '{"command":"rm -rf build","description":"clean the build"}')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    _check "$(_codex_post Bash "" '{"command":"ls"}')" || true
+    _held
+    _check "$(_codex_post Bash "" '{"command":"rm -rf build"}')" || true
+    _cleared_once
+}
+
+@test "X-17 33900 req1 (A2): with no exact identifier for the asked call, no tool call clears; the next prompt does" {
+    # A Claude Code that fires no PermissionRequest hook: the Notification alone, so nothing names the call.
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _check "$(_cc_post Bash)" || true
+    _check "$(_cc_post Bash "" '{"command":"anything"}')" || true
+    _held
+    _check "$(_cc_prompt 'carry on')" || true
+    _cleared_once
+}
+
+@test "X-18 33900 req1 (B2): hooks.json registers SubagentStop to the waiting answer, gated on this session's waiting marker" {
+    local cmd
+    cmd="$("$(command -v jq)" -r '[.hooks.SubagentStop[]?.hooks[]?.command] | join("\n")' "$PLUGIN_ROOT/hooks/hooks.json")"
+    [[ "$cmd" == *'/hooks-handlers/formation-waiting.sh'* && "$cmd" == *' --answer-hook'* ]] || { echo "registered: [$cmd]"; return 1; }
+    [[ "$cmd" == *'.mmry-waiting-'* ]] || { echo "not gated: [$cmd]"; return 1; }
+    [[ "$cmd" != *'formation-check'* ]] || { echo "runs the formation poller: [$cmd]"; return 1; }
+}
+
+@test "X-19 33900 req1 (B2): Claude Code, a subagent's Deny clears through the registered SubagentStop hook, and only for that agent" {
+    local cmd
+    cmd="$("$(command -v jq)" -r '[.hooks.SubagentStop[]?.hooks[]?.command][0] // ""' "$PLUGIN_ROOT/hooks/hooks.json" | tr -d '\r')"
+    [ -n "$cmd" ] || { echo "no SubagentStop hook registered"; return 1; }
+    _cc_raise Bash "$SUB"
+    # The registered command itself, as Claude Code runs it.
+    printf '%s' "$(_cc_subagent_stop "$BG")" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" TMPDIR="$TEST_TMPDIR" sh -c "$cmd" || true
+    _held
+    printf '%s' "$(_cc_subagent_stop "$SUB")" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" TMPDIR="$TEST_TMPDIR" sh -c "$cmd" || true
+    _cleared_once
+    # A session with no waiting marker: the gate stops it before bash starts, and nothing is called.
+    : > "$URLS"
+    printf '%s' "$(_cc_subagent_stop "$SUB")" | CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" TMPDIR="$TEST_TMPDIR" sh -c "$cmd" || true
+    [ ! -s "$URLS" ] || { cat "$URLS"; return 1; }
+}
+
+@test "X-20 33900 req1 (B2): codex-hooks.json registers Stop and SubagentStop to the waiting answer only, through codex-hook.sh, gated on a waiting marker" {
+    local ev cmd win
+    for ev in Stop SubagentStop; do
+        cmd="$("$(command -v jq)" -r --arg e "$ev" '[.hooks[$e][]?.hooks[]?.command] | join("\n")' "$PLUGIN_ROOT/hooks/codex-hooks.json")"
+        win="$("$(command -v jq)" -r --arg e "$ev" '[.hooks[$e][]?.hooks[]?.commandWindows] | join("\n")' "$PLUGIN_ROOT/hooks/codex-hooks.json")"
+        [[ "$cmd" == *'codex-hook.sh'*'formation-waiting'*'--answer-hook'* ]] || { echo "$ev: [$cmd]"; return 1; }
+        [[ "$cmd" == *'.mmry-waiting-'* ]] || { echo "$ev not gated: [$cmd]"; return 1; }
+        [[ "$cmd" != *'formation-check'* ]] || { echo "$ev runs the formation poller: [$cmd]"; return 1; }
+        [[ "$win" == *'codex-hook.cmd'*'formation-waiting --answer-hook'* ]] || { echo "$ev windows: [$win]"; return 1; }
+    done
+}
+
+@test "X-23 33900 (B2): on Windows, Codex's registered Stop command starts no bash while no waiting marker exists" {
+    # Behaviour of the cmd gate added to codex-hook.cmd: a stand-in codex-hook.sh beside the real
+    # launcher reports whether it was reached. Codex's Stop ends every turn, so with no prompt open the
+    # gate must exit before looking for Git's bash.
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) skip "Windows only: needs cmd.exe" ;; esac
+    command -v cygpath >/dev/null 2>&1 || skip "no cygpath"
+    local root="$TEST_TMPDIR/cmdroot" tdir="$TEST_TMPDIR/cmdtmp"
+    mkdir -p "$root/hooks-handlers" "$tdir"
+    cp "$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" "$root/hooks-handlers/"
+    printf '#!/usr/bin/env bash\necho "REACHED args=[$*]"\n' > "$root/hooks-handlers/codex-hook.sh"
+    local registered winroot wtmp cmdline
+    registered="$("$(command -v jq)" -r '.hooks.Stop[0].hooks[0].commandWindows' "$PLUGIN_ROOT/hooks/codex-hooks.json" | tr -d '\r')"
+    winroot="$(cygpath -w "$root")"; wtmp="$(cygpath -w "$tdir")"
+    cmdline="${registered//\$\{PLUGIN_ROOT\}/$winroot}"
+    # The registered line, unchanged, in a batch file: Git Bash would escape its quotes on a cmd.exe
+    # command line.
+    printf '@%s\r\n' "$cmdline" > "$root/run.bat"
+    local bat; bat="$(cygpath -w "$root/run.bat")"
+    run env TMPDIR="$wtmp" MSYS_NO_PATHCONV=1 cmd.exe /d /c "$bat" < /dev/null
+    [[ "$output" != *REACHED* ]] || { echo "bash started with no marker: $output"; return 1; }
+    : > "$tdir/.mmry-waiting-some-session"
+    run env TMPDIR="$wtmp" MSYS_NO_PATHCONV=1 cmd.exe /d /c "$bat" < /dev/null
+    [[ "$output" == *"REACHED args=[formation-waiting --answer-hook]"* ]] || { echo "not reached with a marker: $output"; return 1; }
+}
+
+@test "X-21 33900 req1 (B2): Codex, a Deny on the main thread clears on the asking turn's Stop, and no other turn's Stop" {
+    _waiting "$(_codex_ask Bash)"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    # Another turn's Stop (Codex also sends Stop for its own memory consolidation): not this prompt.
+    run _stophook "$(_codex_stop turn-other)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _held
+    run _stophook "$(_codex_stop turn-77)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _cleared_once
+}
+
+@test "X-22 33900 req1 (B2): Codex, a subagent's Deny clears on that subagent's SubagentStop only; the main turn's Stop leaves it" {
+    _waiting "$(_codex_ask Bash thread-sub-2)"
+    _stophook "$(_codex_subagent_stop thread-sub-3)" || true
+    _stophook "$(_codex_stop turn-77)" || true
+    _held
+    run _stophook "$(_codex_subagent_stop thread-sub-2)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _cleared_once
 }

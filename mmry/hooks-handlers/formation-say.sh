@@ -171,6 +171,28 @@ if [[ -n "$recipient_member_id" ]]; then
     # #31721. The sender can now find out whether it was read, and has to be told where to look,
     # or the feature is one nobody finds.
     echo "It reads as not read yet until it has been shown to them. $(mmry_host_formation_ref roster) shows whether it has been read."
+
+    # #33848 (DD-192 in MMRY-AI/mmry). THE WAKE LINE: when the member cannot wake on its own (an idle
+    # Codex member, or one with no recent activity), the server's answer carries one line saying so,
+    # naming the member and a host name the server sets, then the fixed safety line. It is printed
+    # whole, after the reply above, because the sender needs it now: otherwise it waits on a member
+    # that will not see the message until a person types in its window. The wording is the server's
+    # (cleared by cmo-mmry, approved by Eric); this script adds nothing to it. An answer with no wake
+    # line, from a member that wakes on its own or from an older server, reads exactly as before.
+    #
+    # Untrusted text on a terminal, so it is cleaned as formation-debrief.sh cleans a server reason:
+    # every C0 and C1 control but newline and tab goes, carriage return included, inside jq (which
+    # sees C1, two bytes in UTF-8) and again with tr; and it is cut at 2,000 characters.
+    wake=""
+    if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+        wake="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            'def clean: gsub("[\u0000-\u0008\u000b-\u001f\u007f-\u009f]"; ""); if type == "object" and (.wake | type) == "string" then (.wake | clean | .[0:2000]) else empty end' \
+            2>/dev/null || true)"
+        wake="$(printf '%s' "$wake" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+    fi
+    if [[ -n "$wake" ]]; then
+        printf '%s\n' "$wake"
+    fi
 else
     echo "Sent to formation ${formation_id}. The other members will see it after their next tool call."
 fi

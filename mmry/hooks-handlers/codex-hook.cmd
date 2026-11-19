@@ -74,7 +74,16 @@ rem MEMBERSHIP FILES ONLY (#31844). The locks and markers that share the prefix 
 rem (a crashed holder, an older version), and every one of them opened this gate. Each match is
 rem handed to :gate_consider, at the end of this file, which ignores those names. `call` to a label
 rem starts no process either.
+rem THE APPROVAL HOOK GOES THROUGH THE SAME GATE (#33903). formation-waiting, the Codex PermissionRequest
+rem hook, has work only for a Formation member, and it runs on every approval prompt for every person.
+rem Without this a person in no Formation paid where.exe, reg.exe, bash and the library, 0.9 to 1.6 s
+rem measured, on each prompt before formation-waiting.sh found nothing to do. The sh form in
+rem hooks/codex-hooks.json carries the identical gate the formation-check entries carry. Only the
+rem raise, formation-waiting with no second argument; any other formation-waiting entry keeps its own
+rem gate.
+if /i "%~1"=="formation-waiting" if "%~2"=="" goto :formation_gate
 if /i not "%~1"=="formation-check" goto :after_formation_gate
+:formation_gate
 set "MMRY_MEMBER="
 if not defined TMPDIR goto :gate_usertemp
 set "MMRY_GATE_DIR=%TMPDIR%"
@@ -91,6 +100,30 @@ if defined LOCALAPPDATA for %%F in ("%LOCALAPPDATA%\Temp\.mmry-formation-*") do 
 :gate_decide
 if not defined MMRY_MEMBER exit /b 0
 :after_formation_gate
+
+rem THE WAITING-ANSWER GATE (#33900 round 2). formation-waiting --answer-hook is registered on Codex
+rem Stop and SubagentStop, which end every turn, and has work only while a waiting marker exists
+rem (.mmry-waiting-<session>, which formation-waiting.sh writes to ${TMPDIR:-/tmp}, the folder the gate
+rem above reads). Builtins only, so a turn ending with no permission prompt open starts no process. The
+rem raise itself (formation-waiting with no second argument, on PermissionRequest) is not gated.
+if /i not "%~1"=="formation-waiting" goto :after_waiting_gate
+if /i not "%~2"=="--answer-hook" goto :after_waiting_gate
+set "MMRY_WAITING="
+if not defined TMPDIR goto :wgate_usertemp
+set "MMRY_GATE_DIR=%TMPDIR%"
+set "MMRY_GATE_ABS="
+if "%MMRY_GATE_DIR:~1,1%"==":" set "MMRY_GATE_ABS=1"
+if "%MMRY_GATE_DIR:~0,2%"=="\\" set "MMRY_GATE_ABS=1"
+if not defined MMRY_GATE_ABS goto :after_waiting_gate
+if exist "%MMRY_GATE_DIR%\.mmry-waiting-*" set "MMRY_WAITING=1"
+goto :wgate_decide
+:wgate_usertemp
+if defined TEMP if exist "%TEMP%\.mmry-waiting-*" set "MMRY_WAITING=1"
+if defined TMP if exist "%TMP%\.mmry-waiting-*" set "MMRY_WAITING=1"
+if defined LOCALAPPDATA if exist "%LOCALAPPDATA%\Temp\.mmry-waiting-*" set "MMRY_WAITING=1"
+:wgate_decide
+if not defined MMRY_WAITING exit /b 0
+:after_waiting_gate
 
 rem NEVER RUN A PROGRAM FROM THE CUSTOMER'S PROJECT FOLDER (#31245 QA rounds 9 and 10, security).
 rem Codex runs this hook with the customer's project as the current folder, and cmd.exe looks
