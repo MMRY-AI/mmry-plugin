@@ -157,6 +157,8 @@ tests/handlers/stop-check.bats
 tests/handlers/tmp-selfcheck.bats
 tests/handlers/userpromptsubmit-foundation.bats
 tests/handlers/visibility.bats
+tests/helpers/codex-hook-group.ps1
+tests/helpers/codex-per-message.bash
 tests/helpers/count-processes.ps1
 tests/helpers/formation-waiting-helpers.sh
 tests/helpers/foundation-set.bash
@@ -211,7 +213,9 @@ tests/structural/codex-formation-lead-docs.bats
 tests/structural/codex-late-handoff-isolation.bats
 tests/structural/codex-manifest.bats
 tests/structural/codex-mcp.bats
+tests/structural/codex-per-message-in-time.bats
 tests/structural/codex-sandbox-access.bats
+tests/structural/codex-stop-check-in-cmd.bats
 tests/structural/codex-tools-first.bats
 tests/structural/codex-windows-commands.bats
 tests/structural/cross-platform.bats
