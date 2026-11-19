@@ -119,16 +119,16 @@ case "$verb" in
     add)
         id="$(field '.id')"; host_out="$(field '.host')"
         printf 'Queued piece %s >>> %s <<<' "$id" "$(clean "$(field '.description')")"
-        [[ -n "$host_out" ]] && printf ', for members on %s' "$host_out"
+        if [[ -n "$host_out" ]]; then printf ', for members on %s' "$host_out"; else printf ', for any member'; fi
         printf '.\n%s\n' "$QUEUE_SAFETY_LINE"
         ;;
     list)
         count="$(field '.pieces | length')"
         if [[ "${count:-0}" == "0" ]]; then
-            echo "The queue for formation ${formation_id} is empty."
+            echo "The queue for Formation ${formation_id} is empty."
             exit 0
         fi
-        echo "Queue for formation ${formation_id}, in the order pieces are offered:"
+        echo "Queue for Formation ${formation_id}, in the order pieces are offered:"
         # Control characters become spaces BEFORE @tsv, which would otherwise escape a line break as a
         # literal backslash-n: typed text stays on its own line whatever it carries.
         printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r 'def flat: gsub("[[:cntrl:]]"; " ");
@@ -148,7 +148,8 @@ case "$verb" in
                 offered) line+=", offered to member ${offered}" ;;
                 *) line+=", queued" ;;
             esac
-            [[ "${returned:-0}" != "0" ]] && line+=", returned ${returned} time(s), last: ${reason}"
+            if [[ "${returned:-0}" == "1" ]]; then line+=", returned 1 time, last: ${reason}"
+            elif [[ "${returned:-0}" != "0" ]]; then line+=", returned ${returned} times, last: ${reason}"; fi
             printf '%s\n' "$line"
         done
         printf '%s\n' "$QUEUE_SAFETY_LINE"
