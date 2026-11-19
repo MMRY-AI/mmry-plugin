@@ -110,12 +110,36 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-waiting-*; do if [ -f \"$f\" ]; then exec sh \"$@\"; fi; done; exit 0' mmry-waiting-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-waiting --answer-hook",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-waiting --answer-hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-waiting-*; do if [ -f \"$f\" ]; then exec sh \"$@\"; fi; done; exit 0' mmry-waiting-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-waiting --answer-hook",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-waiting --answer-hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-waiting",
+            "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then exec sh \"$@\"; fi; done; exit 0' mmry-formation-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-waiting",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-waiting",
             "timeout": 15
           }

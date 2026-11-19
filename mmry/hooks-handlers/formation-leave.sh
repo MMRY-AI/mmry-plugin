@@ -47,6 +47,9 @@ bash "${HANDLER_DIR}/formation-state.sh" keep "$session_id"
 # Stop delivery here regardless of what the service said. Leaving the state behind would keep the
 # hook polling a formation the person has finished with, on top of whatever else went wrong.
 bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id"
+# And this session's waiting marker (#33901): once the membership record is gone no hook clears it, and
+# left in place it would silence the first permission prompt after the next join.
+bash "${HANDLER_DIR}/formation-waiting.sh" --forget "$session_id" </dev/null >/dev/null 2>&1 || true
 
 if [[ "$leave_rc" -eq 0 ]]; then
     formation_id="$known_id"

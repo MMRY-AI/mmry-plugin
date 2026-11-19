@@ -51,3 +51,58 @@ mmry_formation_save_outcome_prompt() {
         printf '%s %s\n' "$MMRY_FORMATION_SAVE_OUTCOME_ASK" "$MMRY_FORMATION_SAVE_OUTCOME_SKIP"
     fi
 }
+
+# ---- Each member's availability on the roster (#33847, DD-191 in MMRY-AI/mmry) -------------------
+#
+# The service decides each member's state and when it began, from what MMRY AI has recorded, and
+# sends the state as a plain word (availability) with its start (availabilitySince). The words are
+# held once in the service (FormationAvailability); this file holds what the plugin adds around them:
+# the label, the duration and the footer, each once. formation-roster.sh and formation-status.sh
+# both read them from here. Cleared by cmo-mmry and approved by Eric, 2026-11-18.
+#
+# THE DURATION: under 60 minutes in minutes ("for 12 minutes"); from 60 minutes in hours and minutes
+# ("for 1 hour", "for 2 hours 15 minutes"), singular units, no zero part (cmo-mmry follow-up,
+# 2026-11-18, because the roster is often heard aloud). With no
+# stored start, or under a minute, the state is shown alone ("Availability: unknown."), never
+# "since unknown". A member that has left, a lead and a server that sends no availability show
+# nothing, so an older server's roster reads exactly as before. A value that is not a short plain
+# lowercase word is not shown at all.
+#
+# NO strptime AND NO BACKSLASH. jq 1.6 on Windows has no strptime, so the start is turned into
+# seconds by arithmetic; and a backslash in a jq program given on the command line is not reliable
+# on Windows, where MSYS rewrites it before jq.exe sees it.
+MMRY_FORMATION_AVAILABILITY_FOOTER="Availability is based on the activity MMRY AI has recorded for each member in this Formation. No recent activity means the member holds no work and has shown no activity for the quiet limit; MMRY AI cannot tell why."
+
+MMRY_JQ_AVAILABILITY_DEFS='
+def mmry_iso_epoch: tostring | .[0:19] as $s
+    | if ($s | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$")) | not then null
+      else ($s[0:4] | tonumber) as $y | ($s[5:7] | tonumber) as $mo | ($s[8:10] | tonumber) as $d
+        | (if $mo <= 2 then $y - 1 else $y end) as $yy
+        | (($yy / 400) | floor) as $era
+        | ($yy - $era * 400) as $yoe
+        | ((((153 * (if $mo > 2 then $mo - 3 else $mo + 9 end) + 2) / 5) | floor) + $d - 1) as $doy
+        | ($yoe * 365 + (($yoe / 4) | floor) - (($yoe / 100) | floor) + $doy) as $doe
+        | ($era * 146097 + $doe - 719468) * 86400
+          + ($s[11:13] | tonumber) * 3600 + ($s[14:16] | tonumber) * 60 + ($s[17:19] | tonumber)
+      end;
+def mmry_unit($n; $one; $many): ($n | tostring) + " " + (if $n == 1 then $one else $many end);
+def mmry_duration_words: ((. / 60) | floor) as $h | (. - $h * 60) as $mm
+    | if $h == 0 then mmry_unit($mm; "minute"; "minutes")
+      elif $mm == 0 then mmry_unit($h; "hour"; "hours")
+      else mmry_unit($h; "hour"; "hours") + " " + mmry_unit($mm; "minute"; "minutes") end;
+def mmry_availability_word:
+    if .leftDate != null then null
+    elif ((.availability // null) | type) != "string" then null
+    elif (.availability | test("^[a-z][a-z ]{0,39}$")) then .availability
+    else null end;
+def mmry_availability_suffix:
+    mmry_availability_word as $w
+    | if $w == null then ""
+      else ((.availabilitySince // null) | if . == null then null else mmry_iso_epoch end) as $t
+        | (if $t == null then null else (((now - $t) / 60) | floor) end) as $m
+        | "  Availability: " + $w
+          + (if $m == null or $m < 1 then "" else ", for " + ($m | mmry_duration_words) end)
+          + "."
+      end;
+def mmry_roster_has_availability: [(.members // [])[] | mmry_availability_word | select(. != null)] | length > 0;
+'

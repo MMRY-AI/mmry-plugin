@@ -144,6 +144,7 @@ fi
 # The formation is closed out server-side. Clear the local state so the delivery hook stops polling
 # a channel that will never serve anything again; the membership record itself is the server's.
 bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id" 2>/dev/null || true
+bash "${HANDLER_DIR}/formation-waiting.sh" --forget "$session_id" </dev/null >/dev/null 2>&1 || true  # #33901
 
 # THE ACCOUNT, AS THE SERVER RENDERED IT (#31046). Printed rather than rebuilt here: it is
 # assembled in one place on purpose, and a second version written in bash would be a second answer

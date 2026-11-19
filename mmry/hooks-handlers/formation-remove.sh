@@ -111,6 +111,7 @@ fi
 # can only be this window.
 if [[ -n "$session_id" && -n "$entry_session" && "$entry_session" == "$session_id" ]]; then
     bash "${HANDLER_DIR}/formation-state.sh" clear "$session_id" || true
+    bash "${HANDLER_DIR}/formation-waiting.sh" --forget "$session_id" </dev/null >/dev/null 2>&1 || true  # #33901, as leaving does
     echo "Member ${member_id} was this session's own place, so this session has left formation ${formation_id}. No further messages from it will be surfaced here. To leave a formation, $(mmry_host_formation_ref leave) is the command to use."
     exit 0
 fi

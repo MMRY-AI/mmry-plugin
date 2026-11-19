@@ -157,6 +157,26 @@ _progress() {
     [ "$output" = "$OFFER_SENT" ]
 }
 
+# #33847: the roster's availability footer, which tells the lead whom to hand work to, is held once,
+# in lib-formation-prompts.sh, ASCII, and the roster and status scripts both read it from there.
+AVAIL_FOOTER='Availability is based on the activity MMRY AI has recorded for each member in this Formation. No recent activity means the member holds no work and has shown no activity for the quiet limit; MMRY AI cannot tell why.'
+
+@test "33847 literals: lib-formation-prompts.sh holds the availability footer and label once; no script spells them" {
+    local lib="${HANDLERS}/lib-formation-prompts.sh"
+    run bash -c 'source "$1"; printf "%s" "$MMRY_FORMATION_AVAILABILITY_FOOTER"' _ "$lib"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$AVAIL_FOOTER" ]
+    ! printf '%s' "$AVAIL_FOOTER" | LC_ALL=C grep -q '[^ -~]' || { echo "non-ASCII footer"; return 1; }
+    [ "$(grep -c -F -- 'Availability is based on' "$lib")" -eq 1 ]
+    [ "$(grep -c -F -- '"  Availability: "' "$lib")" -eq 1 ]
+    local f
+    for f in "${HANDLERS}/formation-roster.sh" "${HANDLERS}/formation-status.sh"; do
+        grep -q -F 'lib-formation-prompts.sh' "$f" || { echo "$f does not read the held text"; return 1; }
+        ! grep -q -F -- 'Availability is based on' "$f" || { echo "$f spells the footer itself"; return 1; }
+        ! grep -q -F -- 'Availability: ' "$f" || { echo "$f spells the label itself"; return 1; }
+    done
+}
+
 # ---- Requirement 3: join and start --------------------------------------------------------------
 
 @test "req3: a member joining on Claude Code is given the member rule and not the lead rule" {
