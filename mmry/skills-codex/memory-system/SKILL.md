@@ -32,6 +32,10 @@ approves Internet access for the conversation, which is the prompt these tools e
 | As the lead, close the formation out | `formation_debrief` | `summary` |
 | As the lead or an administrator, remove a member whose session has dropped | `formation_remove` | `member_id`; optional `formation_id` |
 | Leave the formation | `formation_leave` | nothing |
+| Queue a piece of work for this Formation (lead only). Name a host to offer it only to members on that host. | `formation_queue_add` | `description`; optional `host` (`codex` or `claude-code`) |
+| Show the queue: each piece, the host it needs, and who took it and when. | `formation_queue_list` | nothing |
+| Take the queued piece you were offered. It becomes your assignment. | `formation_queue_take` | `piece_id` |
+| Turn down the queued piece you were offered. It goes back to the queue for the next member. | `formation_queue_decline` | `piece_id` |
 
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,

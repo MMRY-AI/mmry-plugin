@@ -233,6 +233,60 @@ FAKECURL
     _assert_customer_typography "$codex"
 }
 
+# #33849 (DD-193 in MMRY-AI/mmry). The work queue on Codex: the four operations are mmry_plugin tools
+# (no Internet access approval), named by the derived remedy, carrying the approved descriptions (E),
+# and each runs formation-queue.sh as Claude Code's command does.
+@test "33849: on Codex a queue command is named as its mmry_plugin tool, on Claude Code as the slash command" {
+    local codex claude
+    codex="$(env MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash -c 'source "$1/lib-host.sh"; mmry_host_formation_ref queue take 3; echo; mmry_host_formation_ref queue add; echo; mmry_host_formation_ref queue list' _ "$HH")"
+    claude="$(env -u MMRY_HOST bash -c 'source "$1/lib-host.sh"; mmry_host_formation_ref queue take 3' _ "$HH")"
+    [[ "$codex" == *"the mmry_plugin formation_queue_take tool with piece_id 3"* ]] || { echo "$codex"; return 1; }
+    [[ "$codex" == *"the mmry_plugin formation_queue_add tool"* ]] || { echo "$codex"; return 1; }
+    [[ "$codex" == *"the mmry_plugin formation_queue_list tool"* ]] || { echo "$codex"; return 1; }
+    [ "$claude" = "/mmry:formation queue take 3" ]
+}
+
+@test "33849: the tool server lists the four queue tools with the approved descriptions" {
+    local out tools
+    out="$(printf '%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+        | env MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash "$HH/mcp-server.sh" 2>/dev/null)"
+    tools="$(printf '%s\n' "$out" | jq -c 'select(.id == 2) | .result.tools')"
+    [ "$(printf '%s' "$tools" | jq -r '.[] | select(.name == "formation_queue_add") | .description')" = "Queue a piece of work in the Formation you lead, with an optional host it needs. Only the lead can add." ]
+    [ "$(printf '%s' "$tools" | jq -r '.[] | select(.name == "formation_queue_list") | .description')" = "List the Formation's queued work: each piece, the host it needs, and who took it and when." ]
+    [ "$(printf '%s' "$tools" | jq -r '.[] | select(.name == "formation_queue_take") | .description')" = "Take the queued piece you were offered; it becomes your assignment. If another member took it first, you are told and nothing changes." ]
+    [ "$(printf '%s' "$tools" | jq -r '.[] | select(.name == "formation_queue_decline") | .description')" = "Decline the queued piece you were offered; it returns to the queue." ]
+}
+
+@test "33849: formation_queue_take through the tool server takes the piece in this conversation's Formation" {
+    local sid="conv-queue-$$" log="$TEST_TMPDIR/queue-urls"
+    : > "$log"
+    mkdir -p "$TEST_TMPDIR/queue-bin"
+    cat > "$TEST_TMPDIR/queue-bin/curl" <<FAKECURL
+#!/usr/bin/env bash
+out=""; prev=""; url=""; method="GET"
+for arg in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$arg"; [[ "\$prev" == "-X" ]] && method="\$arg"; [[ "\$arg" == http* ]] && url="\$arg"; prev="\$arg"; done
+printf '%s %s\n' "\$method" "\$url" >> "$log"
+resp='{"id":3,"description":"Port the roster tests","host":null,"state":"taken","takenByMemberId":7}'
+[[ -n "\$out" ]] && printf '%s' "\$resp" > "\$out"
+printf '200'
+exit 0
+FAKECURL
+    chmod +x "$TEST_TMPDIR/queue-bin/curl"
+    bash "$HH/formation-state.sh" set 42 "$sid" >/dev/null
+    local out text
+    out="$(printf '%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"formation_queue_take","arguments":{"piece_id":3},"_meta":{"sessionId":"'"$sid"'"}}}' \
+        | PATH="$TEST_TMPDIR/queue-bin:$PATH" env MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash "$HH/mcp-server.sh" 2>/dev/null)"
+    text="$(printf '%s\n' "$out" | jq -r 'select(.id == 2) | .result.content[0].text')"
+    bash "$HH/formation-state.sh" clear "$sid" >/dev/null 2>&1 || true
+    grep -qF "POST http://fake.invalid/api/formations/42/queue/3/take" "$log" || { cat "$log"; echo "$out"; return 1; }
+    [[ "$text" == *"piece 3 >>> Port the roster tests <<<"* ]] || { echo "$out"; return 1; }
+    _assert_customer_typography "$text"
+}
+
 # #33848 (DD-192 in MMRY-AI/mmry). A Codex lead that sends work to a member that cannot wake on its own
 # is told so in the send reply, by the same script the formation_say tool runs, with the same words as on
 # Claude Code. The wake line comes whole from the server's answer; the plugin adds nothing to it.
