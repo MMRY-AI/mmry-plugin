@@ -65,6 +65,37 @@ case "$HANDLER_NAME" in
     *[/\\]*|.*|"") exit 0 ;;
 esac
 
+# THE LAUNCHER'S CLOCK (#33967 round 5). codex-hook.cmd says stop-check's prompt itself, in cmd, when it
+# can be sure of it (:stop_check_say), and for that it needs the time in seconds since 1970, which cmd
+# cannot read. So every launch the launcher handed its seconds of the day and its date
+# (MMRY_CODEX_HOOK_SECS and MMRY_CODEX_HOOK_DATE; the session start and the Foundation parts are such
+# launches) leaves it a clock beside stop-check's marker: .mmry-codex-clock.cmd, "SSSSS EEEEEEEEEE <date>",
+# bash's own seconds of the day and epoch read at one instant, with the launcher's date. Only when bash's
+# day is the launcher's (bash's seconds are not before the launcher's: no midnight between them), and not
+# again within a minute of a clock of the same date, so cmd seldom meets one half written (it then lets
+# stop-check run). Builtins only, and only with bash's own clock (4.2 and later); the sh form hands nothing.
+if [[ -n "${MMRY_CODEX_HOOK_DATE:-}" && "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,5}$ && "$MMRY_CODEX_HOOK_DATE" != *[$'\r\n']* ]] \
+    && (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
+    _mmry_ck=""
+    printf -v _mmry_ck '%(%s %H %M %S)T' -1 2>/dev/null || _mmry_ck=""
+    if [[ "$_mmry_ck" =~ ^([0-9]{10})\ ([0-9]{2})\ ([0-9]{2})\ ([0-9]{2})$ ]]; then
+        _mmry_ck_e="${BASH_REMATCH[1]}"
+        _mmry_ck_s=$(( 10#${BASH_REMATCH[2]} * 3600 + 10#${BASH_REMATCH[3]} * 60 + 10#${BASH_REMATCH[4]} ))
+        _mmry_ck_l=$(( 10#$MMRY_CODEX_HOOK_SECS ))
+        if (( _mmry_ck_l < 86400 && _mmry_ck_s >= _mmry_ck_l )); then
+            _mmry_ck_f="${TMPDIR:-/tmp}/.mmry-codex-clock.cmd"
+            _mmry_ck_old=""
+            if [[ -f "$_mmry_ck_f" ]]; then
+                { IFS= read -r _mmry_ck_old || true; } 2>/dev/null < "$_mmry_ck_f" || _mmry_ck_old=""
+            fi
+            if ! [[ "$_mmry_ck_old" =~ ^([0-9]{5})\ [0-9]{10}\ (.*)$ && "${BASH_REMATCH[2]}" == "$MMRY_CODEX_HOOK_DATE" ]] \
+                || (( _mmry_ck_s < 10#${BASH_REMATCH[1]} || _mmry_ck_s - 10#${BASH_REMATCH[1]} >= 60 )); then
+                printf '%05d %s %s' "$_mmry_ck_s" "$_mmry_ck_e" "$MMRY_CODEX_HOOK_DATE" > "$_mmry_ck_f" 2>/dev/null || true
+            fi
+        fi
+    fi
+fi
+
 # THE FIRST PROMPT'S LATE MEMORIES RUN HERE, IN THIS SHELL, BEFORE ANYTHING BELOW (#33062 fix round 1).
 # codex-first-prompt.sh needs no host, no library and no credential, only the temp folder, and it runs
 # exactly when a start was already too slow, so it is sourced before the lines below start their

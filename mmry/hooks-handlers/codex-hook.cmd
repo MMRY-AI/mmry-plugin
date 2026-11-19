@@ -49,6 +49,14 @@ rem from the record stop-check leaves beside its marker, with builtins only, and
 rem having started no process at all. Anything it cannot be sure of goes on to stop-check as before.
 if /i "%~1"=="stop-check" call :stop_check_quiet
 if /i "%~1"=="stop-check" if defined MMRY_SQ_QUIET exit /b 0
+rem STOP-CHECK'S PROMPT IS SAID HERE TOO (#33967 round 5). In the round 4 live measurement (Codex 0.169.0,
+rem a load of 496 ms per process start) the quiet message was at the floor, but on the first message
+rem stop-check still failed at its 10 s limit, while formation-check, which ends here in cmd, took 9.5 s:
+rem the prompt cost the floor plus Git's bash. So :stop_check_say, at the end of this file, says the prompt
+rem itself, with builtins only, whenever it can be sure what stop-check would say, and leaves the files
+rem stop-check leaves. Anything it cannot be sure of goes on to stop-check as before.
+if /i "%~1"=="stop-check" call :stop_check_say
+if /i "%~1"=="stop-check" if defined MMRY_SQ_SAID exit /b 0
 rem THE LATE-MEMORIES GATE (#33062 fix round 1; moved by #33231, DD-182). codex-first-prompt runs on
 rem every prompt and has work only when a session start ran out of time and left a
 rem .mmry-codex-late.<key>.<session> marker, so with none it exits here, before where.exe, reg.exe or
@@ -158,6 +166,10 @@ if not defined MMRY_GIT_BASH if exist "%LOCALAPPDATA%\Programs\Git\bin\bash.exe"
 
 if not defined MMRY_GIT_BASH goto :no_git
 
+rem EVERY HANDLER IS HANDED THIS LAUNCH'S SECONDS OF THE DAY AND DATE (#33967 round 5), not only
+rem stop-check: codex-hook.sh leaves :stop_check_say its clock from them, and the session start and the
+rem Foundation parts are the launches that reach it. stop-check's were set by :stop_check_quiet.
+if /i not "%MMRY_HANDLER%"=="stop-check" call :launch_clock
 "%MMRY_GIT_BASH%" "%~dp0codex-hook.sh" %*
 exit /b %ERRORLEVEL%
 
@@ -250,23 +262,8 @@ rem leading zero, any one-character separators) hands over neither, and stop-che
 rem record. The record's text is compared with delayed expansion, so it is never parsed as commands.
 rem Builtins only: set, set /a, set /p, if, for /f over a string, call.
 set "MMRY_SQ_QUIET="
-set "MMRY_CODEX_HOOK_SECS="
-set "MMRY_CODEX_HOOK_DATE="
-set "MMRY_SQ_T=%MMRY_CODEX_HOOK_STARTED: =0%"
-if not "%MMRY_SQ_T:~11%"=="" exit /b 0
-set "MMRY_SQ_D8=%MMRY_SQ_T:~0,2%%MMRY_SQ_T:~3,2%%MMRY_SQ_T:~6,2%%MMRY_SQ_T:~9,2%"
-if "%MMRY_SQ_D8:~7,1%"=="" exit /b 0
-for /f "delims=0123456789" %%X in ("%MMRY_SQ_D8%x") do if not "%%X"=="x" exit /b 0
-for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~2,1%") do if "%%X"=="a" exit /b 0
-for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~5,1%") do if "%%X"=="a" exit /b 0
-for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~8,1%") do if "%%X"=="a" exit /b 0
-set /a "MMRY_SQ_H=1%MMRY_SQ_T:~0,2%-100, MMRY_SQ_M=1%MMRY_SQ_T:~3,2%-100, MMRY_SQ_S=1%MMRY_SQ_T:~6,2%-100"
-if %MMRY_SQ_H% gtr 23 exit /b 0
-if %MMRY_SQ_M% gtr 59 exit /b 0
-if %MMRY_SQ_S% gtr 59 exit /b 0
-if not defined DATE exit /b 0
-set /a "MMRY_CODEX_HOOK_SECS=MMRY_SQ_H*3600+MMRY_SQ_M*60+MMRY_SQ_S"
-set "MMRY_CODEX_HOOK_DATE=%DATE%"
+call :launch_clock
+if not defined MMRY_CODEX_HOOK_SECS exit /b 0
 set "MMRY_SQ_DIR=%TEMP%"
 if defined TMP set "MMRY_SQ_DIR=%TMP%"
 if defined TMPDIR set "MMRY_SQ_DIR=%TMPDIR%"
@@ -293,4 +290,191 @@ endlocal & set "MMRY_SQ_QUIET=1"
 exit /b 0
 :stop_check_loud
 endlocal
+exit /b 0
+:launch_clock
+rem Sets MMRY_CODEX_HOOK_SECS, this launch's seconds of the day, and MMRY_CODEX_HOOK_DATE, cmd's date, from
+rem the stamp taken as this file's first step, or leaves both unset when the stamp is not HH:MM:SS.cc in
+rem shape (a space for a leading zero, any one-character separators). Split out of :stop_check_quiet,
+rem unchanged, by round 5, so every handler is handed them. Builtins only.
+set "MMRY_CODEX_HOOK_SECS="
+set "MMRY_CODEX_HOOK_DATE="
+set "MMRY_SQ_T=%MMRY_CODEX_HOOK_STARTED: =0%"
+if not "%MMRY_SQ_T:~11%"=="" exit /b 0
+set "MMRY_SQ_D8=%MMRY_SQ_T:~0,2%%MMRY_SQ_T:~3,2%%MMRY_SQ_T:~6,2%%MMRY_SQ_T:~9,2%"
+if "%MMRY_SQ_D8:~7,1%"=="" exit /b 0
+for /f "delims=0123456789" %%X in ("%MMRY_SQ_D8%x") do if not "%%X"=="x" exit /b 0
+for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~2,1%") do if "%%X"=="a" exit /b 0
+for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~5,1%") do if "%%X"=="a" exit /b 0
+for /f "delims=0123456789" %%X in ("a%MMRY_SQ_T:~8,1%") do if "%%X"=="a" exit /b 0
+set /a "MMRY_SQ_H=1%MMRY_SQ_T:~0,2%-100, MMRY_SQ_M=1%MMRY_SQ_T:~3,2%-100, MMRY_SQ_S=1%MMRY_SQ_T:~6,2%-100"
+if %MMRY_SQ_H% gtr 23 exit /b 0
+if %MMRY_SQ_M% gtr 59 exit /b 0
+if %MMRY_SQ_S% gtr 59 exit /b 0
+if not defined DATE exit /b 0
+set /a "MMRY_CODEX_HOOK_SECS=MMRY_SQ_H*3600+MMRY_SQ_M*60+MMRY_SQ_S"
+set "MMRY_CODEX_HOOK_DATE=%DATE%"
+exit /b 0
+:stop_check_say
+rem Says stop-check's prompt, or its "a save already landed" silence, from cmd (#33967 round 5), and sets
+rem MMRY_SQ_SAID when it has answered for stop-check. It answers only when it can be sure what
+rem stop-check.sh would say on Codex, and then leaves the files stop-check leaves; anything else leaves
+rem MMRY_SQ_SAID unset, having written nothing, and stop-check runs as before. It answers when:
+rem   - the folder is stop-check's (TMPDIR, else TMP, else TEMP), an absolute Windows path, and no Formation
+rem     renewal-turn marker is waiting (stop-check spends those);
+rem   - THE CLOCK. cmd cannot read the time in seconds since 1970, which stop-check's files hold, so
+rem     codex-hook.sh leaves it .mmry-codex-clock.cmd on every launch the launcher handed its seconds and
+rem     date (the session start's included): "SSSSS EEEEEEEEEE <date>", bash's seconds of the day and its
+rem     epoch read at one instant, with this launcher's date. It is used only when its date is today's and
+rem     its seconds are not after this launch's; now is its epoch plus the seconds since. On the night a
+rem     clock change falls between the clock and now this is an hour out, which can only move one prompt;
+rem   - stop-check's marker is absent (the first message of a fresh home), or it is 900 s or more old by
+rem     the time stop-check keeps beside it (.mmry-stop-checked.at), with the launcher's record beside it
+rem     well formed (so the last stamp was a launcher's, whose time is consistent). Under 900 s it is
+rem     stop-check's to decide: :stop_check_quiet answers the clear cases from the record;
+rem   - each file it reads is one line of digits as stop-check would read it (spaces dropped), epochs
+rem     of 10 digits no larger than 2147483647, a count of up to 8 digits with no leading zero.
+rem What it then does is stop-check.sh's Codex path, step for step: a save at or after the marker's time
+rem means silence, a stamp and a count of 0; otherwise a stamp (time, marker, record), the count plus
+rem one, and the directive, with the last save's minutes, the escalation from 3 firings and the
+rem compaction clause, printed as one JSON line with no newline. A marker that cannot be written ends it
+rem silently, as stop-check's set -e does. tests/structural/codex-per-message-in-time.bats runs both on
+rem the same state and requires the same words and files. Builtins only: set, set /a, set /p, if, call,
+rem for over a list, type nul, echo and redirection.
+set "MMRY_SQ_SAID="
+if not defined MMRY_CODEX_HOOK_SECS exit /b 0
+if not defined MMRY_CODEX_HOOK_DATE exit /b 0
+set "MMRY_SS_DIR=%TEMP%"
+if defined TMP set "MMRY_SS_DIR=%TMP%"
+if defined TMPDIR set "MMRY_SS_DIR=%TMPDIR%"
+set "MMRY_SS_ABS="
+if "%MMRY_SS_DIR:~1,2%"==":\" set "MMRY_SS_ABS=1"
+if "%MMRY_SS_DIR:~0,2%"=="\\" set "MMRY_SS_ABS=1"
+if not defined MMRY_SS_ABS exit /b 0
+if "%MMRY_SS_DIR:~-1%"=="\" set "MMRY_SS_DIR=%MMRY_SS_DIR:~0,-1%"
+if exist "%MMRY_SS_DIR%\.mmry-renewal-turn-*" exit /b 0
+setlocal enabledelayedexpansion
+set MMRY_SS_LF=^
+
+
+set "MMRY_SS_MK=!MMRY_SS_DIR!\.mmry-stop-checked"
+rem The clock, read whole: its date holds spaces.
+set "MMRY_SS_C="
+if exist "!MMRY_SS_DIR!\.mmry-codex-clock.cmd" set /p "MMRY_SS_C=" 2>nul 0<"!MMRY_SS_DIR!\.mmry-codex-clock.cmd"
+if not defined MMRY_SS_C goto :ss_run
+if not "!MMRY_SS_C:~5,1!"==" " goto :ss_run
+if not "!MMRY_SS_C:~16,1!"==" " goto :ss_run
+if not "!MMRY_SS_C:~17!"=="!MMRY_CODEX_HOOK_DATE!" goto :ss_run
+set "MMRY_SS_V=!MMRY_SS_C:~0,5!"
+call :ss_digits
+if not defined MMRY_SS_OK goto :ss_run
+set /a "MMRY_SS_CS=1!MMRY_SS_V!-100000"
+set "MMRY_SS_V=!MMRY_SS_C:~6,10!"
+call :ss_epoch
+if not defined MMRY_SS_OK goto :ss_run
+set /a "MMRY_SS_SINCE=MMRY_CODEX_HOOK_SECS-MMRY_SS_CS"
+if !MMRY_SS_SINCE! lss 0 goto :ss_run
+set /a "MMRY_SS_NOW=!MMRY_SS_V!+MMRY_SS_SINCE"
+rem The marker: absent, or 900 s or more old by the time beside it.
+set "MMRY_SS_AT="
+if not exist "!MMRY_SS_MK!" goto :ss_marker_done
+set "MMRY_SS_R="
+if exist "!MMRY_SS_MK!.cmd" set /p "MMRY_SS_R=" 2>nul 0<"!MMRY_SS_MK!.cmd"
+if not defined MMRY_SS_R goto :ss_run
+if not "!MMRY_SS_R:~5,1!"==" " goto :ss_run
+set "MMRY_SS_V=!MMRY_SS_R:~0,5!"
+call :ss_digits
+if not defined MMRY_SS_OK goto :ss_run
+set "MMRY_SS_F=!MMRY_SS_MK!.at"
+call :ss_read
+call :ss_epoch
+if not defined MMRY_SS_OK goto :ss_run
+set "MMRY_SS_AT=!MMRY_SS_V!"
+set /a "MMRY_SS_AGE=MMRY_SS_NOW-MMRY_SS_AT"
+if !MMRY_SS_AGE! lss 900 goto :ss_run
+:ss_marker_done
+rem The last save, if any.
+set "MMRY_SS_SV="
+if not exist "!MMRY_SS_DIR!\.mmry-last-save" goto :ss_save_done
+set "MMRY_SS_F=!MMRY_SS_DIR!\.mmry-last-save"
+call :ss_read
+call :ss_epoch
+if not defined MMRY_SS_OK goto :ss_run
+set "MMRY_SS_SV=!MMRY_SS_V!"
+:ss_save_done
+rem The firings since the last save.
+set "MMRY_SS_N=0"
+if not exist "!MMRY_SS_DIR!\.mmry-stop-count" goto :ss_count_done
+set "MMRY_SS_F=!MMRY_SS_DIR!\.mmry-stop-count"
+call :ss_read
+if not defined MMRY_SS_V goto :ss_count_done
+call :ss_digits
+if not defined MMRY_SS_OK goto :ss_run
+if not "!MMRY_SS_V:~8!"=="" goto :ss_run
+if "!MMRY_SS_V:~0,1!"=="0" if not "!MMRY_SS_V!"=="0" goto :ss_run
+set /a "MMRY_SS_N=!MMRY_SS_V!"
+:ss_count_done
+rem Sure now. The stamp, in stop-check's order: its time, the marker, the launcher's record.
+set "MMRY_SS_P=0000!MMRY_CODEX_HOOK_SECS!"
+set "MMRY_SS_P=!MMRY_SS_P:~-5!"
+>"!MMRY_SS_MK!.at" 2>nul echo !MMRY_SS_NOW!
+type nul >"!MMRY_SS_MK!" 2>nul
+if not exist "!MMRY_SS_MK!" goto :ss_silent
+<nul >"!MMRY_SS_MK!.cmd" 2>nul set /p "=!MMRY_SS_P! !MMRY_CODEX_HOOK_DATE!"
+rem A save at or after the marker's time: nothing is outstanding, so silence and a count of 0.
+if not defined MMRY_SS_AT goto :ss_prompt
+if not defined MMRY_SS_SV goto :ss_prompt
+if !MMRY_SS_SV! lss !MMRY_SS_AT! goto :ss_prompt
+>"!MMRY_SS_DIR!\.mmry-stop-count" 2>nul echo 0
+goto :ss_silent
+:ss_prompt
+set /a "MMRY_SS_N+=1"
+>"!MMRY_SS_DIR!\.mmry-stop-count" 2>nul echo !MMRY_SS_N!
+set "MMRY_SS_TX=Save what is new since the last memory: identify decisions, findings, and corrections from this segment of the session, then call the mmry_plugin memory_save tool for each, with the memory as its content. If nothing new is worth keeping, skip and proceed."
+if not defined MMRY_SS_SV goto :ss_said_save
+set /a "MMRY_SS_MIN=(MMRY_SS_NOW-MMRY_SS_SV)/60"
+if !MMRY_SS_MIN! lss 1 set "MMRY_SS_TX=!MMRY_SS_TX! Your last save was under a minute ago; save only what is genuinely new since then, or skip."
+if !MMRY_SS_MIN! geq 1 set "MMRY_SS_TX=!MMRY_SS_TX! Your last save was !MMRY_SS_MIN! minute(s) ago; save only what is new since then."
+:ss_said_save
+if !MMRY_SS_N! geq 3 set "MMRY_SS_TX=!MMRY_SS_TX! You have skipped !MMRY_SS_N! Stop firings without saving. Either save now or briefly state in your reply why this segment has nothing worth keeping."
+set "MMRY_SS_TX=!MMRY_SS_TX! Codex gives MMRY no moment at compaction and no channel at session end, so this periodic prompt is the only warning you get: anything not saved can be lost when the conversation is trimmed."
+<nul set /p "={"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"!MMRY_SS_TX!"}}"
+:ss_silent
+endlocal & set "MMRY_SQ_SAID=1"
+exit /b 0
+:ss_run
+endlocal
+exit /b 0
+
+rem :stop_check_say's reader: the file MMRY_SS_F's first line into MMRY_SS_V, as stop-check reads it. set /p
+rem stops at CRLF and drops a final LF but keeps an LF inside, so an LF left is made a # (not a digit, so
+rem the caller lets stop-check run). Spaces are dropped, as stop-check drops whitespace.
+:ss_read
+set "MMRY_SS_V="
+set /p "MMRY_SS_V=" 2>nul 0<"!MMRY_SS_F!"
+if not defined MMRY_SS_V exit /b 0
+for %%L in ("!MMRY_SS_LF!") do set "MMRY_SS_V=!MMRY_SS_V:%%~L=#!"
+set "MMRY_SS_V=!MMRY_SS_V: =!"
+exit /b 0
+
+rem MMRY_SS_OK when MMRY_SS_V is one or more digits and nothing else: every digit is taken out, and nothing
+rem may be left. (A for /f with digits for delimiters would pass 12x3.)
+:ss_digits
+set "MMRY_SS_OK="
+if not defined MMRY_SS_V exit /b 0
+set "MMRY_SS_W=!MMRY_SS_V!"
+for %%D in (0 1 2 3 4 5 6 7 8 9) do if defined MMRY_SS_W set "MMRY_SS_W=!MMRY_SS_W:%%D=!"
+if not defined MMRY_SS_W set "MMRY_SS_OK=1"
+exit /b 0
+
+rem MMRY_SS_OK when MMRY_SS_V is an epoch cmd can do sums with: 10 digits, no leading zero, no larger than
+rem 2147483647 (set /a is 32-bit; compared as text, which is exact for two 10-digit numbers).
+:ss_epoch
+call :ss_digits
+if not defined MMRY_SS_OK exit /b 0
+set "MMRY_SS_OK="
+if "!MMRY_SS_V:~9,1!"=="" exit /b 0
+if not "!MMRY_SS_V:~10!"=="" exit /b 0
+if "!MMRY_SS_V:~0,1!"=="0" exit /b 0
+if "!MMRY_SS_V!" gtr "2147483647" exit /b 0
+set "MMRY_SS_OK=1"
 exit /b 0
