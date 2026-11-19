@@ -275,7 +275,7 @@ if [[ -z "${MMRY_HOST:-}" ]]; then
                 read -r _mmry_marker_host || _mmry_marker_host=""
                 read -r _mmry_marker_home || true
             } < "$_mmry_marker" 2>/dev/null
-            _mmry_marker_home="${_mmry_marker_home%$''}"
+            _mmry_marker_home="${_mmry_marker_home%$'\r'}"
             _mmry_marker_host="${_mmry_marker_host:0:64}"
             _mmry_marker_host="${_mmry_marker_host//[[:space:]]/}"
             if [[ "$_mmry_marker_host" == "codex" ]]; then
@@ -677,6 +677,8 @@ mmry_host_tool_ref() {
         formation_start|formation_assign|formation_report|formation_debrief) ;;
         # #32270: removing a member whose session has dropped.
         formation_remove) ;;
+        # #33849: the work queue.
+        formation_queue_add|formation_queue_list|formation_queue_take|formation_queue_decline) ;;
         *) return 1 ;;
     esac
     printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
@@ -746,6 +748,21 @@ _mmry_host_formation_tool() {
             else
                 mmry_host_tool_ref formation_remove "with member_id (from the roster)"
             fi
+            ;;
+        # #33849. "queue <verb> [piece id]": the verb names the tool, a piece id becomes piece_id.
+        queue)
+            case "${1:-}" in
+                add)  mmry_host_tool_ref formation_queue_add "with description (and host, codex or claude-code)" ;;
+                list) mmry_host_tool_ref formation_queue_list ;;
+                take|decline)
+                    if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+                        mmry_host_tool_ref "formation_queue_$1" "with piece_id $2"
+                    else
+                        mmry_host_tool_ref "formation_queue_$1" "with piece_id"
+                    fi
+                    ;;
+                *) return 1 ;;
+            esac
             ;;
         say)
             if (( $# == 0 )); then
@@ -1077,11 +1094,12 @@ mmry_host_codex_access_hint() {
     # Not for setup ($1 given), which has no tool.
     if [[ -z "${1:-}" ]]; then
         echo "network access. If this was a save, search, retire or reload, or a"
-        echo "formation start, join, say, assign, progress report, roster, status, report, debrief, remove a"
+        echo "formation start, join, say, assign, queued work, progress report, roster, status, report, debrief, remove a"
         echo "member or leave, do not ask for access: call the matching mmry_plugin tool instead (memory_save,"
         echo "memory_search, memory_retire, memory_load,"
         echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
         echo "formation_roster, formation_status, formation_report, formation_debrief, formation_remove,"
+        echo "formation_queue_add, formation_queue_list, formation_queue_take, formation_queue_decline,"
         echo "formation_leave), which needs"
         echo "none. For anything else, call request_permissions with"
     else

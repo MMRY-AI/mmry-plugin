@@ -30,6 +30,7 @@ hooks-handlers/formation-join.sh
 hooks-handlers/formation-leave.sh
 hooks-handlers/formation-list.sh
 hooks-handlers/formation-progress.sh
+hooks-handlers/formation-queue.sh
 hooks-handlers/formation-remove.sh
 hooks-handlers/formation-report.sh
 hooks-handlers/formation-roster.sh
@@ -232,6 +233,7 @@ tests/structural/formation-listen-docs.bats
 tests/structural/formation-listen-limit.bats
 tests/structural/formation-listening.bats
 tests/structural/formation-progress.bats
+tests/structural/formation-queue.bats
 tests/structural/formation-remove.bats
 tests/structural/formation-renewal-turn.bats
 tests/structural/formation-report-rule.bats

@@ -329,6 +329,45 @@ _line_for() { printf '%s\n' "$output" | tr -d '\r' | grep "m$1@x.y"; }
     [ "$(printf '%s\n' "$flat" | tail -n 1)" = "$AVAIL_FOOTER" ] || { echo "$output"; return 1; }
 }
 
+# ---- #33849 (DD-193 in MMRY-AI/mmry): the work queue's notices ---------------------------------------
+#
+# The service writes the offer to the member (A) and the taken and returned notices to the lead (B, C)
+# as directed system lines, on the path every directed message takes. The plugin's half: each is shown
+# whole, with the safety line, on Claude Code and on Codex. Pins, not red-first: the check already
+# renders any directed [MMRY] line.
+
+OFFER_LINE='QUEUED WORK FOR YOU. The lead has queued work you can take: piece 3 >>> Port the roster tests <<<. Take it with /mmry:formation queue take 3, or decline it with /mmry:formation queue decline 3. Once you take it, it becomes your assignment.'
+OFFER_LINE_CODEX='QUEUED WORK FOR YOU. The lead has queued work you can take: piece 3 >>> Port the roster tests <<<. Take it with the mmry_plugin formation_queue_take tool with piece_id 3, or decline it with the mmry_plugin formation_queue_decline tool with piece_id 3. Once you take it, it becomes your assignment.'
+TAKEN_LINE="QUEUED WORK TAKEN. Member 505 >>> Seat C <<< took piece 3 >>> Port the roster tests <<<. It is now that member's assignment."
+RETURNED_LINE='QUEUED WORK RETURNED. Piece 3 >>> Port the roster tests <<< is back in the queue because Member 505 >>> Seat C <<< went quiet before finishing it. It will be offered to the next member that is idle and ready.'
+
+@test "QW1: on Claude Code a member's window shows the queued-work offer whole, directed to it" {
+    _check claude member "$(_quiet_poll "$OFFER_LINE")"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"[MMRY] DIRECTED TO YOU: ${OFFER_LINE}"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"$CAVEAT_LINE"* ]] || { echo "$output"; return 1; }
+}
+
+@test "QW1: on Codex a member's window is given the offer as additionalContext" {
+    _check codex member "$(_quiet_poll "$OFFER_LINE_CODEX")"
+    [ "$status" -eq 0 ]
+    local ctx; ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    [[ "$ctx" == *"[MMRY] DIRECTED TO YOU: ${OFFER_LINE_CODEX}"* ]] || { echo "$output"; return 1; }
+}
+
+@test "QW2: the lead's window shows the taken and returned notices whole, on Claude Code and on Codex" {
+    _check claude lead "$(_quiet_poll "$TAKEN_LINE" "$RETURNED_LINE")"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"$TAKEN_LINE"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"$RETURNED_LINE"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"$CAVEAT_LINE"* ]] || { echo "$output"; return 1; }
+    _check codex lead "$(_quiet_poll "$TAKEN_LINE" "$RETURNED_LINE")"
+    [ "$status" -eq 0 ]
+    local ctx; ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    [[ "$ctx" == *"$TAKEN_LINE"* ]] || { echo "$output"; return 1; }
+    [[ "$ctx" == *"$RETURNED_LINE"* ]] || { echo "$output"; return 1; }
+}
+
 # ---- #33848 (DD-192 in MMRY-AI/mmry): the wake line and the unread-message notice ------------------
 #
 # The service decides who cannot wake on its own and writes the wake line, naming the member and a host

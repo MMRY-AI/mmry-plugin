@@ -134,14 +134,16 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 9 | jq -c '.result')" = "{}" ]
 }
 
-@test "protocol: tools/list names the fifteen tools, each with an object input schema" {
+@test "protocol: tools/list names the nineteen tools, each with an object input schema" {
     # #31789 added the lead's four: formation_start, formation_assign, formation_report and
     # formation_debrief. #32270 added formation_remove, so a lead or an administrator on Codex can
     # take off a member whose session has dropped without the Internet access prompt. #31410 added
-    # formation_status, the status view with each member's name beside its member id.
+    # formation_status, the status view with each member's name beside its member id. #33849 added
+    # the work queue's four: formation_queue_add, formation_queue_list, formation_queue_take and
+    # formation_queue_decline.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     [ "$(answer 2 | jq -r '.result.tools | map(.name) | sort | join(",")')" = \
-      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_load,memory_retire,memory_save,memory_search" ]
+      "formation_assign,formation_debrief,formation_join,formation_leave,formation_progress,formation_queue_add,formation_queue_decline,formation_queue_list,formation_queue_take,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_load,memory_retire,memory_save,memory_search" ]
     [ "$(answer 2 | jq -r '[.result.tools[] | .inputSchema.type] | unique | join(",")')" = "object" ]
 }
 
@@ -169,9 +171,9 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ "$(answer 2 | jq '[.result.tools[] | .annotations.openWorldHint] | any')" = "false" ]
 }
 
-@test "annotations: search, roster, status and the close-out record are read-only; nothing that changes anything claims to be" {
+@test "annotations: search, roster, status, the close-out record and the queue list are read-only; nothing that changes anything claims to be" {
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_report,formation_roster,formation_status,memory_search" ]
+    [ "$(answer 2 | jq -r '[.result.tools[] | select(.annotations.readOnlyHint) | .name] | sort | join(",")')" = "formation_queue_list,formation_report,formation_roster,formation_status,memory_search" ]
 }
 
 @test "annotations: retiring a memory, closing a formation out and removing a member are the destructive tools, so Codex asks once and offers always" {
