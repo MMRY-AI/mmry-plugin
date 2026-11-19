@@ -21,6 +21,8 @@
 #     as Codex runs it, with the payload on stdin, so removing a registration turns its case red.
 #   G-04  Codex: the asked call's PostToolUse clears once and tells the lead once (requirement 3)
 #   G-05  Codex: the person's next prompt clears once and tells the lead once (requirement 3)
+#   G-06..G-09 (after #33900 merges) an unrelated Codex call, the asking turn's Stop, a subagent's
+#         SubagentStop, all through codex-hook.sh, and Claude Code's ask record (requirements 1 to 3)
 #
 # The service is a fake curl that records every request and body, and records the lead's
 # "APPROVAL ANSWERED." notice where the service would send it: only on a clear it accepts.
@@ -227,4 +229,73 @@ _told_once_unnamed() { # $1 the bad name (raw)
 
     _codex_hook UserPromptSubmit formation-check "$(_codex_prompt 'and again')" >/dev/null || true
     [ "$(_deletes)" -eq 1 ] || { echo "clear calls: $(_deletes)"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# After #33900: the clear follows the answered prompt (DD-187 point 7). Through codex-hook.sh, as
+# above. These cases need #33900's code: on develop before it, any event clears and Codex registers
+# no Stop or SubagentStop route.
+
+_codex_stop() { # $1 turn_id
+    printf '{"session_id":"%s","turn_id":"%s","transcript_path":null,"cwd":"/x","hook_event_name":"Stop","model":"gpt-5","permission_mode":"default","stop_hook_active":false,"last_assistant_message":null}' "$SID" "$1"
+}
+_codex_sub_ask() { # $1 agent_id: a thread-spawned subagent's PermissionRequest
+    printf '{"session_id":"%s","turn_id":"turn-sub","transcript_path":null,"cwd":"/x","hook_event_name":"PermissionRequest","model":"gpt-5","permission_mode":"default","tool_name":"Bash","tool_input":{"command":"ls","description":"list"},"agent_id":"%s","agent_type":"worker"}' "$SID" "$1"
+}
+_codex_subagent_stop() { # $1 agent_id
+    printf '{"session_id":"%s","turn_id":"turn-sub","transcript_path":null,"agent_transcript_path":null,"cwd":"/x","hook_event_name":"SubagentStop","model":"gpt-5","permission_mode":"default","stop_hook_active":false,"agent_id":"%s","agent_type":"worker","last_assistant_message":null}' "$SID" "$1"
+}
+_held() { # still waiting: no clear call, no notice, the marker in place
+    [ "$(_deletes)" -eq 0 ] || { echo "a clear call was made"; cat "$URLS"; return 1; }
+    [ "$(_answered)" -eq 0 ] || { echo "the lead was told the approval was answered"; return 1; }
+    [ -n "$(_marker)" ] || { echo "the marker is gone"; return 1; }
+}
+_cleared_once() {
+    [ "$(_deletes)" -eq 1 ] || { echo "clear calls: $(_deletes)"; cat "$URLS"; return 1; }
+    [ "$(_answered)" -eq 1 ] || { echo "notices: $(_answered)"; return 1; }
+    [ -z "$(_marker)" ] || { echo "the marker is still there"; return 1; }
+}
+
+@test "G-06 33897 req3 (after 33900): Codex, an unrelated tool call through codex-hook.sh clears nothing; the asked call then does" {
+    _codex_hook PermissionRequest formation-waiting "$(_codex_ask Bash)"
+    [ -n "$(_marker)" ] || { echo "no marker after the raise"; return 1; }
+    _codex_hook PostToolUse formation-check "$(_codex_post Bash 'git status')" >/dev/null || true
+    _codex_hook PostToolUse formation-check "$(_codex_post apply_patch "ls $PLANTED")" >/dev/null || true
+    _held
+    _codex_hook PostToolUse formation-check "$(_codex_post Bash "ls $PLANTED")" >/dev/null || true
+    _cleared_once
+}
+
+@test "G-07 33897 req3 (after 33900): Codex, the asking turn's Stop through codex-hook.sh clears once; another turn's Stop does not" {
+    _codex_hook PermissionRequest formation-waiting "$(_codex_ask Bash)"
+    [ -n "$(_marker)" ] || { echo "no marker after the raise"; return 1; }
+    run _codex_hook Stop formation-waiting "$(_codex_stop turn-99)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _held
+    run _codex_hook Stop formation-waiting "$(_codex_stop turn-77)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _cleared_once
+}
+
+@test "G-08 33897 req3 (after 33900): Codex, a subagent's prompt clears on its SubagentStop through codex-hook.sh, not on the main turn's Stop" {
+    _codex_hook PermissionRequest formation-waiting "$(_codex_sub_ask sub-41)"
+    [ -n "$(_marker)" ] || { echo "no marker after the raise"; return 1; }
+    _codex_hook Stop formation-waiting "$(_codex_stop turn-sub)" >/dev/null || true
+    _codex_hook SubagentStop formation-waiting "$(_codex_subagent_stop sub-99)" >/dev/null || true
+    _held
+    run _codex_hook SubagentStop formation-waiting "$(_codex_subagent_stop sub-41)"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _cleared_once
+}
+
+@test "G-09 33897 req1+2 (after 33900): Claude Code's ask record never keeps a name that is not bare, and Bash; is sent unnamed" {
+    local rec="$TEST_TMPDIR/.mmry-asking-$SID"
+    printf '{"session_id":"%s","transcript_path":"/x","cwd":"/x","prompt_id":"p-1","permission_mode":"default","hook_event_name":"PermissionRequest","tool_name":"Bash;","tool_input":{"command":"ls"},"permission_suggestions":[]}' "$SID" \
+        | bash "$HH/formation-waiting.sh" --ask
+    [ -f "$rec" ] || { echo "no ask record written"; return 1; }
+    grep -qx 'tool -' "$rec" || { echo "the record kept:"; cat "$rec"; return 1; }
+    ! grep -qF 'Bash;' "$rec" || { cat "$rec"; return 1; }
+    run _waiting "$(_notification 'Claude needs your permission to use Bash;')"
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _told_once_unnamed "Bash;"
 }
