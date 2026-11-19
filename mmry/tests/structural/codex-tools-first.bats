@@ -65,14 +65,15 @@ _script_hits() {
     while IFS= read -r t; do
         grep -qF "\`$t\`" "$SKILL" || missing="${missing} $t"
     done < <(_server_tools)
-    # 16 since #32270 added formation_remove; 17 since #31410 added formation_status; 15 since #32640.
-    [ "$(_server_tools | grep -c .)" -eq 15 ] || { echo "expected 15 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
+    # 16 since #32270 added formation_remove; 17 since #31410 added formation_status; 15 since #32640;
+    # 19 since #33849 added the work queue's four.
+    [ "$(_server_tools | grep -c .)" -eq 19 ] || { echo "expected 19 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
     # Any memory_* or formation_* name in backticks must be one the server offers. The connector's
     # mmry_formation_* tools are a different, warned-about thing and are excluded by the prefix,
     # and an argument such as formation_id is not a tool.
     while IFS= read -r t; do
         _server_tools | grep -qx "$t" || extra="${extra} $t"
-    done < <(grep -oE '`(memory|formation)_[a-z]+`' "$SKILL" | tr -d '`' | grep -v '_id$' | sort -u)
+    done < <(grep -oE '`(memory|formation)_[a-z_]+`' "$SKILL" | tr -d '`' | grep -v '_id$' | sort -u)
     [ -z "$missing" ] || { echo "the skill does not name:${missing}"; return 1; }
     [ -z "$extra" ] || { echo "the skill names tools the server does not offer:${extra}"; return 1; }
 }

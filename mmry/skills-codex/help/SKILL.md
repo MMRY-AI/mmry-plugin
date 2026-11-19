@@ -59,6 +59,10 @@ A Formation is several assistants working on one job together. We recommend lead
 - **Close the job out,** as the lead. (formation_debrief)
 - **Remove a member whose session has dropped,** as the lead or an administrator. (formation_remove)
 - **Leave the Formation.** (formation_leave)
+- **Queue a piece of work for this Formation (lead only).** Name a host to offer it only to members on that host. (formation_queue_add)
+- **Show the queue:** each piece, the host it needs, and who took it and when. (formation_queue_list)
+- **Take the queued piece you were offered.** It becomes your assignment. (formation_queue_take)
+- **Turn down the queued piece you were offered.** It goes back to the queue for the next member. (formation_queue_decline)
 - Listing the Formations on your account and claiming an area to work on also work here, through MMRY's scripts. They have not been tested from Codex yet.
 
 ## Your Foundation directives

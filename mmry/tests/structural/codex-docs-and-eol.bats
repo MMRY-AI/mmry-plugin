@@ -432,6 +432,12 @@ _codex_tree() {
             join|say|progress|roster|leave|start|assign|report|debrief|remove|status)
                 grep -q "\`formation_${op}\`" "$skill" || missing="${missing} ${op}(tool)"
                 ! grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}(script-named)" ;;
+            # #33849: the work queue is four tools, one per verb (formation_queue_add, _list, _take, _decline).
+            queue)
+                for v in add list take decline; do
+                    grep -q "\`formation_queue_${v}\`" "$skill" || missing="${missing} queue_${v}(tool)"
+                done
+                ! grep -q "formation-queue.sh" "$skill" || missing="${missing} queue(script-named)" ;;
             *)
                 grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}" ;;
         esac
