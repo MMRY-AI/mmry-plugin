@@ -13,6 +13,8 @@
 #        first); nothing claims success.
 #   QU5  a wrong piece id, no verb and no Formation are refused before any request.
 #   QU6  the command page and the Codex skill carry the approved help lines (D), byte for byte.
+#   QU7  the script lines cmo-mmry changed (2026-11-18): "for any member" when no host is named, a
+#        capital F on Formation, and "returned 1 time" or "returned 2 times".
 #
 # Every refusal test is paired with a control proving the same setup CAN succeed.
 
@@ -157,9 +159,9 @@ _piece() {
 @test "QU4: a member that is not the lead is refused add with the server's reason" {
     bash "${HANDLERS}/formation-state.sh" set 45 "$CLAUDE_SESSION_ID"
     bin="$(_fake_curl_dir)"
-    FAKE_CODE=403 FAKE_BODY='{"error":"Only the flight lead, from its own session, can queue work. Nothing was queued."}' _run_queue add "work"
+    FAKE_CODE=403 FAKE_BODY='{"error":"Only the lead of this Formation, from its own session, can queue work. Nothing was queued."}' _run_queue add "work"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Only the flight lead, from its own session, can queue work."* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"Refused. Only the lead of this Formation, from its own session, can queue work. Nothing was queued."* ]] || { echo "$output"; return 1; }
 }
 
 # ---------------------------------------------------------------- QU5 refused before any request
@@ -200,4 +202,40 @@ _piece() {
     done
     grep -qF 'formation-queue.sh" take <pieceId>' "$page"
     grep -qF '`formation_queue_take`' "$skill"
+}
+
+# ---------------------------------------------------------------- QU7 the script lines cmo-mmry changed (follow-up r1)
+
+@test "QU7: a piece queued with no host is reported for any member; a Codex piece for members on codex" {
+    bash "${HANDLERS}/formation-state.sh" set 45 "$CLAUDE_SESSION_ID"
+    bin="$(_fake_curl_dir)"
+    FAKE_CODE=201 FAKE_BODY="$(_piece 4 'Any member work' null queued)" _run_queue add "Any member work"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | head -n 1 | tr -d '\r')" = "Queued piece 4 >>> Any member work <<<, for any member." ] || { echo "$output"; return 1; }
+    FAKE_CODE=201 FAKE_BODY="$(_piece 3 'Port the Codex hook' '"codex"' queued)" _run_queue add "Port the Codex hook" --host codex
+    [ "$(printf '%s\n' "$output" | head -n 1 | tr -d '\r')" = "Queued piece 3 >>> Port the Codex hook <<<, for members on codex." ] || { echo "$output"; return 1; }
+}
+
+@test "QU7: the empty queue and the list heading name the Formation with a capital F" {
+    bash "${HANDLERS}/formation-state.sh" set 45 "$CLAUDE_SESSION_ID"
+    bin="$(_fake_curl_dir)"
+    FAKE_CODE=200 FAKE_BODY='{"formationId":45,"pieces":[]}' _run_queue list
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(printf '%s' "$output" | tr -d '\r')" = "The queue for Formation 45 is empty." ] || { echo "$output"; return 1; }
+    FAKE_CODE=200 FAKE_BODY="{\"formationId\":45,\"pieces\":[$(_piece 3 'Port the roster tests' null queued)]}" _run_queue list
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | head -n 1 | tr -d '\r')" = "Queue for Formation 45, in the order pieces are offered:" ] || { echo "$output"; return 1; }
+}
+
+@test "QU7: a returned piece reads returned 1 time, or returned 2 times" {
+    bash "${HANDLERS}/formation-state.sh" set 45 "$CLAUDE_SESSION_ID"
+    bin="$(_fake_curl_dir)"
+    local once twice
+    once='{"id":3,"description":"Port the roster tests","host":null,"addedAt":"2026-11-18T09:00:00","state":"queued","offeredToMemberId":null,"offeredAt":null,"takenByMemberId":null,"takenByName":null,"takenAt":null,"returnedCount":1,"lastReturnReason":"Declined","lastReturnedAt":"2026-11-18T10:00:00","lastReturnedByMemberId":12}'
+    twice='{"id":4,"description":"Port the Codex hook","host":"codex","addedAt":"2026-11-18T09:01:00","state":"queued","offeredToMemberId":null,"offeredAt":null,"takenByMemberId":null,"takenByName":null,"takenAt":null,"returnedCount":2,"lastReturnReason":"Quiet","lastReturnedAt":"2026-11-18T11:00:00","lastReturnedByMemberId":13}'
+    FAKE_CODE=200 FAKE_BODY="{\"formationId\":45,\"pieces\":[${once},${twice}]}" _run_queue list
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"piece 3 >>> Port the roster tests <<<, host: any, queued, returned 1 time, last: Declined"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"piece 4 >>> Port the Codex hook <<<, host: codex, queued, returned 2 times, last: Quiet"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"time(s)"* ]] || { echo "$output"; return 1; }
 }
