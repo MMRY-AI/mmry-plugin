@@ -113,6 +113,95 @@ fi
 _mmry_host_resolve
 _mmry_codex=0
 [[ "$_MMRY_HOST_V" == "codex" ]] && _mmry_codex=1
+
+# THE TEMPORARY FOLDER MUST TAKE A WRITE, AND A START THAT FINDS IT DOES NOT SAYS SO (#33468).
+#
+# Almost everything this start does next is a write into the folder the client resolves as
+# MMRY_TMPDIR, which is ${TMPDIR:-/tmp} (mmry-client.sh, line 81): the update check's marker, the
+# session record, the startup memories the assistant is told to read, the Foundation set and its
+# markers, the Formation watch. When that folder cannot be written every one of them fails quietly,
+# and in October it did, on one of our own machines, for four days: memories stopped loading,
+# idle members stopped hearing their lead and time stopped recording, each looking like a
+# different problem (the 1.32.3 retrospective, F3). So this is the FIRST thing the start does with
+# the folder, before the first of those writes: write a small marker, read it back, delete it.
+#
+# THE FOLDER IS THE ONE THE PLUGIN USES ON BOTH HOSTS. Since 1.35 the Codex hand-off lives in
+# CODEX_HOME/mmry-handoff (#33231), but Codex still keeps the startup memories, the Foundation set
+# and its markers here, and the Claude Code hooks.json gate reads ${TMPDIR:-/tmp}/.mmry-formation-*.
+#
+# NO WARNING AND NO ADDED DELAY WHEN IT WORKS. Builtins only: a test, a redirection and a read, no
+# process, which on Windows is what the Codex budget is spent on (#33062). The marker is removed
+# straight away on Claude Code; on Codex that rm waits for the exit trap below, which runs after the
+# output is closed, for the same reason the sweep does.
+#
+# WHEN IT FAILS, ONE THING HAPPENS AND THE START ENDS: the person is told, in the sentence cmo-mmry and
+# Eric approved on 2026-11-17, the assistant being told to say it word for word as the 402 sentence
+# above is; one line is recorded in the host's own folder (never the folder that failed) for the
+# Foundation and Formation checks to find; and the start exits 0 with that one answer. Nothing is
+# loaded, because nothing could be kept, and no error line is printed. The start's one answer is the
+# only place this is said, so two prompts later it is not said again. #33628 (degrade quietly, and
+# record why, in the other hooks) builds on exactly this shape: one check, before the first write.
+_mmry_tmpcheck_file=""
+_mmry_tmpcheck_cleanup() {
+    [[ -n "$_mmry_tmpcheck_file" ]] || return 0
+    rm -f "$_mmry_tmpcheck_file" 2>/dev/null || true
+    _mmry_tmpcheck_file=""
+}
+# 0 when a marker can be written in $1 and read back as written. Sets _mmry_tmpcheck_why when not.
+_mmry_tmp_takes_a_write() {
+    local d="$1" f back="" had_c=0
+    _mmry_tmpcheck_why=""
+    if [[ ! -e "$d" ]]; then
+        _mmry_tmpcheck_why="does not exist"; return 1
+    elif [[ ! -d "$d" ]]; then
+        _mmry_tmpcheck_why="is not a folder"; return 1
+    fi
+    f="${d%/}/.mmry-tmpcheck.$$.${RANDOM}${RANDOM}"
+    # Created exclusively (noclobber): a name already there, a link included, is never written through.
+    case "$-" in *C*) had_c=1 ;; esac
+    set -C
+    if ! { printf 'mmry-tmpcheck %s' "$$" > "$f"; } 2>/dev/null; then
+        (( had_c == 1 )) || set +C
+        _mmry_tmpcheck_why="cannot be written"; return 1
+    fi
+    (( had_c == 1 )) || set +C
+    _mmry_tmpcheck_file="$f"
+    IFS= read -r back < "$f" 2>/dev/null || true
+    if [[ "$back" != "mmry-tmpcheck $$" ]]; then
+        _mmry_tmpcheck_why="cannot be read back"; return 1
+    fi
+    return 0
+}
+_mmry_tc_dir="${TMPDIR:-/tmp}"
+_mmry_tc_state="${_MMRY_HOST_DIR_V}/mmry"
+if _mmry_tmp_takes_a_write "$_mmry_tc_dir"; then
+    (( _mmry_codex == 1 )) || _mmry_tmpcheck_cleanup
+    # A folder that works again ends yesterday's record: the checks that read it must not keep
+    # blaming a folder that is now fine. Tested first, so nothing is started when there is none.
+    if [[ -e "${_mmry_tc_state}/mmry-tmp-unwritable.log" ]]; then
+        rm -f "${_mmry_tc_state}/mmry-tmp-unwritable.log" 2>/dev/null || true
+    fi
+else
+    _mmry_tmpcheck_cleanup
+    # One line, in the host's own folder: when, which folder, and what was wrong with it.
+    { mkdir -p "$_mmry_tc_state" \
+        && printf '%s\t%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf 'unknown-time')" "$_mmry_tc_dir" "$_mmry_tmpcheck_why" \
+            > "${_mmry_tc_state}/mmry-tmp-unwritable.log"; } 2>/dev/null || true
+    # The approved sentence, with only its two placeholders filled: the folder as resolved, and the
+    # one host in use. Escaped here by expansion, as _mmry_emit_setup_message does, because the
+    # client that holds _mmry_json_escape is not sourced yet on this path.
+    _mmry_tc_say="MMRY AI could not load your memories for this conversation because it cannot save its working files in ${_mmry_tc_dir}. Make sure that folder exists and you can write to it, then restart ${_MMRY_HOST_LABEL_V}. Until then, Formation messages may not reach this conversation. Your saved memories are safe."
+    _mmry_tc_msg="MMRY AI did not load memories for this session: its temporary folder cannot be used. Tell the user this sentence, word for word: \"${_mmry_tc_say}\""
+    _mmry_tc_msg="${_mmry_tc_msg//\\/\\\\}"
+    _mmry_tc_msg="${_mmry_tc_msg//\"/\\\"}"
+    _mmry_tc_msg="${_mmry_tc_msg//$'\n'/\\n}"
+    _mmry_tc_msg="${_mmry_tc_msg//$'\r'/\\r}"
+    _mmry_tc_msg="${_mmry_tc_msg//$'\t'/\\t}"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' "$_mmry_tc_msg"
+    exit 0
+fi
+unset _mmry_tc_dir _mmry_tc_state _mmry_tc_say _mmry_tc_msg
+
 if (( _mmry_codex == 0 )); then
     bash "${PLUGIN_ROOT}/hooks-handlers/self-update.sh" 2>/dev/null || true
 fi
@@ -325,14 +414,14 @@ unset _mmry_idless_status
 # session's file, and the model is never pointed at it) but is left for an older plugin still running
 # here, until it too is a week old.
 _mmry_fnd_sweep() {
-    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' -o -name 'mmry-foundation-moment.*' -o -name 'mmry-foundation-shortening.*' -o -name '.mmry-foundation-private.*' \) -mtime +7 -delete 2>/dev/null || true
+    find "${MMRY_TMPDIR}" -maxdepth 1 -type f \( -name 'mmry-foundation.status.*' -o -name 'mmry-foundation.outcome.*' -o -name 'mmry-foundation.stored.*' -o -name 'mmry-foundation.byref.*' -o -name '.mmry-foundation-byref-told.*' -o -name '.mmry-foundation-empty-told.*' -o -name '.mmry-foundation-inflight.*' -o -name '.mmry-foundation-prepared.*' -o -name '.mmry-foundation-claim.*' -o -name '.mmry-foundation-result.*' -o -name '.mmry-foundation-cutshort*' -o -name 'mmry-foundation-set.md' -o -name 'mmry-foundation.session' -o -name 'mmry-memories.md' -o -name 'mmry-memories.*.md' -o -name 'mmry-foundation-moment.*' -o -name 'mmry-foundation-shortening.*' -o -name '.mmry-foundation-private.*' -o -name '.mmry-tmpcheck.*' \) -mtime +7 -delete 2>/dev/null || true
 }
 # ON CODEX THE SWEEP RUNS AS THIS FILE ENDS, AFTER ITS OUTPUT IS CLOSED (#33062 fix round 7). It removes
 # week-old records and has nothing to do with the memories, and on Windows the find is two processes,
 # 0.5 to 2.4 s of the start's budget, measured. The EXIT trap closes stdout first, so the hand-over is
 # not held for it, and it runs on every way out of this file, as it ran before every one of them.
 if (( _mmry_codex == 1 )); then
-    trap 'exec >/dev/null; _mmry_fnd_sweep; mmry_foundation_private_v "$MMRY_TMPDIR"' EXIT
+    trap 'exec >/dev/null; _mmry_tmpcheck_cleanup; _mmry_fnd_sweep; mmry_foundation_private_v "$MMRY_TMPDIR"' EXIT
 else
     _mmry_fnd_sweep
     mmry_foundation_private_v "$MMRY_TMPDIR"
@@ -612,5 +701,8 @@ fi
 # same call Claude Code makes above, with the same id and directory; it only happens later.
 if (( _mmry_codex == 1 )); then
     exec >/dev/null
+    # The #33468 marker goes first, before the registration's request: on a start that ends here it is the
+    # only thing left to remove, and it is removed by this line, not by the exit trap alone.
+    _mmry_tmpcheck_cleanup
     mmry_register_session "$SESSION_ID" "$(mmry_host_client_name)" "$WORK_DIR" "" 2>/dev/null || true
 fi

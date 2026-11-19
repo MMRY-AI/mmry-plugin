@@ -4,162 +4,175 @@
       {
         "hooks": [
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-init.sh\"", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-init.sh\"",
             "timeout": 30
           }
         ]
-      }, 
+      },
       {
+        "matcher": "startup|resume|clear|fork",
         "hooks": [
           {
-            "type": "command", 
-            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'", 
+            "type": "command",
+            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'",
             "timeout": 15
           }
         ]
-      }
-    ], 
-    "UserPromptSubmit": [
+      },
       {
+        "matcher": "compact",
         "hooks": [
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 1", 
-            "timeout": 20
-          }, 
-          {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 2", 
-            "timeout": 20
-          }, 
-          {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 3", 
-            "timeout": 20
-          }, 
-          {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 4", 
-            "timeout": 20
-          }, 
-          {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 5", 
-            "timeout": 20
-          }, 
-          {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 6", 
-            "timeout": 20
-          }
-        ]
-      }, 
-      {
-        "hooks": [
-          {
-            "type": "command", 
-            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'", 
-            "timeout": 15
-          }
-        ]
-      }
-    ], 
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command", 
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh stop-check || true\"", 
-            "timeout": 10
-          }
-        ]
-      }, 
-      {
-        "hooks": [
-          {
-            "type": "command", 
-            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'", 
-            "asyncRewake": true, 
-            "rewakeSummary": "MMRY AI: Formation Transmission", 
+            "type": "command",
+            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'",
+            "asyncRewake": true,
+            "rewakeSummary": "MMRY AI: Formation Transmission",
             "timeout": 1800
           }
         ]
       }
-    ], 
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 1",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 2",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 3",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 4",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 5",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/userpromptsubmit-foundation.sh\" --part 6",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh stop-check || true\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'",
+            "asyncRewake": true,
+            "rewakeSummary": "MMRY AI: Formation Transmission",
+            "timeout": 1800
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "hooks": [
           {
-            "type": "command", 
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh precompact-check || true\"", 
+            "type": "command",
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh precompact-check || true\"",
             "timeout": 10
           }
         ]
-      }, 
+      },
       {
         "hooks": [
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 1", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 1",
             "timeout": 15
-          }, 
+          },
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 2", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 2",
             "timeout": 15
-          }, 
+          },
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 3", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 3",
             "timeout": 15
-          }, 
+          },
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 4", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 4",
             "timeout": 15
-          }, 
+          },
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 5", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 5",
             "timeout": 15
-          }, 
+          },
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 6", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/precompact-foundation.sh\" --part 6",
             "timeout": 15
           }
         ]
       }
-    ], 
+    ],
     "PostToolUse": [
       {
-        "matcher": "ExitPlanMode", 
+        "matcher": "ExitPlanMode",
         "hooks": [
           {
-            "type": "command", 
-            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh plan-accepted-check || true\"", 
+            "type": "command",
+            "command": "bash -c \"[ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ] && bash ~/.claude/mmry/hooks-handlers/hook-guard.sh plan-accepted-check || true\"",
             "timeout": 10
           }
         ]
-      }, 
+      },
       {
         "hooks": [
           {
-            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'", 
-            "type": "command", 
+            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-formation-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then if [ -f ~/.claude/mmry/hooks-handlers/hook-guard.sh ]; then exec bash ~/.claude/mmry/hooks-handlers/hook-guard.sh formation-check; fi; fi; exit 0'",
+            "type": "command",
             "timeout": 15
           }
         ]
       }
-    ], 
+    ],
     "Notification": [
       {
-        "matcher": "permission_prompt", 
+        "matcher": "permission_prompt",
         "hooks": [
           {
-            "type": "command", 
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-waiting.sh\"", 
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-waiting.sh\"",
             "timeout": 15
           }
         ]

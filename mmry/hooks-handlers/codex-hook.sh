@@ -65,6 +65,40 @@ case "$HANDLER_NAME" in
     *[/\\]*|.*|"") exit 0 ;;
 esac
 
+# THE LAUNCHER'S CLOCK (#33967 round 5). codex-hook.cmd says stop-check's prompt itself, in cmd, when it
+# can be sure of it (:stop_check_say), and for that it needs the time in seconds since 1970, which cmd
+# cannot read. So every launch the launcher handed its seconds of the day and its date
+# (MMRY_CODEX_HOOK_SECS and MMRY_CODEX_HOOK_DATE; the session start and the Foundation parts are such
+# launches) leaves it a clock beside stop-check's marker: .mmry-codex-clock.cmd, "SSSSS EEEEEEEEEE <date>",
+# bash's own seconds of the day and epoch read at one instant, with the launcher's date. Only when bash's
+# day is the launcher's (bash's seconds are not before the launcher's: no midnight between them), and not
+# again within a minute of a clock of the same date, so cmd seldom meets one half written (it then lets
+# stop-check run). Builtins only, and only with bash's own clock (4.2 and later: on 3.2 the printf below
+# fails, the regex does not match and nothing is written); the sh form hands nothing.
+if [[ -n "${MMRY_CODEX_HOOK_DATE:-}" && "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,5}$ && "$MMRY_CODEX_HOOK_DATE" != *[$'\r\n']* ]]; then
+    _mmry_ck=""
+    # In variables, as this file keeps every regex holding a bracket: dash -n reads the whole file.
+    _mmry_re_ck='^([0-9]{10}) ([0-9]{2}) ([0-9]{2}) ([0-9]{2})$'
+    _mmry_re_ck_old='^([0-9]{5}) [0-9]{10} (.*)$'
+    printf -v _mmry_ck '%(%s %H %M %S)T' -1 2>/dev/null || _mmry_ck=""
+    if [[ "$_mmry_ck" =~ $_mmry_re_ck ]]; then
+        _mmry_ck_e="${BASH_REMATCH[1]}"
+        _mmry_ck_s=$(( 10#${BASH_REMATCH[2]} * 3600 + 10#${BASH_REMATCH[3]} * 60 + 10#${BASH_REMATCH[4]} ))
+        _mmry_ck_l=$(( 10#$MMRY_CODEX_HOOK_SECS ))
+        if (( _mmry_ck_l < 86400 && _mmry_ck_s >= _mmry_ck_l )); then
+            _mmry_ck_f="${TMPDIR:-/tmp}/.mmry-codex-clock.cmd"
+            _mmry_ck_old=""
+            if [[ -f "$_mmry_ck_f" ]]; then
+                { IFS= read -r _mmry_ck_old || true; } 2>/dev/null < "$_mmry_ck_f" || _mmry_ck_old=""
+            fi
+            if ! [[ "$_mmry_ck_old" =~ $_mmry_re_ck_old && "${BASH_REMATCH[2]}" == "$MMRY_CODEX_HOOK_DATE" ]] \
+                || (( _mmry_ck_s < 10#${BASH_REMATCH[1]} || _mmry_ck_s - 10#${BASH_REMATCH[1]} >= 60 )); then
+                printf '%05d %s %s' "$_mmry_ck_s" "$_mmry_ck_e" "$MMRY_CODEX_HOOK_DATE" > "$_mmry_ck_f" 2>/dev/null || true
+            fi
+        fi
+    fi
+fi
+
 # THE FIRST PROMPT'S LATE MEMORIES RUN HERE, IN THIS SHELL, BEFORE ANYTHING BELOW (#33062 fix round 1).
 # codex-first-prompt.sh needs no host, no library and no credential, only the temp folder, and it runs
 # exactly when a start was already too slow, so it is sourced before the lines below start their
@@ -156,8 +190,16 @@ _mmry_src="${BASH_SOURCE[0]//\\//}"
 HANDLER_DIR="${_mmry_src%/*}"
 [[ "$HANDLER_DIR" == "$_mmry_src" ]] && HANDLER_DIR="."
 [[ -n "$HANDLER_DIR" ]] || HANDLER_DIR="/"
+# WITHOUT A PROCESS (#33967). This was `$(cd "$HANDLER_DIR" && pwd)`, a fork, and on Windows every hook
+# takes this branch, because codex-hook.cmd hands bash a C:\ path. A cd there and back in this shell
+# gives the same logical answer, $PWD, with no process.
 case "${HANDLER_DIR}/" in
-    /*//*|*/./*|*/../*|[!/]*) HANDLER_DIR="$(cd "$HANDLER_DIR" && pwd)" || exit 0 ;;
+    /*//*|*/./*|*/../*|[!/]*)
+        _mmry_here="$PWD"
+        cd -- "$HANDLER_DIR" 2>/dev/null || exit 0
+        HANDLER_DIR="$PWD"
+        cd -- "$_mmry_here" 2>/dev/null || true
+        ;;
 esac
 [[ "$HANDLER_DIR" == /* ]] || exit 0
 PLUGIN_ROOT="${HANDLER_DIR%/*}"
@@ -479,6 +521,54 @@ fi
 # model something, it prints it; there is no other channel, and pretending otherwise is what put
 # "Hook failed" in front of a customer every turn.
 set +e
-bash "$TARGET" "$@"
+case "$HANDLER_NAME" in
+    userpromptsubmit-foundation|stop-check)
+        # THE PER-MESSAGE CHECKS, IN TIME ON WINDOWS (#33967). Codex starts these on every message and
+        # cuts them off at their registered limits (20 s and 10 s), and in the 33452 TC5 proof a message
+        # sent while Codex was working timed out both: on a loaded Windows machine each process start
+        # took about a second, and each check started eight before its own code ran.
+        #
+        # 1. HOW LONG THE LAUNCH TOOK, for the handler to take off its own deadline. codex-hook.cmd
+        #    records the time as its first step (a builtin); this is the seconds since, by bash's own
+        #    clock, no process. Unknown (the sh form, or a stamp that cannot be read) is 0.
+        _mmry_launch=0
+        _mmry_t0="${MMRY_CODEX_HOOK_STARTED:-}"; _mmry_t0="${_mmry_t0// /}"; _mmry_t0="${_mmry_t0%%[.,]*}"
+        _mmry_re_t0='^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$'
+        if [[ "$_mmry_t0" =~ $_mmry_re_t0 ]]; then
+            _mmry_t0s=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} ))
+            _mmry_now=""
+            printf -v _mmry_now '%(%H:%M:%S)T' -1 2>/dev/null || _mmry_now=""
+            if [[ "$_mmry_now" =~ $_mmry_re_t0 ]]; then
+                _mmry_launch=$(( 10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]} - _mmry_t0s ))
+                (( _mmry_launch >= 0 )) || _mmry_launch=$(( _mmry_launch + 86400 ))
+                (( _mmry_launch <= 120 )) || _mmry_launch=0
+            fi
+        fi
+        export MMRY_HOOK_LAUNCH_SECS="$_mmry_launch"
+        # 2. THE HANDLER IN A SUBSHELL OF THIS SHELL, not a new bash: one fork where a child bash is a
+        #    fork and an exec, two Windows processes. A subshell, not this shell, so the handler's exit
+        #    code is still discarded below, and it runs as a plain statement, never in an || list, where
+        #    bash would ignore the handler's own set -e.
+        #    POSIX MODE OFF FIRST (#33967 QA round 1), as _mmry_codex_ss does for session-start.sh. The
+        #    `command` form starts this file with sh, which on macOS is bash 3.2 in POSIX mode, and a
+        #    child bash used to clear it; a sourced subshell inherits it, and bash 3.2 in POSIX mode
+        #    does not parse the process substitutions userpromptsubmit-foundation.sh uses.
+        # STOP-CHECK IN THIS SHELL, NOT A SUBSHELL (#33967 round 4). A subshell is a fork, and under Git
+        # Bash on a loaded Windows machine a fork costs about what a process start does; in the 33967
+        # live proof stop-check ran out its 10 s. stop-check is the last thing this script runs and sets
+        # no trap of its own, so the EXIT trap below discards its exit code exactly as the subshell did,
+        # and POSIX mode goes off here as it did there (#33967 round 2).
+        if [[ "$HANDLER_NAME" == stop-check ]]; then
+            set +o posix
+            trap 'exit 0' EXIT
+            source "$TARGET" "$@"
+            exit 0
+        fi
+        ( set +o posix; source "$TARGET" "$@" )
+        ;;
+    *)
+        bash "$TARGET" "$@"
+        ;;
+esac
 set -e
 exit 0
