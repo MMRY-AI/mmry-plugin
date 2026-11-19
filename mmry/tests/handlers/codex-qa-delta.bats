@@ -118,6 +118,17 @@ _host_of() {
     [ "$output" = "codex|$CX" ] || { echo "resolved [$output], expected [codex|$CX]"; return 1; }
 }
 
+@test "qa2: a CRLF plugin-root marker an earlier release left still resolves the copy in its home (#33849 QA r1 F2)" {
+    # A marker written on Windows ends each line CR LF. read drops the LF and keeps the CR, so the
+    # home line must lose its trailing CR before the directory test, or the named home is not
+    # believed and the copy falls back to two directories above itself (here, inside the cache).
+    local root; root="$(_plugin_at "$CX/plugins/cache/mmry-plugin/mmry")"
+    printf 'codex\r\n%s\r\n' "$CX" > "$root/.mmry-host"
+    [[ "$(od -An -c "$root/.mmry-host" | tr -d ' \n')" == *'\r\n'* ]] || { echo "control: the fixture holds no CR LF"; return 1; }
+    run _host_of "$root"
+    [ "$output" = "codex|$CX" ] || { echo "resolved [$output], expected [codex|$CX]"; return 1; }
+}
+
 @test "qa2: req4 - a Claude Code plugin-cache copy resolves as Claude beside its home's own marker" {
     # Claude Code's cache has the same shape under ~/.claude, and its home's marker says "claude".
     local root; root="$(_plugin_at "$HOME/.claude/plugins/cache/mmry-plugin/mmry/2.15.6")"

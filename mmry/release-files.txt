@@ -30,6 +30,7 @@ hooks-handlers/formation-join.sh
 hooks-handlers/formation-leave.sh
 hooks-handlers/formation-list.sh
 hooks-handlers/formation-progress.sh
+hooks-handlers/formation-queue.sh
 hooks-handlers/formation-remove.sh
 hooks-handlers/formation-report.sh
 hooks-handlers/formation-roster.sh
@@ -122,6 +123,8 @@ tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats
+tests/handlers/formation-waiting-busy.bats
+tests/handlers/formation-waiting-guards.bats
 tests/handlers/formation-waiting-record.bats
 tests/handlers/formation-waiting.bats
 tests/handlers/foundation-31597-edges.bats
@@ -151,6 +154,7 @@ tests/handlers/session-start-reload.bats
 tests/handlers/session-start.bats
 tests/handlers/setup_suite.bash
 tests/handlers/stop-check.bats
+tests/handlers/tmp-selfcheck.bats
 tests/handlers/userpromptsubmit-foundation.bats
 tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
@@ -233,6 +237,7 @@ tests/structural/formation-listen-docs.bats
 tests/structural/formation-listen-limit.bats
 tests/structural/formation-listening.bats
 tests/structural/formation-progress.bats
+tests/structural/formation-queue.bats
 tests/structural/formation-remove.bats
 tests/structural/formation-renewal-turn.bats
 tests/structural/formation-report-rule.bats
@@ -246,6 +251,7 @@ tests/structural/foundation-status-command.bats
 tests/structural/help-complete.bats
 tests/structural/hook-budgets.bats
 tests/structural/hooks-guards.bats
+tests/structural/hooks-json-format.bats
 tests/structural/hooks-json.bats
 tests/structural/macos-hook-payload.bats
 tests/structural/marketplace-sync.bats
