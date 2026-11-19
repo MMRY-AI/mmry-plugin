@@ -32,6 +32,10 @@ approves Internet access for the conversation, which is the prompt these tools e
 | As the lead, close the formation out | `formation_debrief` | `summary` |
 | As the lead or an administrator, remove a member whose session has dropped | `formation_remove` | `member_id`; optional `formation_id` |
 | Leave the formation | `formation_leave` | nothing |
+| Queue a piece of work for this Formation (lead only). Name a host to offer it only to members on that host. | `formation_queue_add` | `description`; optional `host` (`codex` or `claude-code`) |
+| Show the queue: each piece, the host it needs, and who took it and when. | `formation_queue_list` | nothing |
+| Take the queued piece you were offered. It becomes your assignment. | `formation_queue_take` | `piece_id` |
+| Turn down the queued piece you were offered. It goes back to the queue for the next member. | `formation_queue_decline` | `piece_id` |
 
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,
@@ -270,6 +274,8 @@ Each member is also given one rule for its own role:
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 
 **The lead hears who is free.** A member with no active work for 15 minutes is named to the lead, up to three times, 30 minutes apart, and the roster marks it. A member's own Done asks the lead: Is there anything else I can do? A lead on Codex or a connected assistant sees this on its next action, not while idle.
+
+**The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member's assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.
 
 **The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, with the name of the tool asking and nothing else from the prompt, and the roster marks that member as waiting. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them.
 

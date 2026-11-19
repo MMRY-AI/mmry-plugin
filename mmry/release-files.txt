@@ -30,6 +30,7 @@ hooks-handlers/formation-join.sh
 hooks-handlers/formation-leave.sh
 hooks-handlers/formation-list.sh
 hooks-handlers/formation-progress.sh
+hooks-handlers/formation-queue.sh
 hooks-handlers/formation-remove.sh
 hooks-handlers/formation-report.sh
 hooks-handlers/formation-roster.sh
@@ -122,6 +123,7 @@ tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats
+tests/handlers/formation-waiting-record.bats
 tests/handlers/formation-waiting.bats
 tests/handlers/foundation-31597-edges.bats
 tests/handlers/foundation-both-paths.bats
@@ -153,6 +155,7 @@ tests/handlers/stop-check.bats
 tests/handlers/userpromptsubmit-foundation.bats
 tests/handlers/visibility.bats
 tests/helpers/count-processes.ps1
+tests/helpers/formation-waiting-helpers.sh
 tests/helpers/foundation-set.bash
 tests/helpers/isolate-home.bash
 tests/helpers/live-foundation.bash
@@ -195,6 +198,7 @@ tests/run-tests.sh
 tests/setup_suite.bash
 tests/structural/CODEX-MUTATIONS.md
 tests/structural/bash32-portability.bats
+tests/structural/codex-approval-gate.bats
 tests/structural/codex-customer-strings.bats
 tests/structural/codex-desktop-trust-claim.bats
 tests/structural/codex-docs-and-eol.bats
@@ -229,6 +233,7 @@ tests/structural/formation-listen-docs.bats
 tests/structural/formation-listen-limit.bats
 tests/structural/formation-listening.bats
 tests/structural/formation-progress.bats
+tests/structural/formation-queue.bats
 tests/structural/formation-remove.bats
 tests/structural/formation-renewal-turn.bats
 tests/structural/formation-report-rule.bats

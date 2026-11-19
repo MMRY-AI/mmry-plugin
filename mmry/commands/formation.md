@@ -1,6 +1,6 @@
 Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>`
 
 ## What This Does
 
@@ -245,6 +245,8 @@ Each member is also given one rule for its own role:
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 
 **The lead hears who is free.** A member with no active work for 15 minutes is named to the lead, up to three times, 30 minutes apart, and the roster marks it. A member's own Done asks the lead: Is there anything else I can do? A lead on Codex or a connected assistant sees this on its next action, not while idle.
+
+**The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member's assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.
 
 **The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, with the name of the tool asking and nothing else from the prompt, and the roster marks that member as waiting. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them.
 
@@ -573,6 +575,20 @@ session's own place, the script says so and stops listening here, as `leave` wou
 **Report what the script reports.** On success it prints when and by whom the member was removed,
 read back from the server. On a refusal it prints the server's own reason: a member who has already
 left, one that is not in this formation, and a formation already closed out each read differently.
+
+### queue
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" add "<description>" [--host codex|claude-code]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" list
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" take <pieceId>
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" decline <pieceId>
+```
+
+- `add`: Queue a piece of work for this Formation (lead only). Name a host to offer it only to members on that host.
+- `list`: Show the queue: each piece, the host it needs, and who took it and when.
+- `take`: Take the queued piece you were offered. It becomes your assignment.
+- `decline`: Turn down the queued piece you were offered. It goes back to the queue for the next member.
 
 ### status
 
