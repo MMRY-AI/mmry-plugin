@@ -796,10 +796,11 @@ _sc_quiet_marker() {
     local wtmp; wtmp="$(cygpath -w "$TMPDIR")"
     local got rc n fails="" name rec
     # name | record ("" for none; @N is "today, N s before now", made just before its run) | marker (1 or 0)
-    # | expect: cmd (ends in cmd) or run (stop-check ran)
+    # | expect: cmd (ends in cmd) or run (stop-check ran). "Inside" is 600 s, not nearer 880: under load the
+    # counter itself takes seconds to start cmd after the record is made. The 880 is pinned by the next test.
     local -a cases=(
         "fresh, 5 s old|@5|1|cmd"
-        "870 s old, inside the 880 s the launcher allows|@870|1|cmd"
+        "600 s old, inside the 880 s the launcher allows|@600|1|cmd"
         "885 s old, past the 880 s the launcher allows|@885|1|run"
         "from the future (a clock set back)|@-60|1|run"
         "another day's date|$(printf '%05d %s' $(( sod - 5 )) "Mon 01/01/2001")|1|run"
