@@ -296,7 +296,7 @@ R5_ROUNDS="${MMRY_TEST_R5_ROUNDS:-5}"
     for (( r = 1; r <= R5_ROUNDS; r++ )); do
         rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-checked.cmd"
         _group "prompt$r"
-        [[ "$SC_MS" =~ ^[0-9]+$ ]] || { echo "the group helper did not report stop-check: $(cat "$TEST_TMPDIR/group-prompt$r/times")"; return 1; }
+        [[ "$SC_MS" =~ ^[0-9]+$ ]] || { echo "the group helper did not report stop-check: $(cat "$TEST_TMPDIR/group-prompt$r/times") $(head -c 400 "$TEST_TMPDIR/group-prompt$r/err" 2>/dev/null)"; return 1; }
         (( SC_MS < limit * 1000 )) || over="${over} [prompting $r: ${SC_MS} ms]"
         (( SC_RC == 0 )) || bad="${bad} [prompting $r exited ${SC_RC}]"
         if [[ -s "$SC_OUT" ]]; then
@@ -307,7 +307,7 @@ R5_ROUNDS="${MMRY_TEST_R5_ROUNDS:-5}"
         fc="$(sed -n 's/^formation-check|\([0-9]*\)|.*/\1/p' "$TEST_TMPDIR/group-prompt$r/times" | head -1)"
         [[ "$fc" =~ ^[0-9]+$ ]] && deltas+=( $(( SC_MS - fc )) )
         _group "quiet$r"
-        [[ "$SC_MS" =~ ^[0-9]+$ ]] || { echo "the group helper did not report stop-check: $(cat "$TEST_TMPDIR/group-quiet$r/times")"; return 1; }
+        [[ "$SC_MS" =~ ^[0-9]+$ ]] || { echo "the group helper did not report stop-check: $(cat "$TEST_TMPDIR/group-quiet$r/times") $(head -c 400 "$TEST_TMPDIR/group-quiet$r/err" 2>/dev/null)"; return 1; }
         (( SC_MS < limit * 1000 )) || over="${over} [quiet $r: ${SC_MS} ms]"
         (( SC_RC == 0 )) || bad="${bad} [quiet $r exited ${SC_RC}]"
         [[ ! -s "$SC_OUT" ]] || bad="${bad} [quiet $r prompted inside the quiet time]"

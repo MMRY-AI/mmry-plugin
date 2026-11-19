@@ -32,7 +32,11 @@ foreach ($h in $hooks) {
         Out = $p.StandardOutput.ReadToEndAsync(); Err = $p.StandardError.ReadToEndAsync()
     }
 }
-foreach ($r in $runs) { $r.P.StandardInput.Write($pay); $r.P.StandardInput.Close() }
+# A hook that ends in cmd without reading its payload (the quiet and said stop-check, formation-check) can
+# be gone before it is written, and the write can then throw. Codex completes such a hook (the round 4 live
+# steer), so that is not the hook failing. Under Stop it would end this helper with no report, the likely
+# cause of the empty reports round 4 and round 5 each saw once under load (not reproduced idle).
+foreach ($r in $runs) { try { $r.P.StandardInput.Write($pay); $r.P.StandardInput.Close() } catch { } }
 foreach ($r in $runs) {
     [void]$r.P.WaitForExit(120000)
     $ms = [int]($r.P.ExitTime - $r.T0).TotalMilliseconds

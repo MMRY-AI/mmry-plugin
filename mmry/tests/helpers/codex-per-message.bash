@@ -135,7 +135,7 @@ _group() {
     env -u MMRY_CONFIG_FILE -u MMRY_HOST -u MMRY_CODEX_HOOK_STARTED -u MMRY_HOOK_LAUNCH_SECS \
         CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$(cygpath -w "$TMPDIR")" HOME="$(cygpath -w "$HOME")" \
         pwsh -NoProfile -File "$helper" -Root "$WROOT" -Payload "$(cygpath -w "$TEST_TMPDIR/payload.json")" \
-        -OutDir "$(cygpath -w "$dir")" < /dev/null 2>/dev/null | tr -d '\r' > "$dir/times"
+        -OutDir "$(cygpath -w "$dir")" < /dev/null 2>"$dir/err" | tr -d '\r' > "$dir/times"
     SC_MS="" SC_RC="" SC_OUT=""
     while IFS='|' read -r name ms lim rc file; do
         case "$name" in
