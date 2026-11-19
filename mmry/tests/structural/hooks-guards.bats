@@ -85,7 +85,8 @@ load '../helpers/test-helper'
             echo "the guard is not exec'd, so its exit code may not survive: $line"; return 1; }
         n=$((n + 1))
     done <<< "$fc"
-    # Five since #33256: SessionStart, UserPromptSubmit, Stop, PostCompact (the re-arm) and PostToolUse.
+    # Five since #33256: SessionStart (the sweep), SessionStart "compact" (the re-arm), UserPromptSubmit,
+    # Stop and PostToolUse.
     (( n == 5 )) || { echo "expected 5 formation-check registrations, found $n"; return 1; }
 }
 

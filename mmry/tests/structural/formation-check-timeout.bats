@@ -360,7 +360,9 @@ _handler_figure() {
 
     local f got checked=0
     for f in hooks.json codex-hooks.json; do
-        got="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const o={};for(const[ev,gs]of Object.entries(d.hooks))for(const g of gs)for(const h of g.hooks)if(h.command.includes("formation-check"))o[ev]=h.timeout;console.log([o.UserPromptSubmit,o.SessionStart,o.PostToolUse].join(" "));' \
+        # Synchronous registrations only: the asyncRewake ones (Stop, SessionStart "compact", #33256)
+        # run on the idle budget, which formation-listen-limit.bats pins.
+        got="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const o={};for(const[ev,gs]of Object.entries(d.hooks))for(const g of gs)for(const h of g.hooks)if(h.command.includes("formation-check")&&h.asyncRewake!==true)o[ev]=h.timeout;console.log([o.UserPromptSubmit,o.SessionStart,o.PostToolUse].join(" "));' \
             "${BATS_TEST_DIRNAME}/../../hooks/${f}")"
         echo "${f}: UserPromptSubmit SessionStart PostToolUse = ${got}" >&3
         [ "$got" = "${ps_budget} ${ps_budget} ${tool_budget}" ] || { echo "${f} registers ${got}, the handler assumes ${ps_budget} ${ps_budget} ${tool_budget}"; return 1; }

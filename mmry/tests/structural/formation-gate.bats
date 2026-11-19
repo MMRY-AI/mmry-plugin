@@ -163,7 +163,8 @@ _run_counted() {
     echo "gated registrations: hooks.json ${n_claude}, codex-hooks.json ${n_codex}" >&3
     # SAMPLE SIZE: Claude Code registers the check on five events, Codex on three. A file that lost
     # a registration, or a parse that found none, must not pass by having nothing to compare. The
-    # fifth is PostCompact (#33256), which starts the idle watch again after a compaction.
+    # fifth is SessionStart "compact" (#33256), which starts the idle watch again after a compaction;
+    # SessionStart carries two, the sweep and that re-arm, with matchers that never overlap.
     (( n_claude == 5 )) || { echo "hooks.json: ${n_claude} formation-check registrations, expected 5"; return 1; }
     (( n_codex == 3 )) || { echo "codex-hooks.json: ${n_codex} formation-check registrations, expected 3"; return 1; }
 }

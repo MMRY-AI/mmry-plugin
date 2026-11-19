@@ -8,9 +8,17 @@
 # and nobody was told. Evidence: R:\Intranet\ClaudeAI\plans\MMRY\v1.32.1\v1.32.1-pm2-idle-gap-evidence.md.
 #
 # What these prove, at handler level, against a stub service:
-#   test case 1  the after-compaction event (PostCompact, registered with asyncRewake) starts the
-#                watch again for a member with no live watch, and a directed message is delivered
-#                within one listening interval; removing the re-arm turns it red
+#   test case 1  the after-compaction event (SessionStart with source "compact", registered with
+#                matcher "compact" and asyncRewake) starts the watch again for a member with no live
+#                watch, and a directed message is delivered within one listening interval; removing
+#                the re-arm turns it red. "startup", "resume" and "clear" do not re-arm.
+#
+# NOT PostCompact (#33256 round 2). PostCompact arrived in Claude Code 2.1.76, and Claude Code 2.1.75
+# rejects a plugin hooks file that names it: "Invalid key in record", "Registered 0 hooks", so every
+# MMRY hook and the MCP server were off, silently (R:\Intranet\ClaudeAI\plans\MMRY\v1.36\
+# idle-compaction\old-client-33256.md, cell B). SessionStart has fired with source "compact" after a
+# compaction since long before that, and both 2.1.75 and 2.1.322 run an asyncRewake SessionStart hook
+# in the background and wake the session on its exit 2, as they do for Stop.
 #   test case 2  the after-compaction step killed at its time limit: the next end of turn starts the
 #                watch again and a directed message after that is delivered; removing the end-of-turn
 #                re-arm turns it red
@@ -160,12 +168,14 @@ _mutant() {
 }
 
 # Start a watch in the background on the real clock and wait until it has asked once.
-# Usage: _bg_watch DIR EVENT [NAME=value ...]; leaves BG_PID.
+# Usage: _bg_watch DIR EVENT[:SOURCE] [NAME=value ...]; leaves BG_PID. SessionStart:compact sends
+# the payload a compaction does.
 _bg_watch() {
-    local hdir="$1" ev="$2"; shift 2
+    local hdir="$1" ev="$2" extra=""; shift 2
     local waited=0
+    if [[ "$ev" == *:* ]]; then extra=",\"source\":\"${ev#*:}\""; ev="${ev%%:*}"; fi
     : > "$URLS"
-    _payload "$ev" "" | env "$@" bash "${hdir}/formation-check.sh" >"${BATS_TEST_TMPDIR}/bg.out" 2>&1 &
+    _payload "$ev" "$extra" | env "$@" bash "${hdir}/formation-check.sh" >"${BATS_TEST_TMPDIR}/bg.out" 2>&1 &
     BG_PID=$!
     while [ "$(_count_polls)" -lt 1 ] && [ ! -f "${KT_DIR}/stalled" ] && [ "$waited" -lt 300 ]; do
         sleep 0.1; waited=$(( waited + 1 ))
@@ -187,16 +197,18 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
 # TEST CASE 1: the after-compaction event starts the watch again
 # =============================================================================================
 
-@test "TC1 wired: formation-check is registered on PostCompact with asyncRewake, the Stop budget and the same gate" {
+@test "TC1 wired: formation-check is registered on SessionStart with matcher compact, asyncRewake, the Stop budget and the same gate" {
     run node -e '
         const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-        const pick = ev => (d.hooks[ev] || []).flatMap(g => g.hooks).filter(h => h.command.includes("formation-check"));
-        const pc = pick("PostCompact"), st = pick("Stop");
-        if (pc.length !== 1) { console.log("PostCompact: expected 1 formation-check registration, got " + pc.length); process.exit(1); }
-        if (pc[0].asyncRewake !== true) { console.log("PostCompact: asyncRewake not set"); process.exit(1); }
-        if (pc[0].timeout !== st[0].timeout) { console.log("PostCompact timeout " + pc[0].timeout + " is not the Stop budget " + st[0].timeout); process.exit(1); }
-        if (pc[0].rewakeSummary !== st[0].rewakeSummary) { console.log("PostCompact rewakeSummary differs from Stop"); process.exit(1); }
-        if (pc[0].command !== st[0].command) { console.log("PostCompact gate differs from Stop"); process.exit(1); }
+        const fc = h => h.type === "command" && typeof h.command === "string" && h.command.includes("formation-check");
+        const st = (d.hooks.Stop || []).flatMap(g => g.hooks).filter(fc);
+        const cg = (d.hooks.SessionStart || []).filter(g => g.matcher === "compact");
+        const rc = cg.flatMap(g => g.hooks).filter(fc);
+        if (rc.length !== 1) { console.log("SessionStart \"compact\": expected 1 formation-check registration, got " + rc.length); process.exit(1); }
+        if (rc[0].asyncRewake !== true) { console.log("SessionStart compact: asyncRewake not set"); process.exit(1); }
+        if (rc[0].timeout !== st[0].timeout) { console.log("SessionStart compact timeout " + rc[0].timeout + " is not the Stop budget " + st[0].timeout); process.exit(1); }
+        if (rc[0].rewakeSummary !== st[0].rewakeSummary) { console.log("SessionStart compact rewakeSummary differs from Stop"); process.exit(1); }
+        if (rc[0].command !== st[0].command) { console.log("SessionStart compact gate differs from Stop"); process.exit(1); }
         console.log("ok");
     ' "${HOOKS}/hooks.json"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -204,12 +216,59 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
     grep -q '^_IDLE_BUDGET=1800$' "${HANDLERS}/formation-check.sh"
 }
 
+@test "TC1 wired: one compaction runs formation-check once, through the re-arm; every other source runs only the sweep" {
+    # Two SessionStart registrations carry the same gate, and the handler cannot tell which one ran
+    # it. So the matchers must never overlap: a compaction that ran both would start the watch in the
+    # 15 s sweep too, which Claude Code cancels, leaving the asyncRewake watch to find a live lock.
+    # The matching is Claude Code's own: no matcher, "" or "*" matches every source, and a matcher of
+    # letters, digits, _ and | is a list of exact names (2.1.75 cli.js wYz; 2.1.322 the same rule).
+    run node -e '
+        const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        const fc = h => h.type === "command" && typeof h.command === "string" && h.command.includes("formation-check");
+        const matches = (m, q) => {
+            if (!m || m === "*") return true;
+            if (/^[a-zA-Z0-9_|]+$/.test(m)) return m.split("|").map(s => s.trim()).includes(q);
+            return new RegExp(m).test(q);
+        };
+        const run = q => (d.hooks.SessionStart || []).filter(g => matches(g.matcher, q)).flatMap(g => g.hooks).filter(fc);
+        let bad = 0;
+        for (const q of ["startup", "resume", "clear", "fork", "compact"]) {
+            const r = run(q);
+            const kind = r.map(h => h.asyncRewake === true ? "re-arm" : "sweep").join(",");
+            console.log(q + ": " + (kind || "none"));
+            if (r.length !== 1) { console.log("  expected exactly one formation-check, got " + r.length); bad++; continue; }
+            if (q === "compact" && r[0].asyncRewake !== true) { console.log("  a compaction runs the synchronous sweep, not the re-arm"); bad++; }
+            if (q !== "compact" && (r[0].asyncRewake === true || r[0].async === true)) { console.log("  " + q + " runs the re-arm"); bad++; }
+        }
+        process.exit(bad ? 1 : 0);
+    ' "${HOOKS}/hooks.json"
+    echo "$output" >&3
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "hooks.json names no PostCompact, and every event in it is one Claude Code 2.1.75 accepts" {
+    # Claude Code 2.1.75 drops a plugin's WHOLE hooks file when one event name is unknown to it, and
+    # says so only in /plugin and the debug log. Every MMRY hook and the MCP server are then off.
+    # The list is 2.1.75's own, verbatim, from the error it printed for PostCompact (Seat D's cell B,
+    # R:\Intranet\ClaudeAI\plans\MMRY\v1.36\idle-compaction\old-client-33256.md, 2026-11-19), which
+    # is the hook event enum in its cli.js. A new event needs a client floor and a decision first.
+    local accepted=" PreToolUse PostToolUse PostToolUseFailure Notification UserPromptSubmit SessionStart SessionEnd Stop SubagentStart SubagentStop PreCompact PermissionRequest Setup TeammateIdle TaskCompleted Elicitation ElicitationResult ConfigChange WorktreeCreate WorktreeRemove InstructionsLoaded "
+    local events e
+    events="$(node -e 'console.log(Object.keys(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).hooks).join(" "))' "${HOOKS}/hooks.json")"
+    echo "events: ${events}" >&3
+    [[ -n "$events" ]] || { echo "no events read"; return 1; }
+    for e in $events; do
+        [[ "$e" != "PostCompact" ]] || { echo "hooks.json registers PostCompact, which 2.1.75 rejects with the whole file"; return 1; }
+        [[ "$accepted" == *" $e "* ]] || { echo "${e} is not an event Claude Code 2.1.75 accepts"; return 1; }
+    done
+}
+
 @test "TC1: after compaction a member with no live watch listens again, and a directed message is delivered within one interval" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local seq="${BATS_TEST_TMPDIR}/seq"; mkdir -p "$seq"
     printf '[]' > "${seq}/1.body"
     printf '%s' "$DIRECTED" > "${seq}/2.body"
-    run _fire "$HANDLERS" PostCompact ',"trigger":"auto","compact_summary":"x"' \
+    run _fire "$HANDLERS" SessionStart ',"source":"compact","model":"x"' \
         FAKE_SEQ_DIR="$seq" FAKE_SENT_BODY="$_member_true" \
         MMRY_IDLE_POLL_SECONDS=30 MMRY_IDLE_POLL_INTERVAL=1
     echo "exit ${status}, polls $(_count_polls)" >&3
@@ -225,32 +284,29 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
 
 @test "TC1 control: with the after-compaction re-arm removed, the same message is not delivered" {
     local m; m="$(_mutant norearm)"
-    perl -0777 -pi -e 's{^\s*PostCompact\)[^\n]*\n}{}m' "${m}/formation-check.sh"
+    perl -0777 -pi -e 's{^[^\n]*"\$hook_source" == "compact" \]\] && mode="rearm"[^\n]*\n}{}m' "${m}/formation-check.sh"
     ! cmp -s "${m}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local seq="${BATS_TEST_TMPDIR}/seq"; mkdir -p "$seq"
     printf '[]' > "${seq}/1.body"
     printf '%s' "$DIRECTED" > "${seq}/2.body"
-    run _fire "$m" PostCompact ',"trigger":"auto"' \
+    run _fire "$m" SessionStart ',"source":"compact"' \
         FAKE_SEQ_DIR="$seq" FAKE_SENT_BODY="$_member_true" \
         MMRY_IDLE_POLL_SECONDS=30 MMRY_IDLE_POLL_INTERVAL=1
     [ "$status" -ne 2 ] || { echo "the mutant delivered too, so the test proves nothing: ${output}"; return 1; }
     [[ "$output" != *"CR-DIRECTED"* ]] || return 1
 }
 
-@test "TC1: the post-compaction SessionStart leaves pending messages for the re-armed watch, which wakes the session" {
+@test "TC1: after compaction, messages already waiting are delivered with a wake, never swept silently into context" {
     # A sweep at SessionStart puts messages into context WITHOUT waking an idle session, and marks
-    # them seen, so the watch that follows finds nothing to wake it with. After a compaction the
-    # sweep leaves them, and the PostCompact watch delivers them with a wake.
+    # them seen. After a compaction the session may be idle, so SessionStart "compact" is the watch:
+    # what is waiting goes out on stderr with exit 2, which asyncRewake turns into a wake.
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    run _fire "$HANDLERS" SessionStart ',"source":"compact"' FAKE_BODY="$DIRECTED"
-    [ "$status" -eq 0 ]
-    [ -z "$output" ] || { echo "the post-compaction sweep consumed the messages: ${output}"; return 1; }
-    [ "$(_count_polls)" -eq 0 ] || { echo "the post-compaction sweep asked the service"; return 1; }
-    run _fire "$HANDLERS" PostCompact ',"trigger":"auto"' FAKE_BODY="$DIRECTED" FAKE_SENT_BODY="$_member_true" \
+    run _fire "$HANDLERS" SessionStart ',"source":"compact"' FAKE_BODY="$DIRECTED" FAKE_SENT_BODY="$_member_true" \
         MMRY_IDLE_POLL_SECONDS=10 MMRY_IDLE_POLL_INTERVAL=1
-    [ "$status" -eq 2 ] || { echo "the re-armed watch did not deliver: ${status} ${output}"; return 1; }
+    [ "$status" -eq 2 ] || { echo "a compaction did not wake the session with what was waiting: ${status} ${output}"; return 1; }
     [[ "$output" == *"CR-DIRECTED"* ]] || return 1
+    [[ ! "$output" =~ \"hookEventName\":[[:space:]]*\"SessionStart\" ]] || { echo "a compaction swept the messages into context: ${output}"; return 1; }
 }
 
 @test "TC1: a SessionStart that is not a compaction still sweeps, as before" {
@@ -261,12 +317,50 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
     [[ "$output" == *"CR-DIRECTED"* ]] || return 1
 }
 
+# Fire SessionStart with one source at a member with no live watch. A message arrives on the second
+# ask, which only a listening watch makes. Leaves $status, $output and the ask count in $polls.
+_no_rearm_case() {
+    local hdir="$1" src="$2" seq="${BATS_TEST_TMPDIR}/seq-$2"
+    _reset_locks
+    rm -rf "${seq:?}"; mkdir -p "$seq"
+    printf '[]' > "${seq}/1.body"
+    printf '%s' "$DIRECTED" > "${seq}/2.body"
+    : > "$URLS"
+    run _fire "$hdir" SessionStart ",\"source\":\"${src}\"" FAKE_SEQ_DIR="$seq" FAKE_SENT_BODY="$_member_true" \
+        MMRY_IDLE_POLL_SECONDS=4 MMRY_IDLE_POLL_INTERVAL=1
+    polls="$(_count_polls)"
+}
+
+@test "TC1: startup, resume and clear do not re-arm: one ask, the sweep's, and no watch" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local src polls
+    for src in startup resume clear; do
+        _no_rearm_case "$HANDLERS" "$src"
+        echo "${src}: exit ${status}, asks ${polls}" >&3
+        [ "$status" -eq 0 ] || { echo "${src} woke the session (exit ${status}): ${output}"; return 1; }
+        [ "$polls" -eq 1 ] || { echo "${src} asked ${polls} times; a sweep asks once"; return 1; }
+        [[ "$output" != *"CR-DIRECTED"* ]] || { echo "${src} listened and delivered: ${output}"; return 1; }
+        [ ! -d "${TMPDIR}/.mmry-formation-poll-$(_sid)" ] || { echo "${src} took the watch's lock"; return 1; }
+    done
+}
+
+@test "TC1 control: a handler that re-arms on every SessionStart turns the no-re-arm test red" {
+    local m; m="$(_mutant everyss)"
+    perl -0777 -pi -e 's{\[\[ "\$hook_event" == "SessionStart" && "\$hook_source" == "compact" \]\] && mode="rearm"}{[[ "\$hook_event" == "SessionStart" ]] && mode="rearm"}' "${m}/formation-check.sh"
+    ! cmp -s "${m}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    local polls
+    _no_rearm_case "$m" resume
+    [ "$status" -eq 2 ] || { echo "the mutant did not re-arm on resume, so the test proves nothing: ${status} ${output}"; return 1; }
+    [ "$polls" -ge 2 ] || return 1
+}
+
 @test "TC1: the re-arm leaves a live watch alone: one watcher, no request" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     _bg_watch "$HANDLERS" Stop FAKE_BODY='[]' FAKE_SENT_BODY="$_member_true" \
         MMRY_IDLE_POLL_SECONDS=120 MMRY_IDLE_POLL_INTERVAL=1
     : > "$URLS"
-    run _fire "$HANDLERS" PostCompact ',"trigger":"auto"' FAKE_TAG=R FAKE_BODY="$DIRECTED" FAKE_SENT_BODY="$_member_true" \
+    run _fire "$HANDLERS" SessionStart ',"source":"compact"' FAKE_TAG=R FAKE_BODY="$DIRECTED" FAKE_SENT_BODY="$_member_true" \
         MMRY_IDLE_POLL_SECONDS=10 MMRY_IDLE_POLL_INTERVAL=1
     [ "$status" -eq 0 ] || { echo "the re-arm acted beside a live watch: ${status} ${output}"; return 1; }
     [ -z "$output" ]
@@ -327,7 +421,7 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
 
 @test "TC1: an after-compaction event that names a dispatched agent does nothing (#31991)" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    run _fire "$HANDLERS" PostCompact ',"trigger":"auto","agent_id":"a1b2","agent_type":"general-purpose"' \
+    run _fire "$HANDLERS" SessionStart ',"source":"compact","agent_id":"a1b2","agent_type":"general-purpose"' \
         FAKE_BODY="$DIRECTED" FAKE_SENT_BODY="$_member_true" MMRY_IDLE_POLL_SECONDS=4 MMRY_IDLE_POLL_INTERVAL=1
     [ "$status" -eq 0 ]
     [ -z "$output" ]
@@ -335,7 +429,7 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
 }
 
 @test "TC1: a session in no formation pays one file test and nothing else after a compaction" {
-    run _fire "$HANDLERS" PostCompact ',"trigger":"auto"' FAKE_BODY="$DIRECTED" MMRY_IDLE_POLL_SECONDS=4 MMRY_IDLE_POLL_INTERVAL=1
+    run _fire "$HANDLERS" SessionStart ',"source":"compact"' FAKE_BODY="$DIRECTED" MMRY_IDLE_POLL_SECONDS=4 MMRY_IDLE_POLL_INTERVAL=1
     [ "$status" -eq 0 ]
     [ -z "$output" ]
     [ "$(_count_polls)" -eq 0 ]
@@ -349,7 +443,7 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     # The after-compaction watch stalls on its first request and is killed outright, as a hook that
     # reaches its time limit is: no trap runs, so its lock and its listening record stay behind.
-    _bg_watch "$HANDLERS" PostCompact KT_STALL=1 FAKE_SENT_BODY="$_member_true" \
+    _bg_watch "$HANDLERS" SessionStart:compact KT_STALL=1 FAKE_SENT_BODY="$_member_true" \
         MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=1
     _kill_bg
     [ -d "${TMPDIR}/.mmry-formation-poll-$(_sid)" ] || { echo "the killed step left no lock, so this stages nothing"; return 1; }
@@ -384,7 +478,7 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
     perl -0777 -pi -e 's{(_acquire_poller\(\) \{.*?if \[\[ "\$pid" =~ \^\[0-9\]\+\$ && "\$pid" != "\$\$" \]\]; then\n)}{$1        kill -0 "\$pid" 2>/dev/null || return 1\n}s' "${m}/formation-check.sh"
     ! cmp -s "${m}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
-    _bg_watch "$m" PostCompact KT_STALL=1 FAKE_SENT_BODY="$_member_true" MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=1
+    _bg_watch "$m" SessionStart:compact KT_STALL=1 FAKE_SENT_BODY="$_member_true" MMRY_IDLE_POLL_SECONDS=600 MMRY_IDLE_POLL_INTERVAL=1
     _kill_bg
     run _fire "$m" Stop '' FAKE_BODY="$DIRECTED" FAKE_SENT_BODY="$_member_true" MMRY_IDLE_POLL_SECONDS=10 MMRY_IDLE_POLL_INTERVAL=1
     [ "$status" -ne 2 ] || { echo "the mutant delivered too, so the test proves nothing: ${output}"; return 1; }
