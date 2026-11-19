@@ -142,10 +142,12 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 }
 
 @test "W-06 a tool name that is not a bare name is left out, and the member is still reported" {
-    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    # #33898: this case used the MCP sentence and accepted the server name "mmry"; the MCP form now has
+    # its own cases (W-26 on). A word that is not a bare name is still left out, never trimmed.
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash;id')"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    ! grep -q 'toolName' "$BODIES" || grep -q '"toolName":"mmry"' "$BODIES" || { cat "$BODIES"; return 1; }
-    ! grep -q 'memory_save (MCP)' "$BODIES" || { cat "$BODIES"; return 1; }
+    ! grep -q 'toolName' "$BODIES" || grep -q '"toolName":null' "$BODIES" || { cat "$BODIES"; return 1; }
+    ! grep -q 'Bash' "$BODIES" || { cat "$BODIES"; return 1; }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -194,11 +196,13 @@ _marker() { ls "$TEST_TMPDIR"/.mmry-waiting-* 2>/dev/null | head -1; }
 # TC4: the tool name, never the prompt
 # ---------------------------------------------------------------------------------------------
 
-@test "W-12 a prompt for a command carrying a planted secret sends and keeps the tool name only" {
+@test "W-12 a prompt for a command carrying a planted secret sends no name and nothing of the command" {
+    # Round 4 (lead 439, ruling 3): text after the word means it is not exactly one list entry, so no name.
+    JQ_BIN="$(command -v jq)"
     run _waiting "$(_notification permission_prompt "Claude needs your permission to use Bash with curl -H Authorization: $PLANTED")"
     [ "$status" -eq 0 ]
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
-    grep -q '"toolName":"Bash"' "$BODIES" || { cat "$BODIES"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
     ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "planted string stored"; return 1; }
     [[ "$output" != *"$PLANTED"* ]]
@@ -354,4 +358,304 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
     _waiting "$(_permission_request_turn Bash turn-0003)"
     _waiting "$(_permission_request_turn Bash turn-0003)"
     [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+# ---------------------------------------------------------------------------------------------
+# #33898: for an MCP tool the lead is told the tool's own name, mcp__<server>__<tool>, or no name.
+# The sentences are Claude Code's own (2.1.322): "Claude needs your permission to use <server> -
+# <tool title or name> (MCP)", the server as configured (a plugin's is plugin:<plugin>:<server>), and
+# the tool name the server part normalised exactly as Claude Code builds it (any character outside
+# A-Z a-z 0-9 _ - becomes _).
+# ---------------------------------------------------------------------------------------------
+
+_notification_tp() { # $1 message, $2 transcript path
+    printf '{"session_id":"%s","transcript_path":"%s","cwd":"/x","hook_event_name":"Notification","notification_type":"permission_prompt","message":"%s"}' "$SID" "$2" "$1"
+}
+_tool_sent() { "$JQ_BIN" -r '.toolName // "<none>"' < "$BODIES" | head -1; }
+# A transcript whose latest assistant message calls each named tool (one tool_use per name, in order).
+_transcript() { # $1 path, $2.. tool names
+    local tp="$1" n i=0; shift
+    : > "$tp"
+    for n in "$@"; do
+        i=$((i + 1))
+        printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_%s","name":"%s","input":{"note":"%s"}}]}}\n' "$i" "$n" "$PLANTED" >> "$tp"
+    done
+}
+# The tool_result Claude Code writes when a call has run (answered), one per id.
+_tool_result() { # $1 path, $2.. tool_use ids
+    local tp="$1" id; shift
+    for id in "$@"; do
+        printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"done"}]}}\n' "$id" >> "$tp"
+    done
+}
+# A fresh ask record as 33900's --ask writes it (.mmry-asking-<session>), here left over from an
+# earlier prompt. 33898 alone never reads one; the stack must not let it supply a name on its own.
+_leftover_ask() { # $1 tool name
+    printf 'asker -\ntool %s\ninput -\nat %s\n' "$1" "$(date +%s)" > "$TEST_TMPDIR/.mmry-asking-$SID"
+}
+
+# #33898 round 2 (QA finding A1), tightened in round 3 (C1, below): the sentence builds the name and
+# the session's own transcript must hold it as the one still-waiting call of its server. The transcript never
+# supplies a name of its own, so a title, another call of the same server, or a subagent's call that is
+# not in the main transcript all send no name, and the lead's tool sentence is left out.
+
+@test "W-26 33898 req1: the MCP sentence names the tool, mcp__mmry__memory_save, not the server" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-27 33898 req1: a plugin's MCP server is named as Claude Code names it, mcp__plugin_<plugin>_<server>__<tool>" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__plugin_mmry_mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:mmry:mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__plugin_mmry_mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-28 33898 req1 (A1): a tool shown by its title sends no name, even with a call of that server in the transcript" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__plugin_acme_files__save_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+}
+
+@test "W-33 33898 req1 (A1, probe QA-1): a transcript holding only ANOTHER call of the server sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_search
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'memory_search' "$BODIES" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "another tool was named"; return 1; }
+}
+
+@test "W-34 33898 req1 (A1, C1): the one still-waiting exact call is named, past answered calls of the server and of that tool" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # toolu_1 memory_save (answered), toolu_2 memory_search (answered), toolu_3 memory_save (waiting).
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search mcp__mmry__memory_save
+    _tool_result "$tp" toolu_1 toolu_2
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$BODIES"; return 1; }
+    # The waiting call written to the transcript twice (one id) is still one call.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    tail -n 3 "$tp" | head -n 1 >> "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "mcp__mmry__memory_save" ] || { cat "$tp" "$BODIES"; return 1; }
+}
+
+# #33898 round 3 (QA finding C1, lead 439's ruling 2026-11-18): the transcript must tie the name to
+# THIS prompt. A name is sent only when its call is still waiting (no tool_result carries its id) and
+# is the only still-waiting call of its server in the transcript; otherwise the sentence is left out.
+# A leftover ask record never supplies a name on its own.
+
+@test "W-37 33898 req1 (C1, probe P-01): a bare-word title equal to another tool's real name sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # read_file ran earlier and was answered; write_file, whose title is "read_file", is the one asking.
+    _transcript "$tp" mcp__acme__read_file mcp__acme__write_file
+    _tool_result "$tp" toolu_1
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - read_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-38 33898 req1 (C1, probe P-02): a name string inside another call's input is not a call, and sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"mcp__acme__write_file","input":{"meta":{"name":"mcp__acme__Save"}}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-39 33898 req1 (C1): a leftover ask record never supplies a name on its own" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The record and the transcript name a call that has already been answered.
+    _transcript "$tp" mcp__acme__write_file
+    _tool_result "$tp" toolu_1
+    _leftover_ask mcp__acme__write_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - write_file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A titled MCP prompt with a leftover record naming a tool of that server: no name.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _leftover_ask mcp__acme__write_file
+    run _waiting "$(_notification_tp 'Claude needs your permission to use acme - Write a file (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-40 33898 req1 (C1): two still-waiting calls of one server send no name, even when one matches exactly" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_search
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # Two waiting calls of the same tool are no better: either could be the one asking.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _transcript "$tp" mcp__mmry__memory_save mcp__mmry__memory_save
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-35 33898 req1 (A1, probe QA-2): a titled tool called in parallel with another tool of the server sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"mcp__plugin_acme_files__save_file","input":{}},{"type":"tool_use","id":"toolu_2","name":"mcp__plugin_acme_files__list_files","input":{}}]}}' > "$tp"
+    run _waiting "$(_notification_tp 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-36 33898 req1 (A1): a subagent's prompt, its call absent from the main transcript or no transcript at all, sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # The main thread called nothing of this server; the subagent's call lives in its own transcript.
+    _transcript "$tp" Bash
+    run _waiting "$(_notification_tp 'Claude needs your permission to use mmry - memory_save (MCP)' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # No readable transcript: nothing establishes the name.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use mmry - memory_save (MCP)')"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
+
+@test "W-29 33898 req1: an MCP sentence that cannot be read sends no name, and the member is still reported" {
+    JQ_BIN="$(command -v jq)"
+    for m in 'Claude needs your permission to use plugin:acme:files - Save a file (MCP)' \
+             'Claude needs your permission to use mmry (MCP)' \
+             'Claude needs your permission to use mmry - memory_save (MCP) and more'; do
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "$m")"
+        [ "$(grep -c '^PUT ' "$BODIES" "$URLS" | tail -1 | cut -d: -f2)" -ge 1 ] || { cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
+    [ "$(_puts)" -eq 3 ] || { cat "$URLS"; return 1; }
+}
+
+@test "W-30 33898 req1: a server and tool longer than 64 characters send no name, never a shortened one" {
+    JQ_BIN="$(command -v jq)"
+    local srv="a-very-long-mcp-server-name-for-testing" tl="an_equally_long_tool_name_here"
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use $srv - $tl (MCP)")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'mcp__a-very' "$BODIES" || { echo "a shortened name was sent"; return 1; }
+}
+
+@test "W-31 33898 req3: a planted secret after the MCP tool name reaches neither the call, the marker nor the output" {
+    JQ_BIN="$(command -v jq)"
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use mmry - memory_save (MCP) $PLANTED")"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+    ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "planted string stored"; return 1; }
+    run _waiting "$(_notification permission_prompt "Claude needs your permission to use mmry - memory_save $PLANTED (MCP)")"
+    ! grep -q "$PLANTED" "$BODIES" "$URLS" || { echo "planted string sent"; return 1; }
+}
+
+@test "W-32 33898 req2: Bash and Write send exactly the names they sent before" {
+    JQ_BIN="$(command -v jq)"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    _check "$(_event UserPromptSubmit)" || true
+    : > "$BODIES"
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Write')"
+    [ "$(_tool_sent)" = "Write" ] || { cat "$BODIES"; return 1; }
+}
+
+# #33898 round 3b (lead 439's ruling 2026-11-18): without a fresh ask record, the one word after
+# "permission to use" is sent only when it is a Claude Code built-in tool's name
+# (_MMRY_WAITING_BUILTIN_TOOLS). On Claude Code 2.1.322 an MCP prompt's sentence can be a bare display
+# word ("use Echo"), which cannot be told from a built-in's name, so any other word sends no name and
+# the lead's tool sentence is left out. Codex's PermissionRequest carries tool_name and is unchanged.
+
+@test "W-41 33898 req1 (3b): an MCP display word, use Echo, with no ask record and no matching call sends no name" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # No transcript at all.
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use Echo')"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    # A transcript holding only other calls (a built-in, and an answered call of another server).
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _transcript "$tp" Bash mcp__other__thing
+    _tool_result "$tp" toolu_2
+    run _waiting "$(_notification_tp 'Claude needs your permission to use Ping' "$tp")"
+    [ "$(_puts)" -eq 2 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+    ! grep -q 'Ping\|Echo' "$BODIES" "$TEST_TMPDIR"/.mmry-waiting-* || { echo "a display word was sent or stored"; return 1; }
+}
+
+@test "W-42 33898 req2 (3b): use Bash still sends Bash, also for a subagent's prompt, and other built-ins send their names" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl" w
+    # A subagent's prompt: the main transcript holds only the waiting Agent call, not the Bash call.
+    _transcript "$tp" Agent
+    run _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    for w in Edit WebFetch NotebookEdit PowerShell Task MultiEdit; do
+        _check "$(_event UserPromptSubmit)" || true
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
+        [ "$(_tool_sent)" = "$w" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
+}
+
+@test "W-43 33898 req1 (3b): a word that is not a built-in tool's name sends no name; Codex's tool_name is unchanged" {
+    JQ_BIN="$(command -v jq)"
+    local w n=0
+    # Memory is the first word of mcp__mmry__memory_save's display name, Memory Save. bash is not
+    # Bash: the names are matched exactly.
+    for w in Frobnicate Memory bash Code; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $w"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
+    # Codex names its tool in the payload, so a name off the list still passes the field rule.
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_permission_request apply_patch '')"
+    grep -q '"toolName":"apply_patch"' "$BODIES" || { cat "$BODIES"; return 1; }
+}
+
+@test "W-44 33898 req1 (round 4, D1): a multi-word display name with no ask record sends no name, never its first word" {
+    JQ_BIN="$(command -v jq)"
+    local w n=0
+    # Claude Code 2.1.322 shows an untitled MCP tool read_file as "Read File" (QA round 3, measured).
+    for w in 'Read File' 'Write File' 'Edit File' 'Task Create' 'Bash Exec' 'Grep Search'; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $w")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $w"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
+    done
+}
+
+@test "W-45 33898 req1 (round 4, security F3): a list word followed by a newline and more text sends no name" {
+    JQ_BIN="$(command -v jq)"
+    # The JSON escape \n: the message the handler reads carries a real newline after the word. The
+    # second form (a space, then the newline) sent Edit before round 4; the first was already refused.
+    local m n=0
+    for m in 'Edit\nEndConversation' 'Edit \nEndConversation' 'Edit\r\n'; do
+        n=$((n + 1))
+        : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+        run _waiting "$(_notification permission_prompt "Claude needs your permission to use $m")"
+        [ "$(_puts)" -eq "$n" ] || { echo "for: $m"; cat "$URLS"; return 1; }
+        [ "$(_tool_sent)" = "<none>" ] || { echo "for: $m"; cat "$BODIES"; return 1; }
+    done
 }
