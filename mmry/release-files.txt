@@ -248,6 +248,7 @@ tests/structural/foundation-status-command.bats
 tests/structural/help-complete.bats
 tests/structural/hook-budgets.bats
 tests/structural/hooks-guards.bats
+tests/structural/hooks-json-format.bats
 tests/structural/hooks-json.bats
 tests/structural/macos-hook-payload.bats
 tests/structural/marketplace-sync.bats
