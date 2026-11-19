@@ -284,7 +284,7 @@ _notice_header='MMRY FORMATION LISTENING HAD STOPPED (formation 4242)'
 
 @test "TC1 control: with the after-compaction re-arm removed, the same message is not delivered" {
     local m; m="$(_mutant norearm)"
-    perl -0777 -pi -e 's{^[^\n]*"\$hook_source" == "compact" \]\] && mode="rearm"[^\n]*\n}{}m' "${m}/formation-check.sh"
+    perl -0777 -pi -e 's{^[^\n]*\|\| mode="rearm"[^\n]*\n}{}m' "${m}/formation-check.sh"
     ! cmp -s "${m}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local seq="${BATS_TEST_TMPDIR}/seq"; mkdir -p "$seq"
@@ -346,13 +346,21 @@ _no_rearm_case() {
 
 @test "TC1 control: a handler that re-arms on every SessionStart turns the no-re-arm test red" {
     local m; m="$(_mutant everyss)"
-    perl -0777 -pi -e 's{\[\[ "\$hook_event" == "SessionStart" && "\$hook_source" == "compact" \]\] && mode="rearm"}{[[ "\$hook_event" == "SessionStart" ]] && mode="rearm"}' "${m}/formation-check.sh"
+    perl -0777 -pi -e 's{if \[\[ "\$hook_event" == "SessionStart" && "\$hook_source" == "compact" \]\]; then}{if [[ "\$hook_event" == "SessionStart" ]]; then}' "${m}/formation-check.sh"
     ! cmp -s "${m}/formation-check.sh" "${HANDLERS}/formation-check.sh" || { echo "mutation did not apply"; return 1; }
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
     local polls
     _no_rearm_case "$m" resume
     [ "$status" -eq 2 ] || { echo "the mutant did not re-arm on resume, so the test proves nothing: ${status} ${output}"; return 1; }
     [ "$polls" -ge 2 ] || return 1
+}
+
+@test "TC1: on Codex a SessionStart \"compact\" still sweeps, as before (Codex has no idle watch to re-arm)" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    run _fire "$HANDLERS" SessionStart ',"source":"compact"' MMRY_HOST=codex FAKE_BODY="$DIRECTED"
+    [ "$status" -eq 0 ] || { echo "Codex compact did not sweep: ${status} ${output}"; return 1; }
+    [[ "$output" =~ \"hookEventName\":[[:space:]]*\"SessionStart\" ]] || { echo "Codex compact no longer sweeps: ${output}"; return 1; }
+    [[ "$output" == *"CR-DIRECTED"* ]] || return 1
 }
 
 @test "TC1: the re-arm leaves a live watch alone: one watcher, no request" {

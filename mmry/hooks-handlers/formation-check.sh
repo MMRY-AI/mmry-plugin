@@ -283,8 +283,8 @@ hook_read_status="notty"
 # The four fields this hook takes from the payload, in ONE jq call. agent_id is the third (#31991):
 # see THE SESSION ITSELF, NOT AN AGENT IT DISPATCHED, below the parse. tostring, so an id that ever
 # arrives as a number is still seen as present. source is the fourth (#33256): SessionStart says
-# "compact" when it follows a compaction, and the sweep then leaves its messages for the watch that
-# the PostCompact registration starts (see AFTER A COMPACTION in the start mode).
+# "compact" when it follows a compaction, and that is the re-arm, not the sweep (see SESSIONSTART
+# "compact" IS THE RE-ARM, where the mode is chosen).
 _fc_payload_fields='[(.session_id // ""), (.hook_event_name // ""), (.agent_id // "" | tostring), (.source // "" | tostring)] | @tsv'
 if [[ ! -t 0 ]]; then
     mmry_read_hook_payload "${MMRY_HOOK_READ_TIMEOUT:-2}" || true
@@ -421,14 +421,18 @@ session_id="${session_id:-$(mmry_session_id)}"
 # from the outside, and that is precisely how the macOS defect passed for healthy. PostToolUse is now
 # matched by name, and reaching the catch-all means the event was not resolved.
 #
-# PostCompact IS THE RE-ARM (#33256). It is registered with "asyncRewake": true and the Stop budget,
-# so it is the one event after an idle compaction that can still wake the session; see AFTER A
-# COMPACTION, THE WATCH IS STARTED AGAIN in the idle mode.
+# SESSIONSTART "compact" IS THE RE-ARM (#33256). Claude Code fires SessionStart with source "compact"
+# after every compaction, an idle one included. hooks.json registers this handler for it alone, matcher
+# "compact", with "asyncRewake": true and the Stop budget, so it is the one event after an idle
+# compaction that can still wake the session; see AFTER A COMPACTION, THE WATCH IS STARTED AGAIN in the
+# idle mode. The sweep registration is matched to every other source, so a compaction runs this handler
+# once, here, and never in the 15 s sweep. NOT PostCompact: Claude Code 2.1.75 and older reject a
+# plugin hooks file that names it, and drop every hook in it (Seat D, 2026-11-19). Both 2.1.75 and
+# 2.1.322 background an asyncRewake SessionStart hook and wake the session on its exit 2, as for Stop.
 mode="${MMRY_FORMATION_MODE:-}"
 if [[ -z "$mode" ]]; then
     case "$hook_event" in
         Stop|SubagentStop) mode="idle"   ;;
-        PostCompact)       mode="rearm"  ;;
         SessionStart)      mode="start"  ;;
         UserPromptSubmit)  mode="prompt" ;;
         PostToolUse)       mode="tool"   ;;
@@ -443,6 +447,12 @@ if [[ -z "$mode" ]]; then
             fi
             ;;
     esac
+    # Claude Code only. Codex has no asyncRewake and no idle watch to start (see the idle mode), so a
+    # Codex SessionStart sweeps on every source, as it always has.
+    if [[ "$hook_event" == "SessionStart" && "$hook_source" == "compact" ]]; then
+        _mmry_host_resolve
+        [[ "$_MMRY_HOST_V" == "codex" ]] || mode="rearm"
+    fi
 fi
 
 # ---- 1. Are we in a formation at all? One file test, then out. Key state by the resolved id. ----
@@ -558,7 +568,7 @@ _held_poller=""
 # ---- THE LISTENING RECORD: how the last watch ended (#33256) ----------------------------------
 # On 2026-10-30 a member's watch stopped, the idle session then compacted itself, and nothing started
 # listening again for 53.7 hours; nobody was told. Two things were missing: a way to start the watch
-# again when no turn ends (the PostCompact re-arm in the idle mode), and a way to tell a watch that
+# again when no turn ends (the SessionStart "compact" re-arm in the idle mode), and a way to tell a watch that
 # stopped early from one that stopped at its set limit (this record).
 #
 # One line, ".mmry-listen-<session>": STATE PID CHAIN STAMP FORMATION. Not named .mmry-formation-*,
@@ -1232,11 +1242,11 @@ case "$mode" in
             if [[ "$_MMRY_HOST_V" != "codex" ]]; then
                 # AFTER A COMPACTION (#33256), the session has not restarted and may be idle. A sweep
                 # here would put the messages into its context WITHOUT waking it and mark them seen,
-                # so the watch the PostCompact registration starts would find nothing to wake it with:
-                # the member would be shown them only when somebody next typed. So this leaves them,
-                # and that watch delivers them with a wake. It also asks nothing, which keeps this
-                # step well inside its 15 s on a busy machine: on 2026-10-31 this step ran 17.6 s and
-                # was cancelled.
+                # so the re-armed watch would find nothing to wake it with: the member would be shown
+                # them only when somebody next typed. A compaction is the re-arm (the mode is chosen
+                # above), so it never reaches here from the payload; this guard is for a start mode
+                # forced with source "compact", and it leaves the messages and asks nothing. On
+                # 2026-10-31 this step ran 17.6 s and was cancelled.
                 [[ "$hook_source" == "compact" ]] && exit 0
                 # A session that started or resumed had no watch while it was not running; the sweep
                 # says so. An old record of the watch it had before is not an early stop to report.
@@ -1322,7 +1332,7 @@ case "$mode" in
         # picked up instead by the PostToolUse and UserPromptSubmit routes on the next thing that
         # happens. NOT hookSpecificOutput: stop.command.output.schema.json has no such property.
         if [[ "$(mmry_host)" == "codex" ]]; then
-            # Codex registers no PostCompact re-arm and has no idle watch to start again.
+            # Codex registers no after-compaction re-arm and has no idle watch to start again.
             [[ "$mode" == "rearm" ]] && exit 0
             _poll_once || exit 0
             printf '%s\n' "$FORMATION_BLOCK" >&2 || exit 0
@@ -1340,7 +1350,7 @@ case "$mode" in
         # AFTER A COMPACTION, THE WATCH IS STARTED AGAIN (#33256 requirements 1 and 2). Claude Code can
         # compact an idle session on its own, and after that no turn ends, so no Stop fires to start a
         # watch. On 2026-10-30 a member whose watch had stopped was compacted while idle and then heard
-        # nothing for 53.7 hours. PostCompact is registered with "asyncRewake": true and the Stop
+        # nothing for 53.7 hours. SessionStart "compact" is registered with "asyncRewake": true and the Stop
         # budget, so this watch can wake the session exactly as a Stop watch does. It starts only
         # where there is no live watch and listening has not reached its set limit:
         #   a live watch (its pid alive, its record touched within _IDLE_LOCK_STALE): leave it be,
