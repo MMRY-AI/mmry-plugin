@@ -246,7 +246,10 @@ _slow() {
 #
 # THE BUDGETS, and where each process goes after #33967:
 #   cmd 1, Git's bin\bash.exe wrapper 1, bash 1, codex-hook.sh's subshell for the handler 1 = 4
-#   stop-check: 4, and nothing of its own
+#   stop-check inside its quiet time (most messages): cmd alone = 1. Round 4: codex-hook.cmd answers it
+#     from the record stop-check leaves beside its marker. On the 3db1d57 head it was 4.
+#   stop-check when it prompts: cmd, the wrapper and bash = 3, because round 4 runs it in codex-hook.sh's
+#     own shell, not a subshell. On the 3db1d57 head it was 4.
 #   Foundation parts 2-6, no set (TC5's account): 4, and the rename of the outcome record (mv: fork
 #     and exec) 2 = 6
 #   Foundation part 1, no set: 6, and three forks for the host's command names in its notice = 9
@@ -259,7 +262,8 @@ _budget() {
         codex-first-prompt|formation-check) echo 1 ;;
         "userpromptsubmit-foundation --part 1") echo 9 ;;
         "userpromptsubmit-foundation --part "[2-6]) echo 6 ;;
-        stop-check) echo 4 ;;
+        stop-check) echo 1 ;;
+        "stop-check firing") echo 3 ;;
         *) echo "" ;;
     esac
 }
@@ -323,13 +327,13 @@ _registrations_windows() {
     echo "all nine: ${total} processes" >&3
     (( n == 9 )) || { echo "expected 9 per-message registrations, found $n"; return 1; }
     # stop-check above was counted on its quiet path (the uncounted firing had just prompted). Its other
-    # path, the firing that prompts and stamps its marker, has the same budget.
+    # path, the firing that prompts and stamps its marker, has its own budget (round 4).
     rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-count"
     got="$(_count_registered "$(_registered UserPromptSubmit stop-check commandWindows)" "$TEST_TMPDIR/firing.out")"
-    echo "$(printf '%-40s' "stop-check, firing") ${got} processes (budget $(_budget stop-check))" >&3
+    echo "$(printf '%-40s' "stop-check, firing") ${got} processes (budget $(_budget "stop-check firing"))" >&3
     [[ "$(_ctx "$TEST_TMPDIR/firing.out")" == *"Save what is new since the last memory"* ]] || {
         echo "premise: the counted stop-check did not fire: $(cat "$TEST_TMPDIR/firing.out")"; return 1; }
-    (( got <= $(_budget stop-check) )) || over="${over} [stop-check firing: $got > $(_budget stop-check)]"
+    (( got <= $(_budget "stop-check firing") )) || over="${over} [stop-check firing: $got > $(_budget "stop-check firing")]"
     [[ -z "$over" ]] || { echo "over budget:$over"; return 1; }
 }
 
@@ -742,4 +746,159 @@ _group() {
     echo "load: median ${before} ms per process start before the groups, ${LOAD_MS} ms after" >&3
     [[ -z "$bad" ]] || { echo "stop-check misbehaved:$bad"; return 1; }
     [[ -z "$over" ]] || { echo "stop-check took ${limit} s or more, its limit:$over"; return 1; }
+}
+
+# =============================================================================================
+# ROUND 4: STOP-CHECK'S QUIET MESSAGE ENDS IN CMD, AND ITS PROMPT STARTS NO SUBSHELL
+# =============================================================================================
+# codex-hook.cmd ends stop-check in cmd, starting no process, when the record stop-check leaves beside its
+# marker (.mmry-stop-checked.cmd: this launch's seconds of the day and cmd's %DATE%) shows it is inside
+# its quiet time. Everything else goes on to stop-check. These pin both halves: the launcher is quiet
+# only when stop-check would be, and stop-check writes the record only from values the launcher handed it.
+
+# The real launcher for stop-check, as Codex's PowerShell runs it, counted by a job object. $1 the TMPDIR
+# the hook sees, $2 the stdout file, $3 the stderr file. Echoes "<processes> <exit code>".
+_sc_count() {
+    local tmp="$1" out="$2" err="$3" counter wpay c
+    counter="$(cygpath -w "${BATS_TEST_DIRNAME}/../helpers/count-processes.ps1")"
+    _payload > "$TEST_TMPDIR/payload.json"
+    wpay="$(cygpath -w "$TEST_TMPDIR/payload.json")"
+    c="$(_registered UserPromptSubmit stop-check commandWindows)"
+    c="${c//\$\{PLUGIN_ROOT\}/$WROOT}"
+    env -u MMRY_CONFIG_FILE -u MMRY_CODEX_HOOK_STARTED -u MMRY_CODEX_HOOK_SECS -u MMRY_CODEX_HOOK_DATE \
+        CODEX_HOME="$(cygpath -w "$CODEX_DIR")" TMPDIR="$tmp" HOME="$(cygpath -w "$HOME")" \
+        pwsh -NoProfile -File "$counter" -CommandLine "cmd.exe /d /s /c \"${c#cmd /d /c } < \"$wpay\" > \"$(cygpath -w "$out")\" 2> \"$(cygpath -w "$err")\"\"" \
+        < /dev/null 2>/dev/null | tr -d '\r' | sed -n 's/.*PROCESSES=\([0-9]*\) EXIT=\([0-9]*\).*/\1 \2/p' | tail -1
+}
+# cmd's own date, and the seconds of the day now, as the launcher computes them.
+_cmd_date() { cmd //d //c "echo %DATE%" | tr -d '\r'; }
+_sod_now() {
+    local h m s; printf -v h '%(%H)T' -1; printf -v m '%(%M)T' -1; printf -v s '%(%S)T' -1
+    echo $(( 10#$h * 3600 + 10#$m * 60 + 10#$s ))
+}
+# Stop-check inside its quiet time by its own reckoning: a marker stamped now, with its time beside it.
+_sc_quiet_marker() {
+    local now; printf -v now '%(%s)T' -1
+    printf '%s\n' "$now" > "$TMPDIR/.mmry-stop-checked.at"
+    : > "$TMPDIR/.mmry-stop-checked"
+}
+
+@test "33967 quiet windows: the launcher ends stop-check in cmd only when the record shows its quiet time, and otherwise runs it" {
+    _is_windows || skip "Windows only: needs cmd.exe and a Windows job object"
+    command -v pwsh >/dev/null 2>&1 || skip "no pwsh"
+    _install_codex_copy
+    local sod; sod="$(_sod_now)"
+    (( sod > 1000 && sod < 86400 - 1000 )) || skip "too near midnight for a same-day record"
+    local date; date="$(_cmd_date)"
+    [[ -n "$date" ]] || { echo "premise: cmd gave no %DATE%"; return 1; }
+    local wtmp; wtmp="$(cygpath -w "$TMPDIR")"
+    local got rc n fails="" name rec
+    # name | record ("" for none) | marker (1 or 0) | expect: cmd (ends in cmd) or run (stop-check ran)
+    local -a cases=(
+        "fresh, 5 s old|$(printf '%05d %s' $(( sod - 5 )) "$date")|1|cmd"
+        "875 s old, inside the 880 s the launcher allows|$(printf '%05d %s' $(( sod - 875 )) "$date")|1|cmd"
+        "885 s old, past the 880 s the launcher allows|$(printf '%05d %s' $(( sod - 885 )) "$date")|1|run"
+        "from the future (a clock set back)|$(printf '%05d %s' $(( sod + 60 )) "$date")|1|run"
+        "another day's date|$(printf '%05d %s' $(( sod - 5 )) "Mon 01/01/2001")|1|run"
+        "no marker beside it|$(printf '%05d %s' $(( sod - 5 )) "$date")|0|run"
+        "no record|NONE|1|run"
+        "an empty record||1|run"
+        "letters for seconds|abcde ${date}|1|run"
+        "no space after the seconds|$(printf '%05d' $(( sod - 5 )))${date}|1|run"
+        "four digits|$(printf '%04d' $(( (sod - 5) % 10000 ))) ${date}|1|run"
+        "a quote and an ampersand|1\"2&3 ${date}|1|run"
+        "percent signs|%PATH% ${date}|1|run"
+        "bangs|!CD!! ${date}|1|run"
+        "carets|^^^^^ ${date}|1|run"
+    )
+    local c
+    for c in "${cases[@]}"; do
+        IFS='|' read -r name rec n want <<< "$c"
+        rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$TMPDIR/.mmry-stop-checked.cmd" "$TMPDIR"/.mmry-renewal-turn-*
+        (( n == 1 )) && _sc_quiet_marker
+        [[ "$rec" == NONE ]] || printf '%s' "$rec" > "$TMPDIR/.mmry-stop-checked.cmd"
+        read -r got rc < <(_sc_count "$wtmp" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err")
+        echo "$(printf '%-48s' "$name") ${got} process(es), exit ${rc}" >&3
+        [[ "$got" =~ ^[0-9]+$ ]] || { fails="${fails} [${name}: the counter did not answer]"; continue; }
+        (( rc == 0 )) || fails="${fails} [${name}: exit ${rc}: $(head -c 200 "$TEST_TMPDIR/q.err")]"
+        [[ ! -s "$TEST_TMPDIR/q.err" ]] || fails="${fails} [${name}: cmd wrote an error: $(head -c 200 "$TEST_TMPDIR/q.err")]"
+        if [[ "$want" == cmd ]]; then
+            (( got == 1 )) || fails="${fails} [${name}: stop-check ran (${got} processes), cmd should have ended it]"
+            [[ ! -s "$TEST_TMPDIR/q.out" ]] || fails="${fails} [${name}: said something: $(head -c 120 "$TEST_TMPDIR/q.out")]"
+        else
+            (( got > 1 )) || fails="${fails} [${name}: ended in cmd, stop-check should have run]"
+        fi
+        if [[ "$name" == "no marker beside it" ]]; then
+            [[ "$(_ctx "$TEST_TMPDIR/q.out")" == *"Save what is new since the last memory"* ]] || fails="${fails} [${name}: stop-check did not prompt]"
+        fi
+    done
+    # A Formation renewal turn is stop-check's to spend, even inside the quiet time.
+    rm -f "$TMPDIR/.mmry-stop-checked.cmd"; _sc_quiet_marker
+    printf '%05d %s' $(( sod - 5 )) "$date" > "$TMPDIR/.mmry-stop-checked.cmd"
+    printf '%s\n' "$(date +%s)" > "$TMPDIR/.mmry-renewal-turn-${SID}"
+    read -r got rc < <(_sc_count "$wtmp" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err")
+    echo "$(printf '%-48s' "a renewal-turn marker waiting") ${got} process(es), exit ${rc}" >&3
+    (( got > 1 )) || fails="${fails} [renewal turn: ended in cmd, stop-check should have spent the marker]"
+    [[ ! -e "$TMPDIR/.mmry-renewal-turn-${SID}" ]] || fails="${fails} [renewal turn: the marker was not spent]"
+    # A TMPDIR the launcher cannot read as a Windows path (Git Bash's own form) is never trusted.
+    rm -f "$TMPDIR"/.mmry-renewal-turn-*; _sc_quiet_marker
+    printf '%05d %s' $(( sod - 5 )) "$date" > "$TMPDIR/.mmry-stop-checked.cmd"
+    read -r got rc < <(_sc_count "$TMPDIR" "$TEST_TMPDIR/q.out" "$TEST_TMPDIR/q.err")
+    echo "$(printf '%-48s' "TMPDIR in Git Bash's form ($TMPDIR)") ${got} process(es), exit ${rc}" >&3
+    (( got > 1 )) || fails="${fails} [POSIX TMPDIR: ended in cmd]"
+    [[ -z "$fails" ]] || { echo "wrong:$fails"; return 1; }
+}
+
+@test "33967 quiet windows: the launcher's quiet time is stop-check's, less the 20 s a late stop-check could still run" {
+    local launcher="$PLUGIN_ROOT/hooks-handlers/codex-hook.cmd" handler="$PLUGIN_ROOT/hooks-handlers/stop-check.sh" deb cmdq
+    deb="$(sed -n 's/^DEBOUNCE_SECONDS=\([0-9]*\).*/\1/p' "$handler")"
+    cmdq="$(tr -d '\r' < "$launcher" | sed -n 's/^if !MMRY_SQ_AGE! geq \([0-9]*\) goto :stop_check_loud$/\1/p')"
+    echo "stop-check quiet time ${deb} s, the launcher's ${cmdq} s" >&3
+    [[ "$deb" =~ ^[0-9]+$ && "$cmdq" =~ ^[0-9]+$ ]] || { echo "could not read both: [$deb] [$cmdq]"; return 1; }
+    (( cmdq + 20 == deb )) || { echo "the launcher's quiet time (${cmdq} s) is not stop-check's (${deb} s) less 20 s"; return 1; }
+    local limit; limit="$(_registered UserPromptSubmit stop-check timeout)"
+    (( limit <= 20 )) || { echo "stop-check's limit (${limit} s) is longer than the 20 s held in hand"; return 1; }
+}
+
+@test "33967 quiet: stop-check writes the launcher's record only from the values the launcher handed it" {
+    local f="$TMPDIR/.mmry-stop-checked.cmd"
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at" "$f"
+    MMRY_CODEX_HOOK_SECS=00731 MMRY_CODEX_HOOK_DATE="Wed 11/18/2026" _codex_fire "stop-check" "" "$TEST_TMPDIR/a.json"
+    [[ "$(_ctx "$TEST_TMPDIR/a.json")" == *"Save what is new since the last memory"* ]] || { echo "premise: stop-check did not prompt"; return 1; }
+    [[ "$(cat "$f" 2>/dev/null)" == "00731 Wed 11/18/2026" ]] || { echo "record: [$(cat "$f" 2>/dev/null)]"; return 1; }
+    # Not handed over (Claude Code, the sh form): the old record is emptied, never left to vouch for a new stamp.
+    local bad
+    for bad in "" "86400" "12a" "123456"; do
+        rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at"
+        printf '00731 Wed 11/18/2026' > "$f"
+        MMRY_CODEX_HOOK_SECS="$bad" MMRY_CODEX_HOOK_DATE="Wed 11/18/2026" _codex_fire "stop-check" "" "$TEST_TMPDIR/b.json"
+        [[ -f "$TMPDIR/.mmry-stop-checked" ]] || { echo "premise: [$bad] stop-check did not stamp"; return 1; }
+        [[ ! -s "$f" ]] || { echo "seconds [$bad]: the record was left as [$(cat "$f")]"; return 1; }
+    done
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at"
+    printf '00731 Wed 11/18/2026' > "$f"
+    MMRY_CODEX_HOOK_SECS=00731 MMRY_CODEX_HOOK_DATE="" _codex_fire "stop-check" "" "$TEST_TMPDIR/c.json"
+    [[ ! -s "$f" ]] || { echo "no date: the record was left as [$(cat "$f")]"; return 1; }
+    # Claude Code's stop-check, run directly, empties it too, and still prompts its own way.
+    printf '00731 Wed 11/18/2026' > "$f"
+    rm -f "$TMPDIR/.mmry-stop-checked" "$TMPDIR/.mmry-stop-checked.at"
+    run env -u MMRY_HOST -u MMRY_CODEX_HOOK_SECS -u MMRY_CODEX_HOOK_DATE bash "$PLUGIN_ROOT/hooks-handlers/stop-check.sh" < /dev/null
+    (( status == 2 )) || { echo "Claude Code stop-check exited $status"; return 1; }
+    [[ ! -s "$f" ]] || { echo "Claude Code: the record was left as [$(cat "$f")]"; return 1; }
+}
+
+@test "33967 quiet: codex-hook.sh runs stop-check in its own shell, not a subshell, and still discards its exit code" {
+    local root="$TEST_TMPDIR/sc root" out
+    mkdir -p "$root"
+    cp -R "$PLUGIN_ROOT/hooks-handlers" "$root/"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho "SUBSHELL=${BASH_SUBSHELL}"\nexit 7\n' > "$root/hooks-handlers/stop-check.sh"
+    out="$(_payload | env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$root/hooks-handlers/codex-hook.sh" stop-check 2>/dev/null)"; local rc=$?
+    echo "exit 7: codex-hook.sh exit ${rc}, ${out}" >&3
+    (( rc == 0 )) || { echo "a stop-check exit 7 came out as $rc"; return 1; }
+    [[ "$out" == "SUBSHELL=0" ]] || { echo "stop-check did not run in codex-hook.sh's own shell: $out"; return 1; }
+    printf '#!/usr/bin/env bash\nset -euo pipefail\necho before\nfalse\necho after\n' > "$root/hooks-handlers/stop-check.sh"
+    out="$(_payload | env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$root/hooks-handlers/codex-hook.sh" stop-check 2>/dev/null)"; rc=$?
+    echo "set -e failure: codex-hook.sh exit ${rc}, ${out//$'\n'/ }" >&3
+    (( rc == 0 )) || { echo "a stop-check set -e failure came out as $rc"; return 1; }
+    [[ "$out" == "before" ]] || { echo "stop-check's own set -e did not hold: $out"; return 1; }
 }
