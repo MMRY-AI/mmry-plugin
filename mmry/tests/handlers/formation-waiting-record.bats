@@ -276,6 +276,12 @@ load '../helpers/formation-waiting-helpers.sh'
     _leftover_ask mcp__probe__ping
     _waiting "$(_notification_tp 'Claude needs your permission' "$tp")"
     [ "$(_tool_sent)" = "mcp__probe__ping" ] || { cat "$BODIES"; return 1; }
+    # A built-in record older than the freshness window is no record: the generic sentence names nothing.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    printf 'asker -\ntool Bash\ninput -\nat %s\n' "$(( $(date +%s) - 3600 ))" > "$TEST_TMPDIR/.mmry-asking-$SID"
+    _waiting "$(_notification_tp 'Claude needs your permission' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { echo "a stale record named the tool"; cat "$BODIES"; return 1; }
     # With no record, the generic sentence names nothing.
     _check "$(_event UserPromptSubmit)" || true
     rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*; : > "$BODIES"
