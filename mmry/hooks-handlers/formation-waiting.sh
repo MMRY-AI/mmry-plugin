@@ -208,11 +208,13 @@ mmry_waiting_tool_name() {
     MMRY_WAITING_TOOL="$name"
 }
 
-# _mmry_waiting_asked_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH  (#33898 C1, round 4)
+# _mmry_waiting_asked_name RECORD_TOOL SENTENCE_NAME MCP_PREFIX TRANSCRIPT_PATH SENTENCE_NAMES_A_TOOL  (#33898 C1, round 4)
 # Sets MMRY_WAITING_TOOL to the name to send when a fresh ask record exists. Lead 439's ruling (b),
 # 2026-11-18: a fresh record wins only when the sentence gives no confirmed name.
 #   - A built-in's record (no mcp__): a built-in's sentence is exactly its name, so the record is
-#     this prompt's only when it equals the sentence's whole word. Otherwise no name.
+#     this prompt's only when it equals the sentence's whole word. A sentence that names no tool at
+#     all (interactive Claude Code sends the fixed "Claude needs your permission") confirms nothing,
+#     and the record wins. Otherwise no name.
 #   - The sentence confirms a list name (a built-in) and the record names another tool: no name.
 #   - The sentence's MCP name, confirmed by the transcript, equals the record: that name.
 #   - Otherwise (a multi-word display name such as Read File, a display word off the list, a title,
@@ -223,10 +225,12 @@ mmry_waiting_tool_name() {
 #     beside another still-waiting call of its server, sends no name (W-39, X-24, X-25).
 #   - An MCP sentence of another server than the record's: the record is not this prompt's.
 _mmry_waiting_asked_name() {
-    local rec="${1:-}" name="${2:-}" prefix="${3:-}" tp="${4:-}" rest rp
+    local rec="${1:-}" name="${2:-}" prefix="${3:-}" tp="${4:-}" named="${5:-}" rest rp
     MMRY_WAITING_TOOL=""
     if [[ "$rec" != mcp__* ]]; then
-        [[ -n "$name" && "$rec" == "$name" ]] && MMRY_WAITING_TOOL="$rec"
+        # A sentence that names no tool at all (interactive Claude Code's fixed "Claude needs your
+        # permission", live check (a)) confirms nothing, so the record wins (ruling (b)).
+        if [[ -z "$named" ]] || [[ -n "$name" && "$rec" == "$name" ]]; then MMRY_WAITING_TOOL="$rec"; fi
         return 0
     fi
     [[ -z "$prefix" && -n "$name" && "$_MMRY_WAITING_BUILTIN_TOOLS" == *" ${name} "* ]] && return 0
@@ -559,11 +563,12 @@ mmry_resolve_jq >/dev/null || exit 0
 _fields='[(.session_id // "" | tostring), (.hook_event_name // "" | tostring),
           (.notification_type // "" | tostring), (.tool_name // "" | tostring),
           ((.message // "" | tostring) | '"$_MMRY_WAITING_SENTENCE_JQ"'),
-          (.turn_id // "" | tostring), (.transcript_path // "" | tostring), (.agent_id // "" | tostring)]
+          (.turn_id // "" | tostring), (.transcript_path // "" | tostring), (.agent_id // "" | tostring),
+          ((.message // "" | tostring) | if test("permission to use ") then "1" else "" end)]
          | flatten | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
 parsed="$("$MMRY_JQ" -r "$_fields" <<< "$payload" || true)"
 [[ "$parsed" == *$'\037'* ]] || exit 0
-IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent <<< "$parsed" || true
+IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent mnamed <<< "$parsed" || true
 
 case "$event" in
     Notification)
@@ -629,7 +634,7 @@ else
                 # The clear's own identity (asker, exact, input) is 33900's and unchanged.
                 _s_name="$tool"
                 [[ -n "$mprefix" ]] || _s_name="$MMRY_WAITING_WORD"
-                _mmry_waiting_asked_name "$_k_tool" "$_s_name" "$mprefix" "$tpath"
+                _mmry_waiting_asked_name "$_k_tool" "$_s_name" "$mprefix" "$tpath" "$mnamed"
                 tool="$MMRY_WAITING_TOOL"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
             fi
