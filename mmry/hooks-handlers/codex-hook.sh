@@ -73,12 +73,15 @@ esac
 # bash's own seconds of the day and epoch read at one instant, with the launcher's date. Only when bash's
 # day is the launcher's (bash's seconds are not before the launcher's: no midnight between them), and not
 # again within a minute of a clock of the same date, so cmd seldom meets one half written (it then lets
-# stop-check run). Builtins only, and only with bash's own clock (4.2 and later); the sh form hands nothing.
-if [[ -n "${MMRY_CODEX_HOOK_DATE:-}" && "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,5}$ && "$MMRY_CODEX_HOOK_DATE" != *[$'\r\n']* ]] \
-    && (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
+# stop-check run). Builtins only, and only with bash's own clock (4.2 and later: on 3.2 the printf below
+# fails, the regex does not match and nothing is written); the sh form hands nothing.
+if [[ -n "${MMRY_CODEX_HOOK_DATE:-}" && "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,5}$ && "$MMRY_CODEX_HOOK_DATE" != *[$'\r\n']* ]]; then
     _mmry_ck=""
+    # In variables, as this file keeps every regex holding a bracket: dash -n reads the whole file.
+    _mmry_re_ck='^([0-9]{10}) ([0-9]{2}) ([0-9]{2}) ([0-9]{2})$'
+    _mmry_re_ck_old='^([0-9]{5}) [0-9]{10} (.*)$'
     printf -v _mmry_ck '%(%s %H %M %S)T' -1 2>/dev/null || _mmry_ck=""
-    if [[ "$_mmry_ck" =~ ^([0-9]{10})\ ([0-9]{2})\ ([0-9]{2})\ ([0-9]{2})$ ]]; then
+    if [[ "$_mmry_ck" =~ $_mmry_re_ck ]]; then
         _mmry_ck_e="${BASH_REMATCH[1]}"
         _mmry_ck_s=$(( 10#${BASH_REMATCH[2]} * 3600 + 10#${BASH_REMATCH[3]} * 60 + 10#${BASH_REMATCH[4]} ))
         _mmry_ck_l=$(( 10#$MMRY_CODEX_HOOK_SECS ))
@@ -88,7 +91,7 @@ if [[ -n "${MMRY_CODEX_HOOK_DATE:-}" && "${MMRY_CODEX_HOOK_SECS:-}" =~ ^[0-9]{1,
             if [[ -f "$_mmry_ck_f" ]]; then
                 { IFS= read -r _mmry_ck_old || true; } 2>/dev/null < "$_mmry_ck_f" || _mmry_ck_old=""
             fi
-            if ! [[ "$_mmry_ck_old" =~ ^([0-9]{5})\ [0-9]{10}\ (.*)$ && "${BASH_REMATCH[2]}" == "$MMRY_CODEX_HOOK_DATE" ]] \
+            if ! [[ "$_mmry_ck_old" =~ $_mmry_re_ck_old && "${BASH_REMATCH[2]}" == "$MMRY_CODEX_HOOK_DATE" ]] \
                 || (( _mmry_ck_s < 10#${BASH_REMATCH[1]} || _mmry_ck_s - 10#${BASH_REMATCH[1]} >= 60 )); then
                 printf '%05d %s %s' "$_mmry_ck_s" "$_mmry_ck_e" "$MMRY_CODEX_HOOK_DATE" > "$_mmry_ck_f" 2>/dev/null || true
             fi

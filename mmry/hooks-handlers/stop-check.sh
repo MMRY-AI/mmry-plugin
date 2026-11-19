@@ -172,6 +172,12 @@ _mmry_sc_marker_at() {
 # compares its own values and no clock or date arithmetic is shared. Written after the marker. Where they
 # were not handed over (Claude Code, the sh form, a %TIME% the launcher could not read) an old record is
 # emptied, so the launcher never trusts a stamp it did not make. Builtins only.
+#
+# AND THE LAUNCHER CAN SAY THIS FILE'S CODEX PROMPT ITSELF (#33967 round 5). :stop_check_say in
+# codex-hook.cmd does what the Codex path below does (the save-since silence, the stamp, the count, the
+# directive and its clauses) in cmd, when it can be sure, so the first message is not Git's bash past the
+# 10 s limit. A change to that path, its files or its words is a change to both: codex-per-message-in-
+# time.bats runs the two on the same state and requires the same words and files.
 _MMRY_SC_CMD_FILE="${MARKER}.cmd"
 _mmry_sc_stamp() {
     _mmry_sc_now

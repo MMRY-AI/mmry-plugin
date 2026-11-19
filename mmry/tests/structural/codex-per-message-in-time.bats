@@ -978,7 +978,11 @@ _r5_state() {
         "a last save of 11 digits") printf '17950674310\n' > "$d/.mmry-last-save" ;;
         "a marker with no time beside it") _r5_marker "$d" 950; rm -f "$d/.mmry-stop-checked.at" ;;
         "a marker with an empty record") _r5_marker "$d" 950; : > "$d/.mmry-stop-checked.cmd" ;;
-        "a marker 890 s old") _r5_marker "$d" 890 ;;
+        # 800 s by the marker's own time, 950 by the launcher's record: round 4's record check lets it through
+        # (950 is past 880), and the marker's time keeps it stop-check's (under 900), with 100 s to spare
+        # for a loaded machine. stop-check, reading the marker's time, stays quiet.
+        "a marker 800 s old by its time") _r5_marker "$d" 950; printf '%s\n' "$(( e - 800 ))" > "$d/.mmry-stop-checked.at"; : > "$d/.mmry-stop-checked" ;;
+        "a count of two lines") printf '2\n5\n' > "$d/.mmry-stop-count" ;;
         "a marker stamped 5 minutes ahead") _r5_marker "$d" -300 ;;
         *) echo "no state [$2]"; return 1 ;;
     esac
@@ -1088,8 +1092,8 @@ _r5_setup() {
     done
     # A good clock, and a state cmd must leave to stop-check.
     for c in "a renewal turn waiting" "a count that is not a number" "a count with a leading zero" "a last save that is not a number" \
-        "a last save of 11 digits" "a marker with no time beside it" "a marker with an empty record" "a marker 890 s old" \
-        "a marker stamped 5 minutes ahead"; do
+        "a last save of 11 digits" "a marker with no time beside it" "a marker with an empty record" "a marker 800 s old by its time" \
+        "a marker stamped 5 minutes ahead" "a count of two lines"; do
         rm -f "$R5_A/$R5_CLOCK"; _r5_launch "$R5_WA"
         _r5_state "$R5_A" "$c"; _r5_state "$R5_B" "$c"
         read -r got rc < <(_sc_count "$R5_WA" "$TEST_TMPDIR/r5a.out" "$TEST_TMPDIR/r5a.err")

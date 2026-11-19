@@ -353,9 +353,6 @@ if not defined MMRY_SS_ABS exit /b 0
 if "%MMRY_SS_DIR:~-1%"=="\" set "MMRY_SS_DIR=%MMRY_SS_DIR:~0,-1%"
 if exist "%MMRY_SS_DIR%\.mmry-renewal-turn-*" exit /b 0
 setlocal enabledelayedexpansion
-set MMRY_SS_LF=^
-
-
 set "MMRY_SS_MK=!MMRY_SS_DIR!\.mmry-stop-checked"
 rem The clock, read whole: its date holds spaces.
 set "MMRY_SS_C="
@@ -445,14 +442,13 @@ exit /b 0
 endlocal
 exit /b 0
 
-rem :stop_check_say's reader: the file MMRY_SS_F's first line into MMRY_SS_V, as stop-check reads it. set /p
-rem stops at CRLF and drops a final LF but keeps an LF inside, so an LF left is made a # (not a digit, so
-rem the caller lets stop-check run). Spaces are dropped, as stop-check drops whitespace.
+rem :stop_check_say's reader: the file MMRY_SS_F's first line into MMRY_SS_V, as stop-check reads it, spaces
+rem dropped as stop-check drops whitespace. set /p stops at CRLF and drops a final LF, but reads on past an
+rem LF inside: that LF is not a digit, so every caller then lets stop-check run (measured, round 5).
 :ss_read
 set "MMRY_SS_V="
 set /p "MMRY_SS_V=" 2>nul 0<"!MMRY_SS_F!"
 if not defined MMRY_SS_V exit /b 0
-for %%L in ("!MMRY_SS_LF!") do set "MMRY_SS_V=!MMRY_SS_V:%%~L=#!"
 set "MMRY_SS_V=!MMRY_SS_V: =!"
 exit /b 0
 
