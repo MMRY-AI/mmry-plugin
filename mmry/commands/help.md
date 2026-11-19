@@ -41,7 +41,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:formation leave` takes this session out of the Formation.
   - `/mmry:formation remove <memberId>` takes a member whose session has dropped off the Formation (the lead or an administrator).
   - `/mmry:formation status` shows which Formation this session is in.
-  - `/mmry:formation queue add "description" [--host codex|claude-code]`: Queue a piece of work for this Formation (lead only). Name a host to offer it only to members on that host.
+  - `/mmry:formation queue add "description" [--host <host>]`: Queue a piece of work for this Formation (lead only). Name a host to offer it only to members on that host.
   - `/mmry:formation queue list`: Show the queue: each piece, the host it needs, and who took it and when.
   - `/mmry:formation queue take <pieceId>`: Take the queued piece you were offered. It becomes your assignment.
   - `/mmry:formation queue decline <pieceId>`: Turn down the queued piece you were offered. It goes back to the queue for the next member.
