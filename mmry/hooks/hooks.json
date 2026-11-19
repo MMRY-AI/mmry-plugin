@@ -164,6 +164,28 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'd=\"${TMPDIR:-/tmp}\"; s=\"${CLAUDE_CODE_SESSION_ID:-}\"; case \"$s\" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) s=\"\" ;; esac; m=\"\"; if [ -n \"$s\" ]; then if [ -f \"$d/.mmry-waiting-$s\" ]; then m=1; fi; else for f in \"$d\"/.mmry-waiting-*; do if [ -f \"$f\" ]; then m=1; break; fi; done; fi; if [ -n \"$m\" ]; then exec bash \"$1\" --answer-hook; fi; exit 0' mmry-waiting-gate \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-waiting.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-waiting.sh\" --ask",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
