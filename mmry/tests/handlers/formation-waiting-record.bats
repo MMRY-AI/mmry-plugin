@@ -259,3 +259,26 @@ load '../helpers/formation-waiting-helpers.sh'
         [ "$(_tool_sent)" = "<none>" ] || { echo "for: $w"; cat "$BODIES"; return 1; }
     done
 }
+
+@test "X-33 33900 live check (a), ruling (b): interactive Claude Code's generic sentence names no tool, so a fresh record names it" {
+    JQ_BIN="$(command -v jq)"
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    # Claude Code 2.1.322's interactive permission notification is the fixed text "Claude needs your
+    # permission", with no tool (read from the client; live check (a) saw no name for Bash). The
+    # sentence confirms no name, so the fresh ask record wins, a built-in's as well as an MCP tool's.
+    _transcript "$tp" Agent
+    _leftover_ask Bash
+    _waiting "$(_notification_tp 'Claude needs your permission' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    [ "$(_tool_sent)" = "Bash" ] || { cat "$BODIES"; return 1; }
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
+    _leftover_ask mcp__probe__ping
+    _waiting "$(_notification_tp 'Claude needs your permission' "$tp")"
+    [ "$(_tool_sent)" = "mcp__probe__ping" ] || { cat "$BODIES"; return 1; }
+    # With no record, the generic sentence names nothing.
+    _check "$(_event UserPromptSubmit)" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*; : > "$BODIES"
+    _waiting "$(_notification_tp 'Claude needs your permission' "$tp")"
+    [ "$(_tool_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
+}
