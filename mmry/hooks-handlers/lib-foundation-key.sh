@@ -269,8 +269,8 @@ mmry_foundation_directive_read_v() {
     _MMRY_FND_DIRECTIVE_TEXT="$body"
     return 0
 }
-# The block every Claude Code and Codex delivery opens with, into _MMRY_FND_DIRECTIVE_BLOCK: the label,
-# then the service's words unchanged. The same label the connector uses (McpToolResponse, DD-196).
+# The block every Claude Code and Codex delivery carries, into _MMRY_FND_DIRECTIVE_BLOCK: the label, then
+# the service's words unchanged. At a session start it follows the "MMRY AI loaded" line (session-start.sh). The same label the connector uses (McpToolResponse, DD-196).
 mmry_foundation_directive_block_v() {
     _MMRY_FND_DIRECTIVE_BLOCK=""
     mmry_foundation_directive_read_v "$1" || return 1
