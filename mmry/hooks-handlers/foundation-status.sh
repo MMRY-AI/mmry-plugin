@@ -95,9 +95,9 @@ echo
 #    it is sent whether or not the account has Foundation directives, and whatever the switch below says,
 #    and it is not counted in any figure that follows.
 if mmry_foundation_directive_read_v "$MMRY_TMPDIR" 2>/dev/null; then
-    echo "MMRY's built-in directive: sent with every message, apart from your account's Foundation directives (version ${_MMRY_FND_DIRECTIVE_VERSION}, ${#_MMRY_FND_DIRECTIVE_TEXT} characters)."
+    echo "MMRY AI's built-in directive: sent with every message, separate from your account's Foundation directives (version ${_MMRY_FND_DIRECTIVE_VERSION}, ${#_MMRY_FND_DIRECTIVE_TEXT} characters)."
 else
-    echo "MMRY's built-in directive: not received from MMRY AI yet. Run ${_FS_RELOAD} to load it."
+    echo "MMRY AI's built-in directive: not received yet. Run ${_FS_RELOAD} to load it."
 fi
 echo
 

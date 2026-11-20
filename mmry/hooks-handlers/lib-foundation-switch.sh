@@ -180,7 +180,7 @@ _mmry_fnd_set_empty_notice() {
     # must not read as if nothing did. Said only when a kept copy is there to be delivered (builtins).
     if declare -F mmry_foundation_directive_read_v >/dev/null 2>&1 \
         && mmry_foundation_directive_read_v "${MMRY_TMPDIR:-${TMPDIR:-/tmp}}" 2>/dev/null; then
-        MMRY_FND_EMPTY_NOTICE="${MMRY_FND_EMPTY_NOTICE} MMRY's built-in directive is still sent with every message."
+        MMRY_FND_EMPTY_NOTICE="${MMRY_FND_EMPTY_NOTICE} MMRY AI's built-in directive is still sent with every message."
     fi
 }
 

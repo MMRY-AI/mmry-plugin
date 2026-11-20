@@ -54,7 +54,7 @@ mmry_foundation_directive_block_v "$_fd_dir" || exit 0
 _fd_block="$_MMRY_FND_DIRECTIVE_BLOCK"
 
 if [[ "$_fd_mode" == precompact ]]; then
-    printf '%s\n' "MMRY AI: keep MMRY's built-in directive in the summary word for word, exactly as written below, so it stays in force after it."
+    printf '%s\n' "MMRY AI: keep MMRY AI's built-in directive in the summary word for word, exactly as written below, so it stays in force after the conversation is shortened."
     printf '\n%s\n' "$_fd_block"
     exit 0
 fi

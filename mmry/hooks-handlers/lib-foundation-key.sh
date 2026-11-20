@@ -274,7 +274,7 @@ mmry_foundation_directive_read_v() {
 mmry_foundation_directive_block_v() {
     _MMRY_FND_DIRECTIVE_BLOCK=""
     mmry_foundation_directive_read_v "$1" || return 1
-    _MMRY_FND_DIRECTIVE_BLOCK="MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): ${_MMRY_FND_DIRECTIVE_TEXT}"
+    _MMRY_FND_DIRECTIVE_BLOCK="MMRY AI's built-in directive (supplied by MMRY AI to every account, separate from the account's own Foundation memories): ${_MMRY_FND_DIRECTIVE_TEXT}"
 }
 
 # WHETHER THE IDENTITY IS WHOLE (#32915): a credential AND a server address this session was actually
