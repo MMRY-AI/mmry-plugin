@@ -415,7 +415,7 @@ Do not ask before sending, and never choose for the customer. For an entry print
 ask the customer the question it carries, wait for their answer, and send that entry again with
 their answer as `visibility` and the printed `questionId`. A batch holds at most 25
 entries and 100,000 characters; for a long batch, write the array to a file and pass
-`--entries-file <path>` instead of `--entries`. `query-entries.sh` answers how many, which ones and in what order from the
+`--entries-file <path>` instead of `--entries`. `save-entry.sh` takes `--fields-file <path>` the same way, for fields too long for one command line. `query-entries.sh` answers how many, which ones and in what order from the
 values; on a database with many fields, add `--fields key,key` to get only the fields the question
 needs and `--no-note` to leave out each entry's words, and a page then holds more entries (a key the
 database does not declare is refused with the keys it does declare; filters and `--order` may use
