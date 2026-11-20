@@ -143,6 +143,7 @@ tests/handlers/mcp-server.bats
 tests/handlers/plan-accepted.bats
 tests/handlers/precompact-check.bats
 tests/handlers/qa-killers.bats
+tests/handlers/save-entry-fields-file.bats
 tests/handlers/save-memory.bats
 tests/handlers/save-supersede.bats
 tests/handlers/search-memories.bats
@@ -277,6 +278,7 @@ tests/structural/test-isolation.bats
 tests/structural/trimmed-tool-list.bats
 tests/unit/account-key-no-collision.bats
 tests/unit/auth-header.bats
+tests/unit/client-caller-options.bats
 tests/unit/codex-claude-config-isolation.bats
 tests/unit/config-loading.bats
 tests/unit/foundation-cache-write.bats

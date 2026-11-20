@@ -64,7 +64,7 @@ echo "$MMRY_RESPONSE"
 
 Available functions: `mmry_create_memory`, `mmry_get_memories`, `mmry_get_startup_memories`, `mmry_get_memory_by_id`, `mmry_search_memories`, `mmry_deactivate_memory`, `mmry_register_session`, `mmry_get_active_sessions`, `mmry_get_my_groups`, `mmry_health`, and for the AI database `mmry_list_databases`, `mmry_get_database`, `mmry_create_database`, `mmry_revise_database`, `mmry_rename_database`, `mmry_retire_database`, `mmry_reinstate_database`, `mmry_save_entry`, `mmry_save_entries`, `mmry_get_entries`, `mmry_get_entry_history`.
 
-After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result.
+After each call, check `$MMRY_HTTP_CODE` and `$MMRY_RESPONSE` for the result. Sourcing the client leaves your shell's `errexit`, `nounset` and `pipefail` as they were, so a refused call returns non-zero with the server's reason in `$MMRY_RESPONSE` instead of ending your script.
 
 ## Your AI Database
 
@@ -200,6 +200,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/save-entry.sh" \
 `text.degraded` means the words were saved and the fields were not.
 An update changes **only** the fields you send; anything you leave out keeps its current value,
 and sending a field as `null` clears it.
+Fields too long for one command line (Windows stops at 32,767 characters, and an entry can hold far more) go in a file: write the JSON object to a file and pass `--fields-file <path>` instead of `--fields`.
 
 ### Changing a database that already exists
 
