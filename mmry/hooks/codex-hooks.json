@@ -81,6 +81,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" foundation-directive",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}hooks-handlerscodex-hook.cmd\" foundation-directive",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "sh -c 'for f in \"${TMPDIR:-/tmp}\"/.mmry-formation-*; do case \"${f##*/}\" in .mmry-formation-cs-*) continue ;; .mmry-formation-poll-*) continue ;; .mmry-formation-handover-*) continue ;; .mmry-formation-renewed-*) continue ;; esac; if [ -f \"$f\" ]; then exec sh \"$@\"; fi; done; exit 0' mmry-formation-gate \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" formation-check",
             "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" formation-check",
             "timeout": 15

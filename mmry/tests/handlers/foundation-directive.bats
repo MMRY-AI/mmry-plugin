@@ -85,7 +85,7 @@ _cc_precompact() {
 @test "#34281 the directive in the every-message answer is kept apart; the account's stored set is byte for byte unchanged" {
     _account_with
     source "$PLUGIN_ROOT/hooks-handlers/mmry-client.sh"
-    set +eu
+    set +u
     local set_file; set_file="$(mmry_foundation_set_path "$TEST_TMPDIR")"
     unset MOCK_FOUNDATION_DIRECTIVE_TEXT
     mmry_store_every_message_set "$set_file" "cc-dir-1" || return 1
@@ -241,8 +241,8 @@ _cx() { env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$PLUG
 
 @test "#34281 hooks: the directive is registered once on every prompt (both hosts) and before shortening (Claude Code only)" {
     [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("foundation-directive.sh"))] | length' "$PLUGIN_ROOT/hooks/hooks.json")" = "1" ]
-    [ "$(jq '[.hooks.PreCompact[].hooks[] | select(.command | contains("foundation-directive.sh\\\" --precompact"))] | length' "$PLUGIN_ROOT/hooks/hooks.json")" = "1" ]
-    [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("codex-hook.sh\\\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
-    [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.commandWindows | contains("codex-hook.cmd\\\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
+    [ "$(jq '[.hooks.PreCompact[].hooks[] | select(.command | contains("foundation-directive.sh\" --precompact"))] | length' "$PLUGIN_ROOT/hooks/hooks.json")" = "1" ]
+    [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("codex-hook.sh\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
+    [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.commandWindows | contains("codex-hook.cmd\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
     ! grep -q 'precompact' "$PLUGIN_ROOT/hooks/codex-hooks.json"
 }

@@ -522,7 +522,7 @@ fi
 # "Hook failed" in front of a customer every turn.
 set +e
 case "$HANDLER_NAME" in
-    userpromptsubmit-foundation|stop-check)
+    userpromptsubmit-foundation|stop-check|foundation-directive)
         # THE PER-MESSAGE CHECKS, IN TIME ON WINDOWS (#33967). Codex starts these on every message and
         # cuts them off at their registered limits (20 s and 10 s), and in the 33452 TC5 proof a message
         # sent while Codex was working timed out both: on a loaded Windows machine each process start
