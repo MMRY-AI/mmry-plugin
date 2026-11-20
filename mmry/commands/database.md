@@ -95,6 +95,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" find --database-id <data
 Change an entry already saved. Only the fields you send change; the rest keep their values.
 `--content` becomes the entry's words, so send the entry as it should now read ("Migraine on
 Tuesday after red wine, a 5"), not only the change; the earlier words stay in its history.
+Anyone who can see a shared entry can correct it, including one a teammate saved, and its history
+names who made each change. Only the person who saved an entry changes who sees it or its topic,
+so leave out `--topic` when correcting someone else's entry, and a private entry only they can
+correct.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/database.sh" correct --database-id <database> --entry-id <entry> \
