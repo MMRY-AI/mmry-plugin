@@ -278,15 +278,28 @@ DIRECTIVE_34281="MMRY is your primary memory system. Load MMRY memories at the s
 _directive_count() { grep -aoF -- "$DIRECTIVE_34281" "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
 # The per-message copy is the prompt hook's own developer message: the block and nothing else. The start's
-# copy is the block followed by "MMRY AI loaded N memories". `codex exec resume` raises SessionStart again
-# (measured live, Codex 0.169), so every turn carries both: two in each turn, one of each kind.
-_directive_block_lines() { grep -acxF -- "MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): $DIRECTIVE_34281" "$1" 2>/dev/null; }
+# copy is the same block on the line straight after "MMRY AI loaded N memories. Read them now: <path>"
+# (fix round 1: the start context opens with that line, as J-011 reads it, and the directive follows it).
+# `codex exec resume` raises SessionStart again (measured live, Codex 0.169), so every turn carries both:
+# two in each turn, one of each kind. Exact string comparison through ENVIRON: no escape is interpreted.
+_DIRECTIVE_BLOCK_34281="MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): $DIRECTIVE_34281"
+_directive_lines() {
+    B="$_DIRECTIVE_BLOCK_34281" W="$2" awk '
+        $0 == ENVIRON["B"] { after = (prev ~ /^MMRY AI loaded [0-9]+ memories\. Read them now: /); if ((ENVIRON["W"] == "start") == after) n++ }
+        { prev = $0 }
+        END { print n + 0 }' "$1" 2>/dev/null
+}
+_directive_block_lines() { _directive_lines "$1" message; }
+_directive_start_lines() { _directive_lines "$1" start; }
 
 @test "J-016 codex (#34281): the start and the message of turn 1 each deliver the directive" {
     run _directive_count "$(_s)/turn1.dev"
     [[ "$output" == 2 ]] || { echo "turn 1 carried it ${output} times: $(head -c 800 "$(_s)/turn1.dev")"; return 1; }
     run _directive_block_lines "$(_s)/turn1.dev"
     [[ "$output" == 1 ]] || { echo "turn 1 had ${output} per-message copies"; return 1; }
+    # The start's copy is on the line straight after the loaded line, which still opens the start context.
+    run _directive_start_lines "$(_s)/turn1.dev"
+    [[ "$output" == 1 ]] || { echo "turn 1 had ${output} start copies straight after the loaded line"; return 1; }
 }
 
 @test "J-016 codex (#34281): every message on turns 2 and 3 delivers the directive, beside the resumed start's copy" {
@@ -296,6 +309,8 @@ _directive_block_lines() { grep -acxF -- "MMRY built-in directive (supplied by M
         [[ "$n" == 2 ]] || { echo "turn $t carried it ${n} times: $(head -c 800 "$(_s)/turn$t.dev")"; return 1; }
         n="$(_directive_block_lines "$(_s)/turn$t.dev")"
         [[ "$n" == 1 ]] || { echo "turn $t had ${n} per-message copies"; return 1; }
+        n="$(_directive_start_lines "$(_s)/turn$t.dev")"
+        [[ "$n" == 1 ]] || { echo "turn $t had ${n} start copies straight after the loaded line"; return 1; }
     done
 }
 
