@@ -117,19 +117,60 @@ _cc_precompact() {
 
 # ---- Claude Code --------------------------------------------------------------------------------
 
-@test "#34281 CC session start, the start after compaction and the reload command each deliver the directive once, first" {
+# THE START CONTEXT OPENS AS IT DID BEFORE THE DIRECTIVE (#34281 fix round 1, QA finding (a)1). J-011 reads
+# the start context as "MMRY AI loaded N memories. Read them now: <path>", with the path the rest of that
+# line. The directive comes after that line, on a line of its own, and before nothing of the account's: the
+# account's Foundation memories are in the file the line names, not in the context itself.
+BLOCK_PREFIX="MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): "
+_loaded_then_directive() {
+    local ctx="${1%|*}" first rest
+    first="${ctx%%$'\n'*}"
+    [[ "$first" =~ ^MMRY\ AI\ loaded\ [0-9]+\ memories\.\ Read\ them\ now:\ [^\ ]+$ ]] \
+        || { echo "the start context does not open with the loaded line, path to its end: ${ctx:0:300}"; return 1; }
+    [[ "$ctx" == *$'\n'* ]] || { echo "no line after the loaded line: ${ctx:0:300}"; return 1; }
+    rest="${ctx#*$'\n'}"
+    [[ "$rest" == "$BLOCK_PREFIX$DIRECTIVE" ]] || { echo "the line after the loaded line is not the directive block alone: ${rest:0:300}"; return 1; }
+}
+
+@test "#34281 CC session start, the start after compaction and the reload command each deliver the directive once, after the loaded line" {
     _account_with
     local out ctx
     for src in startup compact; do
         out="$(_cc_start cc-dir-1 "$src")"
         ctx="$(printf '%s' "$out" | _ctx)"
         [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "$src: $ctx"; return 1; }
-        [[ "$ctx" == "MMRY built-in directive"* ]] || { echo "$src: not first: ${ctx:0:200}"; return 1; }
+        _loaded_then_directive "$ctx" || { echo "($src)"; return 1; }
     done
     export CLAUDE_CODE_SESSION_ID="cc-dir-1"
     out="$(bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" --reload < /dev/null 2>/dev/null)"
     ctx="$(printf '%s' "$out" | _ctx)"
     [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "reload: $ctx"; return 1; }
+    _loaded_then_directive "$ctx" || { echo "(reload)"; return 1; }
+}
+
+@test "#34281 CC a fault note still comes first, then the loaded line, then the directive" {
+    _account_with
+    # A payload that cannot be read is the fault this file can raise without a network fault.
+    local out ctx
+    out="$(printf 'not json at all' | bash "$PLUGIN_ROOT/hooks-handlers/session-start.sh" 2>/dev/null)"
+    ctx="$(printf '%s' "$out" | _ctx)"
+    ctx="${ctx%|*}"
+    [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "$ctx"; return 1; }
+    local first="${ctx%%$'\n'*}"
+    [[ "$first" == *"MMRY AI loaded "*" memories. Read them now: "* ]] || { echo "loaded line: ${ctx:0:300}"; return 1; }
+    [[ "${first%%MMRY AI loaded *}" != "" ]] || skip "this payload raised no fault note here"
+    [[ "${ctx#*$'\n'}" == "$BLOCK_PREFIX$DIRECTIVE" ]] || { echo "after: ${ctx:0:400}"; return 1; }
+}
+
+@test "#34281 CC a fresh account is welcomed first, and the directive follows on a line of its own" {
+    printf '[]' > "$TEST_TMPDIR/mock-moments.json"
+    local out ctx
+    out="$(_cc_start cc-dir-fresh)"
+    ctx="$(printf '%s' "$out" | _ctx)"
+    ctx="${ctx%|*}"
+    [[ "$ctx" == "Welcome to MMRY AI. This is a fresh start"* ]] || { echo "not welcomed first: ${ctx:0:300}"; return 1; }
+    [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "$ctx"; return 1; }
+    [[ "${ctx#*$'\n'}" == "$BLOCK_PREFIX$DIRECTIVE" ]] || { echo "after the welcome: ${ctx:0:600}"; return 1; }
 }
 
 @test "#34281 CC every prompt delivers the directive as its own block, beside the account's set" {
@@ -160,6 +201,7 @@ _cc_precompact() {
     out="$(_cc_start)"
     ctx="$(printf '%s' "$out" | _ctx)"
     [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "$ctx"; return 1; }
+    _loaded_then_directive "$ctx" || return 1
     # The once-a-session notice says the built-in directive still comes.
     _holds "$ctx" "MMRY's built-in directive is still sent with every message" || { echo "notice: $ctx"; return 1; }
     local got; got="$(_cc_prompt)"
@@ -223,8 +265,9 @@ _cx() { env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$PLUG
     _account_without
     local out ctx turn
     out="$(printf '{"session_id":"cx-dir-1","hook_event_name":"SessionStart","source":"startup","cwd":"/w"}' | _cx session-init)"
-    ctx="$(printf '%s' "$out" | _ctx)"
+    ctx="$(printf '%s' "$out" | grep '^{' | tail -1 | _ctx)"
     [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "start: $out"; return 1; }
+    _loaded_then_directive "$ctx" || { echo "(codex start)"; return 1; }
     for turn in 1 2 3; do
         out="$(printf '{"session_id":"cx-dir-1","turn_id":"t%s","cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"hi"}' "$turn" | _cx foundation-directive)"
         ctx="$(printf '%s' "$out" | _ctx)"
