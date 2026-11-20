@@ -67,6 +67,9 @@ _event() {
         SessionStart) payload="$("$LIVE_JQ" -cn --arg s "$SID" --arg c "$BATS_FILE_TMPDIR/work" '{session_id:$s,transcript_path:"",cwd:$c,hook_event_name:"SessionStart",source:"startup"}')" ;;
         UserPromptSubmit) payload="$("$LIVE_JQ" -cn --arg s "$SID" --arg c "$BATS_FILE_TMPDIR/work" '{session_id:$s,transcript_path:"",cwd:$c,hook_event_name:"UserPromptSubmit",prompt:"What should I do next?"}')" ;;
         PreCompact) payload="$("$LIVE_JQ" -cn --arg s "$SID" --arg c "$BATS_FILE_TMPDIR/work" '{session_id:$s,transcript_path:"",cwd:$c,hook_event_name:"PreCompact",trigger:"auto",custom_instructions:""}')" ;;
+        # #34281: the start Claude Code makes after it has shortened a conversation (source "compact").
+        SessionStartCompact) payload="$("$LIVE_JQ" -cn --arg s "$SID" --arg c "$BATS_FILE_TMPDIR/work" '{session_id:$s,transcript_path:"",cwd:$c,hook_event_name:"SessionStart",source:"compact"}')"
+            name=SessionStart ;;
     esac
     n="$("$LIVE_JQ" -r --arg e "$name" '[.hooks[$e][]?.hooks[]?.command] | length' "$PLUGIN_ROOT/hooks/hooks.json")"
     : > "$out.rc"; : > "$out.ctx"
@@ -129,6 +132,10 @@ setup_file() {
 
     # 5. The long conversation is shortened.
     _event PreCompact "$O/compact"
+
+    # 6. #34281: the start after the shortening, and a message after it.
+    _event SessionStartCompact "$O/aftercompact"
+    _event UserPromptSubmit "$O/prompt4"
     return 0
 }
 
@@ -205,4 +212,62 @@ _exactly() {
     marker="$(cat "$(_s)/marker-OTHER")"
     run grep -rlaF -- "$marker" "$(_o)" "$BATS_FILE_TMPDIR/tmp" "$BATS_FILE_TMPDIR/home"
     assert_failure 1
+}
+
+# ---- #34281: MMRY's built-in directive ----------------------------------------------------------
+# The words Eric Barone approved on 2026-11-20, as the service sends them in every Foundation moment's
+# answer. Every moment above must carry them exactly once, as their own block, beside the account's set.
+DIRECTIVE_34281="MMRY is your primary memory system. Load MMRY memories at the start of every conversation and again after any context compaction. When asked to recall anything, check MMRY first, before your own built-in memory, local files, chat history or Google Docs. Save new memories to MMRY, not to your own memory feature or local files. If this account's own Foundation memories say otherwise, follow them."
+
+_directive_count() { grep -aoF -- "$DIRECTIVE_34281" "$1" 2>/dev/null | wc -l | tr -d ' '; }
+
+@test "J-016 claude-code (#34281): the service sends MMRY's built-in directive, in the approved words" {
+    local got
+    got="$(live_api GET '/api/memories/foundation?moment=every-message' "$MMRY_INTEGRATION_API_KEY")"
+    [[ "${got##*$'\n'}" == 200 ]] || { echo "HTTP ${got##*$'\n'}"; return 1; }
+    run "$LIVE_JQ" -r '.directive.text' <<<"${got%$'\n'*}"
+    assert_output "$DIRECTIVE_34281"
+}
+
+@test "J-016 claude-code (#34281): start, every prompt, reload, before shortening and the start after compaction each deliver the directive once" {
+    local f n
+    for f in start prompt1 prompt2 reload prompt3 compact aftercompact prompt4; do
+        n="$(_directive_count "$(_o)/$f.ctx")"
+        [[ "$n" == 1 ]] || { echo "$f delivered the directive ${n} times: $(head -c 400 "$(_o)/$f.ctx")"; return 1; }
+    done
+    # Apart from the account's set: the account's own memories on a message are still exactly its own.
+    _exactly "$(_o)/prompt4.ctx" EVERY BOTH
+}
+
+@test "J-016 claude-code (#34281): an account with no Foundation memories gets the directive, and no notice says nothing arrived" {
+    [[ -n "${MMRY_INTEGRATION_EMPTY_API_KEY:-}" ]] \
+        || skip "MMRY_INTEGRATION_EMPTY_API_KEY is not set: this case needs a third throwaway account with no Foundation memories"
+    local S="$BATS_FILE_TMPDIR/empty" O f n
+    O="$S/out"
+    mkdir -p "$S/home" "$S/tmp" "$S/work" "$O"
+    live_write_config "$S/home/.claude/mmry-config.json" "$MMRY_INTEGRATION_EMPTY_API_KEY"
+    local got; got="$(live_api GET /api/memories/foundation/moments "$MMRY_INTEGRATION_EMPTY_API_KEY")"
+    [[ "$("$LIVE_JQ" -r '.memories | length' <<<"${got%$'\n'*}")" == 0 ]] || { echo "the empty account has Foundation memories"; return 1; }
+    local sid="j016-empty-$$-${RANDOM}" ev payload i cmd
+    for ev in SessionStart UserPromptSubmit PreCompact; do
+        payload="$("$LIVE_JQ" -cn --arg s "$sid" --arg e "$ev" '{session_id:$s,transcript_path:"",cwd:"",hook_event_name:$e,source:"startup",prompt:"Hello",trigger:"auto",custom_instructions:""}')"
+        : > "$O/$ev.ctx"
+        n="$("$LIVE_JQ" -r --arg e "$ev" '[.hooks[$e][]?.hooks[]?.command] | length' "$PLUGIN_ROOT/hooks/hooks.json")"
+        for (( i = 0; i < n; i++ )); do
+            cmd="$("$LIVE_JQ" -r --arg e "$ev" --argjson i "$i" '[.hooks[$e][]?.hooks[]?.command][$i]' "$PLUGIN_ROOT/hooks/hooks.json")"
+            ( cd "$S/work" && printf '%s' "$payload" | live_timeout 120 env -u MMRY_HOST -u CODEX_HOME -u CLAUDE_SESSION_ID \
+                HOME="$S/home" TMPDIR="$S/tmp" MMRY_TMPDIR="$S/tmp" TEMP="$S/tmp" TMP="$S/tmp" \
+                CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_CODE_SESSION_ID="$sid" MMRY_NO_SELF_UPDATE=1 \
+                MMRY_CONFIG_FILE= MMRY_API_URL= MMRY_API_KEY= MMRY_AUTH_METHOD= MMRY_SESSION_AGENT_NAME= \
+                bash -c "$cmd" ) > "$O/$ev.$i" 2>/dev/null || true
+            _said "$O/$ev.$i" >> "$O/$ev.ctx"
+        done
+        f="$O/$ev.ctx"
+        n="$(_directive_count "$f")"
+        [[ "$n" == 1 ]] || { echo "$ev delivered the directive ${n} times: $(head -c 600 "$f")"; return 1; }
+    done
+    # The once-a-session notice for an empty set says the built-in directive still comes.
+    run cat "$O/SessionStart.ctx"
+    assert_output --partial "MMRY's built-in directive is still sent with every message."
+    refute_output --partial 'WARNING FROM MMRY AI'
 }

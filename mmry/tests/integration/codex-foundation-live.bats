@@ -271,3 +271,27 @@ _prompt_context() {
     run grep -rlaF -- "$marker" "$(_s)/rollout.jsonl" "$(_s)"/*.memories "$BATS_FILE_TMPDIR/tmp" "$CODEX_HOME/sessions"
     assert_failure 1
 }
+
+# ---- #34281: MMRY's built-in directive, in a real Codex conversation ----------------------------
+DIRECTIVE_34281="MMRY is your primary memory system. Load MMRY memories at the start of every conversation and again after any context compaction. When asked to recall anything, check MMRY first, before your own built-in memory, local files, chat history or Google Docs. Save new memories to MMRY, not to your own memory feature or local files. If this account's own Foundation memories say otherwise, follow them."
+
+_directive_count() { grep -aoF -- "$DIRECTIVE_34281" "$1" 2>/dev/null | wc -l | tr -d ' '; }
+
+@test "J-016 codex (#34281): the start and the message of turn 1 each deliver the directive" {
+    # Turn 1 is the conversation start and its first message: two deliveries, read from Codex's own record.
+    run _directive_count "$(_s)/turn1.dev"
+    [[ "$output" == 2 ]] || { echo "turn 1 carried it ${output} times: $(head -c 800 "$(_s)/turn1.dev")"; return 1; }
+}
+
+@test "J-016 codex (#34281): every message on turns 2 and 3 delivers the directive" {
+    local t n
+    for t in 2 3; do
+        n="$(_directive_count "$(_s)/turn$t.dev")"
+        [[ "$n" == 1 ]] || { echo "turn $t carried it ${n} times: $(head -c 800 "$(_s)/turn$t.dev")"; return 1; }
+    done
+}
+
+@test "J-016 codex (#34281): memory_load delivers the directive" {
+    run _directive_count "$(_s)/turn2.tools"
+    [[ "$output" -ge 1 ]] || { echo "memory_load's answer: $(head -c 800 "$(_s)/turn2.tools")"; return 1; }
+}
