@@ -4,6 +4,18 @@
 # Version: tracked in .claude-plugin/plugin.json, not here. This line said 2.2.0 while the
 # plugin shipped 2.8.0 (#31104 QA), which is what a hardcoded second copy of a version does.
 
+# THE CALLER'S SHELL OPTIONS ARE PUT BACK AT THE END OF THIS FILE (#34252). The repository convention
+# (file-integrity.bats) runs this file under set -euo pipefail, and until #34252 it left all three on in
+# the shell that sourced it. SKILL.md tells a customer's assistant to source this file for a custom call
+# and then read $MMRY_HTTP_CODE and $MMRY_RESPONSE; with errexit left on, a refused call (any non-2xx)
+# ended that shell at the call, so the reason the server gave was never read. The Journey Catalog writer
+# reported "an empty reply" for a save the API had refused in plain words (feedback 84). Every handler in
+# this directory sets -euo pipefail itself before sourcing, so for them nothing changes; a caller that
+# did not ask for errexit no longer gets it. lib-foundation-key.sh does the same (foundation-isolation.bats).
+_mmry_client_caller_opts="$-"
+_mmry_client_caller_pipefail=0
+[[ -o pipefail ]] && _mmry_client_caller_pipefail=1
+
 set -euo pipefail
 
 # Resolve a usable jq (system or bundled) before anything parses JSON. #30624.
@@ -2440,3 +2452,10 @@ mmry_health() {
 # ============================================================================
 
 [[ "${MMRY_CLIENT_DEFINE_ONLY:-}" == "1" ]] || mmry_load_config
+
+# The caller's errexit, nounset and pipefail, as they were before this file was sourced (#34252; see
+# the top of this file). A caller re-sourcing it keeps what it had at that moment.
+case "$_mmry_client_caller_opts" in *e*) ;; *) set +e ;; esac
+case "$_mmry_client_caller_opts" in *u*) ;; *) set +u ;; esac
+(( _mmry_client_caller_pipefail )) || set +o pipefail
+unset _mmry_client_caller_opts _mmry_client_caller_pipefail

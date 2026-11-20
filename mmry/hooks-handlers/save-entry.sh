@@ -18,6 +18,12 @@
 # Usage:
 #   bash save-entry.sh --database-id ID --content "the user's own words" [--fields JSON]
 #        [--topic T] [--scope S] [--entry-id ID] [--entry-name NAME]
+#   bash save-entry.sh --database-id ID --content "..." --fields-file PATH   # the same JSON, read from a file
+#
+# --fields-file is for fields too long for one command line (#34252). An entry may hold 200 values of
+# up to 4,000 characters each, and Windows caps a command line at 32,767 characters, so a large entry
+# could not be passed as --fields at all. The file is read with the read builtin and the request body
+# travels in a file (_mmry_request), so no command line carries it.
 
 set -euo pipefail
 
@@ -25,13 +31,14 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
 source "${PLUGIN_ROOT}/hooks-handlers/mmry-client.sh"
 
-DATABASE_ID="" CONTENT="" FIELDS="" TOPIC="" SCOPE="" ENTRY_ID="" ENTRY_NAME=""
+DATABASE_ID="" CONTENT="" FIELDS="" FIELDS_FILE="" HAVE_FIELDS="" TOPIC="" SCOPE="" ENTRY_ID="" ENTRY_NAME=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --database-id)   DATABASE_ID="$2"; shift 2 ;;
         --content)     CONTENT="$2"; shift 2 ;;
-        --fields)      FIELDS="$2"; shift 2 ;;
+        --fields)      FIELDS="$2"; HAVE_FIELDS=1; shift 2 ;;
+        --fields-file) FIELDS_FILE="$2"; shift 2 ;;
         --topic)       TOPIC="$2"; shift 2 ;;
         --scope)       SCOPE="$2"; shift 2 ;;
         --entry-id)   ENTRY_ID="$2"; shift 2 ;;
@@ -39,6 +46,18 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+
+if [[ -n "$FIELDS_FILE" ]]; then
+    if [[ -n "$HAVE_FIELDS" ]]; then
+        echo "Error: give the fields once, with --fields or with --fields-file, not both." >&2
+        exit 1
+    fi
+    if [[ ! -f "$FIELDS_FILE" || ! -r "$FIELDS_FILE" ]]; then
+        echo "Error: cannot read the fields file: ${FIELDS_FILE}" >&2
+        exit 1
+    fi
+    IFS= read -r -d "" FIELDS < "$FIELDS_FILE" || true
+fi
 
 if [[ -z "$DATABASE_ID" || -z "$CONTENT" ]]; then
     echo "Error: --database-id and --content are required. An entry is still a memory and still" >&2
