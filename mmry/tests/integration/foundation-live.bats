@@ -227,6 +227,11 @@ _directive_count() { grep -aoF -- "$DIRECTIVE_34281" "$1" 2>/dev/null | wc -l | 
     [[ "${got##*$'\n'}" == 200 ]] || { echo "HTTP ${got##*$'\n'}"; return 1; }
     run "$LIVE_JQ" -r '.directive.text' <<<"${got%$'\n'*}"
     assert_output "$DIRECTIVE_34281"
+    # Its label and supplied-by line, as approved (cmo-mmry, 1.37 copy item 2).
+    run "$LIVE_JQ" -r '.directive.label' <<<"${got%$'\n'*}"
+    assert_output "MMRY AI's built-in directive"
+    run "$LIVE_JQ" -r '.directive.suppliedBy' <<<"${got%$'\n'*}"
+    assert_output "Supplied by MMRY AI to every account. It cannot be edited or turned off."
 }
 
 @test "J-016 claude-code (#34281): start, every prompt, reload, before shortening and the start after compaction each deliver the directive once" {
@@ -268,6 +273,6 @@ _directive_count() { grep -aoF -- "$DIRECTIVE_34281" "$1" 2>/dev/null | wc -l | 
     done
     # The once-a-session notice for an empty set says the built-in directive still comes.
     run cat "$O/SessionStart.ctx"
-    assert_output --partial "MMRY's built-in directive is still sent with every message."
+    assert_output --partial " MMRY AI's built-in directive is still sent with every message."
     refute_output --partial 'WARNING FROM MMRY AI'
 }

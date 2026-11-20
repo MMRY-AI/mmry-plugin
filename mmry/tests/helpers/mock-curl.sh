@@ -313,7 +313,7 @@ case "$URL" in
             _mm_dir=""
             if [[ -n "${MOCK_FOUNDATION_DIRECTIVE_TEXT:-}" ]]; then
                 _mm_dt="${MOCK_FOUNDATION_DIRECTIVE_TEXT//\\/\\\\}"; _mm_dt="${_mm_dt//\"/\\\"}"
-                _mm_dir=',"directive":{"version":1,"label":"MMRY built-in directive (test mock)","text":"'"$_mm_dt"'","characters":'"${#MOCK_FOUNDATION_DIRECTIVE_TEXT}"',"readOnly":true,"suppliedBy":"Supplied by MMRY to every account. It cannot be edited or turned off."}'
+                _mm_dir=',"directive":{"version":1,"label":"MMRY built-in directive (test mock)","text":"'"$_mm_dt"'","characters":'"${#MOCK_FOUNDATION_DIRECTIVE_TEXT}"',"readOnly":true,"suppliedBy":"Supplied by MMRY AI to every account. It cannot be edited or turned off."}'
             fi
             _mm_moment="" _mm_start=""
             _mm_re1='[?&]moment=([A-Za-z-]+)' _mm_re2='[?&]foundationMoment=([A-Za-z-]+)'
@@ -354,7 +354,7 @@ case "$URL" in
                                     | {moment: $m, label: $m, memories: $s, count: ($s | length), characters: $c,
                                        reportAboveCharacters: 57000, overReportedSize: ($c > 57000)}
                                     + (if $dt == "" then {} else {directive: {version: 1, label: ("MMRY" + ([39] | implode) + "s built-in directive"), text: $dt,
-                                       characters: ($dt | length), readOnly: true, suppliedBy: "Supplied by MMRY to every account. It cannot be edited or turned off."}} end)' \
+                                       characters: ($dt | length), readOnly: true, suppliedBy: "Supplied by MMRY AI to every account. It cannot be edited or turned off."}} end)' \
                                     > "$OUTPUT_FILE" 2>/dev/null && _mm_written=1
                                 fi
                                 ;;

@@ -282,7 +282,7 @@ _directive_count() { grep -aoF -- "$DIRECTIVE_34281" "$1" 2>/dev/null | wc -l | 
 # (fix round 1: the start context opens with that line, as J-011 reads it, and the directive follows it).
 # `codex exec resume` raises SessionStart again (measured live, Codex 0.169), so every turn carries both:
 # two in each turn, one of each kind. Exact string comparison through ENVIRON: no escape is interpreted.
-_DIRECTIVE_BLOCK_34281="MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): $DIRECTIVE_34281"
+_DIRECTIVE_BLOCK_34281="MMRY AI's built-in directive (supplied by MMRY AI to every account, separate from the account's own Foundation memories): $DIRECTIVE_34281"
 _directive_lines() {
     B="$_DIRECTIVE_BLOCK_34281" W="$2" awk '
         $0 == ENVIRON["B"] { after = (prev ~ /^MMRY AI loaded [0-9]+ memories\. Read them now: /); if ((ENVIRON["W"] == "start") == after) n++ }

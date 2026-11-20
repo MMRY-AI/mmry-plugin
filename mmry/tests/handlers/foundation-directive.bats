@@ -121,7 +121,7 @@ _cc_precompact() {
 # the start context as "MMRY AI loaded N memories. Read them now: <path>", with the path the rest of that
 # line. The directive comes after that line, on a line of its own, and before nothing of the account's: the
 # account's Foundation memories are in the file the line names, not in the context itself.
-BLOCK_PREFIX="MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): "
+BLOCK_PREFIX="MMRY AI's built-in directive (supplied by MMRY AI to every account, separate from the account's own Foundation memories): "
 _loaded_then_directive() {
     local ctx="${1%|*}" first rest
     first="${ctx%%$'\n'*}"
@@ -192,7 +192,9 @@ _loaded_then_directive() {
     local got; got="$(_cc_precompact)"
     [ "$(_count "$got" "$DIRECTIVE")" = "1" ] || { echo "$got"; return 1; }
     _holds "$got" "EVERY-21" || return 1
-    _holds "$got" "word for word" || return 1
+    # The line the assistant reads before shortening, as approved (cmo-mmry, 1.37 copy item 2), word for word.
+    _holds "$got" "MMRY AI: keep MMRY AI's built-in directive in the summary word for word, exactly as written below, so it stays in force after the conversation is shortened." \
+        || { echo "$got"; return 1; }
 }
 
 @test "#34281 CC an account with no Foundation: start, every prompt and before shortening deliver it, and the notice does not say nothing arrived" {
@@ -203,7 +205,7 @@ _loaded_then_directive() {
     [ "$(_count "$ctx" "$DIRECTIVE")" = "1" ] || { echo "$ctx"; return 1; }
     _loaded_then_directive "$ctx" || return 1
     # The once-a-session notice says the built-in directive still comes.
-    _holds "$ctx" "MMRY's built-in directive is still sent with every message" || { echo "notice: $ctx"; return 1; }
+    _holds "$ctx" " MMRY AI's built-in directive is still sent with every message." || { echo "notice: $ctx"; return 1; }
     local got; got="$(_cc_prompt)"
     [ "$(_count "$got" "$DIRECTIVE")" = "1" ] || { echo "${got:0:800}"; return 1; }
     got="$(_cc_precompact)"
@@ -236,7 +238,7 @@ _loaded_then_directive() {
     _cc_start >/dev/null
     run bash "$PLUGIN_ROOT/hooks-handlers/foundation-directive.sh" < /dev/null
     [ "$status" -eq 0 ]
-    [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext' | tr -d '\r')" = "MMRY built-in directive (supplied by MMRY to every account, separate from the account's own Foundation memories): Say \"MMRY\" first. A back\\slash stays." ]
+    [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext' | tr -d '\r')" = "MMRY AI's built-in directive (supplied by MMRY AI to every account, separate from the account's own Foundation memories): Say \"MMRY\" first. A back\\slash stays." ]
 }
 
 @test "#34281 the status command reports the directive on a line of its own, also for an account with none" {
@@ -245,7 +247,7 @@ _loaded_then_directive() {
         "$acct"
         _cc_start >/dev/null
         run bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
-        _holds "$output" "MMRY's built-in directive: sent with every message, apart from your account's Foundation directives (version 1, ${#DIRECTIVE} characters)." \
+        _holds "$output" "MMRY AI's built-in directive: sent with every message, separate from your account's Foundation directives (version 1, ${#DIRECTIVE} characters)." \
             || { echo "$acct: $output"; return 1; }
     done
 }
@@ -299,8 +301,23 @@ _cx() { env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$PLUG
     _account_without
     printf '{"session_id":"cx-dir-2","hook_event_name":"SessionStart","source":"startup","cwd":"/w"}' | _cx session-init >/dev/null
     run env -u MMRY_CONFIG_FILE MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
-    _holds "$output" "MMRY's built-in directive: sent with every message, apart from your account's Foundation directives (version 1, ${#DIRECTIVE} characters)." \
+    _holds "$output" "MMRY AI's built-in directive: sent with every message, separate from your account's Foundation directives (version 1, ${#DIRECTIVE} characters)." \
         || { echo "$output"; return 1; }
     ! _holds "$output" "/mmry:" || { echo "a Claude Code command was named on Codex: $output"; return 1; }
 }
 
+# ---- The approved wording around the directive (cmo-mmry, 1.37 copy items 2 and 3) -----------------
+
+@test "#34281 the status command says the directive has not arrived yet, in the approved words, when none is kept" {
+    _account_with
+    unset MOCK_FOUNDATION_DIRECTIVE_TEXT
+    _cc_start cc-dir-nr >/dev/null
+    run bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
+    _holds "$output" "MMRY AI's built-in directive: not received yet. Run /mmry:load-memories to load it." \
+        || { echo "$output"; return 1; }
+}
+
+@test "#34281 the help bullets describe the directive in the approved words, on Claude Code and on Codex" {
+    grep -qxF -- "- **MMRY AI's built-in directive** is sent when a conversation starts, with every message, when memories are reloaded and before a long conversation is shortened, for every account, even one with no Foundation memories of its own. It tells Claude that MMRY AI is its primary memory: load MMRY AI memories when a conversation starts and again after it is shortened, check MMRY AI first when asked to recall something, and save new memories to MMRY AI. It is sent separately from your account's own Foundation memories, and where those say otherwise, they win. It is set by MMRY AI and cannot be edited or turned off." "$PLUGIN_ROOT/commands/help.md"         || { echo "help.md: $(grep -n "built-in directive" "$PLUGIN_ROOT/commands/help.md")"; return 1; }
+    grep -qxF -- "- **MMRY AI's built-in directive** is sent when a conversation starts, with every message and when your assistant reloads memories, for every account, even one with no Foundation directives of its own. It tells your assistant that MMRY AI is its primary memory: load MMRY AI memories when a conversation starts and again after it is shortened, check MMRY AI first when asked to recall something, and save new memories to MMRY AI. It is sent separately from your account's own Foundation directives, and where those say otherwise, they win. It is set by MMRY AI and cannot be edited or turned off." "$PLUGIN_ROOT/skills-codex/help/SKILL.md"         || { echo "SKILL.md: $(grep -n "built-in directive" "$PLUGIN_ROOT/skills-codex/help/SKILL.md")"; return 1; }
+}
