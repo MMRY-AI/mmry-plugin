@@ -244,6 +244,10 @@ _cx() { env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$PLUG
     [ "$(jq '[.hooks.PreCompact[].hooks[] | select(.command | contains("foundation-directive.sh\" --precompact"))] | length' "$PLUGIN_ROOT/hooks/hooks.json")" = "1" ]
     [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("codex-hook.sh\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
     [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.commandWindows | contains("codex-hook.cmd\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
+    # The Windows command names the launcher by its full path, as every other entry does. Found live: a
+    # first version lost the backslashes ("${PLUGIN_ROOT}hooks-handlerscodex-hook.cmd"), cmd could not
+    # find it, and the hook said nothing on any Codex message while every check above passed.
+    [ "$(jq '[.hooks[][].hooks[] | select(.commandWindows != null) | select((.commandWindows | startswith("cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" ")) | not)] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "0" ]
     ! grep -q 'precompact' "$PLUGIN_ROOT/hooks/codex-hooks.json"
 }
 

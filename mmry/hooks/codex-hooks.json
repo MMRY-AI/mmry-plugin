@@ -82,7 +82,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks-handlers/codex-hook.sh\" foundation-directive",
-            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}hooks-handlerscodex-hook.cmd\" foundation-directive",
+            "commandWindows": "cmd /d /c \"${PLUGIN_ROOT}\\hooks-handlers\\codex-hook.cmd\" foundation-directive",
             "timeout": 20
           }
         ]
