@@ -76,8 +76,9 @@ teardown_file() {
 _s() { printf '%s' "$BATS_FILE_TMPDIR/state"; }
 
 # The additionalContext the hook handed Claude Code, or nothing.
+# Reads the loaded line wherever it is, as codex-session-live.bats does: the start context also carries the built-in directive after it (#34281).
 _context() {
-    "$LIVE_JQ" -r '.hookSpecificOutput.additionalContext // empty' "$(_s)/hook.out" 2>/dev/null | tail -1
+    "$LIVE_JQ" -r '.hookSpecificOutput.additionalContext // empty' "$(_s)/hook.out" 2>/dev/null | grep -m1 'MMRY AI loaded [0-9]* memories'
 }
 
 # The memories file the context tells the assistant to read.
