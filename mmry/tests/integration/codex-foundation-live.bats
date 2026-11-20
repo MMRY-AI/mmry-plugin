@@ -170,7 +170,7 @@ setup_file() {
     if [[ -s "$S/state/start.file" ]]; then cp "$(cat "$S/state/start.file")" "$S/state/start.memories" 2>/dev/null || true; fi
     # Turn 2: the assistant reloads memories with MMRY's own tool.
     _turn 2 "$CX_BIN" exec resume "${exec_opts[@]}" -o "$S/state/turn2.last" "$thread" \
-        "Call the memory_load tool from the mmry_plugin MCP server exactly once, with no arguments. Do not run any shell commands. Then reply with the single word OK." || return 1
+        "Call the memory_load tool from the mmry_plugin MCP server exactly once, with no arguments, and print the complete text it returns, unchanged. Do not run any shell commands. Then reply with the single word OK." || return 1
     _memfile "$S/state/turn2.tools" > "$S/state/reload.file" || true
     if [[ -s "$S/state/reload.file" ]]; then cp "$(cat "$S/state/reload.file")" "$S/state/reload.memories" 2>/dev/null || true; fi
     # Turn 3: a message after the reload.

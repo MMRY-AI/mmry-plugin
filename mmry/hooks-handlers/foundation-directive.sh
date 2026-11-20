@@ -48,7 +48,44 @@ fi
 # shellcheck source=/dev/null
 source "${_fd_root}/hooks-handlers/lib-foundation-key.sh" >/dev/null 2>&1 || exit 0
 set +e +u
-mmry_foundation_directive_block_v "${MMRY_TMPDIR:-${TMPDIR:-/tmp}}" || exit 0
+_fd_dir="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
+
+# ON CODEX'S FIRST MESSAGE THE START CAN STILL BE RUNNING (#34281, measured live). `codex exec` starts the
+# first turn while the SessionStart hook is still loading, and the start keeps the directive only when
+# its answer arrives (6 s into turn 1 in the live proof), so this hook found no copy and said nothing on
+# that message; the start's own context carried it, but the message did not. So on Codex, with no copy
+# kept yet, it waits for THIS session's start while the start's hand-off marker
+# (.mmry-codex-late.<key>.<session>, codex-hook.sh) says it is still running: at most 12 s of the 20 the
+# hook is given, polling every quarter second. A start that has finished, failed or was never armed is
+# not waited for, so a service that sends no directive costs a later message nothing.
+_fd_wait_codex_start() {
+    declare -F mmry_host >/dev/null 2>&1 && [[ "$(mmry_host)" == "codex" ]] || return 1
+    local payload="" sid="" re='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,100})"' late pid state end
+    [[ -t 0 ]] && return 1
+    IFS= read -r -d '' -t 2 payload || true
+    [[ "$payload" =~ $re ]] || return 1
+    sid="${BASH_REMATCH[1]}"
+    # shellcheck source=/dev/null
+    source "${_fd_root}/hooks-handlers/lib-codex-key.sh" >/dev/null 2>&1 || return 1
+    set +e +u
+    mmry_codex_private_dir_v 2>/dev/null && mmry_codex_private_dir_ok 2>/dev/null || return 1
+    mmry_codex_session_part_v "$sid" 2>/dev/null || return 1
+    late="${_MMRY_CODEX_DIR}/.mmry-codex-late.${_MMRY_CODEX_SESSION_PART}"
+    end=$(( SECONDS + 12 ))
+    while (( SECONDS < end )); do
+        mmry_foundation_directive_block_v "$_fd_dir" && return 0
+        mmry_codex_own_file "$late" || break
+        pid="" state=""
+        { IFS= read -r pid; IFS= read -r state; } < "$late" 2>/dev/null || true
+        [[ "$state" == delivered || "$state" == none ]] && break
+        sleep 0.25 2>/dev/null || sleep 1 2>/dev/null
+    done
+    mmry_foundation_directive_block_v "$_fd_dir"
+}
+
+if ! mmry_foundation_directive_block_v "$_fd_dir"; then
+    [[ "$_fd_mode" == prompt ]] && _fd_wait_codex_start || exit 0
+fi
 _fd_block="$_MMRY_FND_DIRECTIVE_BLOCK"
 
 if [[ "$_fd_mode" == precompact ]]; then

@@ -96,7 +96,7 @@ _cc_precompact() {
     mmry_foundation_directive_name_v "$TEST_TMPDIR"
     [[ -f "$_MMRY_FND_DIRECTIVE_NAME" ]] || { echo "no directive file"; ls -a "$TEST_TMPDIR"; return 1; }
     local head body
-    { IFS= read -r head; IFS= read -r -d '' body; } < "$_MMRY_FND_DIRECTIVE_NAME"
+    { IFS= read -r head; IFS= read -r -d '' body; } < "$_MMRY_FND_DIRECTIVE_NAME" || true
     [ "$head" = "mmry-directive v1 version=1" ] || { echo "head: $head"; return 1; }
     [ "$body" = "$DIRECTIVE" ] || { echo "body: $body"; return 1; }
     ! _holds "$(cat "$set_file")" "primary memory system" || { echo "the directive leaked into the account set"; return 1; }
@@ -245,4 +245,59 @@ _cx() { env -u MMRY_CONFIG_FILE -u MMRY_HOST CODEX_HOME="$CODEX_DIR" bash "$PLUG
     [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("codex-hook.sh\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
     [ "$(jq '[.hooks.UserPromptSubmit[].hooks[] | select(.commandWindows | contains("codex-hook.cmd\" foundation-directive"))] | length' "$PLUGIN_ROOT/hooks/codex-hooks.json")" = "1" ]
     ! grep -q 'precompact' "$PLUGIN_ROOT/hooks/codex-hooks.json"
+}
+
+@test "#34281 Codex: the status command reports the directive on a line of its own, for an account with none" {
+    _codex_env
+    _account_without
+    printf '{"session_id":"cx-dir-2","hook_event_name":"SessionStart","source":"startup","cwd":"/w"}' | _cx session-init >/dev/null
+    run env -u MMRY_CONFIG_FILE MMRY_HOST=codex CODEX_HOME="$CODEX_DIR" bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
+    _holds "$output" "MMRY's built-in directive: sent with every message, apart from your account's Foundation directives (version 1, ${#DIRECTIVE} characters)." \
+        || { echo "$output"; return 1; }
+    ! _holds "$output" "/mmry:" || { echo "a Claude Code command was named on Codex: $output"; return 1; }
+}
+
+# The hand-off marker codex-hook.sh arms for a start in flight, and the kept copy's name, for account A.
+_cx_paths() {
+    local out
+    out="$(
+        source "$PLUGIN_ROOT/hooks-handlers/lib-host.sh" >/dev/null 2>&1
+        source "$PLUGIN_ROOT/hooks-handlers/lib-foundation-key.sh"
+        source "$PLUGIN_ROOT/hooks-handlers/lib-codex-key.sh"
+        set +eu
+        export MMRY_HOST=codex CODEX_HOME="$CODEX_DIR"
+        mmry_codex_private_dir_v; mkdir -p -m 700 "$_MMRY_CODEX_DIR"
+        mmry_codex_session_part_v "$1" || exit 1
+        printf '%s|' "${_MMRY_CODEX_DIR}/.mmry-codex-late.${_MMRY_CODEX_SESSION_PART}"
+        MMRY_CONFIG_FILE="$CODEX_DIR/mmry-config.json"
+        mmry_foundation_directive_name_v "$TEST_TMPDIR"
+        printf '%s' "$_MMRY_FND_DIRECTIVE_NAME"
+    )" || return 1
+    LATE="${out%%|*}"
+    KEPT="${out#*|}"
+}
+
+@test "#34281 Codex first message: while this session's start is still running, the prompt hook waits for the directive" {
+    _codex_env
+    _cx_paths cx-dir-3 || return 1
+    [[ -n "$KEPT" && -n "$LATE" ]] || return 1
+    rm -f "$KEPT"
+    printf '%s\n' 4242 > "$LATE"   # armed: the start is in flight
+    ( sleep 6; printf 'mmry-directive v1 version=1\n%s' "$DIRECTIVE" > "$KEPT"; printf '4242\ndelivered\n' > "$LATE" ) &
+    local t0=$SECONDS out
+    out="$(printf '{"session_id":"cx-dir-3","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | _cx foundation-directive)"
+    wait
+    _holds "$(printf '%s' "$out" | _ctx)" "$DIRECTIVE" || { echo "out: $out"; return 1; }
+    (( SECONDS - t0 < 12 )) || { echo "waited $((SECONDS - t0)) s"; return 1; }
+}
+
+@test "#34281 Codex: with the start finished and no directive kept, the prompt hook does not wait" {
+    _codex_env
+    _cx_paths cx-dir-4 || return 1
+    rm -f "$KEPT"
+    printf '4242\ndelivered\n' > "$LATE"
+    local t0=$SECONDS out
+    out="$(printf '{"session_id":"cx-dir-4","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | _cx foundation-directive)"
+    [ -z "$out" ] || { echo "$out"; return 1; }
+    (( SECONDS - t0 < 6 )) || { echo "took $((SECONDS - t0)) s"; return 1; }
 }
