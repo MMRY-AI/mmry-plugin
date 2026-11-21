@@ -12,8 +12,9 @@
 # is missing from this output that is a defect and not tidiness.
 #
 # IT CONTAINS NO MESSAGES. Anything said to one recipient was said to that recipient, and this
-# record is readable by people who were never in the formation. If the user asks why something
-# somebody transmitted is not in the report, that is the answer.
+# record is read by every current member and by the person who started the formation (#31854:
+# nobody else; the service answers anyone else 404). If the user asks why something somebody
+# transmitted is not in the report, that is the answer.
 #
 # READABLE BEFORE THE FORMATION IS CLOSED OUT, deliberately, so the lead can check the record
 # before writing the summary that goes with it.
@@ -63,7 +64,7 @@ if ! mmry_get_formation_close_out "$formation_id"; then
     if [[ "${MMRY_HTTP_CODE:-0}" == "000" ]]; then
         echo "Could not reach the service. ${MMRY_RESPONSE:-}"
     elif [[ "${MMRY_HTTP_CODE:-0}" == "404" ]]; then
-        echo "Formation ${formation_id} does not exist, or it belongs to another account."
+        echo "Formation ${formation_id} does not exist, or it belongs to another account, or this session is not a current member of it."
     else
         echo "Could not read the record for formation ${formation_id} (HTTP ${MMRY_HTTP_CODE:-0}). ${MMRY_RESPONSE:-}"
     fi

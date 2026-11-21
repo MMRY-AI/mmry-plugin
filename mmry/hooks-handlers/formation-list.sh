@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # formation-list.sh - show this account's active formations, so a join does not need a guessed id.
+#
+# NAMES ONLY (#31854, DD-198). The list is how a session finds a formation to join, so every live
+# formation on the account is in it, by id and name and nothing else. Who is in a formation, how
+# many, and what they are saying belong to its members: the service sends none of that here from
+# 1.38, and this script prints none of it whatever it is sent. A service older than 1.38 calls the
+# name "objective" and adds member counts; the name is read from either field and the counts are
+# never printed.
 set -euo pipefail
 
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +42,7 @@ fi
 
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
     if type == "array" then
-        .[] | "  " + (.id | tostring) + "  " + (.objective // "(no objective)")
-              + "  (" + ((.activeMemberCount // 0) | tostring) + " active member(s))"
-    else empty end' 2>/dev/null || echo "$MMRY_RESPONSE"
+        .[] | "  " + (.id | tostring) + "  " + (.name // .objective // "")
+    else empty end' 2>/dev/null || { echo "The service answered, but the list could not be read."; exit 1; }
+echo "The list shows each formation's id and name. Join one to see its members and messages."
 exit 0

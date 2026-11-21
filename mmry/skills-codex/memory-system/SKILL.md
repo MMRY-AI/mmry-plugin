@@ -199,6 +199,10 @@ point.
 > The connector tools are fine for reading. `mmry_formation_list` and `mmry_formation_status`
 > answer questions without changing anything. It is joining and leaving that must go through this
 > plugin's tools.
+>
+> `mmry_formation_list` shows every Formation running on the account by id and name only.
+> Everything else about a Formation is shown only to its current members and the person who
+> started it.
 
 A formation carries messages between assistant sessions that cannot otherwise see each other, so
 two people's assistants can work the same job without colliding.
@@ -368,6 +372,11 @@ bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-list.sh"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" "src/Billing"
 bash "${CODEX_HOME:-$HOME/.codex}/mmry/hooks-handlers/formation-claim.sh" --list
 ```
+
+`formation-list.sh` shows the formations a customer can join. It prints each active formation's id
+and name and nothing else. A formation's members, messages, claimed areas, work queue and close-out
+record are shown only to its current members and the person who started it; for anyone else the
+formation is not found.
 
 They were left undocumented here until #31245 QA round 6 because the instructions they printed
 named typed slash commands. Those messages are derived from the host now, and where one names an
