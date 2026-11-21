@@ -308,6 +308,13 @@ case "$URL" in
                 _mm_startup='[{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}]'
                 [[ -n "${MOCK_CURL_RESPONSE:-}" ]] && _mm_startup="$MOCK_CURL_RESPONSE"
             fi
+            # #34281: MMRY's built-in directive on each moment's answer, as the API sends it from #34281 on;
+            # only when MOCK_FOUNDATION_DIRECTIVE_TEXT is set, so a test written before it sees what it always saw.
+            _mm_dir=""
+            if [[ -n "${MOCK_FOUNDATION_DIRECTIVE_TEXT:-}" ]]; then
+                _mm_dt="${MOCK_FOUNDATION_DIRECTIVE_TEXT//\\/\\\\}"; _mm_dt="${_mm_dt//\"/\\\"}"
+                _mm_dir=',"directive":{"version":1,"label":"MMRY built-in directive (test mock)","text":"'"$_mm_dt"'","characters":'"${#MOCK_FOUNDATION_DIRECTIVE_TEXT}"',"readOnly":true,"suppliedBy":"Supplied by MMRY AI to every account. It cannot be edited or turned off."}'
+            fi
             _mm_moment="" _mm_start=""
             _mm_re1='[?&]moment=([A-Za-z-]+)' _mm_re2='[?&]foundationMoment=([A-Za-z-]+)'
             [[ "$URL" =~ $_mm_re1 ]] && _mm_moment="${BASH_REMATCH[1]}"
@@ -335,17 +342,19 @@ case "$URL" in
                                     _mm_mem='{"id":1,"topic":"Test Memory","content":"Test content","memoryTier":"Foundation","scope":"global","category":"Fact"}'
                                     case "$_mm_moment" in
                                         conversation-start|every-message)
-                                            printf '{"moment":"%s","label":"%s","memories":[%s],"count":1,"characters":27,"reportAboveCharacters":57000,"overReportedSize":false}' "$_mm_moment" "$_mm_moment" "$_mm_mem" > "$OUTPUT_FILE" ;;
+                                            printf '{"moment":"%s","label":"%s","memories":[%s],"count":1,"characters":27,"reportAboveCharacters":57000,"overReportedSize":false%s}' "$_mm_moment" "$_mm_moment" "$_mm_mem" "$_mm_dir" > "$OUTPUT_FILE" ;;
                                         *)
-                                            printf '{"moment":"%s","label":"%s","memories":[],"count":0,"characters":0,"reportAboveCharacters":57000,"overReportedSize":false}' "$_mm_moment" "$_mm_moment" > "$OUTPUT_FILE" ;;
+                                            printf '{"moment":"%s","label":"%s","memories":[],"count":0,"characters":0,"reportAboveCharacters":57000,"overReportedSize":false%s}' "$_mm_moment" "$_mm_moment" "$_mm_dir" > "$OUTPUT_FILE" ;;
                                     esac
                                     _mm_written=1
                                 else
-                                _mm_jq -c --argjson derived "$_mm_derived" --arg m "$_mm_moment" "$_mm_prelude"'
+                                _mm_jq -c --argjson derived "$_mm_derived" --arg m "$_mm_moment" --arg dt "${MOCK_FOUNDATION_DIRECTIVE_TEXT:-}" "$_mm_prelude"'
                                     data | [.[] | select(.memoryTier == "Foundation" and (.moments | index($m))) | del(.moments)] as $s
                                     | chars($s) as $c
                                     | {moment: $m, label: $m, memories: $s, count: ($s | length), characters: $c,
-                                       reportAboveCharacters: 57000, overReportedSize: ($c > 57000)}' \
+                                       reportAboveCharacters: 57000, overReportedSize: ($c > 57000)}
+                                    + (if $dt == "" then {} else {directive: {version: 1, label: ("MMRY" + ([39] | implode) + "s built-in directive"), text: $dt,
+                                       characters: ($dt | length), readOnly: true, suppliedBy: "Supplied by MMRY AI to every account. It cannot be edited or turned off."}} end)' \
                                     > "$OUTPUT_FILE" 2>/dev/null && _mm_written=1
                                 fi
                                 ;;

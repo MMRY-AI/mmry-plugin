@@ -15,6 +15,7 @@ MMRY AI is your memory. It remembers your decisions, conventions, preferences an
 
 - **When a session starts**, your memories load on their own.
 - **On the moments your account chooses**, your Foundation directives, the standing instructions your account administrator keeps for everyone, are sent to your assistant: when a conversation starts, with every message, and when the assistant reloads memories. Your account administrator ticks the moments for each one on the Foundation Memories page in the MMRY AI portal.
+- **MMRY AI's built-in directive** is sent when a conversation starts, with every message and when your assistant reloads memories, for every account, even one with no Foundation directives of its own. It tells your assistant that MMRY AI is its primary memory: load MMRY AI memories when a conversation starts and again after it is shortened, check MMRY AI first when asked to recall something, and save new memories to MMRY AI. It is sent separately from your account's own Foundation directives, and where those say otherwise, they win. It is set by MMRY AI and cannot be edited or turned off.
 - **While you work**, messages from a Formation you are in arrive after your assistant's next action.
 - **When there is unsaved work**, your assistant is prompted to save what is new.
 

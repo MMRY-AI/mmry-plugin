@@ -812,16 +812,20 @@ mmry_write_foundation_cache() {
         local set_text="" total="" report=""
         MMRY_FND_RESPONSE_LENGTH=""
         MMRY_FND_MOMENT_REPORT=""
-        if ! "$MMRY_JQ" ${jqb:+"$jqb"} -r "${_MMRY_FND_MOMENT_JQ}"' | ($m | length | tostring), $rep, ([$m[] | select(.memoryTier == "Foundation")] | (length | tostring), (.[] | "- \(.topic): \(.content)"))' <<<"$resp" \
+        # #34281: and MMRY's built-in directive the answer carries, its version and its text on one line
+        # each (MMRY_FND_DIRECTIVE_V and _T), in the same jq: no process for it on Codex's start.
+        if ! "$MMRY_JQ" ${jqb:+"$jqb"} -r "${_MMRY_FND_MOMENT_JQ}"' | ($m | length | tostring), $rep, ($r.directive.version // "" | tostring), ($r.directive.text // "" | tostring | gsub("[[:cntrl:]]"; " ")), ([$m[] | select(.memoryTier == "Foundation")] | (length | tostring), (.[] | "- \(.topic): \(.content)"))' <<<"$resp" \
             | LC_ALL=C tr '\000' '\377' \
             > "$tmp" 2>/dev/null
         then
             rm -f "$tmp" 2>/dev/null
             return 1
         fi
-        { IFS= read -r total; IFS= read -r report; IFS= read -r entries; IFS= read -r -d '' set_text; } < "$tmp" 2>/dev/null || true
+        local dv="" dt=""
+        { IFS= read -r total; IFS= read -r report; IFS= read -r dv; IFS= read -r dt; IFS= read -r entries; IFS= read -r -d '' set_text; } < "$tmp" 2>/dev/null || true
         total="${total%$'\r'}"
         report="${report%$'\r'}"
+        MMRY_FND_DIRECTIVE_V="${dv%$'\r'}" MMRY_FND_DIRECTIVE_T="${dt%$'\r'}"
         entries="${entries%$'\r'}"
         [[ "$total" =~ ^[0-9]+$ && "$entries" =~ ^[0-9]+$ ]] || { rm -f "$tmp" 2>/dev/null; return 1; }
         MMRY_FND_RESPONSE_LENGTH="$total"
@@ -924,6 +928,38 @@ mmry_refresh_foundation_cache() {
     mmry_store_every_message_set "$cache" "$sid"
 }
 
+# MMRY'S BUILT-IN DIRECTIVE, KEPT AS THE SERVICE LAST GAVE IT (#34281).
+#
+# Usage: mmry_keep_foundation_directive <version> <text>
+# The service sends one directive, the same for every account, in each Foundation moment's answer. It is
+# kept in mmry-foundation-directive.<key> (lib-foundation-key.sh), "mmry-directive v1 version=N" then the
+# text, apart from the account's set, and delivered from there at every moment (session-start.sh,
+# foundation-directive.sh). Nothing here writes or changes the account's set.
+#   - The same version and text as kept: nothing is written (no process on Codex's start).
+#   - New words: written to a staging name and renamed into place, owner-only, never through a link or
+#     into another user's file.
+#   - An answer with no directive (a service from before #34281): the kept copy is removed, so nothing
+#     is delivered that the service no longer says.
+mmry_keep_foundation_directive() {
+    local v="${1:-}" t="${2:-}" dir="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}" f cur="" want
+    mmry_foundation_directive_name_v "$dir"
+    f="$_MMRY_FND_DIRECTIVE_NAME"
+    [[ -n "$f" ]] || return 1
+    if [[ ! "$v" =~ ^[0-9]{1,6}$ || -z "${t//[[:space:]]/}" ]]; then
+        if [[ -e "$f" || -L "$f" ]]; then
+            mmry_foundation_writable_name "$f" && rm -f "$f" 2>/dev/null
+        fi
+        return 0
+    fi
+    mmry_foundation_writable_name "$f" || return 1
+    want="mmry-directive v1 version=${v}"$'\n'"${t}"
+    [[ -f "$f" ]] && { IFS= read -r -d '' cur < "$f" 2>/dev/null || true; }
+    [[ "$cur" == "$want" ]] && return 0
+    ( umask 077; printf '%s' "$want" > "${f}.w.$$" ) 2>/dev/null || { rm -f "${f}.w.$$" 2>/dev/null; return 1; }
+    mv -f "${f}.w.$$" "$f" 2>/dev/null || { rm -f "${f}.w.$$" 2>/dev/null; return 1; }
+    return 0
+}
+
 # THE MEMORIES SENT WITH EVERY MESSAGE ARE ASKED OF THE SERVICE, NEVER CHOSEN HERE (#33480, DD-172).
 #
 # Usage: mmry_store_every_message_set <cache-file> [session-id]
@@ -941,8 +977,19 @@ mmry_refresh_foundation_cache() {
 mmry_store_every_message_set() {
     local cache="$1" sid="${2:-}" total=""
     MMRY_FND_ACCOUNT_FOUNDATION=""
+    MMRY_FND_DIRECTIVE_V="" MMRY_FND_DIRECTIVE_T=""
     mmry_get_foundation_moment every-message >/dev/null 2>&1 || return 1
     mmry_write_foundation_cache "$MMRY_RESPONSE" "$cache" "$sid" || return 1
+    # #34281: MMRY's built-in directive, kept apart from the set just written. Codex's writer read it in
+    # its own jq; here one jq reads it. Best effort: a directive that cannot be kept changes nothing
+    # about the account's set.
+    if [[ "${_MMRY_HOST_V:-}" != "codex" ]]; then
+        { IFS= read -r MMRY_FND_DIRECTIVE_V; IFS= read -r MMRY_FND_DIRECTIVE_T; } < <("$MMRY_JQ" -r \
+            '(if type == "object" then (.directive.version // "" | tostring), (.directive.text // "" | tostring | gsub("[[:cntrl:]]"; " ")) else "", "" end)' \
+            <<<"$MMRY_RESPONSE" 2>/dev/null) || true
+        MMRY_FND_DIRECTIVE_V="${MMRY_FND_DIRECTIVE_V%$'\r'}" MMRY_FND_DIRECTIVE_T="${MMRY_FND_DIRECTIVE_T%$'\r'}"
+    fi
+    mmry_keep_foundation_directive "$MMRY_FND_DIRECTIVE_V" "$MMRY_FND_DIRECTIVE_T" || true
     if [[ "${MMRY_FND_WRITTEN_ENTRIES:-}" == "0" ]] && mmry_get_foundation_overview >/dev/null 2>&1; then
         total="$("$MMRY_JQ" -r '.memories | length' <<<"$MMRY_RESPONSE" 2>/dev/null)"
         total="${total%$'\r'}"

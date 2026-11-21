@@ -243,6 +243,39 @@ mmry_foundation_session_name_v() {
     [[ -n "$_MMRY_FND_ACCT" ]] || return 0
     _MMRY_FND_SESSION_NAME="${1}/mmry-foundation.session.${_MMRY_FND_ACCT}"
 }
+# MMRY'S BUILT-IN DIRECTIVE, AS THE SERVICE LAST GAVE IT (#34281): "<dir>/mmry-foundation-directive.<key>".
+# The same text for every account, but kept under the account-and-server key like every other Foundation
+# file, so a session pointed at another server never delivers what a different server said. Apart from
+# the account's set: it is never in mmry-foundation-set.<key>.md, its record or its parts.
+mmry_foundation_directive_name_v() {
+    mmry_foundation_account_key_v
+    _MMRY_FND_DIRECTIVE_NAME=""
+    [[ -n "$_MMRY_FND_ACCT" ]] || return 0
+    _MMRY_FND_DIRECTIVE_NAME="${1}/mmry-foundation-directive.${_MMRY_FND_ACCT}"
+}
+# The kept directive's text into _MMRY_FND_DIRECTIVE_TEXT and version into _MMRY_FND_DIRECTIVE_VERSION,
+# builtins only (the per-prompt hook reads it); both empty and 1 returned when there is none, or the
+# file is not this plugin's own (a link, another user's, or not in its format).
+mmry_foundation_directive_read_v() {
+    local f head="" body="" re='^mmry-directive v1 version=([0-9]{1,6})$'
+    _MMRY_FND_DIRECTIVE_TEXT="" _MMRY_FND_DIRECTIVE_VERSION=""
+    mmry_foundation_directive_name_v "$1"
+    f="$_MMRY_FND_DIRECTIVE_NAME"
+    [[ -n "$f" && -f "$f" && ! -L "$f" && -O "$f" && -r "$f" ]] || return 1
+    { IFS= read -r head; IFS= read -r -d '' body; } < "$f" 2>/dev/null
+    head="${head%$'\r'}"
+    [[ "$head" =~ $re && -n "$body" ]] || return 1
+    _MMRY_FND_DIRECTIVE_VERSION="${BASH_REMATCH[1]}"
+    _MMRY_FND_DIRECTIVE_TEXT="$body"
+    return 0
+}
+# The block every Claude Code and Codex delivery carries, into _MMRY_FND_DIRECTIVE_BLOCK: the label, then
+# the service's words unchanged. At a session start it follows the "MMRY AI loaded" line (session-start.sh). The same label the connector uses (McpToolResponse, DD-196).
+mmry_foundation_directive_block_v() {
+    _MMRY_FND_DIRECTIVE_BLOCK=""
+    mmry_foundation_directive_read_v "$1" || return 1
+    _MMRY_FND_DIRECTIVE_BLOCK="MMRY AI's built-in directive (supplied by MMRY AI to every account, separate from the account's own Foundation memories): ${_MMRY_FND_DIRECTIVE_TEXT}"
+}
 
 # WHETHER THE IDENTITY IS WHOLE (#32915): a credential AND a server address this session was actually
 # given, by the environment or by its config. The default server is applied above so that the set's

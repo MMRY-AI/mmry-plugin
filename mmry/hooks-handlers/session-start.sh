@@ -668,6 +668,26 @@ if (( _mmry_codex == 0 )) || [[ -n "$MMRY_HOOK_FAULT_NOTE" ]]; then
     MMRY_HOOK_FAULT_NOTE="$(_mmry_json_escape "$MMRY_HOOK_FAULT_NOTE")"
 fi
 
+# MMRY'S BUILT-IN DIRECTIVE, ON A LINE OF ITS OWN AFTER THE LOADED LINE (#34281). The service sent it with
+# the every-message answer asked for above, and mmry_store_every_message_set kept it; a start whose request
+# failed delivers the copy kept before. It goes on a start, a reload (--reload), the start after compaction
+# (SessionStart "compact" runs this file) and Codex's start, whose output codex-hook.sh hands over, on time
+# or with the first prompt. Also for an account with no Foundation memories of its own, and after the
+# fresh-start welcome.
+#
+# THE START CONTEXT STILL OPENS AS IT ALWAYS HAS (fix round 1, QA finding (a)1). J-011 on Claude Code and
+# Codex reads it as the fault note, if any (read first, #31385), then "MMRY AI loaded N memories. Read them
+# now: <path>", the path being the rest of that line (the rule Codex's late delivery keeps, #33062 fix round
+# 7). So the directive is not put in front of that line, nor on it: it follows it, after a newline, as its
+# own block. The account's own Foundation memories are not in this context (they are in the file the line
+# names and in the per-prompt parts), so nothing of the account's comes before it here.
+# Builtins only: Codex's start is held to a process count.
+_mmry_directive_ctx=""
+if mmry_foundation_directive_block_v "$MMRY_TMPDIR" 2>/dev/null; then
+    _mmry_directive_ctx="${_MMRY_FND_DIRECTIVE_BLOCK//\\/\\\\}"
+    _mmry_directive_ctx="\\n${_mmry_directive_ctx//\"/\\\"}"
+fi
+
 # First-session onboarding: detect zero memories
 # The fault note, when there is one, goes FIRST. Appended to the end of a long instruction block it
 # would be read after the model has already decided what to do with the turn (#31385).
@@ -690,9 +710,9 @@ if (( _mmry_fresh == 1 )); then
         _mmry_onboard_hint="they can always say remember this to save something new, or /mmry:help for a quick reference"
         _mmry_onboard_save="Use save-memory.sh with --working-dir and --session-id for each one."
     fi
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. %s When done, let them know %s."}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_save" "$_mmry_onboard_hint" "$EMPTY_SYSMSG"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sWelcome to MMRY AI. This is a fresh start — no memories yet. Help the user create their first Foundation memories through natural conversation. Ask them to tell you about themselves: who they are, what they build, what tools they use, and what matters to them. Listen, then save each piece as a Foundation/Initialization memory with an appropriate scope. Keep it conversational — not a checklist. %s When done, let them know %s.%s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$_mmry_onboard_save" "$_mmry_onboard_hint" "$_mmry_directive_ctx" "$EMPTY_SYSMSG"
 else
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path" "$EMPTY_SYSMSG"
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%sMMRY AI loaded %s memories. Read them now: %s%s"}%s}' "$MMRY_HOOK_FAULT_NOTE" "$count" "$escaped_path" "$_mmry_directive_ctx" "$EMPTY_SYSMSG"
 fi
 
 # ON CODEX, THE REGISTRATION COMES AFTER THE MEMORIES (#33062). The output is closed first: on Codex

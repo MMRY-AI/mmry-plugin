@@ -40,6 +40,7 @@ hooks-handlers/formation-state.sh
 hooks-handlers/formation-status.sh
 hooks-handlers/formation-waiting.sh
 hooks-handlers/foundation-cut.awk
+hooks-handlers/foundation-directive.sh
 hooks-handlers/foundation-status.sh
 hooks-handlers/hook-guard.sh
 hooks-handlers/lib-codex-key.sh
@@ -130,6 +131,7 @@ tests/handlers/formation-waiting.bats
 tests/handlers/foundation-31597-edges.bats
 tests/handlers/foundation-both-paths.bats
 tests/handlers/foundation-cross-surface.bats
+tests/handlers/foundation-directive.bats
 tests/handlers/foundation-in-time.bats
 tests/handlers/foundation-moments.bats
 tests/handlers/foundation-parts.bats

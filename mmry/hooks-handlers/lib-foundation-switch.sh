@@ -176,6 +176,12 @@ _mmry_fnd_set_empty_notice() {
     else
         MMRY_FND_EMPTY_NOTICE="MMRY AI: this account has no Foundation directives, so there are none to apply to your prompts in this session. Nothing is wrong, and this is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
     fi
+    # #34281: the account's own set is empty, but MMRY's built-in directive still arrives, so the notice
+    # must not read as if nothing did. Said only when a kept copy is there to be delivered (builtins).
+    if declare -F mmry_foundation_directive_read_v >/dev/null 2>&1 \
+        && mmry_foundation_directive_read_v "${MMRY_TMPDIR:-${TMPDIR:-/tmp}}" 2>/dev/null; then
+        MMRY_FND_EMPTY_NOTICE="${MMRY_FND_EMPTY_NOTICE} MMRY AI's built-in directive is still sent with every message."
+    fi
 }
 
 # How many Foundation memories the account has, as the service last said beside an empty

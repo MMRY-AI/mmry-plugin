@@ -91,6 +91,16 @@ STATUS="$(mmry_foundation_record_path "$MMRY_TMPDIR" "$_sid")"
 echo "MMRY AI - Foundation directive status"
 echo
 
+# 0. MMRY'S BUILT-IN DIRECTIVE (#34281), on a line of its own, before anything about the account's set:
+#    it is sent whether or not the account has Foundation directives, and whatever the switch below says,
+#    and it is not counted in any figure that follows.
+if mmry_foundation_directive_read_v "$MMRY_TMPDIR" 2>/dev/null; then
+    echo "MMRY AI's built-in directive: sent with every message, separate from your account's Foundation directives (version ${_MMRY_FND_DIRECTIVE_VERSION}, ${#_MMRY_FND_DIRECTIVE_TEXT} characters)."
+else
+    echo "MMRY AI's built-in directive: not received yet. Run ${_FS_RELOAD} to load it."
+fi
+echo
+
 # 1. Is re-injection switched on at all? A customer who turned it off, or inherited an
 #    environment that turned it off, should be told that first - everything below is moot.
 # THROUGH THE SAME ROUTINE THE HOOK OBEYS (#31583 QA round 4, finding 4a).

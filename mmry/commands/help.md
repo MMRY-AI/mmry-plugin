@@ -12,6 +12,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
 
 - **When a session starts**, your memories load automatically. Claude already knows your context.
 - **On the moments your account chooses**, your Foundation memories - your identity, values, and standards - are sent to Claude: when a conversation starts, with every message, when the assistant reloads memories, and before a long conversation is shortened. An account administrator ticks the moments for each one on the Foundation Memories page in the MMRY AI portal. One with nothing ticked is kept, but not sent.
+- **MMRY AI's built-in directive** is sent when a conversation starts, with every message, when memories are reloaded and before a long conversation is shortened, for every account, even one with no Foundation memories of its own. It tells Claude that MMRY AI is its primary memory: load MMRY AI memories when a conversation starts and again after it is shortened, check MMRY AI first when asked to recall something, and save new memories to MMRY AI. It is sent separately from your account's own Foundation memories, and where those say otherwise, they win. It is set by MMRY AI and cannot be edited or turned off.
 - **When a session ends**, Claude is prompted to save anything important before closing.
 - **When context gets compressed**, Claude saves a continuity note so nothing is lost.
 - **When a plan is accepted**, Claude saves it as a decision record.
