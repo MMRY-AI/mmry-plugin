@@ -122,6 +122,7 @@ tests/handlers/deactivate-memory.bats
 tests/handlers/entry-handlers.bats
 tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
+tests/handlers/formation-list-privacy.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats
 tests/handlers/formation-waiting-busy.bats
@@ -243,6 +244,7 @@ tests/structural/formation-list.bats
 tests/structural/formation-listen-docs.bats
 tests/structural/formation-listen-limit.bats
 tests/structural/formation-listening.bats
+tests/structural/formation-names-only-docs.bats
 tests/structural/formation-progress.bats
 tests/structural/formation-queue.bats
 tests/structural/formation-remove.bats
