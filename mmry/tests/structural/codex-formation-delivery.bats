@@ -312,3 +312,125 @@ FAKECURL
     [ "$status" -eq 0 ]
     [[ "$output" == *"FormationService.cs"* ]]
 }
+
+# ---------------------------------------------------------------------------------------------
+# J-019 ON CODEX, THE REST OF ITS OUTCOME (#31854, DD-198)
+#
+# The journey's outcome on Codex now also says: the formation list shows every live Formation by id
+# and name only, and a Formation's details are shown only to its current members and the person who
+# started it. Codex runs the same scripts as Claude Code, under MMRY_HOST=codex with the Codex
+# conversation's own session id, so what is proven here is that route: the list a Codex customer is
+# shown, and that each read of one formation is asked from the Codex session (the service answers
+# no other caller; its half is the API repository's formation-list-privacy suite).
+#
+# This fake records "METHOD URL", which the one above does not, so what is SENT is observed.
+# ---------------------------------------------------------------------------------------------
+
+_fake_recording_curl_dir() {
+    local dir="${BATS_TEST_TMPDIR}/fake-rec-bin"
+    mkdir -p "$dir"
+    cat > "${dir}/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+out=""; method="GET"; url=""; prev=""
+for arg in "$@"; do
+    case "$prev" in
+        -o) out="$arg" ;;
+        -X) method="$arg" ;;
+    esac
+    case "$arg" in http://*|https://*) url="$arg" ;; esac
+    prev="$arg"
+done
+printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
+code="${FAKE_CODE:-200}"; resp='{}'
+case "$method $url" in
+    "GET "*/api/formations/active*) resp="${FAKE_LIST:-[]}" ;;
+    "GET "*/transmissions/sent*) resp='{"formationId":4242,"member":true,"messages":[]}' ;;
+    "GET "*/transmissions*) resp='[]' ;;
+    "GET "*/api/formations/*/close-out*) resp='{"formationId":4242,"objective":"the codex job","members":[],"counts":{}}' ;;
+    "GET "*/api/formations/*) resp="${FAKE_ROSTER:-}" ;;
+esac
+[[ -n "$resp" ]] || resp='{}'
+[[ -n "$out" ]] && printf '%s' "$resp" > "$out"
+printf '%s' "$code"
+exit 0
+FAKECURL
+    chmod +x "${dir}/curl"
+    printf '%s' "$dir"
+}
+
+# Sets CODEX_ENV to the environment a Codex conversation runs a handler in: MMRY_HOST=codex, the
+# Codex session id, a Codex home holding its own credential, and no Claude Code session id.
+_as_codex() {
+    local bin; bin="$(_fake_recording_curl_dir)"
+    CODEX_SID="codex-thread-31854-$$"
+    CODEX_URLS="${BATS_TEST_TMPDIR}/codex-urls"
+    : > "$CODEX_URLS"
+    local home="${BATS_TEST_TMPDIR}/codex-31854-home"
+    mkdir -p "$home/.codex/mmry"
+    printf '%s' '{"apiUrl":"http://fake.invalid","authMethod":"apikey","apiKey":"codex-key"}' \
+        > "$home/.codex/mmry-config.json"
+    CODEX_ENV=(env -u MMRY_API_KEY -u MMRY_API_URL -u MMRY_CONFIG_FILE -u CLAUDE_PLUGIN_ROOT
+        -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID
+        HOME="$home" CODEX_HOME="$home/.codex" MMRY_HOST=codex CODEX_SESSION_ID="$CODEX_SID"
+        MMRY_NO_SELF_UPDATE=1 PATH="${bin}:${PATH}" FAKE_URL_LOG="$CODEX_URLS")
+}
+
+@test "31854 codex: the formation list shows every live formation by id and name only" {
+    _as_codex
+    run "${CODEX_ENV[@]}" FAKE_LIST='[{"id":4242,"name":"the codex job"},{"id":4243,"name":"the other job"}]' \
+        bash "${HANDLERS}/formation-list.sh"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"4242  the codex job"* ]] || return 1
+    [[ "$output" == *"4243  the other job"* ]] || return 1
+    [[ "$output" != *"member(s)"* ]] || return 1
+    [[ "$output" != *"no objective"* ]] || return 1
+    [[ "$output" == *"The list shows each formation's id and name. Join one to see its members and messages."* ]]
+}
+
+@test "31854 codex: a member count from an older service is not shown to a Codex customer" {
+    _as_codex
+    run "${CODEX_ENV[@]}" FAKE_LIST='[{"id":4242,"objective":"the codex job","memberCount":9,"activeMemberCount":9}]' \
+        bash "${HANDLERS}/formation-list.sh"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"4242  the codex job"* ]] || return 1
+    [[ "$output" != *"9"* ]]
+}
+
+@test "31854 codex: the roster read is asked from the Codex conversation's own session" {
+    _as_codex
+    "${CODEX_ENV[@]}" bash "${HANDLERS}/formation-state.sh" set 4242 "$CODEX_SID"
+    local roster='{"formation":{"id":4242,"objective":"the codex job"},"members":[{"id":31,"sessionId":"'"$CODEX_SID"'","userId":1,"email":"a@b.c","role":"Wingman","displayName":"Codex worker","assignment":null,"progress":null,"leftDate":null}]}'
+
+    run "${CODEX_ENV[@]}" FAKE_ROSTER="$roster" bash "${HANDLERS}/formation-roster.sh"
+    "${CODEX_ENV[@]}" bash "${HANDLERS}/formation-state.sh" clear "$CODEX_SID" || true
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Codex worker"* ]] || return 1
+    grep -qxF "GET http://fake.invalid/api/formations/4242?sessionId=${CODEX_SID}" "$CODEX_URLS"
+}
+
+@test "31854 codex: the close-out read is asked from the Codex conversation's own session" {
+    _as_codex
+    "${CODEX_ENV[@]}" bash "${HANDLERS}/formation-state.sh" set 4242 "$CODEX_SID"
+
+    run "${CODEX_ENV[@]}" bash "${HANDLERS}/formation-report.sh"
+    "${CODEX_ENV[@]}" bash "${HANDLERS}/formation-state.sh" clear "$CODEX_SID" || true
+
+    grep -qxF "GET http://fake.invalid/api/formations/4242/close-out?sessionId=${CODEX_SID}" "$CODEX_URLS"
+}
+
+@test "31854 codex: a formation this conversation is not in is reported as not found, with no roster" {
+    # What the service answers a caller that is neither a current member nor the starter: 404, the
+    # same as an id that does not exist.
+    _as_codex
+
+    run "${CODEX_ENV[@]}" FAKE_CODE=404 FAKE_ROSTER='{"error":"Formation not found."}' \
+        bash "${HANDLERS}/formation-roster.sh" 4243
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Formation 4243 was not found."* ]] || return 1
+    [[ "$output" == *"this session is not a current member of it"* ]] || return 1
+    grep -qxF "GET http://fake.invalid/api/formations/4243?sessionId=${CODEX_SID}" "$CODEX_URLS"
+}
