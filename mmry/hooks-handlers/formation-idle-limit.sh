@@ -86,7 +86,7 @@ if (( ok == 0 )); then
         server_said="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.error // .message // (.errors // {} | [.[]] | flatten | join(" ")) // empty' 2>/dev/null || true)"
     fi
     case "$code" in
-        400|403) [[ -n "$server_said" ]] && echo "$(clean "$server_said")" || echo "Refused (HTTP ${code}). Nothing was changed." ;;
+        400|403) [[ -n "$server_said" ]] && echo "$(clean "$server_said")" || echo "MMRY AI refused the change (HTTP ${code}). Nothing was changed." ;;
         404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Nothing was changed." ;;
         *)   echo "MMRY AI did not answer (HTTP ${code}), so nothing is confirmed. Run $(mmry_host_formation_ref idle-limit) to check the limit before trying again." ;;
     esac
