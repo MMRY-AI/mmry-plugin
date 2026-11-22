@@ -538,3 +538,43 @@ FAKECURL
     _marker 5
     _predicate "$SID" "$OUT/soon.payload" || { echo "a fresh marker was not obeyed"; return 1; }
 }
+
+# #34432 (DD-200 in MMRY-AI/mmry). A lead's renewal that carries the idle reminder is real work, so its
+# turn gets the Foundation set and the directive, even when a renewal-turn marker is live (a plain
+# renewal shortly before). It writes no marker of its own, and it carries neither "There is nothing to
+# act on and nothing to report." nor "Reply with: Still listening.", so the check-in rule fails safe.
+# Break: put "There is nothing to act on and nothing to report." back into the reminder renewal's text.
+@test "34432: a reminder renewal, as formation-check.sh really prints it, gets the Foundation set" {
+    local bin="$TEST_TMPDIR/bin34432" rc=0 text
+    mkdir -p "$bin"
+    cat > "$bin/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+out=""; prev=""; url=""
+for arg in "$@"; do
+    [[ "$prev" == "-o" ]] && out="$arg"
+    case "$arg" in http*) url="$arg" ;; esac
+    prev="$arg"
+done
+case "$url" in
+    */transmissions/sent*) body='{"formationId":4242,"member":true,"messages":[],"idleReminder":{"idleNoticeAfterSeconds":900,"members":[{"memberId":12}],"text":"IDLE MEMBERS STILL WAITING.\r\nThese members of this Formation have had no work for 15 minutes or more:\r\n  Member 12 >>> Seat A <<<: no work for 40 minutes"}}' ;;
+    *) body='[]' ;;
+esac
+[[ -n "$out" ]] && printf '%s' "$body" > "$out"
+printf '200'
+exit 0
+FAKECURL
+    chmod +x "$bin/curl"
+    bash "$HANDLERS/formation-state.sh" set 4242 "$SID"
+    env PATH="$bin:$PATH" CLAUDE_SESSION_ID="$SID" MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key \
+        MMRY_API_URL="http://fake.invalid" MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        bash "$HANDLERS/formation-check.sh" < /dev/null > /dev/null 2> "$OUT/reminder.txt" || rc=$?
+    bash "$HANDLERS/formation-state.sh" clear "$SID" || true
+    [ "$rc" -eq 2 ] || { echo "the watch did not renew: rc $rc: $(cat "$OUT/reminder.txt")"; return 1; }
+    [ ! -f "$TMPDIR/.mmry-renewal-turn-$SID" ] || { echo "a reminder renewal wrote a renewal-turn marker"; return 1; }
+    text="$(cat "$OUT/reminder.txt")"
+    [[ "$text" == *"members of this Formation are waiting for work."* ]] || { echo "unexpected watch text: $text"; return 1; }
+    # The worst case: a plain renewal's marker is still live.
+    _marker 5
+    _fire_payload reminder _payload "$(_wrapped "$text")"
+    _delivered reminder
+}

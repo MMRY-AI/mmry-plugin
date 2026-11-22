@@ -64,6 +64,7 @@ A Formation is several assistants working on one job together. We recommend lead
 - **Show the queue:** each piece, the host it needs, and who took it and when. (formation_queue_list)
 - **Take the queued piece you were offered.** It becomes your assignment. (formation_queue_take)
 - **Turn down the queued piece you were offered.** It goes back to the queue for the next member. (formation_queue_decline)
+- **Read or set how many minutes a member of this Formation can have no work before the lead is reminded.** Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 15. (formation_idle_limit)
 - Listing the Formations on your account and claiming an area to work on also work here, through MMRY's scripts. They have not been tested from Codex yet.
 
 ## Your Foundation directives

@@ -26,6 +26,7 @@ hooks-handlers/formation-assign.sh
 hooks-handlers/formation-check.sh
 hooks-handlers/formation-claim.sh
 hooks-handlers/formation-debrief.sh
+hooks-handlers/formation-idle-limit.sh
 hooks-handlers/formation-join.sh
 hooks-handlers/formation-leave.sh
 hooks-handlers/formation-list.sh
