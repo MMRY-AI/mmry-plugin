@@ -652,6 +652,12 @@ _limit() {
     [ "$status" -ne 0 ] && [ "$output" = "This Formation is no longer active, so it has no idle limit to set." ] || { echo "$output"; return 1; }
 }
 
+@test "L3b: a 403 with no body prints cmo-mmry's approved fallback (fix round 1, item 2) word for word" {
+    _limit 403 '' 20
+    [ "$status" -ne 0 ] || { echo "accepted: $output"; return 1; }
+    [ "$output" = "MMRY AI refused the change (HTTP 403). Nothing was changed." ] || { echo "$output"; return 1; }
+}
+
 @test "L4: the Codex tool server lists formation_idle_limit with the approved description and runs the same script" {
     local srv="${HANDLERS}/mcp-server.sh"
     grep -qF '"name": "formation_idle_limit"' "$srv"
