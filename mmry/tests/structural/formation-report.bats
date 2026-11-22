@@ -187,10 +187,10 @@ BODY
     PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$(_record_body)" FAKE_URL_LOG="$urls"         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid"         run bash "${HANDLERS}/formation-report.sh"
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"This session is not in a Formation. Give the id instead: "* ]]
-    [[ "$output" == *"Only the Formation's current members and the person who created it can read its record."* ]]
-    [[ "$output" != *"readable by anybody"* ]]
-    [[ "$output" != *"never a member"* ]]
+    [[ "$output" == *"This session is not in a Formation. Give the id instead: "* ]] || return 1
+    [[ "$output" == *"Only the Formation's current members and the person who created it can read its record."* ]] || return 1
+    [[ "$output" != *"readable by anybody"* ]] || return 1
+    [[ "$output" != *"never a member"* ]] || return 1
     [ ! -s "$urls" ]
 }
 

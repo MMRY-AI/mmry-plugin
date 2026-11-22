@@ -40,7 +40,7 @@ if [[ -z "$formation_id" ]]; then
     fi
     state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
     if [[ -z "$state" ]]; then
-        echo "This session is not in a formation. Give the id instead: $(mmry_host_formation_ref report '<formationId>'). The record is readable by anybody on the account, including somebody who was never a member."
+        echo "This session is not in a Formation. Give the id instead: $(mmry_host_formation_ref report '<formationId>'). Only the Formation's current members and the person who created it can read its record."
         exit 1
     fi
     formation_id="${state%% *}"
