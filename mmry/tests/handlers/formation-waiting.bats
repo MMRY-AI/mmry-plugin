@@ -729,3 +729,44 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
     [ -z "$output" ] || { echo "printed: $output"; return 1; }
     _cleared_once
 }
+
+# ---------------------------------------------------------------------------------------------
+# #31854: the roster read names the member's own session
+#
+# The service shows a Formation's roster only to a session that is a current member of it. The
+# handler's session comes from the hook's payload; the environment may carry none (Codex's
+# PermissionRequest) or another session's. The fake service here answers the roster only to a read
+# naming this member's own session, so each case below fails if the read names no session, an
+# empty one, or the environment's.
+
+_roster_reads() { grep -c '^GET .*/api/formations/4242' "$URLS" || true; }
+_roster_read_names_own_session() {
+    [ "$(_roster_reads)" -ge 1 ] || { echo "no roster read at all:"; cat "$URLS"; return 1; }
+    if grep -E '^GET .*/api/formations/4242(\?sessionId=)?$' "$URLS"; then echo "a roster read named no session, or an empty one"; return 1; fi
+    if grep -E '^GET .*/api/formations/4242' "$URLS" | grep -v -x -F "GET http://fake.invalid/api/formations/4242?sessionId=${SID}"; then
+        echo "a roster read named a session that is not the member's own (${SID})"; return 1
+    fi
+}
+
+@test "W-S1 31854: the roster read names the member's own session, and the lead is told" {
+    run _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _roster_read_names_own_session
+    [ "$(_puts)" -eq 1 ] || { echo "the lead was not told once:"; cat "$URLS"; return 1; }
+}
+
+@test "W-S2 31854: with no session id in the environment, the read still names the payload's session and the lead is told" {
+    run env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_SESSION_ID -u CODEX_SESSION_ID bash -c 'printf "%s" "$1" | bash "$2/formation-waiting.sh"' _ "$(_notification permission_prompt 'Claude needs your permission to use Bash')" "$HH"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _roster_read_names_own_session
+    [ "$(_puts)" -eq 1 ] || { echo "the lead was not told once:"; cat "$URLS"; return 1; }
+}
+
+@test "W-S3 31854: with another session's id in the environment, the read names the payload's session, not that one" {
+    run env CLAUDE_CODE_SESSION_ID="other-window-$$" bash -c 'printf "%s" "$1" | bash "$2/formation-waiting.sh"' _ "$(_notification permission_prompt 'Claude needs your permission to use Bash')" "$HH"
+    [ "$status" -eq 0 ]
+    _roster_read_names_own_session
+    [ "$(_puts)" -eq 1 ] || { echo "the lead was not told once:"; cat "$URLS"; return 1; }
+}

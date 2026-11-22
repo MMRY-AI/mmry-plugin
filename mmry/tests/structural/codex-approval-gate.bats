@@ -103,15 +103,21 @@ for arg in "$@"; do
     prev="$arg"
 done
 printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
-resp='{}'
+resp='{}'; code=200
 case "$method $url" in
-    "GET "*/api/formations/4242)
-        resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"Wingman","leftDate":null}]}' ;;
+    "GET "*/api/formations/4242|"GET "*/api/formations/4242"?sessionId="*)
+        # #31854: the roster is shown only to a read naming the member's OWN session, never an empty
+        # one. Anything else is the 404 a caller who is not a member gets.
+        if [[ -n "${FAKE_OWN_SID:-}" && "$url" == *"/api/formations/4242?sessionId=${FAKE_OWN_SID}" ]]; then
+            resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"Wingman","leftDate":null}]}'
+        else
+            code=404; resp='{"error":"Formation not found."}'
+        fi ;;
     "PUT "*/members/*/waiting)
         resp='{"formationId":4242,"memberId":31,"waiting":true,"waitingSince":"2026-11-18T14:05:00","toolName":"Bash","leadTold":true,"outcome":"Set"}' ;;
 esac
 [[ -n "$out" ]] && printf '%s' "$resp" > "$out"
-printf '200'
+printf '%s' "$code"
 exit 0
 FAKECURL
     chmod +x "$BIN/curl"
@@ -188,6 +194,11 @@ _run_real() {
     [[ -z "$output" ]] || { echo "printed (Codex would read it as a decision): $output"; return 1; }
     [[ "$(grep -c . "$WAITING_LOG")" -eq 1 ]] || { echo "formation-waiting.sh starts: $(cat "$WAITING_LOG")"; return 1; }
     [[ "$puts" -eq 1 ]] || { echo "expected one waiting call: $(cat "$FAKE_URL_LOG")"; return 1; }
+    # #31854: the roster read names this conversation's own session, from the payload. The
+    # environment carries no session id on this path, so a read that left it to the environment
+    # sent an empty sessionId and the lead was never told.
+    grep -qxF "GET http://fake.invalid/api/formations/4242?sessionId=${SID}" "$FAKE_URL_LOG" || { echo "the roster read did not name the member's own session: $(cat "$FAKE_URL_LOG")"; return 1; }
+    if grep -E '^GET .*/api/formations/4242(\?sessionId=)?$' "$FAKE_URL_LOG"; then echo "a roster read named no session, or an empty one"; return 1; fi
     [[ "$(grep -c '^PUT ' "$FAKE_URL_LOG")" -eq 1 ]] || { echo "more than one PUT: $(cat "$FAKE_URL_LOG")"; return 1; }
 }
 

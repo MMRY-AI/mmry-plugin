@@ -55,8 +55,14 @@ printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
 [[ -n "$body" ]] && printf '%s\n' "$body" >> "$FAKE_BODY_LOG"
 code=200; resp='{}'
 case "$method $url" in
-    "GET "*/api/formations/4242|"GET "*/api/formations/4242"?sessionId="*)   # #31854: the read names the session
-        resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"Wingman","leftDate":null}]}' ;;
+    "GET "*/api/formations/4242|"GET "*/api/formations/4242"?sessionId="*)
+        # #31854: the roster is shown only to a read naming the member's OWN session, never an empty
+        # one. Anything else is the 404 a caller who is not a member gets.
+        if [[ -n "${FAKE_OWN_SID:-}" && "$url" == *"/api/formations/4242?sessionId=${FAKE_OWN_SID}" ]]; then
+            resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"Wingman","leftDate":null}]}'
+        else
+            code=404; resp='{"error":"Formation not found."}'
+        fi ;;
     "PUT "*/members/*/waiting)
         resp='{"formationId":4242,"memberId":31,"waiting":true,"waitingSince":"2026-11-13T14:05:00","toolName":null,"leadTold":true,"outcome":"Set"}' ;;
     "DELETE "*/members/*/waiting*)
@@ -298,4 +304,45 @@ _cleared_once() {
     run _waiting "$(_notification 'Claude needs your permission to use Bash;')"
     [ -z "$output" ] || { echo "printed: $output"; return 1; }
     _told_once_unnamed "Bash;"
+}
+
+# ---------------------------------------------------------------------------------------------
+# #31854: the roster read names the member's own session
+#
+# The service shows a Formation's roster only to a session that is a current member of it. The
+# handler's session comes from the hook's payload; the environment may carry none (Codex's
+# PermissionRequest) or another session's. The fake service here answers the roster only to a read
+# naming this member's own session, so each case below fails if the read names no session, an
+# empty one, or the environment's.
+
+_roster_reads() { grep -c '^GET .*/api/formations/4242' "$URLS" || true; }
+_roster_read_names_own_session() {
+    [ "$(_roster_reads)" -ge 1 ] || { echo "no roster read at all:"; cat "$URLS"; return 1; }
+    if grep -E '^GET .*/api/formations/4242(\?sessionId=)?$' "$URLS"; then echo "a roster read named no session, or an empty one"; return 1; fi
+    if grep -E '^GET .*/api/formations/4242' "$URLS" | grep -v -x -F "GET http://fake.invalid/api/formations/4242?sessionId=${SID}"; then
+        echo "a roster read named a session that is not the member's own (${SID})"; return 1
+    fi
+}
+
+@test "G-S1 31854: the roster read names the member's own session, and the lead is told" {
+    run _waiting "$(_codex_ask apply_patch)"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _roster_read_names_own_session
+    [ "$(_puts)" -eq 1 ] || { echo "the lead was not told once:"; cat "$URLS"; return 1; }
+}
+
+@test "G-S2 31854: with no session id in the environment, the read still names the payload's session and the lead is told" {
+    run env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_SESSION_ID -u CODEX_SESSION_ID bash -c 'printf "%s" "$1" | bash "$2/formation-waiting.sh"' _ "$(_codex_ask apply_patch)" "$HH"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    _roster_read_names_own_session
+    [ "$(_puts)" -eq 1 ] || { echo "the lead was not told once:"; cat "$URLS"; return 1; }
+}
+
+@test "G-S3 31854: with another session's id in the environment, the read names the payload's session, not that one" {
+    run env CLAUDE_CODE_SESSION_ID="other-window-$$" bash -c 'printf "%s" "$1" | bash "$2/formation-waiting.sh"' _ "$(_codex_ask apply_patch)" "$HH"
+    [ "$status" -eq 0 ]
+    _roster_read_names_own_session
+    [ "$(_puts)" -eq 1 ] || { echo "the lead was not told once:"; cat "$URLS"; return 1; }
 }
