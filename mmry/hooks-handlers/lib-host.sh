@@ -701,6 +701,8 @@ _mmry_host_formation_tool() {
             fi
             ;;
         leave)  mmry_host_tool_ref formation_leave ;;
+        # #34432: the Formation's idle limit.
+        idle-limit) mmry_host_tool_ref formation_idle_limit ;;
         roster) mmry_host_tool_ref formation_roster ;;
         status) mmry_host_tool_ref formation_status ;;
         # #31789: the lead's operations are tools too. The example a usage line carries survives,

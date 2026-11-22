@@ -1163,17 +1163,32 @@ _fc_forget_membership() {
     return 0
 }
 
+# THE LEAD'S IDLE REMINDER (#34432, DD-200 in MMRY-AI/mmry). The renewal asks the same route with
+# withIdle=1, and the service answers idleReminder only to a live lead of an Active formation while a
+# member has had no work for the formation's idle limit. Its text is the server's (cmo-mmry's approved
+# wording); this script adds nothing to it. Untrusted text on a terminal, so it is cleaned as the wake
+# line is (formation-say.sh): every C0 and C1 control but newline and tab goes, carriage return
+# included, inside jq and again with tr, and it is cut at 4,000 characters. Read on the member-true
+# path only, so a member's renewal, and a lead's with nobody idle, costs nothing more.
+_fc_idle_reminder=""
+
 _idle_confirmed_member() {
     mmry_formation_state_read "$session_id" || return 1
     [[ "$MMRY_FS_FORMATION" == "$formation_id" ]] || return 1
     local MMRY_HTTP_MAX_TIME=10 MMRY_HTTP_CONNECT_TIMEOUT=5 attempt member=""
     for attempt in 1 2; do
-        if mmry_get_formation_sent "$formation_id" "$session_id" 2>/dev/null \
+        if mmry_get_formation_sent "$formation_id" "$session_id" 1 2>/dev/null \
             && [[ "${MMRY_HTTP_CODE:-}" =~ ^2[0-9][0-9]$ ]]; then
             member="$("$MMRY_JQ" -r 'if type == "object" and (.member | type) == "boolean" then (.member | tostring) else "unknown" end' \
                 <<< "${MMRY_RESPONSE:-}" 2>/dev/null || true)"
             member="${member%$'\r'}"
-            [[ "$member" == "true" ]] && return 0
+            if [[ "$member" == "true" ]]; then
+                _fc_idle_reminder="$("$MMRY_JQ" -r \
+                    'def clean: gsub("[\u0000-\u0008\u000b-\u001f\u007f-\u009f]"; ""); if type == "object" and (.idleReminder | type) == "object" and (.idleReminder.text | type) == "string" then (.idleReminder.text | clean | .[0:4000]) else empty end' \
+                    <<< "${MMRY_RESPONSE:-}" 2>/dev/null || true)"
+                _fc_idle_reminder="$(printf '%s' "$_fc_idle_reminder" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+                return 0
+            fi
             [[ "$member" == "false" ]] && { _fc_forget_membership; return 1; }
         fi
         # Only a request that never got an answer, or got a server fault, is worth asking again.
@@ -1538,7 +1553,9 @@ case "$mode" in
         printf '%s\n' "$_chain_since" > "${_renew_marker}/since" 2>/dev/null || true
         # And the turn this wakes is marked as a renewal, for the save prompt and the prompt check.
         # The clock as last read in the loop, no process; stop-check.sh only needs it to the minute.
-        printf '%s\n' "${_now:-$_idle_entry}" > "$_renew_turn" 2>/dev/null || true
+        # NOT FOR A REMINDER RENEWAL (#34432): a lead told of idle members has real work to do, so its
+        # turn is a typed turn to the save prompt, the prompt check and the Foundation skip (#32244).
+        [[ -n "$_fc_idle_reminder" ]] || printf '%s\n' "${_now:-$_idle_entry}" > "$_renew_turn" 2>/dev/null || true
         # TWO WORDS, NOT SILENCE. Asked to end its turn without replying, a model produced no output,
         # and Claude Code 2.1.285 answered that with a prompt of its own ("Your previous response had
         # no visible output...") - a second turn for every renewal, seen in the live run on #31721. A
@@ -1549,6 +1566,16 @@ case "$mode" in
             _quiet="${MMRY_IDLE_POLL_SECONDS} seconds"
         fi
         _renew_text="MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}. This session is still a member, so MMRY is renewing the background watch that keeps it listening while idle. There is nothing to act on and nothing to report. Reply with: Still listening. If you are waiting on the user's answer to a question, add that question on one more line; otherwise add nothing."
+        # THE LEAD'S IDLE REMINDER (#34432). With a reminder the renewal is real work: the header says
+        # members are waiting (cmo-mmry string 7), then the server's list, then how to remove a member
+        # and what to answer (string 8). Without one, the text above is unchanged, byte for byte: a
+        # member's renewal, and a lead's with nobody idle.
+        if [[ -n "$_fc_idle_reminder" ]]; then
+            _renew_text="MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}, but members of this Formation are waiting for work."
+            _renew_text+=$'\n'"${_fc_idle_reminder}"
+            _renew_text+=$'\n'"To remove a member from the Formation: /mmry:formation remove <member id>."
+            _renew_text+=$'\n''Answer by giving each named member its next piece of work or removing it. Do not reply "Still listening". If you are waiting on the user'"'"'s answer to a question, add that question on one more line.'
+        fi
         # A stop owed to the member, found when this watch started, is told on this turn (#33256).
         # With none, the text is exactly as before.
         if [[ -e "$_listen_notice" ]]; then

@@ -36,6 +36,7 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Show the queue: each piece, the host it needs, and who took it and when. | `formation_queue_list` | nothing |
 | Take the queued piece you were offered. It becomes your assignment. | `formation_queue_take` | `piece_id` |
 | Turn down the queued piece you were offered. It goes back to the queue for the next member. | `formation_queue_decline` | `piece_id` |
+| Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 15. | `formation_idle_limit` | optional `minutes` (1 to 1440); optional `use_default` (true for 15) |
 
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,
@@ -277,7 +278,7 @@ Each member is also given one rule for its own role:
 >
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 
-**The lead hears who is free.** A member with no active work for 15 minutes is named to the lead, up to three times, 30 minutes apart, and the roster marks it. A member's own Done asks the lead: Is there anything else I can do? A lead on Codex or a connected assistant sees this on its next action, not while idle.
+**The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 15 minutes by default, is named to the lead with how long it has had none, on every reminder until it is given work, is removed or leaves. A member that finished its work but went silent is named too. A lead on Claude Code is reminded each time its watch renews and each time a member reports Done to it; the notice that can wake it comes at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
 
 **The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member's assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.
 

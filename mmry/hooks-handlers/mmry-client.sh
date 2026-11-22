@@ -1987,15 +1987,21 @@ mmry_get_formation_transmissions() {
 }
 
 mmry_get_formation_sent() {
-    # Usage: mmry_get_formation_sent FORMATION_ID SESSION_ID
+    # Usage: mmry_get_formation_sent FORMATION_ID SESSION_ID [WITH_IDLE]
     #
     # The directed messages this session sent in the formation, newest first, each with whether its
     # recipient has been shown it (#31721). The answer also says whether the service still holds
     # this session in this formation ("member"), which is what the idle watch asks before it renews
     # itself: a member keeps listening for as long as it is in the formation, and no longer.
-    local formation_id="$1" session_id="$2"
+    #
+    # WITH_IDLE "1" (#34432, DD-200 in MMRY-AI/mmry) asks for the lead's idle reminder too
+    # (idleReminder, null for a member and when nobody is idle). Only the idle watch's renewal asks
+    # for it; the roster and the state calls leave it off and get exactly the answer they always did.
+    local formation_id="$1" session_id="$2" with_idle="${3:-}"
     _mmry_urlencode_v "$session_id"
-    _mmry_request GET "/api/formations/${formation_id}/transmissions/sent?sessionId=${_MMRY_URLENC}"
+    local path="/api/formations/${formation_id}/transmissions/sent?sessionId=${_MMRY_URLENC}"
+    [[ "$with_idle" == "1" ]] && path="${path}&withIdle=1"
+    _mmry_request GET "$path"
 }
 
 
@@ -2051,6 +2057,17 @@ mmry_remove_formation_member() {
 # suits its host on its own next check, and takes or declines it. Who may do what is the server's
 # decision (only the lead adds; a member takes or declines from its own session). Nothing here says
 # who is asking.
+
+mmry_set_formation_idle_limit() {
+    # Usage: mmry_set_formation_idle_limit FORMATION_ID MINUTES|null
+    #
+    # #34432 (DD-200 in MMRY-AI/mmry). Set the Formation's idle limit, 1 to 1440 minutes, or "null" to
+    # go back to the default of 15. The server decides who may (the lead, the person who created the
+    # Formation, or an account administrator) and answers with cmo-mmry's sentence.
+    local formation_id="$1" minutes="$2"
+    [[ "$minutes" =~ ^([0-9]{1,6}|null)$ ]] || return 1
+    _mmry_request PUT "/api/formations/${formation_id}/idle-limit" "{\"minutes\":${minutes}}"
+}
 
 mmry_add_formation_queue_piece() {
     # Usage: mmry_add_formation_queue_piece FORMATION_ID SESSION_ID DESCRIPTION [HOST]
