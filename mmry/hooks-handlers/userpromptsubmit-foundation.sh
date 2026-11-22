@@ -288,6 +288,13 @@ if [[ "${MMRY_FOUNDATION_WORKER:-}" != "1" ]]; then
         if [[ "$_fnd_head" =~ $_fnd_re ]]; then
             MMRY_FND_SID="${BASH_REMATCH[1]}"
         fi
+        # A LISTENING CHECK-IN GETS NOTHING (#32244): every part, before the quick exit, with no output
+        # and no record, so the in-flight and cut-short markers, the outcome and status records and the
+        # once-a-session notices all stay with the last real prompt and the next one. A typed prompt pays
+        # one file test here (lib-foundation-key.sh, mmry_foundation_renewal_turn_v, has the rule).
+        if [[ -n "$MMRY_FND_SID" ]] && mmry_foundation_renewal_turn_v "$MMRY_FND_SID" "$_fnd_head"; then
+            exit 0
+        fi
     fi
     export MMRY_FND_SID
 fi
