@@ -632,7 +632,7 @@ _limit() {
     [ "$output" = "This Formation's idle limit is now 15 minutes." ] || { echo "$output"; return 1; }
     grep -q '{"minutes":null}$' "${BATS_TEST_TMPDIR}/limit.log" || { cat "${BATS_TEST_TMPDIR}/limit.log"; return 1; }
     _limit 200 '{"formation":{"id":4242},"members":[],"idleNoticeAfterSeconds":60}'
-    [ "$status" -eq 0 ] && [ "$output" = "This Formation's idle limit is now 1 minute." ] || { echo "$output"; return 1; }
+    [ "$status" -eq 0 ] && [ "$output" = "This Formation's idle limit is 1 minute." ] || { echo "$output"; return 1; }
     grep -q '^GET http://fake.invalid/api/formations/4242?sessionId=' "${BATS_TEST_TMPDIR}/limit.log" || { cat "${BATS_TEST_TMPDIR}/limit.log"; return 1; }
 }
 
@@ -657,4 +657,45 @@ _limit() {
     grep -qF '"name": "formation_idle_limit"' "$srv"
     grep -qF '"description": "Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 15."' "$srv"
     grep -qF '["formation-idle-limit.sh"]' "$srv"
+}
+
+# ---- #34432 wording round: cmo-mmry's approved D2 to D5 (cmo-drafts-34432-approved.md), word for word ----
+
+@test "WD2: the command page and the Codex skill carry the approved reminder paragraph exactly" {
+    local d2="**The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 15 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?"
+    local f
+    for f in "${HANDLERS}/../commands/formation.md" "${HANDLERS}/../skills-codex/memory-system/SKILL.md"; do
+        [ "$(tr -d '\r' < "$f" | grep -c -x -F -- "$d2")" -eq 1 ] || { echo "$f"; return 1; }
+        ! grep -q -e 'reminded each time its watch renews' -e 'went silent' -e 'The lead can set the idle limit' "$f" || { echo "$f"; return 1; }
+    done
+}
+
+@test "WD3: the idle-limit section's paragraph is the approved text, on one line" {
+    local d3="Any member can read the limit. Only the lead of this Formation, the person who created it, or an account administrator can set it; the server refuses anybody else and says so. **Report what the script prints**: the limit as it now stands, or the server's reason for refusing."
+    [ "$(tr -d '\r' < "${HANDLERS}/../commands/formation.md" | grep -c -x -F -- "$d3")" -eq 1 ]
+}
+
+@test "WD4: a read says 'is', not 'is now'; 1 minute is singular" {
+    _limit 200 '{"formation":{"id":4242},"members":[],"idleNoticeAfterSeconds":1200}'
+    [ "$status" -eq 0 ] && [ "$output" = "This Formation's idle limit is 20 minutes." ] || { echo "$output"; return 1; }
+    _limit 200 '{"formation":{"id":4242},"members":[],"idleNoticeAfterSeconds":60}'
+    [ "$status" -eq 0 ] && [ "$output" = "This Formation's idle limit is 1 minute." ] || { echo "$output"; return 1; }
+}
+
+@test "WD4: a session not in a Formation is told so with a capital F" {
+    bash "${HANDLERS}/formation-state.sh" clear "$LEAD_SID" || true
+    CLAUDE_CODE_SESSION_ID="$LEAD_SID" CLAUDE_SESSION_ID="$LEAD_SID" run env -u MMRY_HOST bash "${HANDLERS}/formation-idle-limit.sh"
+    [ "$status" -ne 0 ] && [ "$output" = "This session is not in a Formation, so it has no idle limit. Run /mmry:formation list to see what is active." ] || { echo "$output"; return 1; }
+}
+
+@test "WD4: no answer names MMRY AI, not the limit" {
+    _limit 503 '' 20
+    [ "$status" -ne 0 ] && [ "$output" = "MMRY AI did not answer (HTTP 503), so nothing is confirmed. Run /mmry:formation idle-limit to check the limit before trying again." ] || { echo "$output"; return 1; }
+}
+
+@test "WD5: the Codex tool's title and argument descriptions are the approved text" {
+    local srv="${HANDLERS}/mcp-server.sh"
+    grep -qF '"title": "Read or set the idle limit",' "$srv"
+    grep -qF '"minutes": {"type": "integer", "description": "Optional: the new idle limit in minutes, 1 to 1440. Omit to read the current limit."}' "$srv"
+    grep -qF '"use_default": {"type": "boolean", "description": "Optional: true to go back to the default of 15 minutes."}' "$srv"
 }

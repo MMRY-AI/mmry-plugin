@@ -49,7 +49,7 @@ if [[ -n "$session_id" ]]; then
     state="$(bash "${HANDLER_DIR}/formation-state.sh" get "$session_id" 2>/dev/null || true)"
 fi
 if [[ -z "$state" ]]; then
-    echo "This session is not in a formation, so it has no idle limit. Run $(mmry_host_formation_ref list) to see what is active."
+    echo "This session is not in a Formation, so it has no idle limit. Run $(mmry_host_formation_ref list) to see what is active."
     exit 1
 fi
 formation_id="${state%% *}"
@@ -65,10 +65,11 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-# The sentence for an effective limit in seconds (cmo-mmry item 9, success; "1 minute" for one).
+# The sentence for an effective limit in seconds, "1 minute" for one. A change says "is now" (cmo-mmry
+# item 9, success); a read says "is" (cmo-mmry D4, approved 2026-11-22), since nothing changed.
 sentence() {
-    local m=$(( $1 / 60 ))
-    if (( m == 1 )); then echo "This Formation's idle limit is now 1 minute."; else echo "This Formation's idle limit is now ${m} minutes."; fi
+    local m=$(( $1 / 60 )) verb="$2"
+    if (( m == 1 )); then echo "This Formation's idle limit ${verb} 1 minute."; else echo "This Formation's idle limit ${verb} ${m} minutes."; fi
 }
 clean() { printf '%s' "$1" | tr -d '\000-\010\013-\037\177' | tr '\n\t' '  ' | cut -c1-500; }
 
@@ -87,7 +88,7 @@ if (( ok == 0 )); then
     case "$code" in
         400|403) [[ -n "$server_said" ]] && echo "$(clean "$server_said")" || echo "Refused (HTTP ${code}). Nothing was changed." ;;
         404) echo "Formation ${formation_id} no longer exists, or it belongs to another account. Nothing was changed." ;;
-        *)   echo "The idle limit did not answer (HTTP ${code}), so nothing is confirmed. Run $(mmry_host_formation_ref idle-limit) before trying again." ;;
+        *)   echo "MMRY AI did not answer (HTTP ${code}), so nothing is confirmed. Run $(mmry_host_formation_ref idle-limit) to check the limit before trying again." ;;
     esac
     exit 1
 fi
@@ -104,5 +105,5 @@ if [[ -n "${MMRY_JQ:-}" ]]; then
 fi
 # A server from before the per-Formation limit reports no number: its limit is the default.
 [[ "$seconds" =~ ^[0-9]+$ ]] || seconds=900
-sentence "$seconds"
+if [[ "$mode" == "read" ]]; then sentence "$seconds" "is"; else sentence "$seconds" "is now"; fi
 exit 0
