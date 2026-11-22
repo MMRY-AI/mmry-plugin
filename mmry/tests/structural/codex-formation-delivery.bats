@@ -323,11 +323,11 @@ FAKECURL
 # shown, and that each read of one formation is asked from the Codex session (the service answers
 # no other caller; its half is the API repository's formation-list-privacy suite).
 #
-# This fake records "METHOD URL", which the one above does not, so what is SENT is observed.
+# This fake writes down "METHOD URL", which the one above does not, so what is SENT is observed.
 # ---------------------------------------------------------------------------------------------
 
-_fake_recording_curl_dir() {
-    local dir="${BATS_TEST_TMPDIR}/fake-rec-bin"
+_fake_logging_curl_dir() {
+    local dir="${BATS_TEST_TMPDIR}/fake-log-bin"
     mkdir -p "$dir"
     cat > "${dir}/curl" <<'FAKECURL'
 #!/usr/bin/env bash
@@ -361,7 +361,7 @@ FAKECURL
 # Sets CODEX_ENV to the environment a Codex conversation runs a handler in: MMRY_HOST=codex, the
 # Codex session id, a Codex home holding its own credential, and no Claude Code session id.
 _as_codex() {
-    local bin; bin="$(_fake_recording_curl_dir)"
+    local bin; bin="$(_fake_logging_curl_dir)"
     CODEX_SID="codex-thread-31854-$$"
     CODEX_URLS="${BATS_TEST_TMPDIR}/codex-urls"
     : > "$CODEX_URLS"

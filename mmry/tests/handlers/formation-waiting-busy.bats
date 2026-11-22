@@ -49,7 +49,7 @@ printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
 busy='{"error":"The formation is busy. Try again.","detail":null}'
 code=200; resp='{}'
 case "$method $url" in
-    "GET "*/api/formations/4242)
+    "GET "*/api/formations/4242|"GET "*/api/formations/4242"?sessionId="*)   # #31854: the read names the session
         resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"Wingman","leftDate":null}]}' ;;
     "PUT "*/members/*/waiting)
         code="${FAKE_SET_CODE:-200}"

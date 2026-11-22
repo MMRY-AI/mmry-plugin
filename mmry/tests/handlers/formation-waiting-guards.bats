@@ -55,7 +55,7 @@ printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
 [[ -n "$body" ]] && printf '%s\n' "$body" >> "$FAKE_BODY_LOG"
 code=200; resp='{}'
 case "$method $url" in
-    "GET "*/api/formations/4242)
+    "GET "*/api/formations/4242|"GET "*/api/formations/4242"?sessionId="*)   # #31854: the read names the session
         resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"Wingman","leftDate":null}]}' ;;
     "PUT "*/members/*/waiting)
         resp='{"formationId":4242,"memberId":31,"waiting":true,"waitingSince":"2026-11-13T14:05:00","toolName":null,"leadTold":true,"outcome":"Set"}' ;;

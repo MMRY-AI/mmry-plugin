@@ -78,13 +78,14 @@ BODY
     # AND EXACTLY THAT PATH. Found by mutation: renaming the route to /close-outMUTANT left the
     # substring assertion above green while the client called a route nothing serves. The whole-line
     # match is what makes this test able to fail for the reason it claims to be checking.
-    run grep -Fxq "http://fake.invalid/api/formations/42/close-out" "$urls"
+    run grep -Fxq "http://fake.invalid/api/formations/42/close-out?sessionId=${CLAUDE_SESSION_ID}" "$urls"
     [ "$status" -eq 0 ]
 }
 
-@test "report: an id given on the command line is used, and no membership is needed" {
-    # The record is for people who were never in the formation - the person who set the mission has
-    # no screen of their own - so a session in no formation must still be able to read one by id.
+@test "report: an id given on the command line is used, and the read names this session" {
+    # #31854: the service shows the record to a current member, by session, and to the person who
+    # started the formation. A session with no local formation state can still ask by id (the
+    # starter reading from another window does exactly that), and the read names the session.
     local bin; bin="$(_fake_curl_dir)"
     local urls="${BATS_TEST_TMPDIR}/urls"
     : > "$urls"
@@ -96,7 +97,7 @@ BODY
     [ "$status" -eq 0 ]
     run cat "$urls"
     [[ "$output" == *"/api/formations/99/close-out"* ]]
-    run grep -Fxq "http://fake.invalid/api/formations/99/close-out" "$urls"
+    run grep -Fxq "http://fake.invalid/api/formations/99/close-out?sessionId=${CLAUDE_SESSION_ID}" "$urls"
     [ "$status" -eq 0 ]
 }
 

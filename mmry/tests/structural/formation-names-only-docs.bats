@@ -28,13 +28,13 @@ setup() {
 }
 
 @test "command page: the list is not said to show an objective or a member count" {
-    [[ "$CMD" != *"Show the objective and id of each"* ]]
-    [[ "$CMD" != *"active member(s)"* ]]
+    [[ "$CMD" != *"Show the objective and id of each"* ]] || return 1
+    [[ "$CMD" != *"active member(s)"* ]] || return 1
     [[ "$CMD" == *"Show the id and name of each, ask which one, and stop."* ]]
 }
 
 @test "command page: joining from the list is still the guidance" {
-    [[ "$CMD" == *"If they gave no id, do not guess. List their active formations so they can pick one:"* ]]
+    [[ "$CMD" == *"If they gave no id, do not guess. List their active formations so they can pick one:"* ]] || return 1
     [[ "$CMD" == *'hooks-handlers/formation-list.sh'* ]]
 }
 
@@ -47,6 +47,6 @@ setup() {
 }
 
 @test "command page: the close-out record is no longer said to be readable by people never in the formation" {
-    [[ "$CMD" != *"readable by people who were never in the formation"* ]]
+    [[ "$CMD" != *"readable by people who were never in the formation"* ]] || return 1
     [[ "$CMD" == *"this record is read by every current member and by the person who started the formation"* ]]
 }
