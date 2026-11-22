@@ -371,3 +371,170 @@ FAKECURL
     [[ "$all_typed" == *"FOUNDATION memories"* && "$all_typed" == *"built-in directive"* && "$all_typed" == *"Directive 0380"* ]] \
         || { echo "a typed prompt did not carry the set and the directive"; return 1; }
 }
+
+# ---- fix round 1 (#32244 QA): the surviving mutants, the missing turns, and a marker in doubt -------
+
+# The predicate alone, in its own shell, for session $1 with the payload on stdin: exit 0 = check-in.
+_PREDICATE='source "$1" >/dev/null 2>&1 || exit 9; mmry_foundation_renewal_turn_v "$2" ""'
+_predicate() {
+    bash -c "$_PREDICATE" _ "$PLUGIN_ROOT/hooks-handlers/lib-foundation-key.sh" "$1" < "$2" > /dev/null 2>&1
+}
+
+# The predicate for session $2 on the payload file $3, in the background, waited for at most $1
+# seconds. The background job is that one bash process (a simple command is forked and exec'd, not
+# wrapped in a subshell), so a run still going is killed outright and the test fails rather than hanging
+# the suite. 3>&- keeps bats from waiting on it. Sets RC to the predicate's exit code.
+_predicate_within() {
+    local secs="$1" pid i
+    bash -c "$_PREDICATE" _ "$PLUGIN_ROOT/hooks-handlers/lib-foundation-key.sh" "$2" < "$3" > /dev/null 2>&1 3>&- &
+    pid=$!
+    for (( i = 0; i < secs * 10; i++ )); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        echo "the predicate was still running after ${secs} s, and was stopped"
+        return 1
+    fi
+    RC=0; wait "$pid" || RC=$?
+}
+
+# Break: the start check `== '<task-notification>'*` becomes `== *'<task-notification>'*` (QA M04).
+@test "T14 typed text before the task-notification wrapper is a real prompt" {
+    _marker 5
+    _fire_payload before _payload "Look at this, it keeps appearing: $(_wrapped "$NOTICE")"
+    _delivered before
+}
+
+# Break: remove the `MMRY FORMATION WATCH RENEWED (formation ` check (QA M05).
+@test "T15 a wake carrying the quiet sentence but not the renewal notice is delivered" {
+    _marker 5
+    _fire_payload quiet _payload "$(_wrapped "The nightly export finished. There is nothing to act on and nothing to report.")"
+    _delivered quiet
+}
+
+# Break: remove the `There is nothing to act on and nothing to report.` check (QA M06).
+@test "T16 a wake carrying the renewal header without the quiet sentence is delivered" {
+    _marker 5
+    _fire_payload loud _payload "$(_wrapped "MMRY FORMATION WATCH RENEWED (formation 4242). A message is waiting for this session: read it and act on it now.")"
+    _delivered loud
+}
+
+# A message-woken turn: the text formation-check.sh really prints when a message arrives in idle mode,
+# wrapped as Claude Code wraps it, while this session's renewal-turn marker is still live (the window
+# between a renewal and that check-in's Stop). It is real work and gets the set, as without the marker.
+# Break: remove both notice checks (QA M07).
+@test "T17 a message-woken turn is delivered while this session's marker is live, as without the marker" {
+    local bin="$TEST_TMPDIR/bin" rc=0 text
+    mkdir -p "$bin"
+    cat > "$bin/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+out=""; prev=""; url=""
+for arg in "$@"; do
+    [[ "$prev" == "-o" ]] && out="$arg"
+    case "$arg" in http*) url="$arg" ;; esac
+    prev="$arg"
+done
+case "$url" in
+    */transmissions/sent*) body='{"formationId":4242,"member":true,"messages":[]}' ;;
+    *) body='[{"transmissionID":61,"senderRole":"lead","senderSessionID":null,"senderUserID":7,"recipientMemberID":5,"content":"RT-17 take the validator","sentDate":"2026-11-18T01:00:00"}]' ;;
+esac
+[[ -n "$out" ]] && printf '%s' "$body" > "$out"
+printf '200'
+exit 0
+FAKECURL
+    chmod +x "$bin/curl"
+    bash "$HANDLERS/formation-state.sh" set 4242 "$SID"
+    env PATH="$bin:$PATH" CLAUDE_SESSION_ID="$SID" MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key \
+        MMRY_API_URL="http://fake.invalid" MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        bash "$HANDLERS/formation-check.sh" < /dev/null > /dev/null 2> "$OUT/woken.txt" || rc=$?
+    bash "$HANDLERS/formation-state.sh" clear "$SID" || true
+    [ "$rc" -eq 2 ] || { echo "the watch did not wake: rc $rc: $(cat "$OUT/woken.txt")"; return 1; }
+    text="$(cat "$OUT/woken.txt")"
+    [[ "$text" == *"RT-17 take the validator"* ]] || { echo "the wake did not carry the message: $text"; return 1; }
+    [[ "$text" != *"WATCH RENEWED"* ]] || { echo "unexpected renewal text in a message wake: $text"; return 1; }
+    _fire_payload warm _typed_payload
+    _fire_payload nomarker _payload "$(_wrapped "$text")"
+    _delivered nomarker
+    _marker 5
+    _fire_payload woken _payload "$(_wrapped "$text")"
+    _delivered woken
+    _same_output nomarker woken
+}
+
+# Two reminders after the wrapper: the renewal notice in the first and other text in the second. The
+# prompt is split once, at the first </system-reminder>, and what follows must be empty; here it is not,
+# so the turn is in doubt and is delivered.
+# Break: the head is cut at the last </system-reminder> instead of the first (QA M15).
+@test "T18 a wake with a second reminder after the renewal notice is delivered" {
+    _marker 5
+    _fire_payload two _payload "$(_wrapped "$NOTICE" $'\n<system-reminder>\nThe user has changed the plan file.\n</system-reminder>')"
+    _delivered two
+}
+
+# PreCompact is not a prompt: the before-shortening delivery (the six precompact parts and the directive
+# with --precompact) is the same with this session's marker live as without it, for a PreCompact payload
+# and even for a payload shaped like a check-in, and the directive is still printed.
+# Break: the directive's check-in test runs in every mode (`[[ "$_fd_mode" == prompt ]]` becomes true).
+@test "T19 --precompact is unchanged while this session's marker is live" {
+    local k pay
+    printf '{"session_id":"%s","transcript_path":"/x/t.jsonl","cwd":"/w","hook_event_name":"PreCompact","trigger":"auto","custom_instructions":""}' "$SID" > "$OUT/pc.payload"
+    _checkin_payload > "$OUT/pcci.payload"
+    _pc_fire() {
+        local pay="$1" tag="$2" dir="${3:-$HANDLERS}"
+        for k in 1 2 3 4 5 6; do
+            ( rc=0; cat "$pay" | bash "$dir/precompact-foundation.sh" --part "$k" > "$OUT/$tag.p$k" 2>/dev/null || rc=$?
+              printf '%s' "$rc" > "$OUT/$tag.rc$k" ) &
+        done
+        ( rc=0; cat "$pay" | bash "$dir/foundation-directive.sh" --precompact > "$OUT/$tag.pd" 2>/dev/null || rc=$?
+          printf '%s' "$rc" > "$OUT/$tag.rcd" ) &
+        wait
+    }
+    _fire_payload warm _typed_payload
+    for pay in pc pcci; do
+        rm -f "$TMPDIR/.mmry-renewal-turn-$SID"
+        _pc_fire "$OUT/$pay.payload" "$pay-nomarker"
+        _marker 5
+        _pc_fire "$OUT/$pay.payload" "$pay-marked"
+        grep -q "built-in directive" "$OUT/$pay-marked.pd" || { echo "$pay: --precompact printed no directive: $(cat "$OUT/$pay-marked.pd")"; return 1; }
+        [ -s "$OUT/$pay-marked.p1" ] || { echo "$pay: precompact part 1 printed nothing"; return 1; }
+        _same_output "$pay-nomarker" "$pay-marked"
+        if _develop_tree; then
+            _pc_fire "$OUT/$pay.payload" "$pay-develop" "$DEVELOP/hooks-handlers"
+            _same_output "$pay-develop" "$pay-marked"
+            echo "$pay: compared with develop ccf6095: equal" >&3
+        fi
+    done
+}
+
+# A corrupt marker of 20 MB with no line end: the predicate reads only the first few bytes, answers
+# within seconds, and answers "not a check-in", so every hook delivers the set.
+# Break: the marker read is unbounded again (`read -r -n 13 at` becomes `read -r at`).
+@test "T20 a 20 MB marker cannot stall the hooks and does not skip the set" {
+    _checkin_payload > "$OUT/big.payload"
+    head -c 20971520 /dev/zero | tr '\0' '7' > "$TMPDIR/.mmry-renewal-turn-$SID"
+    [ "$(wc -c < "$TMPDIR/.mmry-renewal-turn-$SID" | tr -d ' ')" -eq 20971520 ] || { echo "marker not 20 MB"; return 1; }
+    _predicate_within 10 "$SID" "$OUT/big.payload"
+    [ "$RC" -eq 1 ] || { echo "a 20 MB marker was taken as a check-in (rc $RC)"; return 1; }
+    # Only once the predicate is known to answer quickly: the seven hooks together, within 30 s.
+    local t0=$SECONDS
+    _fire_all "$OUT/big.payload" big
+    (( SECONDS - t0 <= 30 )) || { echo "the seven hooks took $(( SECONDS - t0 )) s on a 20 MB marker"; return 1; }
+    _delivered big
+}
+
+# A marker dated in the future is not this check-in's: it is ignored, and a check-in-shaped prompt gets
+# the set. Two seconds ahead is enough to refuse it.
+# Break: the age test accepts a future epoch again (`at <= now &&` removed).
+@test "T21 a future-dated marker is ignored, so a check-in-shaped prompt gets the set" {
+    _marker -3600
+    _fire_payload future _checkin_payload
+    _delivered future
+    _marker -2
+    _checkin_payload > "$OUT/soon.payload"
+    _predicate "$SID" "$OUT/soon.payload" && { echo "a marker 2 s in the future was obeyed"; return 1; }
+    _marker 5
+    _predicate "$SID" "$OUT/soon.payload" || { echo "a fresh marker was not obeyed"; return 1; }
+}
