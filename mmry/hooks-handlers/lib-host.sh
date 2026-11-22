@@ -679,6 +679,8 @@ mmry_host_tool_ref() {
         formation_remove) ;;
         # #33849: the work queue.
         formation_queue_add|formation_queue_list|formation_queue_take|formation_queue_decline) ;;
+        # #34432: the Formation's idle limit.
+        formation_idle_limit) ;;
         *) return 1 ;;
     esac
     printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
@@ -1102,7 +1104,7 @@ mmry_host_codex_access_hint() {
         echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
         echo "formation_roster, formation_status, formation_report, formation_debrief, formation_remove,"
         echo "formation_queue_add, formation_queue_list, formation_queue_take, formation_queue_decline,"
-        echo "formation_leave), which needs"
+        echo "formation_idle_limit, formation_leave), which needs"
         echo "none. For anything else, call request_permissions with"
     else
         echo "network access. Assistant: call request_permissions with"
