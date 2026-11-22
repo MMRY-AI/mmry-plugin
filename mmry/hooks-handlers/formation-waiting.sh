@@ -681,7 +681,11 @@ fi
 _mmry_waiting_load >/dev/null || exit 0
 
 # This session's own live entry and its role, from the roster (as formation-progress.sh finds it).
-mmry_get_formation "$fid" >/dev/null || exit 0
+# The read names THIS handler's session, the one the payload gave (#31854). The service shows a
+# roster only to a session that is a current member, and the environment may carry no session id
+# at all (Codex's PermissionRequest) or another session's, so leaving the session to the client's
+# default sent an empty one, the read was refused, and the lead was never told.
+mmry_get_formation "$fid" "$sid" >/dev/null || exit 0
 own="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg s "$sid" \
     '[(.members // [])[] | select(.sessionId == $s and .leftDate == null)][0] | "\(.id // "") \(.role // "")"' || true)"
 mid="${own%% *}"; role="${own#* }"

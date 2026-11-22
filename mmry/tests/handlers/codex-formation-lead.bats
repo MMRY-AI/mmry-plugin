@@ -215,7 +215,7 @@ out=""; prev=""; url=""
 for arg in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$arg"; [[ "\$arg" == http* ]] && url="\$arg"; prev="\$arg"; done
 resp='{"member":true,"messages":[]}'
 case "\$url" in
-    */api/formations/42) resp='{"formation":{"id":42,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leftDate":null},{"id":7,"role":"Wingman","email":"m@x.y","availability":"idle and ready","availabilitySince":"${since}.1234567","leftDate":null},{"id":8,"role":"Wingman","email":"n@x.y","availability":"unknown","availabilitySince":null,"leftDate":null}]}' ;;
+    */api/formations/42|*/api/formations/42"?sessionId="*) resp='{"formation":{"id":42,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leftDate":null},{"id":7,"role":"Wingman","email":"m@x.y","availability":"idle and ready","availabilitySince":"${since}.1234567","leftDate":null},{"id":8,"role":"Wingman","email":"n@x.y","availability":"unknown","availabilitySince":null,"leftDate":null}]}' ;;
 esac
 [[ -n "\$out" ]] && printf '%s' "\$resp" > "\$out"
 printf '200'

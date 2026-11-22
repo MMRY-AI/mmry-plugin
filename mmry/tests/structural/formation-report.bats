@@ -78,13 +78,14 @@ BODY
     # AND EXACTLY THAT PATH. Found by mutation: renaming the route to /close-outMUTANT left the
     # substring assertion above green while the client called a route nothing serves. The whole-line
     # match is what makes this test able to fail for the reason it claims to be checking.
-    run grep -Fxq "http://fake.invalid/api/formations/42/close-out" "$urls"
+    run grep -Fxq "http://fake.invalid/api/formations/42/close-out?sessionId=${CLAUDE_SESSION_ID}" "$urls"
     [ "$status" -eq 0 ]
 }
 
-@test "report: an id given on the command line is used, and no membership is needed" {
-    # The record is for people who were never in the formation - the person who set the mission has
-    # no screen of their own - so a session in no formation must still be able to read one by id.
+@test "report: an id given on the command line is used, and the read names this session" {
+    # #31854: the service shows the record to a current member, by session, and to the person who
+    # started the formation. A session with no local formation state can still ask by id (the
+    # starter reading from another window does exactly that), and the read names the session.
     local bin; bin="$(_fake_curl_dir)"
     local urls="${BATS_TEST_TMPDIR}/urls"
     : > "$urls"
@@ -96,7 +97,7 @@ BODY
     [ "$status" -eq 0 ]
     run cat "$urls"
     [[ "$output" == *"/api/formations/99/close-out"* ]]
-    run grep -Fxq "http://fake.invalid/api/formations/99/close-out" "$urls"
+    run grep -Fxq "http://fake.invalid/api/formations/99/close-out?sessionId=${CLAUDE_SESSION_ID}" "$urls"
     [ "$status" -eq 0 ]
 }
 
@@ -176,6 +177,23 @@ BODY
     [ -s "$urls" ]
 }
 
+@test "report: a session in no formation is told who can read the record, never that anybody on the account can (#31854)" {
+    # The approved sentence (cmo-mmry, 2026-11-22, wording-31854-qa1.md Q1). The old one said the
+    # record was readable by anybody on the account, the opposite of the member-only rule.
+    local bin; bin="$(_fake_curl_dir)"
+    local urls="${BATS_TEST_TMPDIR}/urls"
+    : > "$urls"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$(_record_body)" FAKE_URL_LOG="$urls"         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid"         run bash "${HANDLERS}/formation-report.sh"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"This session is not in a Formation. Give the id instead: "* ]] || return 1
+    [[ "$output" == *"Only the Formation's current members and the person who created it can read its record."* ]] || return 1
+    [[ "$output" != *"readable by anybody"* ]] || return 1
+    [[ "$output" != *"never a member"* ]] || return 1
+    [ ! -s "$urls" ]
+}
+
 @test "report: a 404 says the formation is not there or is not ours, and no record is invented" {
     local bin; bin="$(_fake_curl_dir)"
 
@@ -184,7 +202,7 @@ BODY
         run bash "${HANDLERS}/formation-report.sh" 99
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"does not exist, or it belongs to another account"* ]]
+    [[ "$output" == *"Formation 99 was not found. Either it does not exist, it belongs to another account, or this session is not a current member of it."* ]]
     [[ "$output" != *"CLOSE-OUT RECORD"* ]]
 }
 

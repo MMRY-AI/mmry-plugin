@@ -58,7 +58,7 @@ case "$method $url" in
     "POST "*/api/formations) code=201; resp='{"id":77,"objective":"Ship it"}' ;;
     "DELETE "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","leftDate":"2026-10-16T02:14:33.1234567","removedByEmail":"a@test.mnemo"}' ;;
     "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
-    "GET "*/api/formations/*/close-out) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
+    "GET "*/api/formations/*/close-out|"GET "*/api/formations/*/close-out"?sessionId="*) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
     "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
     "GET "*/api/formations/[0-9]*) resp='{"formation":{"id":77,"objective":"Ship it"},"members":[{"id":5,"sessionId":"conv-A","role":"Lead","email":"a@test.mnemo"},{"id":6,"sessionId":"conv-B","role":"Wingman","email":"b@test.mnemo"}]}' ;;
     *) code=404; resp='{"error":"no fake route"}' ;;
@@ -322,7 +322,8 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     mcp "$(call 100 formation_roster '{}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 100)" = "false" ]
     [[ "$(text_of 100)" == *"5  Lead"* ]] || return 1
-    grep -q '^GET http://fake.invalid/api/formations/77 ' "$REQLOG"
+    # #31854: the read names the calling conversation's session.
+    grep -q '^GET http://fake.invalid/api/formations/77?sessionId=conv-A ' "$REQLOG"
 }
 
 @test "tool: formation_leave releases this conversation on the service and here" {
@@ -413,9 +414,9 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
         "$(call 421 formation_report '{"formation_id":88}' '{"sessionId":"conv-Z"}')"
     [ "$(is_error 420)" = "false" ]
     [[ "$(text_of 420)" == *"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"* ]] || return 1
-    grep -q '^GET http://fake.invalid/api/formations/77/close-out' "$REQLOG"
+    grep -q '^GET http://fake.invalid/api/formations/77/close-out?sessionId=conv-A ' "$REQLOG"
     [ "$(is_error 421)" = "false" ]
-    grep -q '^GET http://fake.invalid/api/formations/88/close-out' "$REQLOG"
+    grep -q '^GET http://fake.invalid/api/formations/88/close-out?sessionId=conv-Z ' "$REQLOG"
 }
 
 @test "tool: formation_debrief closes this conversation's formation out, prints the record, and clears it here" {

@@ -27,8 +27,14 @@ printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
 [[ -n "$body" ]] && printf '%s\n' "$body" >> "$FAKE_BODY_LOG"
 code=200; resp='{}'
 case "$method $url" in
-    "GET "*/api/formations/4242)
-        resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"'"${FAKE_OWN_ROLE:-Wingman}"'","leftDate":null}]}' ;;
+    "GET "*/api/formations/4242|"GET "*/api/formations/4242"?sessionId="*)
+        # #31854: the roster is shown only to a read naming the member's OWN session, never an empty
+        # one. Anything else is the 404 a caller who is not a member gets.
+        if [[ -n "${FAKE_OWN_SID:-}" && "$url" == *"/api/formations/4242?sessionId=${FAKE_OWN_SID}" ]]; then
+            resp='{"formation":{"id":4242},"members":[{"id":12,"sessionId":null,"role":"Lead","leftDate":null},{"id":31,"sessionId":"'"${FAKE_OWN_SID:-}"'","role":"'"${FAKE_OWN_ROLE:-Wingman}"'","leftDate":null}]}'
+        else
+            code=404; resp='{"error":"Formation not found."}'
+        fi ;;
     "PUT "*/members/*/waiting)
         resp='{"formationId":4242,"memberId":31,"waiting":true,"waitingSince":"2026-11-13T14:05:00","toolName":null,"leadTold":true,"outcome":"Set"}' ;;
     "DELETE "*/members/*/waiting*)

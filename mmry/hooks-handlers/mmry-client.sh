@@ -1809,10 +1809,16 @@ mmry_get_active_formations() {
 #
 # The roster includes members who have left, carrying a leftDate, which is deliberate: the history
 # is the point. A caller wanting only the current crew filters on it, and formation-roster.sh does.
+#
+# WHO IS ANSWERED (#31854, DD-198). The service shows one formation only to a session that is a
+# current member of it, or to the person who started it, and membership is held per session, so the
+# read names the calling session. Anyone else gets 404, the same answer as an id that does not
+# exist. The session defaults to this session's own id, which is what every caller here means.
 mmry_get_formation() {
-    # Usage: mmry_get_formation FORMATION_ID
-    local formation_id="$1"
-    _mmry_request GET "/api/formations/${formation_id}"
+    # Usage: mmry_get_formation FORMATION_ID [SESSION_ID]
+    local formation_id="$1" session_id="${2:-}"
+    [[ -n "$session_id" ]] || session_id="$(mmry_session_id)"
+    _mmry_request GET "/api/formations/${formation_id}?sessionId=$(_mmry_urlencode "$session_id")"
 }
 
 mmry_join_formation() {
@@ -2100,18 +2106,21 @@ mmry_update_formation_member_progress() {
 }
 
 mmry_get_formation_close_out() {
-    # Usage: mmry_get_formation_close_out FORMATION_ID
+    # Usage: mmry_get_formation_close_out FORMATION_ID [SESSION_ID]
     #
     # What each member was asked to do and how that ended. Every member is in it, including one
     # that reported nothing, which reads as unstarted rather than being left out: a record that
     # silently drops abandoned work reads as though everything went to plan.
     #
-    # Readable while the formation is still running, not only after it is closed out, and readable
-    # by somebody who was never in it.
+    # Readable while the formation is still running, not only after it is closed out.
+    #
+    # #31854 (DD-198): readable by a current member, through its own session, and by the person who
+    # started the formation. Anyone else gets 404, so the read names the calling session.
     #
     # It carries assignments and states only. No message is in it, directed or otherwise.
-    local formation_id="$1"
-    _mmry_request GET "/api/formations/${formation_id}/close-out"
+    local formation_id="$1" session_id="${2:-}"
+    [[ -n "$session_id" ]] || session_id="$(mmry_session_id)"
+    _mmry_request GET "/api/formations/${formation_id}/close-out?sessionId=$(_mmry_urlencode "$session_id")"
 }
 
 mmry_add_formation_claim() {

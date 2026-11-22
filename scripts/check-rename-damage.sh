@@ -11,6 +11,7 @@
 #   1. FORMATION KEPT. Every token on the base ref (default origin/develop) that contains formation
 #      or Formation - function, script, route, type, test helper, file path - must still exist,
 #      unchanged, in the working tree. One that is gone is reported with where it was.
+#      A name a ticket removed on purpose is declared in RETIRED below, with its reason (#31854).
 #   2. DAMAGED WORDS. No token in a tracked file may join a letter onto database or entry where no
 #      name means it: databaseion, entryion, mydatabase. A token is split at case changes, digits,
 #      _ - . and /, and each piece holding database, entry or entries must be exactly database,
@@ -57,8 +58,18 @@ if [ "$nbase" -lt 20 ]; then
     exit 2
 fi
 LC_ALL=C comm -23 "$tmp/base" "$tmp/head" > "$tmp/gone"
+# Retired names: Formation names a ticket removed on purpose, each with why and the ticket that
+# retired it. A name listed here is not reported when it is gone, or gone from code. The match is
+# the whole name, so a longer name that begins with a listed one is still reported. Only this guard
+# reads the list; guard 2 does not. Add a name only in the change that removes it.
+#   Formations.GetByIdAsync: #31854 moved the connector's status tool, the last caller through the
+#     Formations accessor, from the acting read to the member read (GetForMemberAsync), so nothing
+#     calls the acting read by this name any more.
+RETIRED=" Formations.GetByIdAsync "
+retired() { case "$RETIRED" in *" $1 "*) return 0 ;; esac; return 1; }
 while IFS= read -r name; do
     [ -n "$name" ] || continue
+    retired "$name" && continue
     where="$(git grep -l -w -F "$name" "$base" -- . 2>/dev/null | head -1 | sed "s|^$base:||")"
     report "formation name gone: $name (on $base in $where)"
 done < "$tmp/gone"
@@ -92,6 +103,7 @@ fi
 LC_ALL=C comm -23 "$tmp/cbase" "$tmp/chead" | LC_ALL=C comm -23 - "$tmp/gone" > "$tmp/cgone"
 while IFS= read -r name; do
     [ -n "$name" ] || continue
+    retired "$name" && continue
     # shellcheck disable=SC2086
     where="$(git grep -l -w -F "$name" "$base" -- ':(glob)**/*.cs' ':(glob)**/*.ts' ':(glob)**/*.mjs' ':(glob)**/*.js' ':(glob)**/*.sh' ':(glob)**/*.bats' ':(glob)**/*.sql' $CODE_EXCLUDE 2>/dev/null | head -1 | sed "s|^$base:||")"
     report "formation name gone from code: $name (code on $base in $where; the tree keeps it only in a comment, prose or not at all)"
