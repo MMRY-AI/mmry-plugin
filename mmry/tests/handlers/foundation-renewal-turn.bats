@@ -131,7 +131,7 @@ _same_output() {
 }
 
 # Every Foundation record on disk, named and checksummed.
-_records_snapshot() {
+_foundation_files_snapshot() {
     local f
     for f in "$TEST_TMPDIR"/mmry-foundation.status.* "$TEST_TMPDIR"/mmry-foundation.outcome.* \
              "$TEST_TMPDIR"/.mmry-foundation-*; do
@@ -246,11 +246,11 @@ ${STOPPED}")"
     _fire_payload typed _typed_payload
     _delivered typed
     local before after
-    before="$(_records_snapshot)"
+    before="$(_foundation_files_snapshot)"
     _marker 5
     _fire_payload checkin _checkin_payload
     _said_nothing checkin
-    after="$(_records_snapshot)"
+    after="$(_foundation_files_snapshot)"
     [ "$before" = "$after" ] || { echo "the check-in changed records:"; diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"); return 1; }
     CLAUDE_CODE_SESSION_ID="$SID" run bash "$PLUGIN_ROOT/hooks-handlers/foundation-status.sh"
     [[ "$output" == *"Delivered:    IN FULL on the most recent prompt, in 4 parts."* ]] || { echo "$output"; return 1; }
