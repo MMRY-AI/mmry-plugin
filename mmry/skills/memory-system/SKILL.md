@@ -551,6 +551,8 @@ When multiple Claude sessions may work on the same project, use the session regi
 
 So registration is a record of your own presence, not a way to discover who else is working. **If you need to coordinate with another person's assistant, use a formation** — `/mmry:formation` — which is built for exactly that, and carries messages between sessions that cannot see each other's registrations.
 
+Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
+
 Sessions are automatically registered at session start. The 8-hour auto-expiry handles stale registrations naturally.
 
 ## Categories

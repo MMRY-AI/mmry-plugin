@@ -37,6 +37,8 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Take the queued piece you were offered. It becomes your assignment. | `formation_queue_take` | `piece_id` |
 | Turn down the queued piece you were offered. It goes back to the queue for the next member. | `formation_queue_decline` | `piece_id` |
 
+Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
+
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,
 and its messages arrive here on their own.

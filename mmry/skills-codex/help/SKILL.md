@@ -49,6 +49,8 @@ Then ask in plain words, for example "Keep track of my expenses." You can see yo
 
 A Formation is several assistants working on one job together. We recommend leading a Formation from Claude Code, because a Codex session hears its members only on its next action.
 
+Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
+
 - **Start one,** with this conversation as its lead. (formation_start)
 - **Join one** by its id. (formation_join)
 - **Message the Formation, or one member.** (formation_say)

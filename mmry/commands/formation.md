@@ -4,6 +4,8 @@ Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId>
 
 ## What This Does
 
+Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
+
 A formation is several assistants working one objective together, sending each other short
 messages as they go. Once this session is in a formation, those messages are surfaced to you
 automatically. You do not have to ask for them.
