@@ -491,7 +491,7 @@ PLAIN_RENEWAL="MMRY FORMATION WATCH RENEWED (formation 4242). No message arrived
 CLOSING_LINES="To remove a member from the Formation: /mmry:formation remove <member id>.
 Answer by giving each named member its next piece of work or removing it. Do not reply \"Still listening\". If you are waiting on the user's answer to a question, add that question on one more line."
 
-_sent_body() { printf '{"formationId":4242,"member":true,"messages":[]%s}' "${1:+,\"idleReminder\":$1}"; }
+_renewal_body() { printf '{"formationId":4242,"member":true,"messages":[]%s}' "${1:+,\"idleReminder\":$1}"; }
 _reminder() { printf '{"idleNoticeAfterSeconds":900,"members":[{"memberId":12,"name":"Seat A","idleMinutes":40},{"memberId":13,"name":"Seat B","idleMinutes":25}],"text":"%s"}' "${1:-$REMINDER_TEXT}"; }
 
 _renewal_curl_dir() {
@@ -530,7 +530,7 @@ _renewal() {
 }
 
 @test "P1: a lead's renewal with a reminder prints the header, the server's list, how to remove a member and what to answer" {
-    _renewal "$(_sent_body "$(_reminder)")"
+    _renewal "$(_renewal_body "$(_reminder)")"
     [ "$status" -eq 2 ] || { echo "status $status: $output"; return 1; }
     local out; out="$(printf '%s' "$output" | tr -d '\r')"
     local head="MMRY FORMATION WATCH RENEWED (formation 4242). No message arrived in the last 2 seconds, but members of this Formation are waiting for work."
@@ -542,23 +542,23 @@ _renewal() {
 }
 
 @test "P2: with no reminder, or a null one, the renewal is byte for byte the 2.19.0 text (a member's renewal, or a lead with nobody idle)" {
-    _renewal "$(_sent_body)"
+    _renewal "$(_renewal_body)"
     [ "$status" -eq 2 ] || { echo "status $status: $output"; return 1; }
     [ "$output" = "$PLAIN_RENEWAL" ] || { echo "--- expected"; echo "$PLAIN_RENEWAL"; echo "--- got"; echo "$output"; return 1; }
     rm -rf "${TMPDIR:?}"/.mmry-formation-* "${TMPDIR:?}"/.mmry-renewal-turn-* 2>/dev/null || true
-    _renewal "$(_sent_body null)"
+    _renewal "$(_renewal_body null)"
     [ "$output" = "$PLAIN_RENEWAL" ] || { echo "--- null: $output"; return 1; }
 }
 
 @test "P3: carriage returns and C0 and C1 control characters in the reminder are removed" {
-    _renewal "$(_sent_body "$(_reminder 'IDLE MEMBERS STILL WAITING.\r\n  Member 12 >>> A\u001b[2Kforged\u0085x\u0007 <<<: no work for 40 minutes')")"
+    _renewal "$(_renewal_body "$(_reminder 'IDLE MEMBERS STILL WAITING.\r\n  Member 12 >>> A\u001b[2Kforged\u0085x\u0007 <<<: no work for 40 minutes')")"
     [ "$status" -eq 2 ] || { echo "status $status: $output"; return 1; }
     [[ "$output" != *$'\r'* && "$output" != *$'\e'* && "$output" != *$'\a'* && "$output" != *$'\xc2\x85'* ]] || { printf '%s' "$output" | od -c | tail -20; return 1; }
     [[ "$output" == *"  Member 12 >>> A[2Kforgedx <<<: no work for 40 minutes"* ]] || { echo "$output"; return 1; }
 }
 
 @test "P5: the renewal asks with withIdle=1, and the roster and state calls never do" {
-    _renewal "$(_sent_body)"
+    _renewal "$(_renewal_body)"
     grep -q '/api/formations/4242/transmissions/sent?sessionId=.*&withIdle=1$' "${BATS_TEST_TMPDIR}/renew-urls.log" || { cat "${BATS_TEST_TMPDIR}/renew-urls.log"; return 1; }
     # The two other callers name only the formation and the session.
     local calls; calls="$(grep -h 'mmry_get_formation_sent "' "${HANDLERS}/formation-roster.sh" "${HANDLERS}/formation-state.sh")"
