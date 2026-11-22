@@ -3,7 +3,7 @@
 # names-only list and member-only details (#31854, DD-198; requirements 4 and 5).
 #
 # The sentences are held here as the customer reads them, with line breaks folded, so a page that
-# drops one fails by name. Joining from the list is unchanged and is asserted too, because the
+# drops one fails by name. They are the text cmo-mmry approved on 2026-11-21 (W2, W3, W8). Joining from the list is unchanged and is asserted too, because the
 # first plan for this ticket removed it.
 
 setup() {
@@ -13,15 +13,15 @@ setup() {
 }
 
 @test "command page: the list is described as every active formation by id and name only" {
-    [[ "$CMD" == *"The list shows every active formation on the account by id and name only."* ]]
+    [[ "$CMD" == *"The list shows every active Formation on the account by id and name only. A Formation's members, messages, claimed areas, work queue and close-out record are shown only to its current members and the person who created it."* ]]
 }
 
 @test "command page: a formation's details are described as for current members and the starter" {
-    [[ "$CMD" == *"A formation's members, messages, claimed areas, work queue and close-out record are shown only to its current members and the person who started it."* ]]
+    [[ "$CMD" == *"A Formation's members, messages, claimed areas, work queue and close-out record are shown only to its current members and the person who created it."* ]]
 }
 
 @test "command page: roster, status and report each say who can read them and what anyone else gets" {
-    local s="Only a current member of the formation, or the person who started it, can read this. For anyone else, including another window of a member, an account administrator who is not in the formation, and a member who has left, the formation is not found."
+    local s="Only a current member of the Formation, or the person who created it, can read this. For anyone else, the Formation is not found: that includes another window of the same person that has not joined, an account administrator who is not in the Formation, and a member who has left."
     local n
     n="$(printf '%s' "$CMD" | grep -o -F "$s" | wc -l | tr -d ' ')"
     [ "$n" -ge 3 ]
@@ -39,7 +39,7 @@ setup() {
 }
 
 @test "codex skill: the list is names only and everything else is for members and the starter" {
-    [[ "$CODEX" == *"\`mmry_formation_list\` shows every Formation running on the account by id and name only. Everything else about a Formation is shown only to its current members and the person who started it."* ]]
+    [[ "$CODEX" == *"\`mmry_formation_list\` shows every Formation running on the account by id and name only. Everything else about a Formation is shown only to its current members and the person who created it."* ]]
 }
 
 @test "codex skill: the list script is described as printing ids and names only" {

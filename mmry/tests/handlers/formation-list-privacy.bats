@@ -66,7 +66,7 @@ FAKECURL
     NAMES_ONLY='[{"id":4242,"name":"the names job"},{"id":4243,"name":"the other job"}]'
     # What a service older than 1.38 sent: the same formations, with counts.
     WITH_COUNTS='[{"id":4242,"objective":"the names job","status":"Active","memberCount":7,"activeMemberCount":7},{"id":4243,"objective":"the other job","status":"Active","memberCount":3,"activeMemberCount":2}]'
-    W1="The list shows each formation's id and name. Join one to see its members and messages."
+    W1="The list shows each Formation's id and name. Join one to see its members and messages."
 }
 
 teardown() {

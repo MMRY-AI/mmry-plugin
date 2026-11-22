@@ -44,5 +44,5 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '
     if type == "array" then
         .[] | "  " + (.id | tostring) + "  " + (.name // .objective // "")
     else empty end' 2>/dev/null || { echo "The service answered, but the list could not be read."; exit 1; }
-echo "The list shows each formation's id and name. Join one to see its members and messages."
+echo "The list shows each Formation's id and name. Join one to see its members and messages."
 exit 0

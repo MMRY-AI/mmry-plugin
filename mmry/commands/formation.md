@@ -191,9 +191,9 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
 
    Show the id and name of each, ask which one, and stop.
 
-   The list shows every active formation on the account by id and name only. A formation's
+   The list shows every active Formation on the account by id and name only. A Formation's
    members, messages, claimed areas, work queue and close-out record are shown only to its current
-   members and the person who started it.
+   members and the person who created it.
 
 2. Join it, which both enrols this session server-side and records it locally:
 
@@ -274,9 +274,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-roster.sh" [formationId]
 Who is in the formation, with the **member id** for each one and, beside it, the member's **name**.
 A member with no name is shown by its role. With no argument it shows this session's own formation.
 
-Only a current member of the formation, or the person who started it, can read this. For anyone
-else, including another window of a member, an account administrator who is not in the formation,
-and a member who has left, the formation is not found.
+Only a current member of the Formation, or the person who created it, can read this. For anyone
+else, the Formation is not found: that includes another window of the same person that has not
+joined, an account administrator who is not in the Formation, and a member who has left.
 
 The member id is what `say --to` addresses. Report the list as the script prints it. Members who
 have left are shown last and marked; a message cannot be directed at them, and the server refuses
@@ -452,9 +452,9 @@ missing from the output, that is a defect worth reporting, not tidiness.
 record is read by every current member and by the person who started the formation. If the user
 asks why something somebody transmitted is not in the report, that is the answer.
 
-Only a current member of the formation, or the person who started it, can read this. For anyone
-else, including another window of a member, an account administrator who is not in the formation,
-and a member who has left, the formation is not found.
+Only a current member of the Formation, or the person who created it, can read this. For anyone
+else, the Formation is not found: that includes another window of the same person that has not
+joined, an account administrator who is not in the Formation, and a member who has left.
 
 **Read it before writing the debrief.** It is available while the formation is still running, and
 it is the material the summary should be written against: it will tell you which members never
@@ -614,9 +614,9 @@ name beside its member id. A member with no name is shown by role and member id.
 printed. If the members could not be read from the service it says so, and the first lines are
 still true: they come from this session's own record.
 
-Only a current member of the formation, or the person who started it, can read this. For anyone
-else, including another window of a member, an account administrator who is not in the formation,
-and a member who has left, the formation is not found.
+Only a current member of the Formation, or the person who created it, can read this. For anyone
+else, the Formation is not found: that includes another window of the same person that has not
+joined, an account administrator who is not in the Formation, and a member who has left.
 
 ## What Not To Do
 

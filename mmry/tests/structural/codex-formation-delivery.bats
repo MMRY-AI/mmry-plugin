@@ -318,7 +318,7 @@ FAKECURL
 #
 # The journey's outcome on Codex now also says: the formation list shows every live Formation by id
 # and name only, and a Formation's details are shown only to its current members and the person who
-# started it. Codex runs the same scripts as Claude Code, under MMRY_HOST=codex with the Codex
+# created it. Codex runs the same scripts as Claude Code, under MMRY_HOST=codex with the Codex
 # conversation's own session id, so what is proven here is that route: the list a Codex customer is
 # shown, and that each read of one formation is asked from the Codex session (the service answers
 # no other caller; its half is the API repository's formation-list-privacy suite).
@@ -385,7 +385,7 @@ _as_codex() {
     [[ "$output" == *"4243  the other job"* ]] || return 1
     [[ "$output" != *"member(s)"* ]] || return 1
     [[ "$output" != *"no objective"* ]] || return 1
-    [[ "$output" == *"The list shows each formation's id and name. Join one to see its members and messages."* ]]
+    [[ "$output" == *"The list shows each Formation's id and name. Join one to see its members and messages."* ]]
 }
 
 @test "31854 codex: a member count from an older service is not shown to a Codex customer" {
