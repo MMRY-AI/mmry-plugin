@@ -107,6 +107,8 @@ _refused_once() {
         "formation-remove.sh 5"
         "formation-assign.sh 5 do-the-tests"
         "formation-debrief.sh all-done-and-closed-out"
+        "formation-idle-limit.sh"
+        "formation-idle-limit.sh 30"
     )
     local c
     for c in "${cmds[@]}"; do
@@ -176,6 +178,20 @@ _refused_once() {
     : > "$URLS"
     run bash "$HH/formation-join.sh" 40
     _refused_once code-only
+}
+
+@test "U-11 idle-limit (34432's command): the approved sentence once when the body names only the code, read and set" {
+    export FAKE_FORM_BODY='{"code":"formation_upgrade_required"}'
+    local c
+    for c in "formation-idle-limit.sh" "formation-idle-limit.sh 30" "formation-idle-limit.sh default"; do
+        _member
+        : > "$URLS"
+        # shellcheck disable=SC2086
+        run bash "$HH"/$c
+        [ "$status" -ne 0 ] || { echo "$c: exit 0 on a refusal: $output"; return 1; }
+        [ "${#lines[@]}" -eq 1 ] || { echo "$c: printed ${#lines[@]} lines: $output"; return 1; }
+        _refused_once "$c code-only"
+    done
 }
 
 @test "U-10 the help for Formation names the upgrade in the approved words, on Claude Code and Codex" {
