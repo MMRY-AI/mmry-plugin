@@ -50,6 +50,23 @@ source "${_fd_root}/hooks-handlers/lib-foundation-key.sh" >/dev/null 2>&1 || exi
 set +e +u
 _fd_dir="${MMRY_TMPDIR:-${TMPDIR:-/tmp}}"
 
+# NOT ON A LISTENING CHECK-IN (#32244): the directive is sent with every message the person sends, and a
+# check-in is the plugin's own wake, not a message. One glob when no session here has a check-in in
+# flight; only when one has is the payload read, and lib-foundation-key.sh decides
+# (mmry_foundation_renewal_turn_v). The prompt only: --precompact is unchanged.
+if [[ "$_fd_mode" == prompt ]]; then
+    for _fd_m in "${TMPDIR:-/tmp}"/.mmry-renewal-turn-*; do
+        [[ -f "$_fd_m" ]] || continue
+        _fd_head=""
+        [[ -t 0 ]] || IFS= read -r -d '' -n 4096 -t 1 _fd_head 2>/dev/null
+        if [[ "$_fd_head" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-]{1,100})\" ]] \
+            && mmry_foundation_renewal_turn_v "${BASH_REMATCH[1]}" "$_fd_head"; then
+            exit 0
+        fi
+        break
+    done
+fi
+
 mmry_foundation_directive_block_v "$_fd_dir" || exit 0
 _fd_block="$_MMRY_FND_DIRECTIVE_BLOCK"
 
