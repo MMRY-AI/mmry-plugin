@@ -438,6 +438,10 @@ _codex_tree() {
                     grep -q "\`formation_queue_${v}\`" "$skill" || missing="${missing} queue_${v}(tool)"
                 done
                 ! grep -q "formation-queue.sh" "$skill" || missing="${missing} queue(script-named)" ;;
+            # #34432: the idle limit is one tool, formation_idle_limit (the script's hyphen is an underscore).
+            idle-limit)
+                grep -q "\`formation_idle_limit\`" "$skill" || missing="${missing} idle_limit(tool)"
+                ! grep -q "formation-idle-limit.sh" "$skill" || missing="${missing} idle-limit(script-named)" ;;
             *)
                 grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}" ;;
         esac

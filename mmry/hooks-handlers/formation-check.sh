@@ -1573,7 +1573,9 @@ case "$mode" in
         if [[ -n "$_fc_idle_reminder" ]]; then
             _renew_text="MMRY FORMATION WATCH RENEWED (formation ${formation_id}). No message arrived in the last ${_quiet}, but members of this Formation are waiting for work."
             _renew_text+=$'\n'"${_fc_idle_reminder}"
-            _renew_text+=$'\n'"To remove a member from the Formation: /mmry:formation remove <member id>."
+            # The command is derived for the host, as every other line naming one is
+            # (codex-customer-strings.bats); only Claude Code renews, so it reads /mmry:formation remove.
+            _renew_text+=$'\n'"To remove a member from the Formation: $(mmry_host_formation_ref remove '<member id>')."
             _renew_text+=$'\n''Answer by giving each named member its next piece of work or removing it. Do not reply "Still listening". If you are waiting on the user'"'"'s answer to a question, add that question on one more line.'
         fi
         # A stop owed to the member, found when this watch started, is told on this turn (#33256).
