@@ -1,4 +1,4 @@
-# mmry release files 2.19.0
+# mmry release files 2.20.0
 .claude-plugin/plugin.json
 .codex-plugin/plugin.json
 README.md
@@ -136,6 +136,7 @@ tests/handlers/foundation-in-time.bats
 tests/handlers/foundation-moments.bats
 tests/handlers/foundation-parts.bats
 tests/handlers/foundation-private-files.bats
+tests/handlers/foundation-renewal-turn.bats
 tests/handlers/foundation-status.bats
 tests/handlers/list-groups.bats
 tests/handlers/make-private.bats

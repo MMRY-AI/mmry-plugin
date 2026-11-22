@@ -277,6 +277,78 @@ mmry_foundation_directive_block_v() {
     _MMRY_FND_DIRECTIVE_BLOCK="MMRY AI's built-in directive (supplied by MMRY AI to every account, separate from the account's own Foundation memories): ${_MMRY_FND_DIRECTIVE_TEXT}"
 }
 
+# A LISTENING CHECK-IN IS NOT A PROMPT FROM THE PERSON (#32244). An idle Formation member's watch renews
+# itself every 28 minutes by waking the session (formation-check.sh, idle mode): it writes
+# ${TMPDIR}/.mmry-renewal-turn-<session id> holding the epoch, prints the renewal notice and exits 2, and
+# Claude Code turns that into a prompt wrapped as a task notification (docs/evidence/31850). The model
+# replies "Still listening." and stop-check.sh removes the marker. Restating the account's set and the
+# built-in directive on that turn added about 2,400 tokens to the transcript per check-in, up to 51 a
+# day, for a turn that acts on nothing. The Foundation parts and foundation-directive.sh ask this first
+# and send nothing on such a turn.
+#
+# A CHECK-IN ONLY WHEN EVERY ONE OF THESE HOLDS; anything else, and any doubt, is a real prompt:
+#   1. this session's marker is there (TMPDIR as formation-check.sh names it, not MMRY_TMPDIR),
+#   2. its epoch is 900 s old or less (stop-check.sh's rule) and not in the future; only its first 13
+#      characters are read, so a corrupt or oversized marker costs nothing and is simply not obeyed,
+#   3. the payload's prompt value starts with <task-notification> (Claude Code's wrapper),
+#   4. the renewal notice is in it before the first </system-reminder>,
+#   5. it does not carry the listening-stopped notice (that turn may run a status command),
+#   6. nothing but whitespace follows that </system-reminder>, and the value ends within 8,192 bytes.
+#
+# $1 = the session id from the payload, $2 = the payload bytes the caller has already read. The rest
+# is read from stdin, only once the marker is found, in 512-byte steps to 8,192. Builtins only on every
+# path but one: bash 3.2 (macOS) has no clock builtin, so it pays one date there, and only when a marker
+# is there. Sets _MMRY_FND_RENEWAL to 1 and returns 0 on a check-in; otherwise 0 and returns 1.
+mmry_foundation_renewal_turn_v() {
+    local sid="${1:-}" p="${2:-}" f at="" now="" more="" rc=0 key v w head tail
+    _MMRY_FND_RENEWAL=0
+    [[ "$sid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || return 1
+    f="${TMPDIR:-/tmp}/.mmry-renewal-turn-${sid}"
+    [[ -f "$f" ]] || return 1
+    # Bounded: an epoch is at most 12 digits, so 13 characters tell a good one from a bad one, whatever
+    # the file's size (a 20 MB marker with no line end took over 2 minutes to read whole).
+    { IFS= read -r -n 13 at || true; } < "$f" 2>/dev/null
+    at="${at%$'\r'}"
+    [[ "$at" =~ ^[0-9]{1,12}$ ]] || return 1
+    if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
+        printf -v now '%(%s)T' -1
+    else
+        now="$(date +%s 2>/dev/null)"
+    fi
+    [[ "$now" =~ ^[0-9]+$ ]] || return 1
+    # A marker dated ahead of the clock was not written by this renewal: not obeyed.
+    (( at <= now && now - at <= 900 )) || return 1
+    while (( ${#p} < 8192 )); do
+        more=""
+        IFS= read -r -d '' -n 512 -t 1 more 2>/dev/null
+        rc=$?
+        p+="$more"
+        (( rc == 0 )) || break
+    done
+    # A read that timed out leaves the payload in doubt.
+    (( rc <= 128 )) || return 1
+    [[ "$p" =~ (\"prompt\"[[:space:]]*:[[:space:]]*\") ]] || return 1
+    key="${BASH_REMATCH[1]}"
+    v="${p#*"$key"}"
+    [[ "$v" == '<task-notification>'* ]] || return 1
+    # The value ends at its first unescaped quote: escaped backslashes and quotes are masked first.
+    w="${v//\\\\/__}"
+    w="${w//\\\"/__}"
+    [[ "$w" == *'"'* ]] || return 1
+    w="${w%%\"*}"
+    [[ "$w" == *'</system-reminder>'* ]] || return 1
+    # One split, at the first </system-reminder> (18 characters): the tail is what follows the head.
+    head="${w%%</system-reminder>*}"
+    tail="${w:${#head}+18}"
+    [[ "$head" == *'MMRY FORMATION WATCH RENEWED (formation '* ]] || return 1
+    [[ "$head" == *'There is nothing to act on and nothing to report.'* ]] || return 1
+    [[ "$w" != *'MMRY FORMATION LISTENING HAD STOPPED'* ]] || return 1
+    tail="${tail//\\n/}"; tail="${tail//\\r/}"; tail="${tail//\\t/}"; tail="${tail//[[:space:]]/}"
+    [[ -z "$tail" ]] || return 1
+    _MMRY_FND_RENEWAL=1
+    return 0
+}
+
 # WHETHER THE IDENTITY IS WHOLE (#32915): a credential AND a server address this session was actually
 # given, by the environment or by its config. The default server is applied above so that the set's
 # name stays stable for a config that never named one; but a session that could name neither a key nor
