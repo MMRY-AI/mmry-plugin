@@ -29,6 +29,7 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+mmry_formation_command  # #34285: an upgrade refusal ends this command with its sentence, once
 
 mode="declare"
 arg1="${1:-}"

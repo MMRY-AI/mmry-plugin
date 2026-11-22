@@ -589,6 +589,8 @@ if [[ "$event" == "PermissionRequest" ]]; then
 fi
 
 [[ -n "$sid" ]] || sid="$(mmry_session_id || true)"
+# #34285: an upgrade refusal clears this session's membership, so no later hook asks again.
+MMRY_FORMATION_REFUSAL_SID="$sid"
 [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
 
 # Who asked, and the asked tool's exact name when known (#33900, WHICH PROMPT, AND WHO ASKED above).

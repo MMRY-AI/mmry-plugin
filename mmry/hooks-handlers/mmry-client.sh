@@ -33,6 +33,8 @@ set -euo pipefail
 # need neither. Every other caller is unchanged.
 _mmry_client_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_mmry_client_dir" == "${BASH_SOURCE[0]}" ]] && _mmry_client_dir="."
+# Kept past the unset below, for the Formation upgrade refusal's call to formation-state.sh (#34285).
+_MMRY_CLIENT_HANDLERS="$_mmry_client_dir"
 # THE ACCOUNT-AND-SERVER KEY THE FOUNDATION COPY IS NAMED BY (#32889). Functions only, no process, so
 # it is loaded for every caller, the definitions-only one included: the set verifier below needs it.
 # shellcheck source=/dev/null
@@ -1157,6 +1159,8 @@ _mmry_request() {
     while [[ "$MMRY_RESPONSE" == *$'\n' ]]; do MMRY_RESPONSE="${MMRY_RESPONSE%$'\n'}"; done
     rm -f "$tmp_resp" "$tmp_body"
     MMRY_HTTP_CODE="$http_code"
+    # #34285: the Formation upgrade refusal, read once here for every Formation request.
+    if [[ "$http_code" == "403" && "$path" == /api/formations* ]]; then _mmry_formation_upgrade_note; fi
 
     # 2xx = success
     if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
@@ -1339,6 +1343,51 @@ _mmry_print_error() {
             mmry_host_codex_access_hint >&2
         fi
     fi
+}
+
+# ============================================================================
+# FORMATION UPGRADE REFUSAL (#34285, DD-199 in the API repository)
+# ============================================================================
+# The service answers every /api/formations route for an account without the Formation upgrade with
+# HTTP 403, {"code": "formation_upgrade_required"} and one sentence for the person. Read here, once,
+# for every Formation request this plugin makes, on Claude Code and Codex alike:
+#   - the session's local Formation membership is cleared, so the idle watch and every hook find no
+#     Formation and ask nothing more: nothing further is spent on Formation;
+#   - a Formation COMMAND (it called mmry_formation_command) prints the server's sentence once, made
+#     safe to print, and exits 1: no retry and no second message of its own;
+#   - a hook is told (MMRY_FORMATION_UPGRADE_REFUSED and MMRY_FORMATION_UPGRADE_TEXT) and decides how
+#     to say it in its own runtime. A hook names its session in MMRY_FORMATION_REFUSAL_SID, because its
+#     session comes from the hook payload rather than the environment.
+# Any other 403 is not this refusal and changes nothing here.
+_MMRY_FORMATION_UPGRADE_SENTENCE="Formation is an upgrade this account does not have yet, and an account administrator can add it on the account page at mmryai.com/account."
+MMRY_FORMATION_UPGRADE_REFUSED=""
+MMRY_FORMATION_UPGRADE_TEXT=""
+
+# A Formation command says it is one, so a refusal ends it with the sentence (hooks never call this).
+mmry_formation_command() { _MMRY_FORMATION_COMMAND=1; }
+
+# True when the last response is the upgrade refusal: 403 and the fixed code, never the text.
+mmry_formation_upgrade_refused_response() {
+    [[ "${MMRY_HTTP_CODE:-}" == "403" ]] || return 1
+    local re='"code"[[:space:]]*:[[:space:]]*"formation_upgrade_required"'
+    [[ "${MMRY_RESPONSE:-}" =~ $re ]]
+}
+
+_mmry_formation_upgrade_note() {
+    mmry_formation_upgrade_refused_response || return 0
+    MMRY_FORMATION_UPGRADE_REFUSED=1
+    _mmry_api_error_v
+    MMRY_FORMATION_UPGRADE_TEXT="${_MMRY_API_ERROR:-$_MMRY_FORMATION_UPGRADE_SENTENCE}"
+    local sid
+    for sid in "${MMRY_FORMATION_REFUSAL_SID:-}" "$(mmry_session_id 2>/dev/null || true)"; do
+        [[ -n "$sid" ]] || continue
+        bash "${_MMRY_CLIENT_HANDLERS:-.}/formation-state.sh" clear "$sid" >/dev/null 2>&1 || true
+    done
+    if [[ -n "${_MMRY_FORMATION_COMMAND:-}" ]]; then
+        printf '%s\n' "$MMRY_FORMATION_UPGRADE_TEXT"
+        exit 1
+    fi
+    return 0
 }
 
 # ============================================================================
