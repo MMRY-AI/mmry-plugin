@@ -177,6 +177,23 @@ BODY
     [ -s "$urls" ]
 }
 
+@test "report: a session in no formation is told who can read the record, never that anybody on the account can (#31854)" {
+    # The approved sentence (cmo-mmry, 2026-11-22, wording-31854-qa1.md Q1). The old one said the
+    # record was readable by anybody on the account, the opposite of the member-only rule.
+    local bin; bin="$(_fake_curl_dir)"
+    local urls="${BATS_TEST_TMPDIR}/urls"
+    : > "$urls"
+
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$(_record_body)" FAKE_URL_LOG="$urls"         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid"         run bash "${HANDLERS}/formation-report.sh"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"This session is not in a Formation. Give the id instead: "* ]]
+    [[ "$output" == *"Only the Formation's current members and the person who created it can read its record."* ]]
+    [[ "$output" != *"readable by anybody"* ]]
+    [[ "$output" != *"never a member"* ]]
+    [ ! -s "$urls" ]
+}
+
 @test "report: a 404 says the formation is not there or is not ours, and no record is invented" {
     local bin; bin="$(_fake_curl_dir)"
 
