@@ -38,6 +38,8 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Turn down the queued piece you were offered. It goes back to the queue for the next member. | `formation_queue_decline` | `piece_id` |
 | Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 15. | `formation_idle_limit` | optional `minutes` (1 to 1440); optional `use_default` (true for 15) |
 
+Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
+
 Each tool describes its own arguments and returns what MMRY printed. Codex tells each tool which
 conversation called it, so a formation joined with `formation_join` is this conversation's alone,
 and its messages arrive here on their own.

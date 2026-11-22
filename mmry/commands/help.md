@@ -29,6 +29,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
 - `/mmry:setup` sets up MMRY AI, or reconfigures it for a different account.
 - `/mmry:uninstall` removes MMRY AI from this computer.
 - `/mmry:formation <subcommand>` coordinates several assistants on one job, as a Formation. The subcommands:
+  - Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
   - `/mmry:formation start "objective"` begins a Formation with this session as its lead.
   - `/mmry:formation join <id>` puts this session in a Formation.
   - Each member is given a rule for its role, and the lead is told which members have had no work for 15 minutes.

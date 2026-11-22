@@ -18,6 +18,7 @@ set -euo pipefail
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
+mmry_formation_command  # #34285: an upgrade refusal ends this command with its sentence, once
 
 # cmo-mmry item 12, approved 2026-11-21: the help line, naming all three forms.
 IDLE_LIMIT_HELP="idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (15 by default). Use idle-limit default to go back to 15, or idle-limit alone to see the current limit."

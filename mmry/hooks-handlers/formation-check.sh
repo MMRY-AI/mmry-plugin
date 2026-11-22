@@ -472,6 +472,8 @@ formation_id="$MMRY_FS_FORMATION"
 # ---- 2. Load the client. If it is not there, this feature simply does not run. ----
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh" 2>/dev/null || exit 0
+# #34285: an upgrade refusal clears THIS session's membership, named from the payload, not the environment.
+MMRY_FORMATION_REFUSAL_SID="$session_id"
 command -v curl >/dev/null 2>&1 || exit 0
 mmry_load_config 2>/dev/null || exit 0
 
@@ -859,6 +861,15 @@ _poll_once() {
     _fc_limit_request || { _release_mutex; return 1; }
 
     if ! mmry_get_formation_transmissions "$formation_id" "$session_id" "$last_seen" "$_fc_shown_owed" 2>/dev/null; then
+        # THE ACCOUNT HAS NO FORMATION UPGRADE (#34285). The client has already cleared this session's
+        # membership, so this watch and every later hook ask nothing more. Say the server's sentence
+        # once, through this runtime's own channel, as a block with nothing marked seen.
+        if [[ -n "${MMRY_FORMATION_UPGRADE_REFUSED:-}" ]]; then
+            rm -f "${MMRY_FS_PATH:-}" 2>/dev/null || true
+            FORMATION_BLOCK="$MMRY_FORMATION_UPGRADE_TEXT"
+            FORMATION_NEWEST=""
+            return 0
+        fi
         _release_mutex; return 1
     fi
     [[ "${MMRY_HTTP_CODE:-}" =~ ^2[0-9][0-9]$ ]] || { _release_mutex; return 1; }
