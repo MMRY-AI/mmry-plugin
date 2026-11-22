@@ -58,7 +58,8 @@ for arg in "$@"; do
 done
 printf '%s\n' "$url" >> "$FAKE_URL_LOG"
 case "$url" in
-    */transmissions/sent*) body='{"formationId":4242,"member":true,"messages":[]}' ;;
+    */transmissions/sent*) body='{"formationId":4242,"member":true,"messages":[]}'
+                           [[ -n "${FAKE_SENT_BODY:-}" ]] && body="$FAKE_SENT_BODY" ;;
     *) body="${FAKE_BODY:-[]}" ;;
 esac
 [[ -n "$out" ]] && printf '%s' "$body" > "$out"
@@ -266,4 +267,20 @@ _renewal_turn_reply() {
     _stop_payload "Here is the status." "" false > "${BATS_TEST_TMPDIR}/stop.json"
     run bash -c "bash '${HANDLERS}/stop-check.sh' < '${BATS_TEST_TMPDIR}/stop.json'"
     [ "$status" -eq 2 ] || { echo "the save prompt did not come back: ${status}"; return 1; }
+}
+
+# #34432 (DD-200 in MMRY-AI/mmry). A lead's renewal that carries the idle reminder is real work: the
+# lead has members to give work to. It writes no renewal-turn marker, so the save prompt, the prompt
+# check and the Foundation skip (#32244) treat its turn as a typed one. A plain renewal still does.
+@test "P4: a reminder renewal writes no renewal-turn marker; a plain renewal still does" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_SESSION_ID"
+    run env MMRY_FORMATION_MODE=idle MMRY_IDLE_POLL_SECONDS=2 MMRY_IDLE_POLL_INTERVAL=1 \
+        FAKE_SENT_BODY='{"formationId":4242,"member":true,"messages":[],"idleReminder":{"idleNoticeAfterSeconds":900,"members":[{"memberId":12}],"text":"IDLE MEMBERS STILL WAITING."}}' \
+        bash "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 2 ] && [[ "$output" == *"members of this Formation are waiting for work."* ]] || { echo "no reminder renewal: ${status} ${output}"; return 1; }
+    [ ! -e "${TMPDIR}/.mmry-renewal-turn-$(_sid)" ] || { echo "a reminder renewal left a renewal-turn marker"; return 1; }
+    # The listening chain is still carried forward.
+    [ -d "${TMPDIR}/.mmry-formation-renewed-$(_sid)" ] || { echo "the renewal marker for the next watch is missing"; return 1; }
+    _reset
+    _renew
 }

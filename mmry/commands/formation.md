@@ -1,6 +1,6 @@
 Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>` | `/mmry:formation idle-limit [<minutes>|default]`
 
 ## What This Does
 
@@ -250,7 +250,7 @@ Each member is also given one rule for its own role:
 >
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 
-**The lead hears who is free.** A member with no active work for 15 minutes is named to the lead, up to three times, 30 minutes apart, and the roster marks it. A member's own Done asks the lead: Is there anything else I can do? A lead on Codex or a connected assistant sees this on its next action, not while idle.
+**The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 15 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
 
 **The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member's assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.
 
@@ -603,6 +603,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" decline <pieceId>
 - `list`: Show the queue: each piece, the host it needs, and who took it and when.
 - `take`: Take the queued piece you were offered. It becomes your assignment.
 - `decline`: Turn down the queued piece you were offered. It goes back to the queue for the next member.
+
+### idle-limit
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-idle-limit.sh" [<minutes>|default]
+```
+
+idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (15 by default). Use idle-limit default to go back to 15, or idle-limit alone to see the current limit.
+
+Any member can read the limit. Only the lead of this Formation, the person who created it, or an account administrator can set it; the server refuses anybody else and says so. **Report what the script prints**: the limit as it now stands, or the server's reason for refusing.
 
 ### status
 

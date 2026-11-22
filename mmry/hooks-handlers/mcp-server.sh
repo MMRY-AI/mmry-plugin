@@ -303,6 +303,19 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Remove a member from the coordination group", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false}
   },
   {
+    "name": "formation_idle_limit",
+    "title": "Read or set the idle limit",
+    "description": "Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 15.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "minutes": {"type": "integer", "description": "Optional: the new idle limit in minutes, 1 to 1440. Omit to read the current limit."},
+        "use_default": {"type": "boolean", "description": "Optional: true to go back to the default of 15 minutes."}
+      }
+    },
+    "annotations": {"title": "Read or set the idle limit", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
     "name": "formation_queue_add",
     "title": "Queue a piece of work",
     "description": "Queue a piece of work in the Formation you lead, with an optional host it needs. Only the lead can add.",
@@ -417,6 +430,11 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "formation_debrief" then ["formation-debrief.sh", (str("summary") | need("summary"))]
    elif $n == "formation_remove" then
       ["formation-remove.sh", (int("member_id") | need("member_id"))] + (if int("formation_id") == null then [] else [int("formation_id")] end)
+   elif $n == "formation_idle_limit" then
+      ["formation-idle-limit.sh"]
+      + (if (.arguments.use_default // false) == true then ["default"]
+         elif int("minutes") == null then []
+         else [int("minutes")] end)
    elif $n == "formation_queue_add" then
       ["formation-queue.sh", "add", (str("description") | need("description"))]
       + (if (str("host") // "") != "" then ["--host", (str("host") | if IN("codex","claude-code") then . else error("host must be codex or claude-code") end)] else [] end)
