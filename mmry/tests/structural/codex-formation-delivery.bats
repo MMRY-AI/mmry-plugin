@@ -430,6 +430,6 @@ _as_codex() {
         bash "${HANDLERS}/formation-roster.sh" 4243
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Formation 4243 does not exist, or it belongs to another account, or this session is not a current member of it."* ]] || return 1
+    [[ "$output" == *"Formation 4243 was not found. Either it does not exist, it belongs to another account, or this session is not a current member of it."* ]] || return 1
     grep -qxF "GET http://fake.invalid/api/formations/4243?sessionId=${CODEX_SID}" "$CODEX_URLS"
 }

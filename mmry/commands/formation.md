@@ -449,8 +449,8 @@ reads as though everything went to plan, which is worse than no record at all. I
 missing from the output, that is a defect worth reporting, not tidiness.
 
 **It contains no messages.** Anything said with `say --to` was said to that recipient, and this
-record is read by every current member and by the person who started the formation. If the user
-asks why something somebody transmitted is not in the report, that is the answer.
+record can be read by every current member and by the person who created the Formation. If the
+user asks why something somebody transmitted is not in the report, that is the answer.
 
 Only a current member of the Formation, or the person who created it, can read this. For anyone
 else, the Formation is not found: that includes another window of the same person that has not

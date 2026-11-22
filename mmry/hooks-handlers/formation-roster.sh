@@ -64,7 +64,7 @@ if ! mmry_get_formation "$formation_id"; then
     if [[ "${MMRY_HTTP_CODE:-0}" == "000" ]]; then
         echo "Could not reach the service. ${MMRY_RESPONSE:-}"
     elif [[ "${MMRY_HTTP_CODE:-0}" == "404" ]]; then
-        echo "Formation ${formation_id} does not exist, or it belongs to another account, or this session is not a current member of it."
+        echo "Formation ${formation_id} was not found. Either it does not exist, it belongs to another account, or this session is not a current member of it."
     else
         echo "Could not read the roster for formation ${formation_id} (HTTP ${MMRY_HTTP_CODE:-0}). ${MMRY_RESPONSE:-}"
     fi

@@ -185,7 +185,7 @@ BODY
         run bash "${HANDLERS}/formation-report.sh" 99
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"does not exist, or it belongs to another account"* ]]
+    [[ "$output" == *"Formation 99 was not found. Either it does not exist, it belongs to another account, or this session is not a current member of it."* ]]
     [[ "$output" != *"CLOSE-OUT RECORD"* ]]
 }
 

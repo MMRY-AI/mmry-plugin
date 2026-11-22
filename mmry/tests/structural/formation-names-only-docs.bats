@@ -3,7 +3,7 @@
 # names-only list and member-only details (#31854, DD-198; requirements 4 and 5).
 #
 # The sentences are held here as the customer reads them, with line breaks folded, so a page that
-# drops one fails by name. They are the text cmo-mmry approved on 2026-11-21 (W2, W3, W8). Joining from the list is unchanged and is asserted too, because the
+# drops one fails by name. They are the text cmo-mmry approved on 2026-11-21 (W2, W3, W8, and X2, X3, X4 from wording-31854-extra.md). Joining from the list is unchanged and is asserted too, because the
 # first plan for this ticket removed it.
 
 setup() {
@@ -43,10 +43,10 @@ setup() {
 }
 
 @test "codex skill: the list script is described as printing ids and names only" {
-    [[ "$CODEX" == *"It prints each active formation's id and name and nothing else."* ]]
+    [[ "$CODEX" == *"\`formation-list.sh\` shows the Formations a customer can join. It prints each active Formation's id and name and nothing else. A Formation's members, messages, claimed areas, work queue and close-out record are shown only to its current members and the person who created it; for anyone else the Formation is not found."* ]]
 }
 
 @test "command page: the close-out record is no longer said to be readable by people never in the formation" {
     [[ "$CMD" != *"readable by people who were never in the formation"* ]] || return 1
-    [[ "$CMD" == *"this record is read by every current member and by the person who started the formation"* ]]
+    [[ "$CMD" == *"this record can be read by every current member and by the person who created the Formation"* ]]
 }
