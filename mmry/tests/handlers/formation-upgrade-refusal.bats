@@ -165,7 +165,7 @@ _refused_once() {
     _member
     export FAKE_FORM_BODY='{"error":"Only the lead can do that.","detail":null}'
     run bash "$HH/formation-say.sh" "hello team"
-    [[ "$output" != *"$SENTENCE"* ]]
+    [[ "$output" != *"$SENTENCE"* ]] || { echo "a 403 without the code printed the upgrade sentence: $output"; return 1; }
     [ -n "$(_state)" ] || { echo "a 403 without the code cleared the membership"; return 1; }
 }
 
