@@ -112,11 +112,11 @@ fi
 seconds=""
 if [[ -n "${MMRY_JQ:-}" ]]; then
     if [[ "$mode" == "read" ]]; then
-        seconds="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r '.stallNoticeAfterSeconds // empty' 2>/dev/null | tr -d '\r' || true)"
+        seconds="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r '.progressNoticeAfterSeconds // empty' 2>/dev/null | tr -d '\r' || true)"
     else
         said="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r '.message // empty' 2>/dev/null | tr -d '\r' || true)"
         if [[ -n "$said" ]]; then echo "$(clean "$said")"; exit 0; fi
-        seconds="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r '.stallNoticeAfterSeconds // empty' 2>/dev/null | tr -d '\r' || true)"
+        seconds="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r '.progressNoticeAfterSeconds // empty' 2>/dev/null | tr -d '\r' || true)"
     fi
 fi
 # A server whose Formation answer carries no progress limit reports the default.
