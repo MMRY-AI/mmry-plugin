@@ -116,10 +116,10 @@ _has_idle_lines() {
     _has_idle_lines
 }
 
-@test "D3: a carriage return or control character in a member's name cannot hide or rewrite an idle line, in the debrief" {
-    _run_on claude formation-debrief.sh "$(_debrief_body "$(_record 'Seat\r\u001b[2KB')")" "$SUMMARY"
+@test "D3: a carriage return, C0 or C1 control character in a member's name cannot hide or rewrite an idle line, in the debrief" {
+    _run_on claude formation-debrief.sh "$(_debrief_body "$(_record 'Seat\r\u001b[2K\u0085B')")" "$SUMMARY"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" != *$'\r'* && "$output" != *$'\e'* ]] || { printf '%s' "$output" | od -c | tail -20; return 1; }
+    [[ "$output" != *$'\r'* && "$output" != *$'\e'* && "$output" != *$'\xc2\x85'* ]] || { printf '%s' "$output" | od -c | tail -20; return 1; }
     printf '%s\n' "$output" | grep -q -x -F -- "Member 13 >>> Seat[2KB <<<: idle for 1 hour 5 minutes in total" || { echo "$output"; return 1; }
     printf '%s\n' "$output" | grep -q -x -F -- "$IDLE_C" || { echo "$output"; return 1; }
 }
