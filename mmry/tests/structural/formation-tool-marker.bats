@@ -9,6 +9,11 @@
 #        once, marked as from MMRY and directed to it, on Claude Code (stderr, exit 2).
 #   A13  And on Codex (additionalContext).
 #   B17  The lead's window shows NO PROGRESS and PROGRESS AGAIN the same way, on both hosts.
+#   QA171 (verdict-171-C FAIL): the after-tool check of the plugin's OWN Formation send or read call
+#        (Claude Code Bash formation-say/roster/status/list/check.sh from an install location; Codex
+#        formation_say/roster/status/list, bare or mcp__mmry_plugin__) polls without the marker. Every
+#        other tool call, and a payload whose tool part cannot be read, still sends it.
+#   PART2 A dispatched helper's call delivers nothing, prints nothing and changes no local state.
 #
 # The notice text is the server's (cmo-mmry's approved wording); the plugin only formats it. The
 # service is a fake transport: no network, every call answered with FAKE_BODY, each URL logged.
