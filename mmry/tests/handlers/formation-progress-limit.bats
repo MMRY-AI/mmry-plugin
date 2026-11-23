@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# #34089 (DD-203 in MMRY-AI/mmry): the progress-limit command, formation-stall-limit.sh.
+# #34089 (DD-203 in MMRY-AI/mmry): the progress-limit command, formation-progress-limit.sh.
 #
 # How long a member with an assignment can go without progress before the lead is told: 5 to 1440
 # minutes, 5 by default. Any member can read it; only the lead, the person who created the Formation or
@@ -14,7 +14,7 @@ setup() {
     HANDLERS="${BATS_TEST_DIRNAME}/../../hooks-handlers"
     export TMPDIR="${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
     export MMRY_CONFIG_FILE="${BATS_TEST_TMPDIR}/no-such-config.json"
-    SID="bats-stall-limit-$$"
+    SID="bats-progress-limit-$$"
     bash "${HANDLERS}/formation-state.sh" clear "$SID" || true
     LOG="${BATS_TEST_TMPDIR}/limit.log"
     : > "$LOG"
@@ -60,14 +60,14 @@ _limit() {
     PATH="${bin}:${PATH}" FAKE_CODE="$code" FAKE_BODY="$body" FAKE_URL_LOG="$LOG" \
         CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-        run "${hostenv[@]}" bash "${HANDLERS}/formation-stall-limit.sh" "$@"
+        run "${hostenv[@]}" bash "${HANDLERS}/formation-progress-limit.sh" "$@"
 }
 
 @test "B16: progress-limit 20 asks the server to set 20 minutes and prints its sentence" {
     _limit claude 200 '{"formationId":4242,"stallAfterMinutes":20,"stallNoticeAfterSeconds":1200,"message":"This Formation'"'"'s progress limit is now 20 minutes."}' 20
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [ "$output" = "This Formation's progress limit is now 20 minutes." ] || { echo "$output"; return 1; }
-    grep -q '^PUT http://fake.invalid/api/formations/4242/stall-limit {"minutes":20}$' "$LOG" || { cat "$LOG"; return 1; }
+    grep -q '^PUT http://fake.invalid/api/formations/4242/progress-limit {"minutes":20}$' "$LOG" || { cat "$LOG"; return 1; }
 }
 
 @test "B16: 5 and 1440 are sent; default sends null and prints the server's sentence" {
@@ -117,7 +117,7 @@ _limit() {
 
 @test "B16: a session not in a Formation is told so, and asks nothing" {
     bash "${HANDLERS}/formation-state.sh" clear "$SID" || true
-    CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" run env -u MMRY_HOST bash "${HANDLERS}/formation-stall-limit.sh"
+    CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" run env -u MMRY_HOST bash "${HANDLERS}/formation-progress-limit.sh"
     [ "$status" -ne 0 ] && [ "$output" = "This session is not in a Formation, so it has no progress limit. Run /mmry:formation list to see what is active." ] || { echo "$output"; return 1; }
 }
 
@@ -127,5 +127,5 @@ _limit() {
 }
 
 @test "B16: the script is in the release file list" {
-    grep -qx 'hooks-handlers/formation-stall-limit.sh' "${HANDLERS}/../release-files.txt"
+    grep -qx 'hooks-handlers/formation-progress-limit.sh' "${HANDLERS}/../release-files.txt"
 }
