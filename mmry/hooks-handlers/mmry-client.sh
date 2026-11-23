@@ -2022,10 +2022,6 @@ mmry_get_formation_transmissions() {
     # session id is not ours to assume the shape of, and "since" is an ISO timestamp whose colons
     # are reserved characters in a query string: an unencoded value is a request the server is
     # entitled to read differently from the one we meant to send (#31196 QA round 2).
-    #
-    # TOOL_MARKER "1" (#34089, DD-203 in MMRY-AI/mmry) adds "&tool=1" last: the check made right after
-    # this session did real work, which the service counts as progress on its assignment. Only the
-    # after-tool check passes it (formation-check.sh); anything else sends the request as before.
     local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}" tool_marker="${5:-}"
     _mmry_urlencode_v "$session_id"; local path="/api/formations/${formation_id}/transmissions?sessionId=${_MMRY_URLENC}"
     if [[ -n "$since" ]]; then
@@ -2036,6 +2032,9 @@ mmry_get_formation_transmissions() {
     if [[ -n "${shown//,/}" ]]; then
         path="${path}&shownIds=${shown}"
     fi
+    # TOOL_MARKER "1" (#34089, DD-203 in MMRY-AI/mmry) adds the marker last: the check made right after
+    # this session did real work, which the service counts as progress on its assignment. Only the
+    # after-tool check passes it (formation-check.sh); anything else sends the request as before.
     [[ "$tool_marker" == "1" ]] && path="${path}&tool=1"
     _mmry_request GET "$path"
 }
