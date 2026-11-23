@@ -1104,7 +1104,7 @@ mmry_host_codex_access_hint() {
         echo "formation_start, formation_join, formation_say, formation_assign, formation_progress,"
         echo "formation_roster, formation_status, formation_report, formation_debrief, formation_remove,"
         echo "formation_queue_add, formation_queue_list, formation_queue_take, formation_queue_decline,"
-        echo "formation_idle_limit, formation_leave), which needs"
+        echo "formation_idle_limit, formation_progress_limit, formation_leave), which needs"
         echo "none. For anything else, call request_permissions with"
     else
         echo "network access. Assistant: call request_permissions with"
