@@ -678,7 +678,7 @@ _limit() {
 
 @test "WD3: the idle-limit section's paragraph is the approved text, on one line" {
     local d3="Any member can read the limit. Only the lead of this Formation, the person who created it, or an account administrator can set it; the server refuses anybody else and says so. **Report what the script prints**: the limit as it now stands, or the server's reason for refusing."
-    [ "$(tr -d '\r' < "${HANDLERS}/../commands/formation.md" | grep -c -x -F -- "$d3")" -eq 1 ]
+    [ "$(tr -d '\r' < "${HANDLERS}/../commands/formation.md" | grep -c -x -F -- "$d3")" -eq 2 ]   # idle-limit and, since #34088, progress-limit read alike
 }
 
 @test "WD4: a read says 'is', not 'is now'; 1 minute is singular" {

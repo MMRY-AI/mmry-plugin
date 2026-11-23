@@ -629,7 +629,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-progress-limit.sh" [<minute
 
 progress-limit <minutes> sets how long a member with an assignment can go without progress before the lead is told, from 5 to 1440 minutes (5 by default). Use progress-limit default to go back to 5, or progress-limit alone to see the current limit.
 
-**Report what the script prints**: the limit as it now stands, or the server's reason for refusing.
+Any member can read the limit. Only the lead of this Formation, the person who created it, or an account administrator can set it; the server refuses anybody else and says so. **Report what the script prints**: the limit as it now stands, or the server's reason for refusing.
 
 ### status
 

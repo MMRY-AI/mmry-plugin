@@ -137,6 +137,7 @@ def mmry_lead_state_suffix:
 def mmry_progress_suffix:
     if (has("minutesSinceProgress") | not) or .leftDate != null then ""
     elif .minutesSinceProgress == null then "  (no assignment)"
+    elif .minutesSinceProgress == 0 then "  (last progress less than a minute ago)"
     elif (.minutesSinceProgress | mmry_whole_minutes) then "  (last progress " + mmry_minutes_words(.minutesSinceProgress) + " ago)"
     else "" end;
 '
