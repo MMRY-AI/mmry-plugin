@@ -174,7 +174,7 @@ _client_set() {
 
 PLUGIN_DIR_PL="${BATS_TEST_DIRNAME}/../.."
 C3_TOOL="Read or set how many minutes a member with an assignment can go without progress before the lead is told. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 5 to 1440 minutes; leave it unset for the default of 5."
-D1_LEAD="If the lead of a Formation shows no activity for the Formation's quiet limit, every member and the person who created the Formation are told once, and told again when the lead is active or if it leaves or is removed while work is still open. A lead waiting on approval is shown as waiting, not quiet."
+D1_LEAD="If the lead of a Formation shows no activity for the Formation's quiet limit, every other member is told once, and told again when the lead is active or if it leaves or is removed while work is still open. A lead waiting on approval is shown as waiting, not quiet. The person who created the Formation can see the lead's state on the roster."
 
 @test "item 13: the command page's usage line names progress-limit, right after idle-limit" {
     local usage; usage="$(tr -d '\r' < "${PLUGIN_DIR_PL}/commands/formation.md" | grep -m1 '^Usage:')"
