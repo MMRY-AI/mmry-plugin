@@ -291,7 +291,7 @@ _mmry_waiting_forget_approvals() {
     [[ "${1:-}" =~ $_MMRY_WAITING_SID_RE ]] || return 0
     rm -f -- "${MMRY_TMPDIR:?}/.mmry-approved-${1}" || true
 }
-_mmry_waiting_record_approval() { # SID TOOL DIGEST
+_mmry_waiting_note_approval() { # SID TOOL DIGEST
     [[ "${1:-}" =~ $_MMRY_WAITING_SID_RE && "${2:-}" =~ $_MMRY_WAITING_TOOL_RE && "${3:-}" =~ ^[0-9a-f]{64}$ ]] || return 0
     _mmry_waiting_approved_path "$1"
     grep -qxF -- "$2 $3" "$MMRY_WAITING_APPROVED" 2>/dev/null && return 0
@@ -523,7 +523,7 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
                 [[ -n "$MMRY_WAITING_DIGEST" && "$MMRY_WAITING_DIGEST" == "$minput" ]] && answered=1
                 # #34519 (DD-206): the person approved the MEMBER'S OWN call (no agent_id). Recorded, as
                 # its tool and digest only, so a helper repeating exactly this call is not stopped again.
-                [[ -n "$answered" && -z "$asker" ]] && _mmry_waiting_record_approval "$sid" "$mtool" "$minput"
+                [[ -n "$answered" && -z "$asker" ]] && _mmry_waiting_note_approval "$sid" "$mtool" "$minput"
             fi ;;
         PreToolUse)
             # #34519 STALE: the asking agent starts another call, so its prompt is over: allowed,
