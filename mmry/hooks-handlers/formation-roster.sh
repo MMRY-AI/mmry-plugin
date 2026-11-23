@@ -104,29 +104,14 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # and before the availability, so the line still ends with its availability. The service sends null
 # for a lead and for a member never idle, and nothing is shown then. It is the service's text, so its
 # control characters are removed, and a value that is not text is not shown.
-# #34466 (DD-205): the bracket is what the service derives, progressShown: Blocked, Done or Abandoned as
-# the member reported it; otherwise working once MMRY AI has recorded activity from the member since its
-# work was given, or not started if it has recorded none. The stored progress is unchanged and is not
-# shown in its place. On a roster that carries progressShown on any member, a member whose value is null
-# (a lead, a member that has left, an inactive account) shows no bracket. A roster with no progressShown
-# anywhere, from an older service or one whose activity read is missing, reads exactly as before. The
-# word is the service's text, so its control characters are removed, and a value that is not text is
-# not shown.
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}"'
     (.members // [])
-    | ([.[] | select((.progressShown | type) == "string")] | length > 0) as $shown
     | sort_by(.leftDate != null, .id)
     | .[]
     | mmry_member_line
       + "  " + (.email // "?")
       + (if .assignment then "  - " + .assignment else "" end)
-      + (if $shown then
-            (if (.progressShown | type) == "string"
-             then (.progressShown | gsub("[\u0000-\u001f\u007f-\u009f]"; "")) as $p
-                  | (if $p != "" then "  [" + $p + "]" else "" end)
-             else "" end)
-         elif .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]"
-         else "" end)
+      + (if .progress then "  [" + (if .progress == "Assigned" then "not started" else .progress end) + "]" else "" end)
       + (if (.idleSince // null) != null and .leftDate == null
          then "  (no active assignment since " + ((.idleSince | tostring)[11:16]) + " UTC)" else "" end)
       + (if (.waitingSince // null) != null and .leftDate == null
@@ -209,18 +194,7 @@ printf 'and the message goes to the whole formation.\n'
 # The format strings below put the breaks back exactly where they were, and the Claude control in
 # codex-formation-instructions.bats now compares the WHOLE footer byte for byte rather than
 # hunting for three fragments inside it.
-#
-# #34466 (DD-205): under a roster that carries progressShown the bracket is no longer only what the
-# member reported, so that sentence is replaced by cmo-mmry's approved footer (wording-34466-cmo.md item
-# 2), with the line breaks as approved and the same two references per host. An older service keeps
-# today's footer byte for byte, the same pattern as the availability footer below.
-if [[ "$(printf '%s' "$_mmry_roster_response" | "$MMRY_JQ" -r '[(.members // [])[] | select((.progressShown | type) == "string")] | length > 0' 2>/dev/null | tr -d '\r')" == "true" ]]; then
-    printf 'In brackets, working means MMRY AI has recorded activity from the member since its work was given,\n'
-    printf 'and not started means it has recorded none. Blocked, Done and Abandoned are what the member\n'
-    printf 'reported, and they always show. Messages count as activity, not as progress. Report your own with\n'
-else
-    printf 'The state in brackets is the last thing that member reported. Report your own with\n'
-fi
+printf 'The state in brackets is the last thing that member reported. Report your own with\n'
 printf '%s, and read the whole account\n' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
 printf 'with %s.\n' "$(mmry_host_formation_ref report)"
 # #33847: what availability rests on, said once, and only under a roster that carries it.

@@ -209,8 +209,7 @@ MMRY_MCP_TOOLS='[
       "type": "object",
       "properties": {
         "message": {"type": "string"},
-        "to_member_id": {"type": "integer", "description": "Roster entry id of the one member this is for."},
-        "confirm": {"type": "boolean", "description": "Optional: true to send a directed message that was held because it mentions another member or a task assigned to another member. Use it only when the recipient is right."}
+        "to_member_id": {"type": "integer", "description": "Roster entry id of the one member this is for."}
       },
       "required": ["message"]
     },
@@ -421,7 +420,6 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "formation_join" then ["formation-join.sh", (int("formation_id") | need("formation_id"))]
       + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)
    elif $n == "formation_say" then ["formation-say.sh", (str("message") | need("message"))] + (if int("to_member_id") == null then [] else [int("to_member_id")] end)
-      + (if (.arguments.confirm // false) == true then ["--confirm"] else [] end)
    elif $n == "formation_progress" then
       ["formation-progress.sh", (str("state") | need("state") | if IN("Accepted","Done","Blocked","Abandoned") then . else error("state must be Accepted, Done, Blocked or Abandoned") end)]
       + (if (str("note") // "") != "" then [str("note")] else [] end)
