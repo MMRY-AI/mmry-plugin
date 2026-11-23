@@ -383,6 +383,13 @@ MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools
 # the handler's command line, shell-quoted with @sh, so no argument value is ever interpreted by a
 # shell: eval only ever sees single-quoted literals.
 # ---------------------------------------------------------------------------------------------
+# cmo-mmry item 9 (#34432), the approved answer for idle-limit minutes outside 1 to 1440, word for word
+# as formation-idle-limit.sh's IDLE_LIMIT_RANGE. It is answered here, alone and before any handler runs,
+# because the generic int() check would put "Nothing was done:" and other words around it. The handler
+# keeps its own copy, since it runs without this server on Claude Code; mcp-server.bats pins the two
+# copies equal so they cannot drift.
+MMRY_MCP_IDLE_LIMIT_RANGE="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 15 minutes."
+
 # shellcheck disable=SC2016
 MMRY_MCP_ARGV_JQ='
 def str($k): (.arguments[$k] // null) | if . == null then null elif type == "string" then . else tostring end;
@@ -390,6 +397,10 @@ def int($k): (.arguments[$k] // null) | if . == null then null
     elif type == "number" and . == floor and . > 0 then tostring
     elif type == "string" and test("^[1-9][0-9]*$") then .
     else error("\($k) must be a positive whole number") end;
+def idle_minutes: (.arguments.minutes // null) | if . == null then null
+    elif type == "number" and . == floor and . >= 1 and . <= 1440 then tostring
+    elif type == "string" and test("^[1-9][0-9]{0,3}$") and (tonumber <= 1440) then .
+    else error($idle_range) end;
 def need($k): if . == null or . == "" then error("\($k) is required") else . end;
 def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
 (.name // "") as $n
@@ -433,8 +444,8 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
    elif $n == "formation_idle_limit" then
       ["formation-idle-limit.sh"]
       + (if (.arguments.use_default // false) == true then ["default"]
-         elif int("minutes") == null then []
-         else [int("minutes")] end)
+         elif idle_minutes == null then []
+         else [idle_minutes] end)
    elif $n == "formation_queue_add" then
       ["formation-queue.sh", "add", (str("description") | need("description"))]
       + (if (str("host") // "") != "" then ["--host", (str("host") | if IN("codex","claude-code") then . else error("host must be codex or claude-code") end)] else [] end)
@@ -502,10 +513,14 @@ _mcp_tools_call() {
     local id="$1" params="$2" setup name
     name="$("$JQ" -r '.name // ""' <<< "$params" 2>/dev/null)"
     name="${name%$'\r'}"
-    if ! setup="$("$JQ" -r "$MMRY_MCP_ARGV_JQ" <<< "$params" 2>&1)"; then
+    if ! setup="$("$JQ" -r --arg idle_range "$MMRY_MCP_IDLE_LIMIT_RANGE" "$MMRY_MCP_ARGV_JQ" <<< "$params" 2>&1)"; then
         setup="${setup#jq: error (at <stdin>:*): }"
+        setup="${setup%$'\r'}"
         if [[ "$setup" == unknown\ tool:* ]]; then
             _mcp_error "$id" -32602 "$setup"
+        elif [[ "$setup" == "$MMRY_MCP_IDLE_LIMIT_RANGE" ]]; then
+            # #34432: the approved sentence is the whole answer, with nothing in front of it.
+            _mcp_tool_text "$id" "$setup" true
         else
             _mcp_tool_text "$id" "Nothing was done: ${setup}" true
         fi
