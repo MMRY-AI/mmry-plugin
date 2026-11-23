@@ -552,6 +552,42 @@ IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset t
     [ ! -s "$REQLOG" ] || { cat "$REQLOG"; return 1; }
 }
 
+@test "34432 tool: a jq that ends its lines with CR (as on Windows) still gives the range sentence alone" {
+    # A Windows jq can leave a CR on what it prints. The server strips a trailing CR from jq's error
+    # before it compares it with the approved sentence (mcp-server.sh, _mcp_tools_call); without that
+    # strip the sentence does not match and the caller gets the generic "Nothing was done:" answer.
+    # Git Bash's command substitution already drops a trailing CR LF, so this jq ends its error with a
+    # bare CR, the case the substitution keeps and only the server's strip removes.
+    local real_jq
+    real_jq="$(command -v jq)"
+    mkdir -p "$TEST_TMPDIR/crlf-bin"
+    cat > "$TEST_TMPDIR/crlf-bin/jq" <<JQCRLF
+#!/usr/bin/env bash
+# Real jq: stdout lines end CR LF, the error text ends with one bare CR (a jq that already writes CR,
+# as a Windows jq writing to a file does, is not given a second); exit status kept.
+err="\$(mktemp)"
+"$real_jq" "\$@" 2>"\$err" | sed 's/\r*\$/\r/'
+rc="\${PIPESTATUS[0]}"
+sed 's/\r*\$/\r/' "\$err" | tr -d '\n' >&2
+rm -f "\$err"
+exit "\$rc"
+JQCRLF
+    chmod +x "$TEST_TMPDIR/crlf-bin/jq"
+    # The control: it really does end its error text with CR.
+    run bash -c '"$0" -n "error(\"x\")" 2>&1' "$TEST_TMPDIR/crlf-bin/jq"
+    [[ "$output" == *$'\r' ]] || { printf '%q\n' "$output"; return 1; }
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    # Only the server sees it, first on its PATH; this test's own jq reads stay plain.
+    local saved_path="$PATH"
+    export PATH="$TEST_TMPDIR/crlf-bin:$PATH"
+    mcp "$(call 3460 formation_idle_limit '{"minutes":0}' '{"sessionId":"conv-A"}')"
+    export PATH="$saved_path"
+    [ "$(is_error 3460)" = "true" ] || { echo "isError $(is_error 3460)"; return 1; }
+    [ "$(text_of 3460 | tr -d '\r')" = "$IDLE_RANGE_34432" ] || { printf '%q\n' "$(text_of 3460)"; return 1; }
+    [[ "$(text_of 3460)" != *"Nothing was done"* ]] || { echo "$(text_of 3460)"; return 1; }
+    [ ! -s "$REQLOG" ] || { cat "$REQLOG"; return 1; }
+}
+
 @test "34432 tool: formation_idle_limit 1, 1440 and \"30\" reach the handler with that value" {
     printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
     mcp "$(call 3450 formation_idle_limit '{"minutes":1}' '{"sessionId":"conv-A"}')" \
