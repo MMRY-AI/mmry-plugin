@@ -1967,6 +1967,7 @@ mmry_debrief_formation() {
 # than the 202 that used to come back either way.
 mmry_send_formation_transmission() {
     # Usage: mmry_send_formation_transmission FORMATION_ID SESSION_ID "message" [WORKING_DIR]
+    #            [RECIPIENT_MEMBER_ID] [CHECK_RECIPIENT true] [CONFIRMED true]
     #
     # #31122: this posts to the formation's own endpoint, not to memory processing. It used to go
     # to /api/memories/process with hookType "formation", which ran the message through AI
@@ -1985,14 +1986,25 @@ mmry_send_formation_transmission() {
     # The roster entry, never a session string. A sender has no legitimate way to learn somebody
     # else's session id, and _mmry_build_json's "#" prefix sends this unquoted because it is a
     # number on the wire.
+    #
+    # #34466 (DD-205 in MMRY-AI/mmry): an optional SIXTH argument, "true", asks the service to check a
+    # directed message against the roster (checkRecipient) and hold it, with a 409 carrying code
+    # recipient_check and the approved warning, when its text mentions another member or another
+    # member's task. An optional SEVENTH, "true", sends a held message anyway (confirmed). Each is sent
+    # only when it is "true", as an unquoted boolean, so a caller passing neither, and a service older
+    # than the check (which ignores both), produce exactly the request and the answer of today.
     local formation_id="$1" session_id="$2" message="$3" working_dir="${4:-}"
-    local recipient_member_id="${5:-}"
+    local recipient_member_id="${5:-}" check_recipient="" confirmed=""
+    [[ "${6:-}" == "true" ]] && check_recipient="true"
+    [[ "${7:-}" == "true" ]] && confirmed="true"
     local body
     body="$(_mmry_build_json \
         "sessionId"          "$session_id" \
         "content"            "$message" \
         "workingDirectory"   "$working_dir" \
-        "#recipientMemberId" "$recipient_member_id")"
+        "#recipientMemberId" "$recipient_member_id" \
+        "#checkRecipient"    "$check_recipient" \
+        "#confirmed"         "$confirmed")"
 
     _mmry_request POST "/api/formations/${formation_id}/transmissions" "$body"
     local rc=$?
