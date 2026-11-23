@@ -384,8 +384,8 @@ _plugin_lead_rule_copies() {
 }
 
 @test "33205 T1: the lead rule is the approved text and names assign, in every plugin copy" {
-    [[ "$LEAD_RULE" == *"Hand each new piece of work to a member with assign"* ]]
-    [[ "$LEAD_RULE" == *"the brief can still go as a message or a file"* ]]
+    [[ "$LEAD_RULE" == *"Hand each new piece of work to a member with assign"* ]] || return 1
+    [[ "$LEAD_RULE" == *"the brief can still go as a message or a file"* ]] || return 1
     local copies label text n=0
     copies="$(_plugin_lead_rule_copies)"
     while IFS='|' read -r label text; do
@@ -424,7 +424,7 @@ _plugin_lead_rule_copies() {
             [[ "$text" == *"$check"* ]] || { echo "$label lacks the check: $check"; return 1; }
         done <<< "$copies"
     done
-    [[ "$LEAD_RULE" == *"Before deciding there is none, check five places: "* ]]
+    [[ "$LEAD_RULE" == *"Before deciding there is none, check five places: "* ]] || return 1
     [[ "$LEAD_RULE" == *"Say there is no work only with the reason, naming what everything is waiting on."* ]]
 }
 
