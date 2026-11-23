@@ -57,7 +57,9 @@ case "$method $url" in
     "PUT "*/api/formations/*/members/*/progress) resp='{"progress":"Accepted"}' ;;
     "POST "*/api/formations) code=201; resp='{"id":77,"objective":"Ship it"}' ;;
     "DELETE "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","leftDate":"2026-10-16T02:14:33.1234567","removedByEmail":"a@test.mnemo"}' ;;
-    "PUT "*/api/formations/*/idle-limit) resp='{"message":"This Formation'"'"'s idle limit is now 30 minutes."}' ;;
+    "PUT "*/api/formations/*/idle-limit) resp='{"message":"This Formation'"'"'s idle limit is now 30 minutes."}'
+        # #34521: a server that answers with no message and no number (older than the idle-limit route's reply).
+        [[ -n "${FAKE_IDLE_LIMIT_BODY+set}" ]] && resp="$FAKE_IDLE_LIMIT_BODY" ;;
     "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
     "GET "*/api/formations/*/close-out|"GET "*/api/formations/*/close-out"?sessionId="*) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
     "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
@@ -612,7 +614,17 @@ JQCRLF
     [ "$(is_error 3454)" = "false" ] || { text_of 3454; return 1; }
     [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":null}' ] || { cat "$REQLOG"; return 1; }
     [[ "$(sed -n 2p "$REQLOG")" == "GET http://fake.invalid/api/formations/77?sessionId=conv-A "* ]] || { cat "$REQLOG"; return 1; }
-    [ "$(text_of 3454)" = "This Formation's idle limit is 15 minutes." ] || { text_of 3454; return 1; }
+    [ "$(text_of 3454)" = "This Formation's idle limit is 5 minutes." ] || { text_of 3454; return 1; }
+}
+
+@test "34521 tool: formation_idle_limit use_default, answered with no message and no number, reports the 5-minute default" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    export FAKE_IDLE_LIMIT_BODY='{}'
+    mcp "$(call 3460 formation_idle_limit '{"use_default":true}' '{"sessionId":"conv-A"}')"
+    unset FAKE_IDLE_LIMIT_BODY
+    [ "$(is_error 3460)" = "false" ] || { text_of 3460; return 1; }
+    [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":null}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(text_of 3460)" = "This Formation's idle limit is now 5 minutes." ] || { text_of 3460; return 1; }
 }
 
 @test "34432 tool: other tools keep the generic whole-number check and its Nothing was done message" {
