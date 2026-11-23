@@ -93,9 +93,9 @@ _sm() { printf '%s' "$output" | jq -r '.systemMessage // "<none>"' | tr -d '\r';
 }
 
 @test "L-02 Claude Code: the person line is cmo-mmry's item 3 for the program, the tool and neither" {
-    local top want
+    local top want tv wv
     for pair in "TOP_GIT|P_GIT" "TOP_TOOL|P_TOOL" "TOP_NONE|P_NONE"; do
-        top="${!pair%%|*}"; want="${pair#*|}"; want="${!want}"
+        tv="${pair%%|*}"; wv="${pair#*|}"; top="${!tv}"; want="${!wv}"
         local body
         if [[ "$top" == *">>>"* ]]; then body="[$(_notice "$(_full "$top")")]"; else body="[$(_notice "$top\\r\\n$ASK")]"; fi
         _deliver claude "$body"
