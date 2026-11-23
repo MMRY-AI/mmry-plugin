@@ -173,6 +173,14 @@ _sends() { grep -c '^POST http://fake.invalid/api/formations/77/transmissions ' 
     [ "$(grep -c '"recipientMemberId":441,"checkRecipient":true,"confirmed":true}' "$REQLOG")" -eq 1 ] || { cat "$REQLOG"; return 1; }
 }
 
+@test "W-13 the command help and the Codex skill carry wording item 4 exactly, each with its own host's confirm" {
+    local claude='A directed message that mentions another member, by name or member id, or a task assigned to another member, is held and not sent, with a warning naming what it mentions. If the recipient is right, send it again with --confirm. Messages to the whole Formation and to the lead are never held.'
+    local codex='A directed message that mentions another member, by name or member id, or a task assigned to another member, is held and not sent, with a warning naming what it mentions. If the recipient is right, send it again with confirm set to true. Messages to the whole Formation and to the lead are never held.'
+    grep -qxF "$claude" "$PLUGIN_ROOT/commands/formation.md" || { echo "commands/formation.md lacks item 4"; return 1; }
+    grep -qxF "$codex" "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" || { echo "the Codex skill lacks item 4"; return 1; }
+    ! grep -qF -- "--confirm" "$PLUGIN_ROOT/skills-codex/memory-system/SKILL.md" || { echo "the Codex skill names a Claude Code flag"; return 1; }
+}
+
 @test "W-12 Codex: the formation_say schema offers confirm with the approved description" {
     export MMRY_HOST=codex CODEX_HOME="$TEST_TMPDIR/codexhome"
     run bash -c 'printf "%s\n" "$1" | bash "$0"' "$HH/mcp-server.sh" '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
