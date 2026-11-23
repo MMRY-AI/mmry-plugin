@@ -233,6 +233,7 @@ tests/structural/file-integrity.bats
 tests/structural/folder-deletes-check.bats
 tests/structural/formation-agent-scoped.bats
 tests/structural/formation-assign.bats
+tests/structural/formation-background-work.bats
 tests/structural/formation-check-identity.bats
 tests/structural/formation-check-prompt-budget.bats
 tests/structural/formation-check-timeout.bats
