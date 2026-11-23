@@ -35,7 +35,14 @@
 # has no legitimate way to learn another session's id, and it is not the kind of thing that should
 # travel through a command line.
 #
-# Usage: formation-say.sh "message" [recipientMemberId]
+# THE WRONG-MEMBER CHECK (#34466, DD-205 in MMRY-AI/mmry). A directed message asks the service to check
+# its text against the roster. When it mentions another member, by name or member id, or a task assigned
+# to another member, the service holds it (409, code recipient_check) and nothing is stored; this prints
+# the service's warning and exits 1. The sending assistant sends again with --confirm when the recipient
+# is right. No person is needed, because nobody may be at the window. A broadcast asks for no check and
+# is sent as today; a service older than the check ignores the field and the send reads as today.
+#
+# Usage: formation-say.sh "message" [recipientMemberId] [--confirm]
 # Exits 0 only when the server confirms it stored the transmission.
 set -euo pipefail
 
@@ -43,6 +50,19 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/mmry-client.sh"
 mmry_formation_command  # #34285: an upgrade refusal ends this command with its sentence, once
+
+# #34466: --confirm may stand before or after the member id; it is taken out here so the positions
+# below read exactly as they always have.
+confirmed=""
+_say_args=()
+for _say_arg in "$@"; do
+    if [[ "$_say_arg" == "--confirm" && ${#_say_args[@]} -ge 1 ]]; then
+        confirmed="true"
+    else
+        _say_args+=("$_say_arg")
+    fi
+done
+set -- "${_say_args[@]+"${_say_args[@]}"}"
 
 message="${1:-}"
 if [[ -z "$message" ]]; then
@@ -92,8 +112,33 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "$PWD" "$recipient_member_id"; then
+# #34466: the check is asked for on a directed message only, and confirmed only goes with one.
+check_recipient=""
+if [[ -n "$recipient_member_id" ]]; then
+    check_recipient="true"
+else
+    confirmed=""
+fi
+
+if ! mmry_send_formation_transmission "$formation_id" "$session_id" "$message" "$PWD" "$recipient_member_id" \
+        "$check_recipient" "$confirmed"; then
     code="${MMRY_HTTP_CODE:-0}"
+    # #34466 (DD-205). HELD, NOT REFUSED: the message mentions another member or another member's task.
+    # The service's own warning is printed whole: it names the recipient, what was mentioned and how to
+    # send it again on this host. Untrusted text on a terminal, so it is cleaned as the wake line is
+    # below: every C0 and C1 control but newline and tab goes, carriage return included, inside jq and
+    # again with tr, and it is cut at 2,000 characters. Only a 409 carrying this code is a hold; any
+    # other 409 falls through to the branches below.
+    if [[ "$code" == "409" && -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
+        held="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            'def clean: gsub("[\u0000-\u0008\u000b-\u001f\u007f-\u009f]"; ""); if type == "object" and .code == "recipient_check" and (.message | type) == "string" then (.message | clean | .[0:2000]) else empty end' \
+            2>/dev/null || true)"
+        held="$(printf '%s' "$held" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+        if [[ -n "$held" ]]; then
+            printf '%s\n' "$held"
+            exit 1
+        fi
+    fi
     # #31195: EVERY BRANCH HERE MAY ONLY SAY WHAT ITS STATUS ACTUALLY MEANS. The gateway branch
     # below used to read "the formation may have been closed out, or you may no longer be a member
     # of it". Hit in production on 2026-09-03 by the Lead of a live formation with an intact roster,
