@@ -519,7 +519,8 @@ RENEWING_33716="MMRY AI is renewing your credits right now. Try your request aga
 # #34432: formation_idle_limit answers cmo-mmry's approved out-of-range sentence (item 9), word for word
 # and alone, for anything that is not a whole number from 1 to 1440, as /mmry:formation idle-limit does
 # on Claude Code. Every other tool keeps the generic check and its "Nothing was done:" message.
-IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 15 minutes."
+# #33205, #34521 (DD-202): the default is now 5 minutes, cmo-mmry's item 4 (wording-33205-34521-cmo-approved.md).
+IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 5 minutes."
 
 @test "34432 tool: formation_idle_limit with 0, 1441 or -5 answers the approved range sentence alone and asks nothing" {
     printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"

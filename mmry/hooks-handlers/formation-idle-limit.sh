@@ -2,7 +2,7 @@
 # formation-idle-limit.sh - read or set the Formation's idle limit (#34432, DD-200 in MMRY-AI/mmry).
 #
 # How long a member of this Formation can have no work before the lead is reminded: 1 to 1440 minutes,
-# 15 by default. Any member can read it; only the lead, the person who created the Formation or an
+# 5 by default (#34521, DD-202; it was 15 when #34432 shipped). Any member can read it; only the lead, the person who created the Formation or an
 # account administrator can set it, and the server decides that (usp_Mnemo_SetFormationIdleLimit). The
 # refusals and the success sentence are the server's, cmo-mmry's approved wording
 # (copy-34432-cmo-approved.md item 9), printed as they come.
@@ -12,7 +12,7 @@
 #
 # Usage: formation-idle-limit.sh            the current limit
 #        formation-idle-limit.sh <minutes>  set it, 1 to 1440
-#        formation-idle-limit.sh default    back to 15 minutes
+#        formation-idle-limit.sh default    back to 5 minutes
 set -euo pipefail
 
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,10 +20,11 @@ HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${HANDLER_DIR}/mmry-client.sh"
 mmry_formation_command  # #34285: an upgrade refusal ends this command with its sentence, once
 
-# cmo-mmry item 12, approved 2026-11-21: the help line, naming all three forms.
-IDLE_LIMIT_HELP="idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (15 by default). Use idle-limit default to go back to 15, or idle-limit alone to see the current limit."
+# cmo-mmry item 12, approved 2026-11-21: the help line, naming all three forms. #34521: 5 by default
+# (wording-33205-34521-cmo-approved.md item 4), and the same for the range sentence below.
+IDLE_LIMIT_HELP="idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (5 by default). Use idle-limit default to go back to 5, or idle-limit alone to see the current limit."
 # cmo-mmry item 9, out of range. The server says the same; this answers before asking it.
-IDLE_LIMIT_RANGE="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 15 minutes."
+IDLE_LIMIT_RANGE="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 5 minutes."
 
 arg="${1:-}"
 mode="read"

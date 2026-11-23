@@ -305,12 +305,12 @@ MMRY_MCP_TOOLS='[
   {
     "name": "formation_idle_limit",
     "title": "Read or set the idle limit",
-    "description": "Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 15.",
+    "description": "Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 5.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "minutes": {"type": "integer", "description": "Optional: the new idle limit in minutes, 1 to 1440. Omit to read the current limit."},
-        "use_default": {"type": "boolean", "description": "Optional: true to go back to the default of 15 minutes."}
+        "use_default": {"type": "boolean", "description": "Optional: true to go back to the default of 5 minutes."}
       }
     },
     "annotations": {"title": "Read or set the idle limit", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
@@ -387,8 +387,8 @@ MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools
 # as formation-idle-limit.sh's IDLE_LIMIT_RANGE. It is answered here, alone and before any handler runs,
 # because the generic int() check would put "Nothing was done:" and other words around it. The handler
 # keeps its own copy, since it runs without this server on Claude Code; mcp-server.bats pins the two
-# copies equal so they cannot drift.
-MMRY_MCP_IDLE_LIMIT_RANGE="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 15 minutes."
+# copies equal so they cannot drift. #34521 (DD-202): the default of 5 minutes, cmo-mmry's item 4.
+MMRY_MCP_IDLE_LIMIT_RANGE="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 5 minutes."
 
 # shellcheck disable=SC2016
 MMRY_MCP_ARGV_JQ='
