@@ -57,6 +57,7 @@ case "$method $url" in
     "PUT "*/api/formations/*/members/*/progress) resp='{"progress":"Accepted"}' ;;
     "POST "*/api/formations) code=201; resp='{"id":77,"objective":"Ship it"}' ;;
     "DELETE "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","leftDate":"2026-10-16T02:14:33.1234567","removedByEmail":"a@test.mnemo"}' ;;
+    "PUT "*/api/formations/*/idle-limit) resp='{"message":"This Formation'"'"'s idle limit is now 30 minutes."}' ;;
     "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
     "GET "*/api/formations/*/close-out|"GET "*/api/formations/*/close-out"?sessionId="*) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
     "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
@@ -513,6 +514,82 @@ RENEWING_33716="MMRY AI is renewing your credits right now. Try your request aga
     mcp "$(call 467 formation_remove '{"member_id":6}' '{"sessionId":"conv-A"}')"
     [ "$(is_error 467)" = "true" ]
     [[ "$(text_of 467)" == *"Could not remove member 6 from formation 77 (HTTP 500)"* ]] || { text_of 467; return 1; }
+}
+
+# #34432: formation_idle_limit answers cmo-mmry's approved out-of-range sentence (item 9), word for word
+# and alone, for anything that is not a whole number from 1 to 1440, as /mmry:formation idle-limit does
+# on Claude Code. Every other tool keeps the generic check and its "Nothing was done:" message.
+IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 15 minutes."
+
+@test "34432 tool: formation_idle_limit with 0, 1441 or -5 answers the approved range sentence alone and asks nothing" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3440 formation_idle_limit '{"minutes":0}' '{"sessionId":"conv-A"}')" \
+        "$(call 3441 formation_idle_limit '{"minutes":1441}' '{"sessionId":"conv-A"}')" \
+        "$(call 3442 formation_idle_limit '{"minutes":-5}' '{"sessionId":"conv-A"}')" \
+        "$(call 3443 formation_idle_limit '{"minutes":"0"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3444 formation_idle_limit '{"minutes":"1441"}' '{"sessionId":"conv-A"}')"
+    local i
+    for i in 3440 3441 3442 3443 3444; do
+        [ "$(is_error $i)" = "true" ] || { echo "call $i: isError $(is_error $i)"; return 1; }
+        [ "$(text_of $i)" = "$IDLE_RANGE_34432" ] || { echo "call $i: $(text_of $i)"; return 1; }
+    done
+    # No handler ran: with this conversation in formation 77 the handler would have sent a request.
+    [ ! -s "$REQLOG" ] || { cat "$REQLOG"; return 1; }
+}
+
+@test "34432 tool: formation_idle_limit with 2.5, \"abc\", \"30x\", \"-5\" or true answers the same sentence alone and asks nothing" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3445 formation_idle_limit '{"minutes":2.5}' '{"sessionId":"conv-A"}')" \
+        "$(call 3446 formation_idle_limit '{"minutes":"abc"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3447 formation_idle_limit '{"minutes":"30x"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3448 formation_idle_limit '{"minutes":"-5"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3449 formation_idle_limit '{"minutes":true}' '{"sessionId":"conv-A"}')"
+    local i
+    for i in 3445 3446 3447 3448 3449; do
+        [ "$(is_error $i)" = "true" ] || { echo "call $i: isError $(is_error $i)"; return 1; }
+        [ "$(text_of $i)" = "$IDLE_RANGE_34432" ] || { echo "call $i: $(text_of $i)"; return 1; }
+    done
+    [ ! -s "$REQLOG" ] || { cat "$REQLOG"; return 1; }
+}
+
+@test "34432 tool: formation_idle_limit 1, 1440 and \"30\" reach the handler with that value" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3450 formation_idle_limit '{"minutes":1}' '{"sessionId":"conv-A"}')" \
+        "$(call 3451 formation_idle_limit '{"minutes":1440}' '{"sessionId":"conv-A"}')" \
+        "$(call 3452 formation_idle_limit '{"minutes":"30"}' '{"sessionId":"conv-A"}')"
+    local i
+    for i in 3450 3451 3452; do
+        [ "$(is_error $i)" = "false" ] || { echo "call $i: $(text_of $i)"; return 1; }
+    done
+    [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":1}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(sed -n 2p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":1440}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(sed -n 3p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":30}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(grep -c . "$REQLOG")" -eq 3 ]
+}
+
+@test "34432 tool: formation_idle_limit use_default sends null, and no minutes reads the current limit" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3453 formation_idle_limit '{"use_default":true}' '{"sessionId":"conv-A"}')" \
+        "$(call 3454 formation_idle_limit '{}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 3453)" = "false" ] || { text_of 3453; return 1; }
+    [ "$(is_error 3454)" = "false" ] || { text_of 3454; return 1; }
+    [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":null}' ] || { cat "$REQLOG"; return 1; }
+    [[ "$(sed -n 2p "$REQLOG")" == "GET http://fake.invalid/api/formations/77?sessionId=conv-A "* ]] || { cat "$REQLOG"; return 1; }
+    [ "$(text_of 3454)" = "This Formation's idle limit is 15 minutes." ] || { text_of 3454; return 1; }
+}
+
+@test "34432 tool: other tools keep the generic whole-number check and its Nothing was done message" {
+    mcp "$(call 3455 memory_retire '{"id":0}' '{"sessionId":"conv-A"}')" \
+        "$(call 3456 formation_queue_take '{"piece_id":"abc"}' '{"sessionId":"conv-A"}')"
+    [ "$(text_of 3455)" = "Nothing was done: id must be a positive whole number" ] || { text_of 3455; return 1; }
+    [ "$(text_of 3456)" = "Nothing was done: piece_id must be a positive whole number" ] || { text_of 3456; return 1; }
+    [ ! -s "$REQLOG" ]
+}
+
+@test "34432: the range sentence is written in one place among the handlers, word for word" {
+    local n
+    n="$(grep -rlF "$IDLE_RANGE_34432" "$PLUGIN_ROOT/hooks-handlers" | grep -c .)"
+    [ "$n" -eq 1 ] || { grep -rlF "$IDLE_RANGE_34432" "$PLUGIN_ROOT/hooks-handlers"; return 1; }
 }
 
 @test "identity: each lead tool that names no conversation is refused, never guessed, and sends nothing" {
