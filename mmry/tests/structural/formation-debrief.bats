@@ -74,12 +74,12 @@ SUMMARY="Ported the validator and closed the billing gaps; nothing left open."
 
 # The idle part of a close-out record as the service writes it (CRLF, as the server's AppendLine),
 # with the record's other lines around it. $1 replaces Seat B's name when given.
-_record() {
+_closeout_text() {
     local b="${1:-Seat B}"
     printf '%s' "CLOSE-OUT RECORD: formation 4242\r\n\r\nMember 12 (Wingman): Seat A\r\n    assigned: >>> port the validator <<<\r\n    outcome:  Done, reported 2026-11-23 10:00 UTC.\r\n\r\nMember 12 >>> Seat A <<<: idle for 40 minutes in total\r\nMember 13 >>> ${b} <<<: idle for 1 hour 5 minutes in total\r\nMember 14 >>> Seat C <<<: idle for 0 minutes in total\r\n\r\nThis record is assembled from the roster."
 }
-_debrief_body() { printf '{"formationId":4242,"status":"ClosedOut","closeOut":{"record":"%s"}}' "${1:-$(_record)}"; }
-_report_body() { printf '{"formationId":4242,"record":"%s"}' "${1:-$(_record)}"; }
+_debrief_body() { printf '{"formationId":4242,"status":"ClosedOut","closeOut":{"record":"%s"}}' "${1:-$(_closeout_text)}"; }
+_report_body() { printf '{"formationId":4242,"record":"%s"}' "${1:-$(_closeout_text)}"; }
 
 IDLE_A="Member 12 >>> Seat A <<<: idle for 40 minutes in total"
 IDLE_B="Member 13 >>> Seat B <<<: idle for 1 hour 5 minutes in total"
@@ -117,7 +117,7 @@ _has_idle_lines() {
 }
 
 @test "D3: a carriage return, C0 or C1 control character in a member's name cannot hide or rewrite an idle line, in the debrief" {
-    _run_on claude formation-debrief.sh "$(_debrief_body "$(_record 'Seat\r\u001b[2K\u0085B')")" "$SUMMARY"
+    _run_on claude formation-debrief.sh "$(_debrief_body "$(_closeout_text 'Seat\r\u001b[2K\u0085B')")" "$SUMMARY"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$output" != *$'\r'* && "$output" != *$'\e'* && "$output" != *$'\xc2\x85'* ]] || { printf '%s' "$output" | od -c | tail -20; return 1; }
     printf '%s\n' "$output" | grep -q -x -F -- "Member 13 >>> Seat[2KB <<<: idle for 1 hour 5 minutes in total" || { echo "$output"; return 1; }
