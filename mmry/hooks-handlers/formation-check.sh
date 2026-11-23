@@ -837,6 +837,8 @@ _poll_once() {
     FORMATION_BLOCK=""
     FORMATION_NEWEST=""
     FORMATION_DIRECTED_IDS=""
+    FORMATION_TOP=""
+    FORMATION_PERSON=""
 
     # Hold the mutex from BEFORE THE LAST-SEEN READ until after "seen" is written. The read is the
     # first half of the read-then-write that must not interleave, so leaving it outside the lock -
@@ -944,7 +946,12 @@ _poll_once() {
         source "${HANDLER_DIR}/lib-formation-prompts.sh" 2>/dev/null || true
         bg_sentence="${MMRY_FORMATION_BACKGROUND_WORK:-}"
     fi
-    local count="" directed_count="" system_count="" away_count="" newest="" directed_ids="" lines=""
+    # #34519 (DD-206 in MMRY-AI/mmry): A WAITING ON APPROVAL NOTICE LEADS. It is rendered first in the
+    # batch, its first line is also put above everything else, and on Claude Code cmo-mmry's one-line
+    # person version (wording-34519-cmo.md item 3) goes to the person as a user-only systemMessage where
+    # the event allows one. Only the service's own notice counts: no sender, addressed to this
+    # session, not caught up from an absence, and starting with the words below.
+    local count="" directed_count="" system_count="" away_count="" newest="" directed_ids="" lines="" wait_top="" wait_person=""
     {
         IFS= read -r -d '' count || true
         IFS= read -r -d '' directed_count || true
@@ -953,9 +960,20 @@ _poll_once() {
         IFS= read -r -d '' newest || true
         IFS= read -r -d '' directed_ids || true
         IFS= read -r -d '' lines || true
+        IFS= read -r -d '' wait_top || true
+        IFS= read -r -d '' wait_person || true
     } < <("$MMRY_JQ" -j --arg bg "$bg_sentence" --arg astart "$assign_start" "${MMRY_JQ_NAME_DEFS:-}"'
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
         def away: (.sentWhileAway // false) == true;
+        def waiting: system and (.recipientMemberID // null) != null and (away | not)
+            and (((.content // "") | tostring) | startswith("WAITING ON APPROVAL."));
+        def firstline: (.content // "") | tostring | split("\r\n")[0] | split("\n")[0];
+        def person: firstline
+            | (capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)( >>> (?<name>.*) <<<)?( \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9][0-9]:[0-9][0-9] UTC (?<what>for approval to run [^ ]+\\.|for approval to use the [^ ]+ tool\\.|on a permission prompt\\.)$") // null)
+            | if . == null then empty
+              else "MMRY AI Formation: " + (if (.name // "") != "" then .name else "Member " + .id end)
+                   + (if (.app // "") != "" then " (" + .app + ")" else "" end)
+                   + " is waiting " + .what + " Answer the prompt in that window." end;
         def sender:
             if (.senderMemberID // null) != null then
                 (if ((.senderName // "") | mmry_name_clean) != ""
@@ -970,7 +988,7 @@ _poll_once() {
               (([.[].sentDate // empty] | max) // "" | tostring),
               ([.[] | select((.recipientMemberID // null) != null) | (.transmissionID // empty)
                     | select(type == "number") | tostring] | join(",")),
-              ([ .[] | (if system
+              ([ .[] | {w: waiting, l: ((if system
                         then "  [MMRY] "
                         else "  [" + sender + "] "
                         end)
@@ -979,8 +997,10 @@ _poll_once() {
                        + ((.content // .topic // "") | tostring)
                        + (if $bg != "" and system and (.recipientMemberID // null) != null and (away | not)
                              and (((.content // "") | tostring) | startswith($astart))
-                          then "\n  " + $bg else "" end)
-               ] | join("\n"))
+                          then "\n  " + $bg else "" end))}
+               ] | (map(select(.w)) + map(select(.w | not))) | map(.l) | join("\n")),
+              ([.[] | select(waiting) | firstline] | join("\n")),
+              ([.[] | select(waiting) | person] | join("\n"))
             ] | map(gsub("\u0000"; "") + "\u0000") | .[]
         else empty end' <<< "$MMRY_RESPONSE" 2>/dev/null)
 
@@ -1015,7 +1035,13 @@ _poll_once() {
     # Built in this shell rather than in a command substitution, which was one more process (#31746).
     # The text is unchanged.
     local nl=$'\n'
-    FORMATION_BLOCK="MMRY AI Formation Transmission (${count} new, formation ${formation_id})${nl}${nl}${lines}${nl}"
+    # #34519: the waiting line(s) first, above the header (see A WAITING ON APPROVAL NOTICE LEADS).
+    wait_top="${wait_top//$'\r'/}"; wait_person="${wait_person//$'\r'/}"
+    FORMATION_TOP="$wait_top"
+    FORMATION_PERSON="$wait_person"
+    FORMATION_BLOCK=""
+    [[ -z "$wait_top" ]] || FORMATION_BLOCK="${wait_top}${nl}${nl}"
+    FORMATION_BLOCK+="MMRY AI Formation Transmission (${count} new, formation ${formation_id})${nl}${nl}${lines}${nl}"
     if [[ "$system_count" -gt 0 ]]; then
         FORMATION_BLOCK+="${nl}A line marked [MMRY] came from the memory system itself, not from another member.${nl}"
         # #32683: progress reports and the lead's idle-member notice are [MMRY] lines too.
@@ -1251,6 +1277,17 @@ case "$mode" in
             _mark_shown
             exit 0
         fi
+        # #34519: A BATCH WITH A WAITING NOTICE ALSO REACHES THE PERSON. Exit 2 discards stdout, so
+        # such a batch goes as JSON on stdout instead, the shape Codex already takes here: the block as
+        # additionalContext for the model and cmo-mmry's person line as a user-only systemMessage.
+        # Every other batch keeps the exit-2 route exactly.
+        if [[ -n "${FORMATION_PERSON:-}" ]]; then
+            printf '%s' "$FORMATION_BLOCK" | "$MMRY_JQ" -Rsc --arg sm "$FORMATION_PERSON" \
+                '{systemMessage:$sm, hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:.}}' \
+                2>/dev/null || exit 0
+            _mark_shown
+            exit 0
+        fi
         printf '%s\n' "$FORMATION_BLOCK" >&2 || exit 0
         _mark_shown
         exit 2
@@ -1333,9 +1370,16 @@ case "$mode" in
         # could go (#31976). A here-string ends with one newline the block never has (it ends with
         # "transmitting."), so .[:-1] takes exactly that newline off and the text is unchanged. The
         # notice, when there is one, follows the block; with none, the text is byte for byte as before.
+        # #34519: with a waiting notice, its line goes above the preamble too, and on Claude Code the
+        # person line goes as a user-only systemMessage. With none, the text is byte for byte as before.
+        _fc_sm=""
+        [[ "$(mmry_host)" == "codex" ]] || _fc_sm="${FORMATION_PERSON:-}"
         "$MMRY_JQ" -Rs \
             --arg ev "$_event_name" --arg pre "$_preamble" --arg note "$_fc_notice" \
-            '{hookSpecificOutput:{hookEventName:$ev, additionalContext:($pre + "\n\n" + .[:-1] + (if $note == "" then "" else "\n\n" + $note end))}}' \
+            --arg top "${FORMATION_TOP:-}" --arg sm "$_fc_sm" \
+            '(if $top == "" then "" else $top + "\n\n" end) as $lead
+             | {hookSpecificOutput:{hookEventName:$ev, additionalContext:($lead + $pre + "\n\n" + (.[:-1] | ltrimstr($lead)) + (if $note == "" then "" else "\n\n" + $note end))}}
+             + (if $sm == "" then {} else {systemMessage:$sm} end)' \
             <<< "$FORMATION_BLOCK" 2>/dev/null || exit 0
         _mark_shown
         [[ -z "$_fc_notice" ]] || _fc_consume_notice

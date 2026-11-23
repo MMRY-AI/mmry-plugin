@@ -18,6 +18,7 @@ load '../helpers/test-helper'
 load '../helpers/formation-waiting-helpers.sh'
 
 ALLOW='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+JQ_BIN="$(command -v jq)"
 
 _program_sent() { "$JQ_BIN" -r '.programName // "<none>"' < "$BODIES" | tail -1; }
 _cc_pre() { # $1 tool_name, $2 agent_id (optional), $3 command text

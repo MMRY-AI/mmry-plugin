@@ -262,6 +262,50 @@ _mmry_waiting_forget() {
     rm -f -- "${MMRY_TMPDIR:?}/.mmry-waiting-${1}" "${MMRY_TMPDIR:?}/.mmry-asking-${1}" || true
 }
 
+# ---- THE PROGRAM (#34519, DD-206) --------------------------------------------------------------
+# What a shell prompt waits to run, for the lead's line: the FIRST WORD of the command, its path
+# removed (git, dotnet, npm). Reduced inside jq, so the command never reaches a shell variable; then
+# held to the tool name's rule here (and by the service and the table), so an assignment
+# (TOKEN=... git), a quote, a substitution or anything else that is not a bare name sends no program.
+# Never an argument, a path or the rest of the command. Only for a shell tool's call.
+_MMRY_WAITING_PROGRAM_JQ='if (type == "object" and ((.tool_input.command // null) | type) == "string") then (.tool_input.command | sub("^[ \t]+"; "") | (split(" ") | .[0] // "") | (split("\t") | .[0] // "") | (split("/") | last // "") | (split("\\") | last // "")) else "" end'
+_MMRY_WAITING_SHELL_TOOLS=' Bash PowerShell shell local_shell exec_command unified_exec '
+# _mmry_waiting_program TOOL WORD: sets MMRY_WAITING_PROGRAM to WORD when TOOL is a shell tool and
+# WORD is a bare name, empty otherwise.
+_mmry_waiting_program() {
+    MMRY_WAITING_PROGRAM=""
+    [[ "$_MMRY_WAITING_SHELL_TOOLS" == *" ${1:-} "* ]] || return 0
+    [[ "${2:-}" =~ $_MMRY_WAITING_TOOL_RE ]] && MMRY_WAITING_PROGRAM="$2"
+    return 0
+}
+
+# ---- THE MEMBER'S OWN APPROVALS THIS SESSION (#34519, DD-206) ------------------------------------
+# Codex does not pass an approval the person gave the member "for this session" to the member's
+# helpers (measured on 0.171.0): a helper repeating the call asks again, in a window nobody watches.
+# When the member's OWN prompt (no agent_id) is answered by the asked call running, its tool and the
+# digest of its input (WHICH CALL below; never the input) are added to .mmry-approved-<session>, owner
+# only. A helper's request repeating exactly that call is answered allow on Codex; nothing else ever is.
+# Forgotten with the session: a session start, leaving and removal (--forget).
+_mmry_waiting_approved_path() { MMRY_WAITING_APPROVED="${MMRY_TMPDIR}/.mmry-approved-$1"; }
+_mmry_waiting_forget_approvals() {
+    [[ "${1:-}" =~ $_MMRY_WAITING_SID_RE ]] || return 0
+    rm -f -- "${MMRY_TMPDIR:?}/.mmry-approved-${1}" || true
+}
+_mmry_waiting_record_approval() { # SID TOOL DIGEST
+    [[ "${1:-}" =~ $_MMRY_WAITING_SID_RE && "${2:-}" =~ $_MMRY_WAITING_TOOL_RE && "${3:-}" =~ ^[0-9a-f]{64}$ ]] || return 0
+    _mmry_waiting_approved_path "$1"
+    grep -qxF -- "$2 $3" "$MMRY_WAITING_APPROVED" 2>/dev/null && return 0
+    ( umask 077; printf '%s %s\n' "$2" "$3" >> "$MMRY_WAITING_APPROVED" ) || true
+    return 0
+}
+_mmry_waiting_is_approved() { # SID TOOL DIGEST
+    [[ "${1:-}" =~ $_MMRY_WAITING_SID_RE && "${2:-}" =~ $_MMRY_WAITING_TOOL_RE && "${3:-}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    _mmry_waiting_approved_path "$1"
+    [[ -f "$MMRY_WAITING_APPROVED" ]] || return 1
+    grep -qxF -- "$2 $3" "$MMRY_WAITING_APPROVED" 2>/dev/null
+}
+_MMRY_WAITING_ALLOW='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+
 # ---- WHICH PROMPT, AND WHO ASKED (#33900) -----------------------------------------------------
 # The waiting state clears only when the prompt it waits on is answered, or the person sends a new
 # prompt. Measured on Claude Code 2.1.322 (the #33900 PR description), a prompt stays open while these
@@ -345,6 +389,7 @@ _mmry_waiting_load() {
 # ---- --forget: the marker's prompt cannot still be open (#33901) ------------------------------
 if [[ "${1:-}" == "--forget" ]]; then
     _mmry_waiting_forget "${2:-}"
+    _mmry_waiting_forget_approvals "${2:-}"
     exit 0
 fi
 
@@ -429,7 +474,8 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
     if [[ -n "$hookmode" ]]; then
         # Only the events it is registered on, for the session the payload names, and only while that
         # session has a marker.
-        case "$ev" in Stop|SubagentStop) ;; *) exit 0 ;; esac
+        # #34519: PreToolUse too, the asking agent's next call (STALE below).
+        case "$ev" in Stop|SubagentStop|PreToolUse) ;; *) exit 0 ;; esac
         sid="$psid"
         [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
         _mmry_waiting_marker "$sid"
@@ -446,7 +492,7 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
     fi
     # A session start has no prompt of an earlier process still open (#33901): forget, no call.
     if [[ "$ev" == "SessionStart" ]]; then
-        _mmry_waiting_forget "$sid"; exit 0
+        _mmry_waiting_forget "$sid"; _mmry_waiting_forget_approvals "$sid"; exit 0
     fi
     # Who asked, and for which tool, as the raise recorded it ("-" or absent: the main thread, or a
     # tool whose exact name was not known).
@@ -475,6 +521,25 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
             if [[ -n "$mtool" && -n "$minput" && "$agent" == "$asker" && "$ptool" == "$mtool" ]]; then
                 _mmry_waiting_digest "$payload"
                 [[ -n "$MMRY_WAITING_DIGEST" && "$MMRY_WAITING_DIGEST" == "$minput" ]] && answered=1
+                # #34519 (DD-206): the person approved the MEMBER'S OWN call (no agent_id). Recorded, as
+                # its tool and digest only, so a helper repeating exactly this call is not stopped again.
+                [[ -n "$answered" && -z "$asker" ]] && _mmry_waiting_record_approval "$sid" "$mtool" "$minput"
+            fi ;;
+        PreToolUse)
+            # #34519 STALE: the asking agent starts another call, so its prompt is over: allowed,
+            # refused, timed out, or a built-in safety prompt it could not pass. Measured on Claude Code
+            # 2.1.331: a refused call has no PostToolUse, no PostToolUseFailure and no PermissionDenied,
+            # and the agent's next event is its next call's PreToolUse; a sibling call of the same batch
+            # starts only after the refusal. Before this a refused prompt stayed shown until the turn
+            # ended (cmo-mmry, 2026-11-23: about 9 minutes). Another agent's call never answers it.
+            # The ASKED call's own PreToolUse (same tool, same input digest) is left to its PostToolUse,
+            # in case a host fires it after the approval: that PostToolUse is what records an approval.
+            if [[ "$agent" == "$asker" ]]; then
+                answered=1
+                if [[ -n "$mtool" && -n "$minput" && "$ptool" == "$mtool" ]]; then
+                    _mmry_waiting_digest "$payload"
+                    [[ "$MMRY_WAITING_DIGEST" == "$minput" ]] && answered=""
+                fi
             fi ;;
         Stop)
             # The asking agent's turn ended (after a Deny there is no PostToolUse: measured). Codex's Stop
@@ -518,19 +583,30 @@ if [[ "${1:-}" == "--ask" ]]; then
     source "${HANDLER_DIR}/lib-jq.sh" || exit 0
     mmry_resolve_jq >/dev/null || exit 0
     [[ -n "${MMRY_JQ:-}" ]] || exit 0
-    parsed="$("$MMRY_JQ" -r '[(.session_id // "" | tostring), (.hook_event_name // "" | tostring), (.agent_id // "" | tostring), (.tool_name // "" | tostring)] | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")' <<< "$payload" || true)"
+    parsed="$("$MMRY_JQ" -r '[(.session_id // "" | tostring), (.hook_event_name // "" | tostring), (.agent_id // "" | tostring), (.tool_name // "" | tostring), ('"$_MMRY_WAITING_PROGRAM_JQ"' | tostring)] | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")' <<< "$payload" || true)"
     [[ "$parsed" == *$'\037'* ]] || exit 0
-    IFS=$'\037' read -r sid event agent tool <<< "$parsed" || true
+    IFS=$'\037' read -r sid event agent tool pword <<< "$parsed" || true
     [[ "$event" == "PermissionRequest" ]] || exit 0
     [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
     [[ -f "${MMRY_TMPDIR}/.mmry-formation-${sid}" ]] || exit 0
     [[ "$agent" =~ $_MMRY_WAITING_SID_RE ]] || agent="-"
     [[ "$tool" =~ $_MMRY_WAITING_TOOL_RE ]] || tool="-"
+    # #34519: the program, for the lead's line (THE PROGRAM above); "-" when there is none.
+    _mmry_waiting_program "$tool" "$pword"
     # The asked call's identifier: a digest of its input, never the input (WHICH CALL above).
     _mmry_waiting_digest "$payload"
     _mmry_waiting_ask_path "$sid"
-    printf 'asker %s\ntool %s\ninput %s\nat %s\n' "$agent" "$tool" "${MMRY_WAITING_DIGEST:--}" "$(date +%s || echo 0)" \
-        > "$MMRY_WAITING_ASK" || true
+    printf 'asker %s\ntool %s\ninput %s\nat %s\nprogram %s\n' "$agent" "$tool" "${MMRY_WAITING_DIGEST:--}" "$(date +%s || echo 0)" \
+        "${MMRY_WAITING_PROGRAM:--}" > "$MMRY_WAITING_ASK" || true
+    # #34519 (DD-206) R1: A HELPER'S REQUEST IS RAISED HERE. Measured on Claude Code 2.1.330, a
+    # background helper's request is denied with no prompt shown and no Notification, and it is in no
+    # result's permission_denials: only this hook sees it, and it carries agent_id. So for a helper the
+    # raise runs now, from this payload, with the key the Notification would use, so a foreground
+    # helper's later Notification for the same prompt makes no second call. Nothing is printed: Claude
+    # Code reads this hook's stdout as a decision, and the plugin never answers one on Claude Code.
+    if [[ "$agent" != "-" ]]; then
+        printf '%s' "$payload" | MMRY_WAITING_FROM_ASK=1 bash "${BASH_SOURCE[0]}" >/dev/null 2>&1 || true
+    fi
     exit 0
 fi
 
@@ -564,11 +640,16 @@ _fields='[(.session_id // "" | tostring), (.hook_event_name // "" | tostring),
           (.notification_type // "" | tostring), (.tool_name // "" | tostring),
           ((.message // "" | tostring) | '"$_MMRY_WAITING_SENTENCE_JQ"'),
           (.turn_id // "" | tostring), (.transcript_path // "" | tostring), (.agent_id // "" | tostring),
-          ((.message // "" | tostring) | if test("permission to use ") then "1" else "" end)]
+          ((.message // "" | tostring) | if test("permission to use ") then "1" else "" end),
+          ('"$_MMRY_WAITING_PROGRAM_JQ"' | tostring)]
          | flatten | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
 parsed="$("$MMRY_JQ" -r "$_fields" <<< "$payload" || true)"
 [[ "$parsed" == *$'\037'* ]] || exit 0
-IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent mnamed <<< "$parsed" || true
+IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent mnamed pword <<< "$parsed" || true
+program=""
+# #34519: raised from Claude Code's PermissionRequest hook for a helper's request (--ask above).
+fromask=""
+[[ "${MMRY_WAITING_FROM_ASK:-}" == "1" && "$event" == "PermissionRequest" ]] && fromask=1
 
 case "$event" in
     Notification)
@@ -608,17 +689,31 @@ if [[ "$event" == "PermissionRequest" ]]; then
         _mmry_waiting_digest "$payload"
         input="$MMRY_WAITING_DIGEST"
     fi
+    _mmry_waiting_program "$exact" "$pword"
+    program="$MMRY_WAITING_PROGRAM"
+    if [[ -n "$fromask" ]]; then
+        # Claude Code: the key the Notification for this prompt computes, so it makes no second call.
+        key="cc:${asker:--}:${exact:--}"
+        mturn=""
+    elif [[ -n "$asker" && -n "$exact" && -n "$input" ]] && _mmry_waiting_is_approved "$sid" "$exact" "$input"; then
+        # CODEX ONLY (#34519, DD-206; supersedes DD-187 point 7's "prints nothing" for this case alone):
+        # a helper (agent_id) repeating exactly a call its member's own prompt was approved for in this
+        # session. Answered allow; nothing raised. Every other request prints nothing, as before.
+        printf '%s' "$_MMRY_WAITING_ALLOW"
+        exit 0
+    fi
 else
     _mmry_waiting_ask_path "$sid"
     _k_named=""
     if [[ -f "$MMRY_WAITING_ASK" ]]; then
-        _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input=""
+        _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input="" _k_prog=""
         while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
             case "$_a" in
                 asker) _k_asker="$_b" ;;
                 tool)  _k_tool="$_b" ;;
                 input) _k_input="$_b" ;;
                 at)    _k_at="$_b" ;;
+                program) _k_prog="$_b" ;;
             esac
         done < "$MMRY_WAITING_ASK"
         _now="$(date +%s || echo 0)"
@@ -639,6 +734,13 @@ else
                 _mmry_waiting_asked_name "$_k_tool" "$_s_name" "$mprefix" "$tpath" "$mnamed"
                 tool="$MMRY_WAITING_TOOL"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
+                # #34519: the program the record holds, for the asked call's shell tool only. The
+                # Notification's sentence never supplies one.
+                _mmry_waiting_program "$_k_tool" "$_k_prog"
+                program="$MMRY_WAITING_PROGRAM"
+                # Only when the name sent is the record's own tool: a record the naming rule set
+                # aside does not supply a program either.
+                [[ "$tool" == "$_k_tool" ]] || program=""
             fi
         fi
         rm -f -- "${MMRY_TMPDIR:?}/.mmry-asking-${sid}" || true
@@ -695,7 +797,7 @@ mid="${own%% *}"; role="${own#* }"
 # A lead's own prompt: nobody to tell.
 [[ "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" != "lead" ]] || exit 0
 
-if mmry_set_formation_member_waiting "$fid" "$mid" "$sid" "$tool" >/dev/null; then
+if mmry_set_formation_member_waiting "$fid" "$mid" "$sid" "$tool" "$program" >/dev/null; then
     printf '%s %s\nprompt %s %s\nasker %s\ntool %s\ninput %s\nturn %s\n' "$fid" "$mid" "$key" "$(date +%s || echo 0)" \
         "${asker:--}" "${exact:--}" "${input:--}" "${mturn:--}" > "$MMRY_WAITING_MARKER" || true
 fi

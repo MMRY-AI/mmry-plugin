@@ -184,4 +184,15 @@ if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
     own_role="${own_role//$''/}"
 fi
 mmry_formation_role_rule "$own_role"
+# #34519: a member is told whether its helper agents share its allowed commands, by host (cmo-mmry's
+# item 5, held in lib-formation-prompts.sh). A lead is not: it is given the lead rule alone.
+case "$own_role" in
+    [Ll][Ee][Aa][Dd]) ;;
+    *)
+        if [[ "$_mmry_client_name" == "claude-code" ]]; then
+            echo "${MMRY_FORMATION_HELPERS_CLAUDE_CODE:-}"
+        elif [[ "$_mmry_client_name" == "codex" ]]; then
+            echo "${MMRY_FORMATION_HELPERS_CODEX:-}"
+        fi ;;
+esac
 exit 0
