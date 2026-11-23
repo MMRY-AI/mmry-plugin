@@ -37,6 +37,7 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Take the queued piece you were offered. It becomes your assignment. | `formation_queue_take` | `piece_id` |
 | Turn down the queued piece you were offered. It goes back to the queue for the next member. | `formation_queue_decline` | `piece_id` |
 | Read or set how many minutes a member of this Formation can have no work before the lead is reminded. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 1 to 1440 minutes; leave it unset for the default of 5. | `formation_idle_limit` | optional `minutes` (1 to 1440); optional `use_default` (true for 5) |
+| Read or set how many minutes a member with an assignment can go without progress before the lead is told. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 5 to 1440 minutes; leave it unset for the default of 5. | `formation_progress_limit` | optional `minutes` (5 to 1440); optional `use_default` (true for 5) |
 
 Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
 
@@ -280,12 +281,16 @@ Each member is also given one rule for its own role:
 > As the lead, keep every member working. Hand each new piece of work to a member with assign, so MMRY AI knows what it is doing; the brief can still go as a message or a file. When a member is idle or reports Done, give it its next job now. Before deciding there is none, check five places: open quality gaps on work in flight, follow-ups promised to the person, preparation for the next stage, records that do not match what was built, and a hand-back from another member waiting for review. Say there is no work only with the reason, naming what everything is waiting on. Do not do work yourself that an idle member could take; keep the coordinating, the deciding and the reviewing for yourself.
 >
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
+>
+> Report progress to the lead at each milestone of your assignment, so the lead can see the work is moving.
 
 **The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 5 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
 
 When a member reports Done, the lead is asked to give it its next job at once. The roster and the close-out record show how long each member has been idle in total; time spent waiting on a permission prompt is never counted.
 
 **The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member's assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.
+
+If the lead of a Formation shows no activity for the Formation's quiet limit, every member and the person who created the Formation are told once, and told again when the lead is active or if it leaves or is removed while work is still open. A lead waiting on approval is shown as waiting, not quiet.
 
 **The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, with the name of the tool asking and nothing else from the prompt, and the roster marks that member as waiting. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them.
 

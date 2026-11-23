@@ -111,3 +111,32 @@ def mmry_availability_suffix:
       end;
 def mmry_roster_has_availability: [(.members // [])[] | mmry_availability_word | select(. != null)] | length > 0;
 '
+
+# ---- The lead's state and each member's time since progress (#34088, #34089, DD-203 in MMRY-AI/mmry) --
+#
+# The service decides both and sends them on each roster row: leadState ("quiet", "waiting" or "left",
+# on the lead's own row only; null while the lead is active) with leadStateMinutes for quiet, and
+# minutesSinceProgress (whole minutes, or null for a member with no assignment). The plugin shows them
+# in cmo-mmry's labels (wording-34088-34089-cmo.md A4 and B4), each in brackets, on the roster line and
+# the status line, before the availability:
+#   quiet for {minutes}      waiting on approval      left
+#   last progress {minutes} ago                      no assignment (no figure, never zero)
+# A row that does not carry a field shows nothing for it, so an older server's roster and status read
+# exactly as before. A value that is not one the service sends is not shown. A member that has left
+# shows no progress label (the roster already says it has left).
+MMRY_JQ_PROGRESS_DEFS='
+def mmry_minutes_words($n): ($n | tostring) + (if $n == 1 then " minute" else " minutes" end);
+def mmry_whole_minutes: type == "number" and . >= 0 and . == floor;
+def mmry_lead_state_suffix:
+    (.leadState // null) as $s
+    | (.leadStateMinutes // null) as $m
+    | if $s == "quiet" and ($m | mmry_whole_minutes) then "  (quiet for " + mmry_minutes_words($m) + ")"
+      elif $s == "waiting" then "  (waiting on approval)"
+      elif $s == "left" then "  (left)"
+      else "" end;
+def mmry_progress_suffix:
+    if (has("minutesSinceProgress") | not) or .leftDate != null then ""
+    elif .minutesSinceProgress == null then "  (no assignment)"
+    elif (.minutesSinceProgress | mmry_whole_minutes) then "  (last progress " + mmry_minutes_words(.minutesSinceProgress) + " ago)"
+    else "" end;
+'

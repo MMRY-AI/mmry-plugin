@@ -9,8 +9,9 @@
 # approved wording (wording-34088-34089-cmo.md C4 to C6, Revision 1's range), printed as they come.
 #
 # A copy of formation-idle-limit.sh's pattern (#34432). The command is /mmry:formation progress-limit
-# (C1); its route in commands/formation.md, the Codex skills and the tool in mcp-server.sh follow once
-# Seat A's change to those files merges.
+# (C1), documented in commands/formation.md and commands/help.md; on Codex it is the formation_progress_limit
+# tool in mcp-server.sh, which runs this script. The set call is mmry-client.sh's
+# mmry_set_formation_progress_limit.
 #
 # THIS DOES NOT FAIL OPEN (formation-remove.sh's rule): it runs because somebody asked and is waiting
 # to know whether it worked, so a refusal prints the reason and exits non-zero.
@@ -72,15 +73,6 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-# The set call. mmry-client.sh is held by another change this round, so the request is made here with
-# the client's own transport; it moves into the client as mmry_set_formation_progress_limit after that
-# merges, beside mmry_set_formation_idle_limit.
-_set_progress_limit() {
-    local fid="$1" value="$2"
-    [[ "$value" =~ ^([0-9]{1,6}|null)$ ]] || return 1
-    _mmry_request PUT "/api/formations/${fid}/progress-limit" "{\"minutes\":${value}}"
-}
-
 # The sentence for an effective limit in seconds, "1 minute" for one. A change says "is now" (C6); a
 # read says "is", since nothing changed.
 sentence() {
@@ -92,7 +84,7 @@ clean() { printf '%s' "$1" | tr -d '\000-\010\013-\037\177' | tr '\n\t' '  ' | c
 if [[ "$mode" == "read" ]]; then
     ok=0; mmry_get_formation "$formation_id" "$session_id" && ok=1
 else
-    ok=0; _set_progress_limit "$formation_id" "$minutes" && ok=1
+    ok=0; mmry_set_formation_progress_limit "$formation_id" "$minutes" && ok=1
 fi
 
 if (( ok == 0 )); then

@@ -464,27 +464,8 @@ fi
 # sends it either.
 _fc_tool_marker=""
 [[ "$mode" == "tool" && "$hook_event" == "PostToolUse" ]] && _fc_tool_marker=1
-
-# The message check, with the marker when there is one. The marked path is the client's
-# mmry_get_formation_transmissions with "&tool=1" added, built here because mmry-client.sh is held by
-# another change this round; it moves into the client as a fifth argument after that merges.
-_fc_get_transmissions() {
-    if [[ -z "$_fc_tool_marker" ]]; then
-        mmry_get_formation_transmissions "$@"
-        return
-    fi
-    local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}"
-    _mmry_urlencode_v "$session_id"; local path="/api/formations/${formation_id}/transmissions?sessionId=${_MMRY_URLENC}"
-    if [[ -n "$since" ]]; then
-        _mmry_urlencode_v "$since"
-        path="${path}&since=${_MMRY_URLENC}"
-    fi
-    shown="${shown//[!0-9,]/}"
-    if [[ -n "${shown//,/}" ]]; then
-        path="${path}&shownIds=${shown}"
-    fi
-    _mmry_request GET "${path}&tool=1"
-}
+# The message check passes it to the client as mmry_get_formation_transmissions' fifth argument, which
+# adds the tool marker to the query last; with it empty the request is the one every other check sends.
 
 # ---- 1. Are we in a formation at all? One file test, then out. Key state by the resolved id. ----
 # IN-PROCESS (#31746). This was `bash formation-state.sh get`, and so was the last-seen read inside
@@ -891,7 +872,7 @@ _poll_once() {
     # Not enough time left to ask and still answer inside the budget: ask nothing (#31746).
     _fc_limit_request || { _release_mutex; return 1; }
 
-    if ! _fc_get_transmissions "$formation_id" "$session_id" "$last_seen" "$_fc_shown_owed" 2>/dev/null; then
+    if ! mmry_get_formation_transmissions "$formation_id" "$session_id" "$last_seen" "$_fc_shown_owed" "$_fc_tool_marker" 2>/dev/null; then
         # THE ACCOUNT HAS NO FORMATION UPGRADE (#34285). The client has already cleared this session's
         # membership, so this watch and every later hook ask nothing more. Say the server's sentence
         # once, through this runtime's own channel, as a block with nothing marked seen.
