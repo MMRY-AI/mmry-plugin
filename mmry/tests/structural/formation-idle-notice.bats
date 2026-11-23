@@ -98,7 +98,7 @@ _flat() { printf '%s' "$1" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
 @test "R1a: the guidance under an [MMRY] line names idle-member notices among what it can be" {
     _check claude lead "$LEAD_POLL"
     local flat; flat="$(_flat "$output")"
-    [[ "$flat" == *"Those are assignment changes, progress reports, idle-member and quiet-member notices, and collision warnings."* ]] || { echo "$output"; return 1; }
+    [[ "$flat" == *"Those are assignment changes, progress reports, notices about idle members, quiet members, members with no progress and the lead, and collision warnings."* ]] || { echo "$output"; return 1; }
 }
 
 # ---- R1b: a member's window shows nothing ---------------------------------------------------------
@@ -221,7 +221,7 @@ _quiet_poll() {
 @test "Q3: the guidance under an [MMRY] line names quiet-member notices among what it can be" {
     _check claude lead "$(_quiet_poll "$QUIET_LINE")"
     local flat; flat="$(_flat "$output")"
-    [[ "$flat" == *"Those are assignment changes, progress reports, idle-member and quiet-member notices, and collision warnings."* ]] || { echo "$output"; return 1; }
+    [[ "$flat" == *"Those are assignment changes, progress reports, notices about idle members, quiet members, members with no progress and the lead, and collision warnings."* ]] || { echo "$output"; return 1; }
 }
 
 @test "Q4: the command page and the Codex skill say the lead hears who has gone quiet, in the same words" {
@@ -834,6 +834,20 @@ OLD_ROSTER_BODY='{"formation":{"id":4242,"objective":"o"},"members":[{"id":3,"ro
     _roster "$(_lead_body null null null)"
     [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y  - port  [Accepted]  (no assignment)" ] || { echo "$output"; return 1; }
     [[ "$(_out_line 'm@x.y')" != *"0 minutes"* ]] || { echo "$output"; return 1; }
+}
+
+@test "#34089 roster: under a minute (0) reads last progress less than a minute ago, never 0 minutes ago" {
+    _roster "$(_lead_body null null 0)"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y  - port  [Accepted]  (last progress less than a minute ago)" ] || { echo "$output"; return 1; }
+    [[ "$output" != *"0 minutes"* ]] || { echo "$output"; return 1; }
+}
+
+@test "#34089 status: under a minute (0) reads last progress less than a minute ago, never 0 minutes ago" {
+    _status "$(_lead_body null null 0)"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(_out_line '  12  Wingman')" = "  12  Wingman  (last progress less than a minute ago)" ] || { echo "$output"; return 1; }
+    [[ "$output" != *"0 minutes"* ]] || { echo "$output"; return 1; }
 }
 
 @test "B16 roster: the labels sit before the availability, so the line still ends with it" {

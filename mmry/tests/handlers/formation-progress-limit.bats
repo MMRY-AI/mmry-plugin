@@ -195,6 +195,14 @@ D1_LEAD="If the lead of a Formation shows no activity for the Formation's quiet 
     [ "$(printf '%s\n' "$section" | grep -c -x -F -- "$HELP")" -eq 1 ] || { echo "$section"; return 1; }
 }
 
+@test "#34088 wording: the command page's progress-limit section says who can set it, before the report sentence" {
+    local page section who
+    who='Any member can read the limit. Only the lead of this Formation, the person who created it, or an account administrator can set it; the server refuses anybody else and says so.'
+    page="$(tr -d '\r' < "${PLUGIN_DIR_PL}/commands/formation.md")"
+    section="$(printf '%s\n' "$page" | awk '/^### progress-limit$/{f=1; next} /^### /{f=0} f{print}')"
+    [[ "$section" == *"${who} **Report what the script prints**: the limit as it now stands, or the server's reason for refusing."* ]] || { echo "$section"; return 1; }
+}
+
 @test "item 13: the help command carries the progress-limit entry with C2, after the idle-limit entry" {
     local help; help="$(tr -d '\r' < "${PLUGIN_DIR_PL}/commands/help.md")"
     local idle_at pl_at
