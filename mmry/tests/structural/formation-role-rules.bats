@@ -20,7 +20,24 @@
 # The report-to-lead rules are pinned by formation-report-rule.bats, which this task does not edit.
 
 # THE RULES, as one literal each. If a surface drifts from these, the surface is wrong.
-LEAD_RULE="As the lead, delegate and check in: when a member is idle or reports Done, give it the next piece of work or tell it there is none, and do not do work yourself that an idle member could take. Keep for yourself the coordinating, the deciding and the reviewing."
+# #33205, #34521 (DD-202 in MMRY-AI/mmry): cmo-mmry's approved lead rule, item 1 revision 1
+# (wording-33205-34521-cmo-approved.md), byte for byte: keep every member working, hand work out with
+# assign, check five places before saying there is none, and say so only with the reason.
+LEAD_RULE="As the lead, keep every member working. Hand each new piece of work to a member with assign, so MMRY AI knows what it is doing; the brief can still go as a message or a file. When a member is idle or reports Done, give it its next job now. Before deciding there is none, check five places: open quality gaps on work in flight, follow-ups promised to the person, preparation for the next stage, records that do not match what was built, and a hand-back from another member waiting for review. Say there is no work only with the reason, naming what everything is waiting on. Do not do work yourself that an idle member could take; keep the coordinating, the deciding and the reviewing for yourself."
+# The rule 2.19 and earlier gave. No copy may still carry it.
+OLD_LEAD_RULE="As the lead, delegate and check in: when a member is idle or reports Done, give it the next piece of work or tell it there is none, and do not do work yourself that an idle member could take. Keep for yourself the coordinating, the deciding and the reviewing."
+# #34521 requirement 2: the five places, each a phrase of the rule, checked one by one in every copy.
+FIVE_CHECKS=(
+    "open quality gaps on work in flight"
+    "follow-ups promised to the person"
+    "preparation for the next stage"
+    "records that do not match what was built"
+    "a hand-back from another member waiting for review"
+)
+# #33205, #34521: cmo-mmry's approved item 2, the line the service adds after the offer in the lead's
+# PROGRESS notice for a member's own Done. The plugin prints it as the service sends it; this pins the
+# service's copies equal to the approved text.
+NEXT="Give this member its next job in this turn, with assign. If there is truly none, say why, naming what everything is waiting on."
 MEMBER_RULE="As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer."
 OFFER="Is there anything else I can do?"
 OFFER_SENT="Your report to the lead ends with: Is there anything else I can do? Keep listening for the answer."
@@ -140,7 +157,7 @@ _progress() {
 
 @test "literals: ASCII only and no apostrophes, so a T-SQL N'' literal holds them unescaped" {
     local s
-    for s in "$LEAD_RULE" "$MEMBER_RULE" "$OFFER" "$OFFER_SENT"; do
+    for s in "$LEAD_RULE" "$MEMBER_RULE" "$OFFER" "$OFFER_SENT" "$NEXT"; do
         [[ "$s" != *"'"* ]] || { echo "apostrophe in: $s"; return 1; }
         ! printf '%s' "$s" | LC_ALL=C grep -q '[^ -~]' || { echo "non-ASCII in: $s"; return 1; }
     done
@@ -346,4 +363,111 @@ _newest_migration_for() {
         grep -q -F -- "'${OFFER}'" "$edits"
         grep -q -F -- "  offer:      " "$edits"
     fi
+}
+
+# ---- #33205 and #34521 (DD-202 in MMRY-AI/mmry): keep every member working --------------------------
+#
+# T1 (33205 requirement 1): the lead rule given at start and on join names assign, on Claude Code and
+#    Codex, and every copy is the approved text. T3 (34521 requirement 2): each of the five places to
+#    look before saying there is none is in every copy, checked one by one, so a copy that drops one
+#    is named. The service copies are compared when MMRY_SERVICE_REPO is set, as req4 above does.
+
+# Every plugin copy of the lead rule, one per line as "label|text". The library is read the way the
+# scripts read it (sourced), the pages by their quoted line.
+_plugin_lead_rule_copies() {
+    local lib="${HANDLERS}/lib-formation-roles.sh" f line
+    printf 'lib-formation-roles.sh|%s\n' "$(bash -c 'source "$1"; mmry_formation_role_rule Lead' _ "$lib")"
+    for f in "${PLUGIN_DIR}/commands/formation.md" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"; do
+        line="$(tr -d '\r' < "$f" | grep -E '^> As the lead,' || true)"
+        printf '%s|%s\n' "${f#"${PLUGIN_DIR}/"}" "${line#> }"
+    done
+}
+
+@test "33205 T1: the lead rule is the approved text and names assign, in every plugin copy" {
+    [[ "$LEAD_RULE" == *"Hand each new piece of work to a member with assign"* ]]
+    [[ "$LEAD_RULE" == *"the brief can still go as a message or a file"* ]]
+    local copies label text n=0
+    copies="$(_plugin_lead_rule_copies)"
+    while IFS='|' read -r label text; do
+        n=$((n + 1))
+        [ "$text" = "$LEAD_RULE" ] || { echo "$label is not the approved lead rule:"; echo "  $text"; return 1; }
+        [[ "$text" == *" with assign"* ]] || { echo "$label does not name assign"; return 1; }
+    done <<< "$copies"
+    [ "$n" -eq 3 ] || { echo "expected 3 plugin copies, read $n"; echo "$copies"; return 1; }
+}
+
+@test "33205 T1: starting a formation and a lead returning both print the approved rule, on Claude Code and Codex" {
+    export FAKE_CODE=201 FAKE_BODY='{"id":42,"objective":"migrate the billing schema"}'
+    export FAKE_BODY_GET='' FAKE_CODE_GET=201
+    local host
+    for host in claude codex; do
+        bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_CODE_SESSION_ID" || true
+        _on "$host" "${HANDLERS}/formation-start.sh" "migrate the billing schema"
+        [ "$status" -eq 0 ] || { echo "$host start: $output"; return 1; }
+        _has_line "$LEAD_RULE"
+    done
+    bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_CODE_SESSION_ID" || true
+    for host in claude codex; do
+        _join "$host" Lead '"2026-10-23T12:30:00"'
+        [ "$status" -eq 0 ] || { echo "$host join: $output"; return 1; }
+        _has_line "$LEAD_RULE"
+    done
+}
+
+@test "34521 T3: each of the five places to look is in every plugin copy of the lead rule" {
+    [ "${#FIVE_CHECKS[@]}" -eq 5 ]
+    local copies label text check
+    copies="$(_plugin_lead_rule_copies)"
+    for check in "${FIVE_CHECKS[@]}"; do
+        [[ "$LEAD_RULE" == *"$check"* ]] || { echo "the approved rule lacks: $check"; return 1; }
+        while IFS='|' read -r label text; do
+            [[ "$text" == *"$check"* ]] || { echo "$label lacks the check: $check"; return 1; }
+        done <<< "$copies"
+    done
+    [[ "$LEAD_RULE" == *"Before deciding there is none, check five places: "* ]]
+    [[ "$LEAD_RULE" == *"Say there is no work only with the reason, naming what everything is waiting on."* ]]
+}
+
+@test "33205 T1: no plugin file still carries the old lead rule or its 'tell it there is none'" {
+    local hits
+    hits="$(grep -r -l -F -e "give it the next piece of work or tell it there is none" -e "As the lead, delegate and check in" \
+        "${PLUGIN_DIR}/hooks-handlers" "${PLUGIN_DIR}/commands" "${PLUGIN_DIR}/skills-codex" "${PLUGIN_DIR}/skills" 2>/dev/null || true)"
+    [ -z "$hits" ] || { echo "still carries the old rule:"; echo "$hits"; return 1; }
+    [ "$OLD_LEAD_RULE" != "$LEAD_RULE" ]
+}
+
+@test "33205 T1 and 34521 T3: the service holds the approved rule and each check in every copy, and the next: line" {
+    if [[ -z "${MMRY_SERVICE_REPO:-}" ]]; then
+        skip "MMRY_SERVICE_REPO is not set; set it to a checkout of MMRY-AI/mmry to compare the service"
+    fi
+    local cs="${MMRY_SERVICE_REPO}/src/Mnemo.Api/Services/FormationRoleRule.cs"
+    local edits="${MMRY_SERVICE_REPO}/sql/lib/Migration104Edits.ps1"
+    local assign progress
+    assign="$(_newest_migration_for usp_Mnemo_UpdateFormationMember)"
+    progress="$(_newest_migration_for usp_Mnemo_UpdateFormationMemberProgress)"
+    [ -f "$cs" ] && [ -f "$edits" ] && [ -n "$assign" ] && [ -n "$progress" ] || { echo "service files missing: $cs $edits $assign $progress"; return 1; }
+
+    # Each copy, as "label|the text it holds", cut out of the file by the form that copy is written in.
+    local copies="" f line
+    copies+="FormationRoleRule.cs|$(tr -d '\r' < "$cs" | grep -o -F -- "\"${LEAD_RULE}\"" | head -1)"$'\n'
+    copies+="$(basename "$assign") literal|$(tr -d '\r' < "$assign" | grep -o -F -- "N'${LEAD_RULE}'" | head -1)"$'\n'
+    copies+="Migration104Edits.ps1|$(tr -d '\r' < "$edits" | grep -o -F -- "'${LEAD_RULE}'" | head -1)"$'\n'
+    for f in "${MMRY_SERVICE_REPO}/src/Mnemo.web/help.html" "${MMRY_SERVICE_REPO}/src/Mnemo.Api/wwwroot/help.html"; do
+        line="$(tr -d '\r' < "$f" | grep -o -F -- "<p>${LEAD_RULE}</p>" | head -1)"
+        copies+="${f#"${MMRY_SERVICE_REPO}/"}|${line}"$'\n'
+    done
+    local label text check
+    while IFS='|' read -r label text; do
+        [[ -n "$label" ]] || continue
+        [ -n "$text" ] || { echo "$label does not hold the approved lead rule byte for byte"; return 1; }
+        [[ "$text" == *" with assign"* ]] || { echo "$label does not name assign"; return 1; }
+        for check in "${FIVE_CHECKS[@]}"; do
+            [[ "$text" == *"$check"* ]] || { echo "$label lacks the check: $check"; return 1; }
+        done
+    done <<< "$copies"
+    ! grep -q -F -- "$OLD_LEAD_RULE" "$cs" || { echo "FormationRoleRule.cs still holds the old rule"; return 1; }
+
+    # The next: line after the offer, in the connector's constant and in the PROGRESS notice.
+    grep -q -F -- "\"${NEXT}\"" "$cs" || { echo "FormationRoleRule.cs lacks the next line"; return 1; }
+    grep -q -F -- "N'  next:       ${NEXT}'" "$progress" || { echo "$progress lacks the next: line"; return 1; }
 }
