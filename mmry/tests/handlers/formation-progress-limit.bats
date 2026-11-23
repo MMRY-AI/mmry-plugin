@@ -131,6 +131,12 @@ _limit() {
     [ "$status" -ne 0 ] && [ "$output" = "MMRY AI did not answer (HTTP 503), so nothing is confirmed. Run /mmry:formation progress-limit to check the limit before trying again." ] || { echo "$output"; return 1; }
 }
 
+@test "B16 item 14: on Codex the answers name the formation_progress_limit tool, never the slash command" {
+    _limit codex 503 '' 20
+    [ "$status" -ne 0 ] && [ "$output" = "MMRY AI did not answer (HTTP 503), so nothing is confirmed. Run the mmry_plugin formation_progress_limit tool to check the limit before trying again." ] || { echo "$output"; return 1; }
+    [[ "$output" != *"/mmry:"* ]] || { echo "$output"; return 1; }
+}
+
 @test "B16: the script is in the release file list" {
     grep -qx 'hooks-handlers/formation-progress-limit.sh' "${HANDLERS}/../release-files.txt"
 }
