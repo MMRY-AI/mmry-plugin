@@ -2235,17 +2235,20 @@ mmry_release_formation_claim() {
 }
 
 mmry_set_formation_member_waiting() {
-    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME]
+    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME] [PROGRAM]
     #
     # #33452. This member is waiting on a permission prompt in its own window, so the lead is told.
     # The server records it only for the caller's OWN entry, resolved from the session, and refuses
     # any other member id. TOOL_NAME is the bare name of the tool asking (Bash, apply_patch,
-    # mcp__server__tool) or empty, and it is the only part of the prompt this ever sends: never the
-    # command, its arguments, a path or a file's contents. formation-waiting.sh checks it is a bare
-    # name before it gets here, and the server refuses anything else.
-    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}"
+    # mcp__server__tool) or empty. formation-waiting.sh checks it is a bare name before it gets here,
+    # and the server refuses anything else.
+    # #34519 (DD-206). PROGRAM is the first word of a shell command, its path removed (git, dotnet,
+    # npm), or empty: never the rest of the command, its arguments or a path. formation-waiting.sh
+    # sends it only when it is a bare name by the tool name's rule; the server drops anything else.
+    # These two names are the only parts of the prompt this ever sends.
+    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}" program="${5:-}"
     local body
-    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool")"
+    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool" "programName" "$program")"
     _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}/waiting" "$body"
 }
 
