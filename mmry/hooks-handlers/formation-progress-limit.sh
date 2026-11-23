@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# formation-stall-limit.sh - read or set the Formation's progress limit (#34089, DD-203 in MMRY-AI/mmry).
+# formation-progress-limit.sh - read or set the Formation's progress limit (#34089, DD-203 in MMRY-AI/mmry).
 #
 # How long a member with an assignment can go without progress before the lead is told: 5 to 1440
 # minutes, 5 by default. Progress is a progress report, a declared area, a new assignment or the member
@@ -15,9 +15,9 @@
 # THIS DOES NOT FAIL OPEN (formation-remove.sh's rule): it runs because somebody asked and is waiting
 # to know whether it worked, so a refusal prints the reason and exits non-zero.
 #
-# Usage: formation-stall-limit.sh            the current limit
-#        formation-stall-limit.sh <minutes>  set it, 5 to 1440
-#        formation-stall-limit.sh default    back to 5 minutes
+# Usage: formation-progress-limit.sh            the current limit
+#        formation-progress-limit.sh <minutes>  set it, 5 to 1440
+#        formation-progress-limit.sh default    back to 5 minutes
 set -euo pipefail
 
 HANDLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,9 +26,9 @@ source "${HANDLER_DIR}/mmry-client.sh"
 mmry_formation_command  # #34285: an upgrade refusal ends this command with its sentence, once
 
 # cmo-mmry C2 (Revision 1), the help line naming all three forms, {stall_default} = 5.
-STALL_LIMIT_HELP="progress-limit <minutes> sets how long a member with an assignment can go without progress before the lead is told, from 5 to 1440 minutes (5 by default). Use progress-limit default to go back to 5, or progress-limit alone to see the current limit."
+PROGRESS_LIMIT_HELP="progress-limit <minutes> sets how long a member with an assignment can go without progress before the lead is told, from 5 to 1440 minutes (5 by default). Use progress-limit default to go back to 5, or progress-limit alone to see the current limit."
 # cmo-mmry C4 (Revision 1), out of range. The server says the same; this answers before asking it.
-STALL_LIMIT_RANGE="The progress limit is between 5 and 1440 minutes. Leave it unset to use the default of 5 minutes."
+PROGRESS_LIMIT_RANGE="The progress limit is between 5 and 1440 minutes. Leave it unset to use the default of 5 minutes."
 STALL_DEFAULT_SECONDS=300
 
 arg="${1:-}"
@@ -37,14 +37,14 @@ minutes=""
 case "$arg" in
     "") mode="read" ;;
     default) mode="set"; minutes="null" ;;
-    -h|--help|help) echo "$STALL_LIMIT_HELP"; exit 0 ;;
+    -h|--help|help) echo "$PROGRESS_LIMIT_HELP"; exit 0 ;;
     *)
         if [[ "$arg" =~ ^[0-9]{1,6}$ ]]; then
             minutes="$((10#$arg))"
-            if (( minutes < 5 || minutes > 1440 )); then echo "$STALL_LIMIT_RANGE"; exit 1; fi
+            if (( minutes < 5 || minutes > 1440 )); then echo "$PROGRESS_LIMIT_RANGE"; exit 1; fi
             mode="set"
         else
-            echo "$STALL_LIMIT_HELP"
+            echo "$PROGRESS_LIMIT_HELP"
             exit 1
         fi
         ;;
@@ -73,12 +73,12 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 # The set call. mmry-client.sh is held by another change this round, so the request is made here with
-# the client's own transport; it moves into the client as mmry_set_formation_stall_limit after that
+# the client's own transport; it moves into the client as mmry_set_formation_progress_limit after that
 # merges, beside mmry_set_formation_idle_limit.
-_set_stall_limit() {
+_set_progress_limit() {
     local fid="$1" value="$2"
     [[ "$value" =~ ^([0-9]{1,6}|null)$ ]] || return 1
-    _mmry_request PUT "/api/formations/${fid}/stall-limit" "{\"minutes\":${value}}"
+    _mmry_request PUT "/api/formations/${fid}/progress-limit" "{\"minutes\":${value}}"
 }
 
 # The sentence for an effective limit in seconds, "1 minute" for one. A change says "is now" (C6); a
@@ -92,7 +92,7 @@ clean() { printf '%s' "$1" | tr -d '\000-\010\013-\037\177' | tr '\n\t' '  ' | c
 if [[ "$mode" == "read" ]]; then
     ok=0; mmry_get_formation "$formation_id" "$session_id" && ok=1
 else
-    ok=0; _set_stall_limit "$formation_id" "$minutes" && ok=1
+    ok=0; _set_progress_limit "$formation_id" "$minutes" && ok=1
 fi
 
 if (( ok == 0 )); then
