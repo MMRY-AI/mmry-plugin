@@ -515,7 +515,7 @@ _mcp_tools_call() {
     name="${name%$'\r'}"
     if ! setup="$("$JQ" -r --arg idle_range "$MMRY_MCP_IDLE_LIMIT_RANGE" "$MMRY_MCP_ARGV_JQ" <<< "$params" 2>&1)"; then
         setup="${setup#jq: error (at <stdin>:*): }"
-        setup="${setup%$''}"
+        setup="${setup%$'\r'}"
         if [[ "$setup" == unknown\ tool:* ]]; then
             _mcp_error "$id" -32602 "$setup"
         elif [[ "$setup" == "$MMRY_MCP_IDLE_LIMIT_RANGE" ]]; then
