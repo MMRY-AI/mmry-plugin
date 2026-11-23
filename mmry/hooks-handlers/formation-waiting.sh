@@ -289,8 +289,8 @@ _mmry_waiting_is_approved() {
     done < "$MMRY_WAITING_APPROVED"
     return 1
 }
-# _mmry_waiting_record_approval SID TOOL DIGEST: the member's own asked call ran.
-_mmry_waiting_record_approval() {
+# _mmry_waiting_keep_approval SID TOOL DIGEST: the member's own asked call ran.
+_mmry_waiting_keep_approval() {
     local n=0 l
     [[ "$2" =~ $_MMRY_WAITING_TOOL_RE && "$3" =~ ^[0-9a-f]{64}$ ]] || return 0
     _mmry_waiting_is_approved "$1" "$2" "$3" && return 0
@@ -569,7 +569,7 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
                     answered=1
                     # #34519 DD-206: the member's OWN asked call ran, so the member approved it. Codex
                     # only (the asking turn is known), the main thread only (no asker).
-                    [[ -z "$asker" && -n "$mturn" ]] && _mmry_waiting_record_approval "$sid" "$mtool" "$minput"
+                    [[ -z "$asker" && -n "$mturn" ]] && _mmry_waiting_keep_approval "$sid" "$mtool" "$minput"
                 fi
             fi
             # #34519 (R2, the stale flag): the main thread's asked call already has its result, so it
