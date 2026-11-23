@@ -586,10 +586,13 @@ IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset t
     [ ! -s "$REQLOG" ]
 }
 
-@test "34432: the range sentence is written in one place among the handlers, word for word" {
-    local n
-    n="$(grep -rlF "$IDLE_RANGE_34432" "$PLUGIN_ROOT/hooks-handlers" | grep -c .)"
-    [ "$n" -eq 1 ] || { grep -rlF "$IDLE_RANGE_34432" "$PLUGIN_ROOT/hooks-handlers"; return 1; }
+@test "34432: the MCP server's range sentence and formation-idle-limit.sh's are the same, word for word" {
+    # Each copy read the way bash reads it, from its own assignment line, so they cannot drift apart.
+    local server handler
+    server="$(bash -c "$(grep -m1 '^MMRY_MCP_IDLE_LIMIT_RANGE=' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"); printf '%s' \"\$MMRY_MCP_IDLE_LIMIT_RANGE\"")"
+    handler="$(bash -c "$(grep -m1 '^IDLE_LIMIT_RANGE=' "$PLUGIN_ROOT/hooks-handlers/formation-idle-limit.sh"); printf '%s' \"\$IDLE_LIMIT_RANGE\"")"
+    [ -n "$server" ] && [ "$server" = "$handler" ] || { echo "server: $server"; echo "handler: $handler"; return 1; }
+    [ "$server" = "$IDLE_RANGE_34432" ] || { echo "$server"; return 1; }
 }
 
 @test "identity: each lead tool that names no conversation is refused, never guessed, and sends nothing" {
