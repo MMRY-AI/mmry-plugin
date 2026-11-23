@@ -964,6 +964,17 @@ _poll_once() {
     # to now: what it asked for may already be done. An older service sends no such field and
     # nothing is marked, exactly as before. The sixth field is the count of marked lines, for the
     # guidance below, counted rather than inferred from the rendered text.
+    # #34161: A CLAUDE CODE MEMBER IS ADVISED, RIGHT AFTER ITS ASSIGNMENT NOTICE, to run long work in
+    # the background. The sentence is held in lib-formation-prompts.sh and is passed to jq only on
+    # Claude Code: on Codex it stays empty and nothing is added. The notice is the service's own
+    # line (no sender), addressed to this session, and starts with the words below; a test pins them.
+    local bg_sentence="" assign_start="ASSIGNMENT. The formation lead has set what this session is working on."
+    _mmry_host_resolve
+    if [[ "$_MMRY_HOST_V" != "codex" ]]; then
+        # shellcheck source=/dev/null
+        source "${HANDLER_DIR}/lib-formation-prompts.sh" 2>/dev/null || true
+        bg_sentence="${MMRY_FORMATION_BACKGROUND_WORK:-}"
+    fi
     local count="" directed_count="" system_count="" away_count="" newest="" directed_ids="" lines=""
     {
         IFS= read -r -d '' count || true
@@ -973,7 +984,7 @@ _poll_once() {
         IFS= read -r -d '' newest || true
         IFS= read -r -d '' directed_ids || true
         IFS= read -r -d '' lines || true
-    } < <("$MMRY_JQ" -j "${MMRY_JQ_NAME_DEFS:-}"'
+    } < <("$MMRY_JQ" -j --arg bg "$bg_sentence" --arg astart "$assign_start" "${MMRY_JQ_NAME_DEFS:-}"'
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
         def away: (.sentWhileAway // false) == true;
         def sender:
@@ -997,6 +1008,9 @@ _poll_once() {
                        + (if away then "SENT WHILE YOU WERE AWAY: " else "" end)
                        + (if (.recipientMemberID // null) != null then "DIRECTED TO YOU: " else "" end)
                        + ((.content // .topic // "") | tostring)
+                       + (if $bg != "" and system and (.recipientMemberID // null) != null and (away | not)
+                             and (((.content // "") | tostring) | startswith($astart))
+                          then "\n  " + $bg else "" end)
                ] | join("\n"))
             ] | map(gsub("\u0000"; "") + "\u0000") | .[]
         else empty end' <<< "$MMRY_RESPONSE" 2>/dev/null)

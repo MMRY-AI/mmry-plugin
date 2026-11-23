@@ -21,7 +21,11 @@
 # literals, and text that needs no escaping there cannot drift by an escape.
 set -euo pipefail
 
-MMRY_FORMATION_LEAD_RULE="As the lead, delegate and check in: when a member is idle or reports Done, give it the next piece of work or tell it there is none, and do not do work yourself that an idle member could take. Keep for yourself the coordinating, the deciding and the reviewing."
+# #33205, #34521 (DD-202 in MMRY-AI/mmry): cmo-mmry's approved lead rule, item 1 revision 1
+# (wording-33205-34521-cmo-approved.md): keep every member working, hand each new piece of work out
+# with assign so MMRY AI knows what each member is doing, check five places before saying there is
+# none, and say so only with the reason.
+MMRY_FORMATION_LEAD_RULE="As the lead, keep every member working. Hand each new piece of work to a member with assign, so MMRY AI knows what it is doing; the brief can still go as a message or a file. When a member is idle or reports Done, give it its next job now. Before deciding there is none, check five places: open quality gaps on work in flight, follow-ups promised to the person, preparation for the next stage, records that do not match what was built, and a hand-back from another member waiting for review. Say there is no work only with the reason, naming what everything is waiting on. Do not do work yourself that an idle member could take; keep the coordinating, the deciding and the reviewing for yourself."
 MMRY_FORMATION_MEMBER_RULE="As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer."
 MMRY_FORMATION_OFFER="Is there anything else I can do?"
 # What the member that reported its own Done is shown: its report carried the question.

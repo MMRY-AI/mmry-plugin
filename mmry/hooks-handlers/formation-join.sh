@@ -22,6 +22,8 @@ source "${HANDLER_DIR}/mmry-client.sh"
 mmry_formation_command  # #34285: an upgrade refusal ends this command with its sentence, once
 # shellcheck source=/dev/null
 source "${HANDLER_DIR}/lib-formation-roles.sh"
+# shellcheck source=/dev/null
+source "${HANDLER_DIR}/lib-formation-prompts.sh"
 
 # The two standing rules a member is given when it joins (#31744). One sentence pair each, ASCII
 # only, no apostrophes, so the same text can be held unchanged in a T-SQL literal on the service.
@@ -166,6 +168,11 @@ fi
 # change all of them.
 echo "${MMRY_FORMATION_REPORT_RULE}"
 echo "${MMRY_FORMATION_ACK_RULE}"
+# #34161: a Claude Code member is told that long work run in the background keeps it reachable.
+# Codex does not wake on Formation messages while idle, so the advice would change nothing there.
+if [[ "$_mmry_client_name" == "claude-code" ]]; then
+    echo "${MMRY_FORMATION_BACKGROUND_WORK}"
+fi
 
 # THE RULE FOR THIS SESSION'S OWN ROLE (#32683), after the two above, which are unchanged. The role
 # is read off this session's own row in the server's answer, so a lead returning to its seat gets

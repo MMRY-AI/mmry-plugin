@@ -57,7 +57,9 @@ case "$method $url" in
     "PUT "*/api/formations/*/members/*/progress) resp='{"progress":"Accepted"}' ;;
     "POST "*/api/formations) code=201; resp='{"id":77,"objective":"Ship it"}' ;;
     "DELETE "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","leftDate":"2026-10-16T02:14:33.1234567","removedByEmail":"a@test.mnemo"}' ;;
-    "PUT "*/api/formations/*/idle-limit) resp='{"message":"This Formation'"'"'s idle limit is now 30 minutes."}' ;;
+    "PUT "*/api/formations/*/idle-limit) resp='{"message":"This Formation'"'"'s idle limit is now 30 minutes."}'
+        # #34521: a server that answers with no message and no number (older than the idle-limit route's reply).
+        [[ -n "${FAKE_IDLE_LIMIT_BODY+set}" ]] && resp="$FAKE_IDLE_LIMIT_BODY" ;;
     "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
     "GET "*/api/formations/*/close-out|"GET "*/api/formations/*/close-out"?sessionId="*) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
     "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
@@ -519,7 +521,8 @@ RENEWING_33716="MMRY AI is renewing your credits right now. Try your request aga
 # #34432: formation_idle_limit answers cmo-mmry's approved out-of-range sentence (item 9), word for word
 # and alone, for anything that is not a whole number from 1 to 1440, as /mmry:formation idle-limit does
 # on Claude Code. Every other tool keeps the generic check and its "Nothing was done:" message.
-IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 15 minutes."
+# #33205, #34521 (DD-202): the default is now 5 minutes, cmo-mmry's item 4 (wording-33205-34521-cmo-approved.md).
+IDLE_RANGE_34432="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 5 minutes."
 
 @test "34432 tool: formation_idle_limit with 0, 1441 or -5 answers the approved range sentence alone and asks nothing" {
     printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
@@ -611,7 +614,17 @@ JQCRLF
     [ "$(is_error 3454)" = "false" ] || { text_of 3454; return 1; }
     [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":null}' ] || { cat "$REQLOG"; return 1; }
     [[ "$(sed -n 2p "$REQLOG")" == "GET http://fake.invalid/api/formations/77?sessionId=conv-A "* ]] || { cat "$REQLOG"; return 1; }
-    [ "$(text_of 3454)" = "This Formation's idle limit is 15 minutes." ] || { text_of 3454; return 1; }
+    [ "$(text_of 3454)" = "This Formation's idle limit is 5 minutes." ] || { text_of 3454; return 1; }
+}
+
+@test "34521 tool: formation_idle_limit use_default, answered with no message and no number, reports the 5-minute default" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    export FAKE_IDLE_LIMIT_BODY='{}'
+    mcp "$(call 3460 formation_idle_limit '{"use_default":true}' '{"sessionId":"conv-A"}')"
+    unset FAKE_IDLE_LIMIT_BODY
+    [ "$(is_error 3460)" = "false" ] || { text_of 3460; return 1; }
+    [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":null}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(text_of 3460)" = "This Formation's idle limit is now 5 minutes." ] || { text_of 3460; return 1; }
 }
 
 @test "34432 tool: other tools keep the generic whole-number check and its Nothing was done message" {

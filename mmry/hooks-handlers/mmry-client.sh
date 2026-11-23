@@ -2111,7 +2111,7 @@ mmry_set_formation_idle_limit() {
     # Usage: mmry_set_formation_idle_limit FORMATION_ID MINUTES|null
     #
     # #34432 (DD-200 in MMRY-AI/mmry). Set the Formation's idle limit, 1 to 1440 minutes, or "null" to
-    # go back to the default of 15. The server decides who may (the lead, the person who created the
+    # go back to the default of 5 (#34521, DD-202). The server decides who may (the lead, the person who created the
     # Formation, or an account administrator) and answers with cmo-mmry's sentence.
     local formation_id="$1" minutes="$2"
     [[ "$minutes" =~ ^([0-9]{1,6}|null)$ ]] || return 1

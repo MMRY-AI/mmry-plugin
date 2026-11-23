@@ -246,11 +246,13 @@ them. They read the same in Claude Code, in Codex and in a connected assistant:
 
 Each member is also given one rule for its own role:
 
-> As the lead, delegate and check in: when a member is idle or reports Done, give it the next piece of work or tell it there is none, and do not do work yourself that an idle member could take. Keep for yourself the coordinating, the deciding and the reviewing.
+> As the lead, keep every member working. Hand each new piece of work to a member with assign, so MMRY AI knows what it is doing; the brief can still go as a message or a file. When a member is idle or reports Done, give it its next job now. Before deciding there is none, check five places: open quality gaps on work in flight, follow-ups promised to the person, preparation for the next stage, records that do not match what was built, and a hand-back from another member waiting for review. Say there is no work only with the reason, naming what everything is waiting on. Do not do work yourself that an idle member could take; keep the coordinating, the deciding and the reviewing for yourself.
 >
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 
-**The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 15 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
+**The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 5 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
+
+When a member reports Done, the lead is asked to give it its next job at once. The roster and the close-out record show how long each member has been idle in total; time spent waiting on a permission prompt is never counted.
 
 **The lead hears who has gone quiet.** When a member holding work (Assigned, Accepted or Blocked) shows no activity in the Formation for 20 minutes, the default, the lead is told once, with the member's assignment and when it was last active. The lead is told once when that member is active again, and once when a member leaves or is removed with its work unfinished. A member waiting on an approval prompt is never reported as quiet. A lead on Codex or a connected assistant sees these notices on its next action, not while idle.
 
@@ -514,6 +516,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-debrief.sh" "<summary>"
 ```
 
 This is how a formation ends properly. The account and the summary are saved as a lasting memory,
+without each member's idle time, which stays in the record members read with /mmry:formation report;
 the durable outcomes in them are extracted into memories of their own, and someone who was never in
 the formation can read both later. The running chatter stops being served. A group with nothing
 durable to say still closes out (#31738).
@@ -610,7 +613,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" decline <pieceId>
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-idle-limit.sh" [<minutes>|default]
 ```
 
-idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (15 by default). Use idle-limit default to go back to 15, or idle-limit alone to see the current limit.
+idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (5 by default). Use idle-limit default to go back to 5, or idle-limit alone to see the current limit.
 
 Any member can read the limit. Only the lead of this Formation, the person who created it, or an account administrator can set it; the server refuses anybody else and says so. **Report what the script prints**: the limit as it now stands, or the server's reason for refusing.
 

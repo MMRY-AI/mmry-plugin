@@ -213,3 +213,38 @@ _skill_claim() {
     grep -q "$words" "$PAGE" || { echo "the server has $n destructive tools; the page does not say '$words'"; return 1; }
     grep -q 'closing' "$PAGE"
 }
+
+# ---- #33205 and #34521 (DD-202 in MMRY-AI/mmry): keep every member working, on Codex -------------
+#
+# A Codex lead learns the lead rule from the skill, and the connector's tools from the skill's table,
+# so the skill must carry cmo-mmry's approved words: the lead rule (item 1 revision 1) with assign and
+# the five places to look, the 5-minute default (item 4), and the two help sentences (item 6) that
+# say a Done asks for the next job at once and that the roster and close-out show idle time in total.
+
+LEAD_RULE_34521="As the lead, keep every member working. Hand each new piece of work to a member with assign, so MMRY AI knows what it is doing; the brief can still go as a message or a file. When a member is idle or reports Done, give it its next job now. Before deciding there is none, check five places: open quality gaps on work in flight, follow-ups promised to the person, preparation for the next stage, records that do not match what was built, and a hand-back from another member waiting for review. Say there is no work only with the reason, naming what everything is waiting on. Do not do work yourself that an idle member could take; keep the coordinating, the deciding and the reviewing for yourself."
+IDLE_SENTENCES_34521="When a member reports Done, the lead is asked to give it its next job at once. The roster and the close-out record show how long each member has been idle in total; time spent waiting on a permission prompt is never counted."
+
+@test "33205 T1 (Codex): the Codex skill quotes the approved lead rule, which names assign and each of the five checks" {
+    local quoted; quoted="$(tr -d '\r' < "$SKILL" | grep -E '^> As the lead,' || true)"
+    [ "$quoted" = "> ${LEAD_RULE_34521}" ] || { echo "the skill quotes: $quoted"; return 1; }
+    local check
+    for check in "open quality gaps on work in flight" "follow-ups promised to the person" "preparation for the next stage" \
+        "records that do not match what was built" "a hand-back from another member waiting for review"; do
+        [[ "$quoted" == *"$check"* ]] || { echo "the skill's lead rule lacks: $check"; return 1; }
+    done
+    [[ "$quoted" == *"Hand each new piece of work to a member with assign"* ]]
+}
+
+@test "34521 (Codex): the skill says a Done asks for the next job at once and that the roster and close-out show idle time in total" {
+    [ "$(tr -d '\r' < "$SKILL" | grep -c -x -F -- "$IDLE_SENTENCES_34521")" -eq 1 ] || { echo "the skill does not carry item 6 on its own line"; return 1; }
+    # Right after the idle reminder paragraph, as the help page places it.
+    local after; after="$(tr -d '\r' < "$SKILL" | awk '/^\*\*The lead is reminded who is free until each has work\.\*\*/{getline; while ($0 == "") getline; print; exit}')"
+    [ "$after" = "$IDLE_SENTENCES_34521" ] || { echo "after the reminder paragraph: $after"; return 1; }
+}
+
+@test "34521 (Codex): the skill's idle-limit row and the Codex help say the default is 5 minutes, and no 15-minute default is left" {
+    local help="$PLUGIN_ROOT/skills-codex/help/SKILL.md"
+    grep -q -F -- "1 to 1440 minutes; leave it unset for the default of 5. | \`formation_idle_limit\` | optional \`minutes\` (1 to 1440); optional \`use_default\` (true for 5) |" "$SKILL"
+    grep -q -F -- "1 to 1440 minutes; leave it unset for the default of 5. (formation_idle_limit)" "$help"
+    ! grep -n -E 'default of 15|15 by default|true for 15|15 minutes by default' "$SKILL" "$help" || return 1
+}

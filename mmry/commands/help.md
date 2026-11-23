@@ -32,7 +32,8 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - Formation is an upgrade to your MMRY AI plan. If your account does not have it, an account administrator can add it on the account page at mmryai.com/account.
   - `/mmry:formation start "objective"` begins a Formation with this session as its lead.
   - `/mmry:formation join <id>` puts this session in a Formation.
-  - Each member is given a rule for its role, and the lead is told which members have had no work for 15 minutes.
+  - Each member is given a rule for its role, and the lead is told which members have had no work for the idle limit, 5 minutes by default.
+  - When a member reports Done, the lead is asked to give it its next job at once. The roster and the close-out record show how long each member has been idle in total; time spent waiting on a permission prompt is never counted.
   - `/mmry:formation roster` lists the members and the ids to address them by.
   - `/mmry:formation say "message" [--to <memberId>]` sends a message to the other members, or to one member.
   - `/mmry:formation assign <memberId> "work"` gives one member its work (the lead).
@@ -47,7 +48,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:formation queue list`: Show the queue: each piece, the host it needs, and who took it and when.
   - `/mmry:formation queue take <pieceId>`: Take the queued piece you were offered. It becomes your assignment.
   - `/mmry:formation queue decline <pieceId>`: Turn down the queued piece you were offered. It goes back to the queue for the next member.
-  - `/mmry:formation idle-limit [<minutes>|default]`: idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (15 by default). Use idle-limit default to go back to 15, or idle-limit alone to see the current limit.
+  - `/mmry:formation idle-limit [<minutes>|default]`: idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (5 by default). Use idle-limit default to go back to 5, or idle-limit alone to see the current limit.
 - `/mmry:database <subcommand>` starts and uses a database in your AI database. Asking in plain words does the same. The subcommands:
   - `/mmry:database create "what to keep track of"` sets up a database, with fields named in your words.
   - `/mmry:database list` lists your databases, or one database in full with its fields.

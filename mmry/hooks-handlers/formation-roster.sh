@@ -99,6 +99,11 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # to ask the person at that window. A server that does not send the fields shows no mark.
 # #33847 (DD-191): each live member's availability, the word the service sends and how long it has
 # held, from lib-formation-prompts.sh. A server that does not send it shows no mark.
+# #34521 (DD-202): how long the member has been idle in this Formation, in total, as the service
+# writes it (idleTotal, cmo-mmry's "idle for {duration} in total"), in brackets beside the marks above
+# and before the availability, so the line still ends with its availability. The service sends null
+# for a lead and for a member never idle, and nothing is shown then. It is the service's text, so its
+# control characters are removed, and a value that is not text is not shown.
 printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}"'
     (.members // [])
     | sort_by(.leftDate != null, .id)
@@ -112,6 +117,10 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAI
       + (if (.waitingSince // null) != null and .leftDate == null
          then "  (waiting on a permission prompt since " + ((.waitingSince | tostring)[11:16]) + " UTC"
               + (if (.waitingTool // null) != null then ", for " + (.waitingTool | tostring) else "" end) + ")"
+         else "" end)
+      + (if (.idleTotal | type) == "string"
+         then (.idleTotal | gsub("[\u0000-\u001f\u007f-\u009f]"; "")) as $idle
+              | (if $idle != "" then "  (" + $idle + ")" else "" end)
          else "" end)
       + mmry_availability_suffix
       + (if .leftDate == null then ""
