@@ -186,4 +186,14 @@ mmry_formation_role_rule "$own_role"
 if [[ "$_mmry_client_name" == "claude-code" ]]; then
     echo "${MMRY_FORMATION_BACKGROUND_WORK}"
 fi
+# #34519 R1: a member is told what its helper agents may run, in its own host's approved words.
+case "$own_role" in
+    [Ll][Ee][Aa][Dd]) ;;
+    *)
+        if [[ "$_mmry_client_name" == "codex" ]]; then
+            echo "${MMRY_FORMATION_HELPERS_CODEX}"
+        else
+            echo "${MMRY_FORMATION_HELPERS_CLAUDE}"
+        fi ;;
+esac
 exit 0
