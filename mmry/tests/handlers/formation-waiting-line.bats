@@ -140,6 +140,14 @@ FIRST="  [MMRY] DIRECTED TO YOU: "
     [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "$output"; return 1; }
 }
 
+@test "L-08 34519 R2: Codex gets no person line on its UserPromptSubmit route either (Claude Code only, per the brief)" {
+    _deliver codex "[$(_notice "$L_PROG" name)]" prompt
+    [ "$status" -eq 0 ]
+    [ "$(_sys)" = "<none>" ] || { echo "Codex was given a person line: [$(_sys)]"; return 1; }
+    local ctx; ctx="$(_ctx)"
+    [[ "$ctx" == *"$FIRST$L_PROG"* ]] || { echo "$ctx"; return 1; }
+}
+
 # ---- R1, the member-rule sentence for helper agents (wording item 5) --------------------------------
 
 _join() { # $1 host, $2 role of this session's own row (Wingman by default)
