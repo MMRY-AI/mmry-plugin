@@ -36,6 +36,7 @@ hooks-handlers/formation-remove.sh
 hooks-handlers/formation-report.sh
 hooks-handlers/formation-roster.sh
 hooks-handlers/formation-say.sh
+hooks-handlers/formation-stall-limit.sh
 hooks-handlers/formation-start.sh
 hooks-handlers/formation-state.sh
 hooks-handlers/formation-status.sh
@@ -126,6 +127,7 @@ tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-list-privacy.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-rejoin.bats
+tests/handlers/formation-stall-limit.bats
 tests/handlers/formation-upgrade-refusal.bats
 tests/handlers/formation-waiting-busy.bats
 tests/handlers/formation-waiting-guards.bats
@@ -258,6 +260,7 @@ tests/structural/formation-role-rules.bats
 tests/structural/formation-save-outcome.bats
 tests/structural/formation-say.bats
 tests/structural/formation-stale-membership.bats
+tests/structural/formation-tool-marker.bats
 tests/structural/foundation-isolation.bats
 tests/structural/foundation-status-command.bats
 tests/structural/help-complete.bats
