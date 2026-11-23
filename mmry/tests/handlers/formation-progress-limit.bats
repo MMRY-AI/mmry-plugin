@@ -134,3 +134,121 @@ _limit() {
 @test "B16: the script is in the release file list" {
     grep -qx 'hooks-handlers/formation-progress-limit.sh' "${HANDLERS}/../release-files.txt"
 }
+
+# ---- Finish round, item 12: the set call is the client's mmry_set_formation_progress_limit ------------
+
+# Call the client function with these arguments through the fake transport; prints its exit status.
+_client_set() {
+    local bin; bin="$(_curl_dir)"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='{}' FAKE_URL_LOG="$LOG" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash -c 'unset MMRY_HOST; source "$1/mmry-client.sh"; shift; mmry_set_formation_progress_limit "$@"; echo "rc=$?"' _ "$HANDLERS" "$@" 2>/dev/null | tr -d '\r' | tail -n 1
+}
+
+@test "B16 item 12: mmry_set_formation_progress_limit PUTs minutes, or null, to the progress-limit route" {
+    [ "$(_client_set 4242 20)" = "rc=0" ] || { cat "$LOG"; return 1; }
+    [ "$(_client_set 4242 null)" = "rc=0" ] || { cat "$LOG"; return 1; }
+    [ "$(sed -n 1p "$LOG" | tr -d '\r')" = 'PUT http://fake.invalid/api/formations/4242/progress-limit {"minutes":20}' ] || { cat "$LOG"; return 1; }
+    [ "$(sed -n 2p "$LOG" | tr -d '\r')" = 'PUT http://fake.invalid/api/formations/4242/progress-limit {"minutes":null}' ] || { cat "$LOG"; return 1; }
+}
+
+@test "B16 item 12: mmry_set_formation_progress_limit refuses a value that is not a whole number or null, and asks nothing" {
+    local v
+    for v in abc "" "20; rm" -5 2.5; do
+        [ "$(_client_set 4242 "$v")" = "rc=1" ] || { echo "accepted: '$v'"; cat "$LOG"; return 1; }
+    done
+    [ ! -s "$LOG" ] || { cat "$LOG"; return 1; }
+}
+
+# ---- Finish round, items 13 and 15: the command page, the help command and the Codex skills -----------
+#
+# The words are cmo-mmry's: C2 (Revision 1) on Claude Code, C3 (Revision 1) on Codex, and D1 (as settled:
+# "if it leaves or is removed") for the lead's notices. The five command answers (the approved lines
+# 110 to 114) are printed by the script only and stay off every help text.
+
+PLUGIN_DIR_PL="${BATS_TEST_DIRNAME}/../.."
+C3_TOOL="Read or set how many minutes a member with an assignment can go without progress before the lead is told. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 5 to 1440 minutes; leave it unset for the default of 5."
+D1_LEAD="If the lead of a Formation shows no activity for the Formation's quiet limit, every member and the person who created the Formation are told once, and told again when the lead is active or if it leaves or is removed while work is still open. A lead waiting on approval is shown as waiting, not quiet."
+
+@test "item 13: the command page's usage line names progress-limit, right after idle-limit" {
+    local usage; usage="$(tr -d '\r' < "${PLUGIN_DIR_PL}/commands/formation.md" | grep -m1 '^Usage:')"
+    [[ "$usage" == *'`/mmry:formation idle-limit [<minutes>|default]` | `/mmry:formation progress-limit [<minutes>|default]`'* ]] || { echo "$usage"; return 1; }
+}
+
+@test "item 13: the command page's progress-limit section follows idle-limit, runs the script, and carries C2 on one line" {
+    local page; page="$(tr -d '\r' < "${PLUGIN_DIR_PL}/commands/formation.md")"
+    local idle_at pl_at next_at
+    idle_at="$(printf '%s\n' "$page" | grep -n -x '### idle-limit' | cut -d: -f1)"
+    pl_at="$(printf '%s\n' "$page" | grep -n -x '### progress-limit' | cut -d: -f1)"
+    [ -n "$idle_at" ] && [ -n "$pl_at" ] && [ "$pl_at" -gt "$idle_at" ] || { echo "idle-limit at ${idle_at:-none}, progress-limit at ${pl_at:-none}"; return 1; }
+    # No other section sits between them.
+    next_at="$(printf '%s\n' "$page" | sed -n "$((idle_at + 1)),\$p" | grep -n '^### ' | head -n 1 | cut -d: -f1)"
+    [ "$((idle_at + next_at))" -eq "$pl_at" ] || { echo "a section sits between idle-limit and progress-limit"; return 1; }
+    local section; section="$(printf '%s\n' "$page" | sed -n "$((pl_at + 1)),\$p" | awk '/^### /{exit} {print}')"
+    [[ "$section" == *'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-progress-limit.sh" [<minutes>|default]'* ]] || { echo "$section"; return 1; }
+    [ "$(printf '%s\n' "$section" | grep -c -x -F -- "$HELP")" -eq 1 ] || { echo "$section"; return 1; }
+}
+
+@test "item 13: the help command carries the progress-limit entry with C2, after the idle-limit entry" {
+    local help; help="$(tr -d '\r' < "${PLUGIN_DIR_PL}/commands/help.md")"
+    local idle_at pl_at
+    idle_at="$(printf '%s\n' "$help" | grep -n -F -- '`/mmry:formation idle-limit [<minutes>|default]`' | head -n 1 | cut -d: -f1)"
+    pl_at="$(printf '%s\n' "$help" | grep -n -x -F -- "  - \`/mmry:formation progress-limit [<minutes>|default]\`: ${HELP}" | cut -d: -f1)"
+    [ -n "$pl_at" ] || { echo "no progress-limit entry with C2"; return 1; }
+    [ "$pl_at" -eq "$((idle_at + 1))" ] || { echo "idle-limit at $idle_at, progress-limit at $pl_at"; return 1; }
+}
+
+@test "item 13: the script's help line is C2, the same text as the pages" {
+    local held; held="$(bash -c "$(grep -m1 '^PROGRESS_LIMIT_HELP=' "${HANDLERS}/formation-progress-limit.sh"); printf '%s' \"\$PROGRESS_LIMIT_HELP\"")"
+    [ "$held" = "$HELP" ] || { echo "$held"; return 1; }
+}
+
+@test "item 13: the five progress-limit command answers stay off every help text" {
+    local f s
+    local -a answers=(
+        "This Formation is no longer active, so it has no progress limit to set."
+        "This session is not in a Formation, so it has no progress limit."
+        "so nothing is confirmed. Run /mmry:formation progress-limit to check the limit"
+        "MMRY AI refused the change (HTTP"
+        "curl is not available, so the progress limit cannot be reached."
+    )
+    for f in commands/help.md commands/formation.md skills-codex/help/SKILL.md skills-codex/memory-system/SKILL.md; do
+        for s in "${answers[@]}"; do
+            ! grep -n -F -- "$s" "${PLUGIN_DIR_PL}/${f}" || { echo "in $f: $s"; return 1; }
+        done
+    done
+}
+
+@test "item 15: the Codex skill's tool table names formation_progress_limit with C3, after the idle-limit row, and never the script" {
+    local skill="${PLUGIN_DIR_PL}/skills-codex/memory-system/SKILL.md" row idle_at pl_at
+    row="| ${C3_TOOL} | \`formation_progress_limit\` | optional \`minutes\` (5 to 1440); optional \`use_default\` (true for 5) |"
+    pl_at="$(tr -d '\r' < "$skill" | grep -n -x -F -- "$row" | cut -d: -f1)"
+    idle_at="$(tr -d '\r' < "$skill" | grep -n -F -- '| `formation_idle_limit` |' | head -n 1 | cut -d: -f1)"
+    [ -n "$pl_at" ] || { echo "no row: $row"; return 1; }
+    [ "$pl_at" -eq "$((idle_at + 1))" ] || { echo "idle-limit at $idle_at, progress-limit at $pl_at"; return 1; }
+    ! grep -n 'formation-progress-limit.sh' "$skill" || return 1
+}
+
+@test "item 15: the Codex help lists the progress limit as its tool, with C3, after the idle limit" {
+    local help="${PLUGIN_DIR_PL}/skills-codex/help/SKILL.md" line idle_at pl_at
+    line="- **Read or set how many minutes a member with an assignment can go without progress before the lead is told.** Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 5 to 1440 minutes; leave it unset for the default of 5. (formation_progress_limit)"
+    pl_at="$(tr -d '\r' < "$help" | grep -n -x -F -- "$line" | cut -d: -f1)"
+    idle_at="$(tr -d '\r' < "$help" | grep -n -F -- '(formation_idle_limit)' | head -n 1 | cut -d: -f1)"
+    [ -n "$pl_at" ] || { echo "no line: $line"; return 1; }
+    [ "$pl_at" -eq "$((idle_at + 1))" ] || { echo "idle-limit at $idle_at, progress-limit at $pl_at"; return 1; }
+}
+
+@test "item 15: the Codex skill and the command page carry D1 for the lead's notices, once, after the quiet-member paragraph" {
+    local f para_at d1_at after
+    for f in skills-codex/memory-system/SKILL.md commands/formation.md; do
+        [ "$(tr -d '\r' < "${PLUGIN_DIR_PL}/${f}" | grep -c -x -F -- "$D1_LEAD")" -eq 1 ] || { echo "$f: D1 not there once"; return 1; }
+        after="$(tr -d '\r' < "${PLUGIN_DIR_PL}/${f}" | awk '/^\*\*The lead hears who has gone quiet\.\*\*/{getline; while ($0 == "") getline; print; exit}')"
+        [ "$after" = "$D1_LEAD" ] || { echo "$f: after the quiet paragraph: $after"; return 1; }
+    done
+}
+
+@test "B16 item 12: formation-progress-limit.sh sets through the client, with no request of its own" {
+    local script="${HANDLERS}/formation-progress-limit.sh"
+    grep -q 'mmry_set_formation_progress_limit "$formation_id" "$minutes"' "$script" || return 1
+    ! grep -n -e '_mmry_request' -e '_set_progress_limit' "$script" || return 1
+}

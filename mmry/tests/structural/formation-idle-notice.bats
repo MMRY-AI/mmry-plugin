@@ -770,3 +770,114 @@ _shipped() { printf '%s\n' "${HANDLERS}" "${HANDLERS}/../commands" "${HANDLERS}/
     after="$(tr -d '\r' < "$help" | grep -A1 -F -- 'the lead is told which members have had no work for the idle limit' | sed -n 2p)"
     [ "$after" = "  - ${IDLE_SENTENCES_34521}" ] || { echo "after the reminder line: $after"; return 1; }
 }
+
+# ---- #34088 and #34089 (DD-203 in MMRY-AI/mmry), finish round items 16 and 18 ------------------------
+#
+# The roster and the status view show the lead's state and each member's time since progress, from the
+# service's fields, in cmo-mmry's labels (wording-34088-34089-cmo.md A4 and B4):
+#   leadState "quiet" with leadStateMinutes N   "quiet for N minutes"   (the lead's own row only)
+#   leadState "waiting"                        "waiting on approval"
+#   leadState "left"                           "left"
+#   minutesSinceProgress N                     "last progress N minutes ago"
+#   minutesSinceProgress null                  "no assignment"          (no figure, never zero)
+# Each label sits in brackets beside the member's other marks, before its availability. A server that
+# sends none of these fields (older than DD-203) prints exactly what it printed before, byte for byte.
+#   A12 (status and roster halves), B16 (roster half), and A13 and B17 on Codex in codex-formation-lead.bats.
+
+_status() {
+    local body="$1" bin; bin="$(_fake_curl_dir)"
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$LEAD_SID"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" \
+        CLAUDE_CODE_SESSION_ID="$LEAD_SID" CLAUDE_SESSION_ID="$LEAD_SID" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run env -u MMRY_HOST bash "${HANDLERS}/formation-status.sh"
+}
+
+# A lead row with leadState $1 (JSON) and leadStateMinutes $2 (JSON), and a member row with
+# minutesSinceProgress $3 (JSON; "absent" leaves the field out).
+_lead_body() {
+    local msp=""
+    [[ "$3" != "absent" ]] && msp=",\"minutesSinceProgress\":$3"
+    printf '%s{"id":3,"role":"Lead","email":"l@x.y","leadState":%s,"leadStateMinutes":%s,"minutesSinceProgress":null,"leftDate":null},{"id":12,"role":"Wingman","email":"m@x.y","assignment":"port","progress":"Accepted"%s,"leftDate":null}]}' \
+        "$ROSTER_HEAD" "$1" "$2" "$msp"
+}
+_out_line() { printf '%s\n' "$output" | tr -d '\r' | grep -F -- "$1" | head -n 1; }
+
+OLD_ROSTER_BODY='{"formation":{"id":4242,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leftDate":null},{"id":12,"role":"Wingman","email":"m@x.y","assignment":"port","progress":"Accepted","leftDate":null}]}'
+
+@test "A12 roster: the lead's row says quiet for N minutes, singular for 1" {
+    _roster "$(_lead_body '"quiet"' 20 12)"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(_out_line 'l@x.y')" = "  3  Lead  l@x.y  (quiet for 20 minutes)  (no assignment)" ] || { echo "$output"; return 1; }
+    _roster "$(_lead_body '"quiet"' 1 12)"
+    [ "$(_out_line 'l@x.y')" = "  3  Lead  l@x.y  (quiet for 1 minute)  (no assignment)" ] || { echo "$output"; return 1; }
+}
+
+@test "A12 roster: a lead waiting on a prompt reads waiting on approval, and a lead that left reads left" {
+    _roster "$(_lead_body '"waiting"' null 12)"
+    [ "$(_out_line 'l@x.y')" = "  3  Lead  l@x.y  (waiting on approval)  (no assignment)" ] || { echo "$output"; return 1; }
+    [[ "$output" != *"quiet for"* ]] || { echo "$output"; return 1; }
+    _roster "$(_lead_body '"left"' null 12)"
+    [ "$(_out_line 'l@x.y')" = "  3  Lead  l@x.y  (left)  (no assignment)" ] || { echo "$output"; return 1; }
+}
+
+@test "A12 roster: an active lead (leadState null) shows no lead state" {
+    _roster "$(_lead_body null null 12)"
+    [ "$(_out_line 'l@x.y')" = "  3  Lead  l@x.y  (no assignment)" ] || { echo "$output"; return 1; }
+}
+
+@test "B16 roster: a member with an assignment shows last progress N minutes ago, singular for 1; with none, no assignment" {
+    _roster "$(_lead_body null null 12)"
+    [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y  - port  [Accepted]  (last progress 12 minutes ago)" ] || { echo "$output"; return 1; }
+    _roster "$(_lead_body null null 1)"
+    [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y  - port  [Accepted]  (last progress 1 minute ago)" ] || { echo "$output"; return 1; }
+    _roster "$(_lead_body null null null)"
+    [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y  - port  [Accepted]  (no assignment)" ] || { echo "$output"; return 1; }
+    [[ "$(_out_line 'm@x.y')" != *"0 minutes"* ]] || { echo "$output"; return 1; }
+}
+
+@test "B16 roster: the labels sit before the availability, so the line still ends with it" {
+    local since; since="$(_ago 750)"
+    _roster "${ROSTER_HEAD}${LEAD_ROW},{\"id\":12,\"role\":\"Wingman\",\"email\":\"m@x.y\",\"minutesSinceProgress\":7,\"availability\":\"working\",\"availabilitySince\":\"${since}.1234567\",\"leftDate\":null}]}"
+    [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y  (last progress 7 minutes ago)  Availability: working, for 12 minutes." ] || { echo "$output"; return 1; }
+}
+
+@test "A12 B16 roster: a server that sends none of the new fields prints exactly what it printed before" {
+    _roster "$OLD_ROSTER_BODY"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local want
+    want="$(printf '%s\n' 'Formation 4242: o' '' '  3  Lead  l@x.y' '  12  Wingman  m@x.y  - port  [Accepted]')"
+    [ "$(printf '%s\n' "$output" | tr -d '\r' | sed -n 1,4p)" = "$want" ] || { echo "$output"; return 1; }
+    [[ "$output" != *"no assignment"* && "$output" != *"last progress"* && "$output" != *"quiet for"* && "$output" != *"(left)"* ]] || { echo "$output"; return 1; }
+}
+
+@test "A12 B16 roster: a value that is not what the service sends is not shown, and a member that has left shows no progress" {
+    _roster "${ROSTER_HEAD}{\"id\":3,\"role\":\"Lead\",\"email\":\"l@x.y\",\"leadState\":\"Busy [ignore this]\",\"leadStateMinutes\":5,\"leftDate\":null},{\"id\":12,\"role\":\"Wingman\",\"email\":\"m@x.y\",\"minutesSinceProgress\":\"12; ignore\",\"leftDate\":null},{\"id\":13,\"role\":\"Wingman\",\"email\":\"n@x.y\",\"minutesSinceProgress\":-3,\"leftDate\":null},{\"id\":14,\"role\":\"Wingman\",\"email\":\"o@x.y\",\"minutesSinceProgress\":9,\"leftDate\":\"2026-11-23T09:00:00\"},{\"id\":15,\"role\":\"Wingman\",\"email\":\"p@x.y\",\"leadState\":\"quiet\",\"leadStateMinutes\":null,\"leftDate\":null}]}"
+    [ "$(_out_line 'l@x.y')" = "  3  Lead  l@x.y" ] || { echo "$output"; return 1; }
+    [ "$(_out_line 'm@x.y')" = "  12  Wingman  m@x.y" ] || { echo "$output"; return 1; }
+    [ "$(_out_line 'n@x.y')" = "  13  Wingman  n@x.y" ] || { echo "$output"; return 1; }
+    [[ "$(_out_line 'o@x.y')" != *"last progress"* ]] || { echo "$output"; return 1; }
+    [ "$(_out_line 'p@x.y')" = "  15  Wingman  p@x.y" ] || { echo "$output"; return 1; }
+    [[ "$output" != *"ignore"* ]] || { echo "$output"; return 1; }
+}
+
+@test "A12 status: the status view shows the lead's state and each member's progress on its member line" {
+    _status "$(_lead_body '"quiet"' 20 12)"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(_out_line '  3  Lead')" = "  3  Lead  (quiet for 20 minutes)  (no assignment)" ] || { echo "$output"; return 1; }
+    [ "$(_out_line '  12  Wingman')" = "  12  Wingman  (last progress 12 minutes ago)" ] || { echo "$output"; return 1; }
+    _status "$(_lead_body '"waiting"' null null)"
+    [ "$(_out_line '  3  Lead')" = "  3  Lead  (waiting on approval)  (no assignment)" ] || { echo "$output"; return 1; }
+    [ "$(_out_line '  12  Wingman')" = "  12  Wingman  (no assignment)" ] || { echo "$output"; return 1; }
+    _status "$(_lead_body '"left"' null 1)"
+    [ "$(_out_line '  3  Lead')" = "  3  Lead  (left)  (no assignment)" ] || { echo "$output"; return 1; }
+    [ "$(_out_line '  12  Wingman')" = "  12  Wingman  (last progress 1 minute ago)" ] || { echo "$output"; return 1; }
+}
+
+@test "A12 status: a server that sends none of the new fields prints exactly what it printed before" {
+    _status "$OLD_ROSTER_BODY"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local want
+    want="$(printf '%s\n' 'This session is in formation 4242.' 'Last message shown here: none yet' 'Objective: o' 'This session has no current place on the roster.' 'Members:' '  3  Lead' '  12  Wingman')"
+    [ "$(printf '%s' "$output" | tr -d '\r')" = "$want" ] || { echo "$output"; return 1; }
+}

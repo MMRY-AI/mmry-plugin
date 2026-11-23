@@ -471,3 +471,70 @@ _plugin_lead_rule_copies() {
     grep -q -F -- "\"${NEXT}\"" "$cs" || { echo "FormationRoleRule.cs lacks the next line"; return 1; }
     grep -q -F -- "N'  next:       ${NEXT}'" "$progress" || { echo "$progress lacks the next: line"; return 1; }
 }
+
+# ---- #34089 (DD-203 in MMRY-AI/mmry), finish round item 17: report progress at each milestone ---------
+#
+# cmo-mmry's B3 (Revision 1), NO APOSTROPHES. A member is given it on its own line straight after the
+# member rule, on Claude Code and on Codex; a lead is not. B3's placement puts the member rules in this
+# order: report at stopping points, acknowledge, never go idle silently, report progress at milestones,
+# (34011's M and S when they land), then on Claude Code the 34161 background-work sentence.
+
+PROGRESS_RULE="Report progress to the lead at each milestone of your assignment, so the lead can see the work is moving."
+BACKGROUND_34161="Run long commands and long delegated work in the background, so messages from your lead can reach you while that work runs instead of waiting until it ends."
+
+_line_no_of() { printf '%s\n' "$output" | tr -d '\r' | grep -n -x -F -- "$1" | head -n 1 | cut -d: -f1; }
+
+@test "34089 B3: the progress rule is ASCII with no apostrophes, held once in lib-formation-roles.sh" {
+    [[ "$PROGRESS_RULE" != *"'"* ]] || return 1
+    ! printf '%s' "$PROGRESS_RULE" | LC_ALL=C grep -q '[^ -~]' || return 1
+    grep -q -F -- "MMRY_FORMATION_PROGRESS_RULE=\"${PROGRESS_RULE}\"" "${HANDLERS}/lib-formation-roles.sh"
+    [ "$(grep -l -r -F -- "$PROGRESS_RULE" "$HANDLERS" | grep -c .)" -eq 1 ] || { grep -l -r -F -- "$PROGRESS_RULE" "$HANDLERS"; return 1; }
+}
+
+@test "34089 B3: a member joining on Claude Code gets the progress rule straight after the member rule, before the 34161 sentence" {
+    _join claude Wingman
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local m p b
+    m="$(_line_no_of "$MEMBER_RULE")"; p="$(_line_no_of "$PROGRESS_RULE")"; b="$(_line_no_of "$BACKGROUND_34161")"
+    [ -n "$m" ] && [ -n "$p" ] && [ -n "$b" ] || { echo "member ${m:-none}, progress ${p:-none}, background ${b:-none}"; echo "$output"; return 1; }
+    [ "$p" -eq "$((m + 1))" ] || { echo "member at $m, progress at $p"; echo "$output"; return 1; }
+    [ "$b" -gt "$p" ] || { echo "progress at $p, background at $b"; echo "$output"; return 1; }
+}
+
+@test "34089 B3: a member joining on Codex gets the same line straight after the member rule, byte for byte" {
+    _join codex Wingman
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local m p
+    m="$(_line_no_of "$MEMBER_RULE")"; p="$(_line_no_of "$PROGRESS_RULE")"
+    [ -n "$m" ] && [ -n "$p" ] && [ "$p" -eq "$((m + 1))" ] || { echo "member ${m:-none}, progress ${p:-none}"; echo "$output"; return 1; }
+}
+
+@test "34089 B3: a lead, returning or starting, is not given the progress rule, on Claude Code or Codex" {
+    _join claude Lead '"2026-10-23T12:30:00"'
+    _lacks "$PROGRESS_RULE"
+    _join codex Lead '"2026-10-23T12:30:00"'
+    _lacks "$PROGRESS_RULE"
+    bash "${HANDLERS}/formation-state.sh" clear "$CLAUDE_CODE_SESSION_ID" || true
+    export FAKE_CODE=201 FAKE_BODY='{"id":42,"objective":"migrate the billing schema"}'
+    export FAKE_BODY_GET='' FAKE_CODE_GET=201
+    _on claude "${HANDLERS}/formation-start.sh" "migrate the billing schema"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    _lacks "$PROGRESS_RULE"
+}
+
+@test "34089 B3: a refused join prints no progress rule" {
+    export FAKE_CODE=403 FAKE_BODY='{}' FAKE_CODE_GET=403 FAKE_BODY_GET='{}'
+    _on claude "${HANDLERS}/formation-join.sh" 4242
+    [ "$status" -ne 0 ]
+    _lacks "$PROGRESS_RULE"
+}
+
+@test "34089 B3: the command page and the Codex skill quote the progress rule right after the member rule" {
+    local f m
+    for f in commands/formation.md skills-codex/memory-system/SKILL.md; do
+        m="$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | grep -n -x -F -- "> ${MEMBER_RULE}" | cut -d: -f1)"
+        [ -n "$m" ] || { echo "$f: no member rule"; return 1; }
+        [ "$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | sed -n "$((m + 1))p")" = ">" ] || { echo "$f: line after the member rule"; return 1; }
+        [ "$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | sed -n "$((m + 2))p")" = "> ${PROGRESS_RULE}" ] || { echo "$f: no progress rule after the member rule"; return 1; }
+    done
+}

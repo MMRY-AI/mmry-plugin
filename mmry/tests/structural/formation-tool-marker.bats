@@ -180,3 +180,43 @@ _polls() { grep ' http://fake.invalid/api/formations/4242/transmissions?' "$URL_
     local ctx; ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
     [[ "$ctx" == *"[MMRY] DIRECTED TO YOU: ${PROGRESS_AGAIN}"* ]] || { echo "$output"; return 1; }
 }
+
+# ---- Finish round, item 12: the marker is the client's fifth argument -------------------------------
+#
+# mmry_get_formation_transmissions takes the marker as its fifth argument and adds "&tool=1" last, so the
+# marked request is the unmarked one plus the marker. formation-check.sh passes it rather than building
+# the path itself. Anything but "1" sends no marker, so an older caller that passes four reads as today.
+
+# The client's request for these arguments, through the fake transport, as "METHOD URL".
+_client_poll() {
+    local bin; bin="$(_fake_curl_dir)"
+    : > "$URL_LOG"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY='[]' FAKE_URL_LOG="$URL_LOG" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash -c 'unset MMRY_HOST; source "$1/mmry-client.sh"; shift; mmry_get_formation_transmissions "$@"' _ "$HANDLERS" "$@" >/dev/null 2>&1 || true
+    tr -d '\r' < "$URL_LOG"
+}
+
+@test "B21 item 12: the client's fifth argument 1 adds &tool=1 last; four arguments, an empty fifth or any other value add nothing" {
+    local base='GET http://fake.invalid/api/formations/4242/transmissions?sessionId=s-1&since=2026-11-23T09%3A00%3A00&shownIds=7,9'
+    local four marked empty other
+    four="$(_client_poll 4242 s-1 2026-11-23T09:00:00 7,9)"
+    marked="$(_client_poll 4242 s-1 2026-11-23T09:00:00 7,9 1)"
+    empty="$(_client_poll 4242 s-1 2026-11-23T09:00:00 7,9 "")"
+    other="$(_client_poll 4242 s-1 2026-11-23T09:00:00 7,9 yes)"
+    [ "$four" = "$base" ] || { echo "four:   $four"; return 1; }
+    [ "$marked" = "${base}&tool=1" ] || { echo "marked: $marked"; return 1; }
+    [ "$empty" = "$base" ] || { echo "empty:  $empty"; return 1; }
+    [ "$other" = "$base" ] || { echo "other:  $other"; return 1; }
+}
+
+@test "B21 item 12: the marker also follows a request with no since and no shown ids" {
+    [ "$(_client_poll 4242 s-1 "" "" 1)" = 'GET http://fake.invalid/api/formations/4242/transmissions?sessionId=s-1&tool=1' ] || { cat "$URL_LOG"; return 1; }
+}
+
+@test "B21 item 12: formation-check.sh passes the marker to the client and builds no transmissions request of its own" {
+    local check="${HANDLERS}/formation-check.sh"
+    ! grep -n -F '&tool=1' "$check" || return 1
+    ! grep -n -E '_mmry_request[[:space:]]+GET[[:space:]]+"\$\{?path' "$check" || return 1
+    grep -q -F 'mmry_get_formation_transmissions "$formation_id" "$session_id" "$last_seen" "$_fc_shown_owed" "$_fc_tool_marker"' "$check" || { grep -n 'mmry_get_formation_transmissions' "$check"; return 1; }
+}
