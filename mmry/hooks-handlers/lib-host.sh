@@ -681,6 +681,8 @@ mmry_host_tool_ref() {
         formation_queue_add|formation_queue_list|formation_queue_take|formation_queue_decline) ;;
         # #34432: the Formation's idle limit.
         formation_idle_limit) ;;
+        # #34089: the Formation's progress limit.
+        formation_progress_limit) ;;
         *) return 1 ;;
     esac
     printf 'the mmry_plugin %s tool%s' "$tool" "${1:+ $1}"
@@ -705,6 +707,8 @@ _mmry_host_formation_tool() {
         leave)  mmry_host_tool_ref formation_leave ;;
         # #34432: the Formation's idle limit.
         idle-limit) mmry_host_tool_ref formation_idle_limit ;;
+        # #34089: the Formation's progress limit.
+        progress-limit) mmry_host_tool_ref formation_progress_limit ;;
         roster) mmry_host_tool_ref formation_roster ;;
         status) mmry_host_tool_ref formation_status ;;
         # #31789: the lead's operations are tools too. The example a usage line carries survives,
