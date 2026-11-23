@@ -15,11 +15,9 @@
 # words pinned below. If the service renames it, the plugin stops recognising it: this file is where
 # that fails, rather than silently.
 #
-# WORDING STATUS: PLACEHOLDER. cmo-mmry has not yet written the approved sentence
-# (R:/Intranet/ClaudeAI/plans/MMRY/v1.38/wording-34161-cmo.md). Swap the literal below and the
-# constant in lib-formation-prompts.sh together, byte for byte.
+# WORDING STATUS: APPROVED by cmo-mmry, 2026-11-23 (R:/Intranet/ClaudeAI/plans/MMRY/v1.38/wording-34161-cmo.md).
 
-SENTENCE="PLACEHOLDER 34161 awaiting approved wording: run long commands and long delegated work in the background so your lead can reach you while it runs."
+SENTENCE="Run long commands and long delegated work in the background, so messages from your lead can reach you while that work runs instead of waiting until it ends."
 NOTICE_START="ASSIGNMENT. The formation lead has set what this session is working on."
 
 setup() {

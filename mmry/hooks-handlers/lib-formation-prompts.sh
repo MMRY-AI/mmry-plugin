@@ -54,9 +54,8 @@ mmry_formation_save_outcome_prompt() {
 
 # ---- Long work in the background, Claude Code members only (#34161) -------------------------------
 # Held once. Printed by formation-join.sh at a Claude Code join and by formation-check.sh right after
-# a delivered assignment notice. PLACEHOLDER until cmo-mmry's approved sentence (wording-34161-cmo.md)
-# is wired byte for byte; tests/structural/formation-background-work.bats pins it.
-MMRY_FORMATION_BACKGROUND_WORK="PLACEHOLDER 34161 awaiting approved wording: run long commands and long delegated work in the background so your lead can reach you while it runs."
+# a delivered assignment notice. Wording approved by cmo-mmry 2026-11-23 (wording-34161-cmo.md).
+MMRY_FORMATION_BACKGROUND_WORK="Run long commands and long delegated work in the background, so messages from your lead can reach you while that work runs instead of waiting until it ends."
 
 # ---- Each member's availability on the roster (#33847, DD-191 in MMRY-AI/mmry) -------------------
 #
