@@ -64,7 +64,7 @@ _limit() {
 }
 
 @test "B16: progress-limit 20 asks the server to set 20 minutes and prints its sentence" {
-    _limit claude 200 '{"formationId":4242,"stallAfterMinutes":20,"stallNoticeAfterSeconds":1200,"message":"This Formation'"'"'s progress limit is now 20 minutes."}' 20
+    _limit claude 200 '{"formationId":4242,"progressAfterMinutes":20,"progressNoticeAfterSeconds":1200,"message":"This Formation'"'"'s progress limit is now 20 minutes."}' 20
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [ "$output" = "This Formation's progress limit is now 20 minutes." ] || { echo "$output"; return 1; }
     grep -q '^PUT http://fake.invalid/api/formations/4242/progress-limit {"minutes":20}$' "$LOG" || { cat "$LOG"; return 1; }
@@ -73,7 +73,7 @@ _limit() {
 @test "B16: 5 and 1440 are sent; default sends null and prints the server's sentence" {
     _limit claude 200 '{"message":"This Formation'"'"'s progress limit is now 5 minutes."}' 5
     _limit claude 200 '{"message":"This Formation'"'"'s progress limit is now 1440 minutes."}' 1440
-    _limit claude 200 '{"formationId":4242,"stallAfterMinutes":null,"stallNoticeAfterSeconds":300,"message":"This Formation'"'"'s progress limit is now 5 minutes."}' default
+    _limit claude 200 '{"formationId":4242,"progressAfterMinutes":null,"progressNoticeAfterSeconds":300,"message":"This Formation'"'"'s progress limit is now 5 minutes."}' default
     [ "$output" = "This Formation's progress limit is now 5 minutes." ] || { echo "$output"; return 1; }
     grep -q '{"minutes":5}$' "$LOG" && grep -q '{"minutes":1440}$' "$LOG" && grep -q '{"minutes":null}$' "$LOG" || { cat "$LOG"; return 1; }
 }
@@ -102,13 +102,18 @@ _limit() {
     [ "$status" -eq 0 ] && [ "$output" = "$HELP" ] || { echo "$output"; return 1; }
 }
 
+@test "B16: a set whose reply has no message reads progressNoticeAfterSeconds for its sentence" {
+    _limit claude 200 '{"formationId":4242,"progressAfterMinutes":20,"progressNoticeAfterSeconds":1200}' 20
+    [ "$status" -eq 0 ] && [ "$output" = "This Formation's progress limit is now 20 minutes." ] || { echo "$output"; return 1; }
+}
+
 @test "B16: a member is refused with the server's approved sentence (C5)" {
     _limit claude 403 "{\"error\":\"${STANDING}\"}" 20
     [ "$status" -ne 0 ] && [ "$output" = "$STANDING" ] || { echo "$output"; return 1; }
 }
 
-@test "B16: a read says 'is', from the Formation's stallNoticeAfterSeconds, and a server without it reads the default of 5" {
-    _limit claude 200 '{"formation":{"id":4242},"members":[],"stallNoticeAfterSeconds":1200}'
+@test "B16: a read says 'is', from the Formation's progressNoticeAfterSeconds, and a server without it reads the default of 5" {
+    _limit claude 200 '{"formation":{"id":4242},"members":[],"progressNoticeAfterSeconds":1200}'
     [ "$status" -eq 0 ] && [ "$output" = "This Formation's progress limit is 20 minutes." ] || { echo "$output"; return 1; }
     grep -q '^GET http://fake.invalid/api/formations/4242?sessionId=' "$LOG" || { cat "$LOG"; return 1; }
     _limit claude 200 '{"formation":{"id":4242},"members":[]}'
