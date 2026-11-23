@@ -252,3 +252,127 @@ _flat() { printf '%s' "$output" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
     grep -q -F -- "N'${REPORT_RULE}'" "$mig"
     grep -q -F -- "N'${ACK_RULE}'" "$mig"
 }
+
+# ---- #34011: two more member rules, M and S, beside the two above (DD-204) ----------------------
+#
+# THE WORDING is the cmo-mmry approved text (plans/MMRY/v1.38/wording-34011-cmo.md, 2026-11-23),
+# held here as literals so the join output is compared against the approved text, never against
+# itself. No apostrophes, plain ASCII. Order on Claude Code: REPORT, ACK, M, S, then 34161's
+# background sentence; on Codex the same without that sentence.
+#
+# STAGE 2 SWITCH. In stage 1 of #34011 formation-join.sh is fenced (plugin #171 and #175), so the
+# join does not print M and S yet and these cases cannot pass. They are skipped with the reason
+# named, not passed. Stage 2 deletes _stage2 and the call to it in each case. Run with
+# MMRY_STAGE2=1 to see them red (stage 1) and green (stage 2).
+M_RULE="Message the one member who needs something; message everyone only when every member must act or change course."
+S_RULE="Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply."
+LINE_A="An assignment holds up to 500 characters; for longer work, put the brief in a file and give its path in the assignment."
+BACKGROUND_SENTENCE="Run long commands and long delegated work in the background, so messages from your lead can reach you while that work runs instead of waiting until it ends."
+
+_stage2() {
+    [[ "${MMRY_STAGE2:-}" == "1" ]] || skip "stage 2: formation-join.sh fenced by #171 and #175"
+}
+
+# The 1-based line number of an exact line in $output, or empty.
+_line_no() {
+    local want="$1" n=0 line
+    while IFS= read -r line; do
+        n=$((n + 1))
+        line="${line%$'\r'}"
+        [[ "$line" == "$want" ]] && { printf '%s' "$n"; return 0; }
+    done <<< "$output"
+    return 1
+}
+
+# How many times an exact line appears in $output.
+_count_line() {
+    local want="$1" count=0 line
+    while IFS= read -r line; do
+        line="${line%$'\r'}"
+        [[ "$line" == "$want" ]] && count=$((count + 1))
+    done <<< "$output"
+    printf '%s' "$count"
+}
+
+@test "P1 (#34011) joining on Claude Code prints REPORT, ACK, M, S in that order, each once" {
+    _stage2
+    _join claude
+    [ "$status" -eq 0 ]
+    _has_line "$M_RULE"
+    _has_line "$S_RULE"
+    [ "$(_count_line "$REPORT_RULE")" = "1" ]
+    [ "$(_count_line "$ACK_RULE")" = "1" ]
+    [ "$(_count_line "$M_RULE")" = "1" ]
+    [ "$(_count_line "$S_RULE")" = "1" ]
+    local r a m s
+    r="$(_line_no "$REPORT_RULE")"; a="$(_line_no "$ACK_RULE")"
+    m="$(_line_no "$M_RULE")"; s="$(_line_no "$S_RULE")"
+    [ "$r" -lt "$a" ]
+    [ "$a" -lt "$m" ]
+    [ "$m" -lt "$s" ]
+}
+
+@test "P2 (#34011) joining on Codex prints M and S once each, after ACK, the same as Claude Code" {
+    _stage2
+    _join codex
+    [ "$status" -eq 0 ]
+    [ "$(_count_line "$M_RULE")" = "1" ]
+    [ "$(_count_line "$S_RULE")" = "1" ]
+    local a m s
+    a="$(_line_no "$ACK_RULE")"; m="$(_line_no "$M_RULE")"; s="$(_line_no "$S_RULE")"
+    [ "$a" -lt "$m" ]
+    [ "$m" -lt "$s" ]
+}
+
+@test "P6 (#34011) the 34161 background sentence follows M and S on Claude Code and is absent on Codex" {
+    _stage2
+    _join claude
+    local s b
+    s="$(_line_no "$S_RULE")"; b="$(_line_no "$BACKGROUND_SENTENCE")"
+    [ -n "$s" ]
+    [ -n "$b" ]
+    [ "$s" -lt "$b" ]
+    _join codex
+    [ "$(_count_line "$BACKGROUND_SENTENCE")" = "0" ]
+}
+
+@test "P5 (#34011) M, S and line A name no host command or mechanism, and have no apostrophe" {
+    # A guard, not stage 2: it holds on the approved text itself. No slash command, no tool name,
+    # no script name, no apostrophe, plain ASCII.
+    local text
+    for text in "$M_RULE" "$S_RULE" "$LINE_A"; do
+        [[ "$text" != *"'"* ]] || return 1
+        [[ "$text" != *"/mmry"* ]] || return 1
+        [[ "$text" != *"mmry_"* ]] || return 1
+        [[ "$text" != *".sh"* ]] || return 1
+        [[ "$text" != *"formation_"* ]] || return 1
+        [[ "$text" != *"Claude"* ]] || return 1
+        [[ "$text" != *"Codex"* ]] || return 1
+        [ -z "$(printf '%s' "$text" | LC_ALL=C tr -d ' -~')" ]
+    done
+}
+
+@test "req4 (#34011) the command page and the Codex skill carry M and S byte for byte" {
+    _stage2
+    grep -q -F -- "> ${M_RULE}" "${PLUGIN_DIR}/commands/formation.md"
+    grep -q -F -- "> ${S_RULE}" "${PLUGIN_DIR}/commands/formation.md"
+    grep -q -F -- "> ${M_RULE}" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+    grep -q -F -- "> ${S_RULE}" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+}
+
+@test "P4 (#34011, req3) the assign help, the Codex skill and the formation_assign description carry line A" {
+    _stage2
+    grep -q -F -- "${LINE_A}" "${PLUGIN_DIR}/commands/formation.md"
+    grep -q -F -- "${LINE_A}" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+    grep -q -F -- "${LINE_A}" "${HANDLERS}/mcp-server.sh"
+}
+
+@test "A5 (#34011) the service carries the same four rules (needs MMRY_SERVICE_REPO)" {
+    if [[ -z "${MMRY_SERVICE_REPO:-}" ]]; then
+        skip "MMRY_SERVICE_REPO is not set; set it to a checkout of MMRY-AI/mmry to compare the third surface"
+    fi
+    local cs="${MMRY_SERVICE_REPO}/src/Mnemo.Api/Services/FormationReportRule.cs"
+    [ -f "$cs" ]
+    grep -q -F -- "\"${M_RULE}\"" "$cs"
+    grep -q -F -- "\"${S_RULE}\"" "$cs"
+}
