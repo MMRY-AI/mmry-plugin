@@ -30,6 +30,7 @@ hooks-handlers/formation-idle-limit.sh
 hooks-handlers/formation-join.sh
 hooks-handlers/formation-leave.sh
 hooks-handlers/formation-list.sh
+hooks-handlers/formation-progress-limit.sh
 hooks-handlers/formation-progress.sh
 hooks-handlers/formation-queue.sh
 hooks-handlers/formation-remove.sh
@@ -125,6 +126,7 @@ tests/handlers/entry-page-fit.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-list-privacy.bats
 tests/handlers/formation-member-names.bats
+tests/handlers/formation-progress-limit.bats
 tests/handlers/formation-rejoin.bats
 tests/handlers/formation-upgrade-refusal.bats
 tests/handlers/formation-waiting-busy.bats
@@ -261,6 +263,7 @@ tests/structural/formation-roster.bats
 tests/structural/formation-save-outcome.bats
 tests/structural/formation-say.bats
 tests/structural/formation-stale-membership.bats
+tests/structural/formation-tool-marker.bats
 tests/structural/foundation-isolation.bats
 tests/structural/foundation-status-command.bats
 tests/structural/help-complete.bats
