@@ -280,7 +280,7 @@ MMRY_MCP_TOOLS='[
   {
     "name": "formation_debrief",
     "title": "Close out the coordination group",
-    "description": "As the lead, close out this conversation'"'"'s formation with a summary of what was accomplished, decided and learned. The summary and the close-out record are kept as lasting memories, and the formation stops carrying messages. This ends the formation for every member.",
+    "description": "As the lead, close out this conversation'"'"'s formation with a summary of what was accomplished, decided and learned. The summary and the close-out record are kept as lasting memories, except for the idle time of each member, which stays in the close-out record that members of the Formation read. The Formation then stops carrying messages. This ends the formation for every member.",
     "inputSchema": {
       "type": "object",
       "properties": {"summary": {"type": "string", "description": "What was accomplished, what was decided, and what went wrong. At least 20 characters."}},

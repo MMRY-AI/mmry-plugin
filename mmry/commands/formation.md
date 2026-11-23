@@ -516,6 +516,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-debrief.sh" "<summary>"
 ```
 
 This is how a formation ends properly. The account and the summary are saved as a lasting memory,
+without each member's idle time, which stays in the record members read with /mmry:formation report;
 the durable outcomes in them are extracted into memories of their own, and someone who was never in
 the formation can read both later. The running chatter stops being served. A group with nothing
 durable to say still closes out (#31738).

@@ -228,7 +228,8 @@ lead, give a member work with `formation_assign` (`member_id` from the roster, a
 `assignment`); only that member is told. `formation_report` prints the close-out record: every
 member, the work it was given and the state it ended in. Close the formation out with
 `formation_debrief` and a `summary` of what was accomplished, decided and learned; the summary and
-the record become lasting memories, and the formation stops carrying messages.
+the record become lasting memories, except for each member's idle time, which stays in the record
+formation_report prints, and the formation stops carrying messages.
 
 A member can leave only from its own session. When that session has dropped, the lead, the person
 who started the formation, or an account administrator can take it off with `formation_remove` and

@@ -106,6 +106,6 @@ if [[ -n "${MMRY_JQ:-}" ]]; then
     fi
 fi
 # A server from before the per-Formation limit reports no number: its limit is the default.
-[[ "$seconds" =~ ^[0-9]+$ ]] || seconds=900
+[[ "$seconds" =~ ^[0-9]+$ ]] || seconds=300
 if [[ "$mode" == "read" ]]; then sentence "$seconds" "is"; else sentence "$seconds" "is now"; fi
 exit 0
