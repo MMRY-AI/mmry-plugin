@@ -164,7 +164,7 @@ if [[ -n "$record" ]]; then
     printf '%s\n\n' "$record"
 fi
 
-echo "Formation ${formation_id} closed out. The summary and the account above have been recorded as lasting memories, and the formation's chatter has stopped."
+echo "Formation ${formation_id} closed out. The summary and the account above have been recorded as lasting memories, except for each member's idle time, which stays in the close-out record that the Formation's members read. The Formation's chatter has stopped."
 if [[ -z "$record" ]]; then
     echo "The account itself could not be read from the reply. Run $(mmry_host_formation_ref report "${formation_id}") to see it."
 fi

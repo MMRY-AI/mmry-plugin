@@ -239,6 +239,7 @@ tests/structural/formation-check-prompt-budget.bats
 tests/structural/formation-check-timeout.bats
 tests/structural/formation-claim.bats
 tests/structural/formation-compaction-rearm.bats
+tests/structural/formation-debrief.bats
 tests/structural/formation-delivery.bats
 tests/structural/formation-directed.bats
 tests/structural/formation-gate.bats
@@ -256,6 +257,7 @@ tests/structural/formation-renewal-turn.bats
 tests/structural/formation-report-rule.bats
 tests/structural/formation-report.bats
 tests/structural/formation-role-rules.bats
+tests/structural/formation-roster.bats
 tests/structural/formation-save-outcome.bats
 tests/structural/formation-say.bats
 tests/structural/formation-stale-membership.bats
