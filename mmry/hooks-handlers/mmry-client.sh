@@ -2235,7 +2235,7 @@ mmry_release_formation_claim() {
 }
 
 mmry_set_formation_member_waiting() {
-    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME]
+    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME [PROGRAM_NAME]]
     #
     # #33452. This member is waiting on a permission prompt in its own window, so the lead is told.
     # The server records it only for the caller's OWN entry, resolved from the session, and refuses
@@ -2243,9 +2243,12 @@ mmry_set_formation_member_waiting() {
     # mcp__server__tool) or empty, and it is the only part of the prompt this ever sends: never the
     # command, its arguments, a path or a file's contents. formation-waiting.sh checks it is a bare
     # name before it gets here, and the server refuses anything else.
-    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}"
+    # #34519 (DD-206 in MMRY-AI/mmry): PROGRAM_NAME, optional, is the bare program a shell command
+    # runs (git, npm), the command's first word with any folder removed, under the same rule. Never
+    # the rest of the command. Left out of the body when empty, so an older server is asked as before.
+    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}" program="${5:-}"
     local body
-    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool")"
+    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool" "programName" "$program")"
     _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}/waiting" "$body"
 }
 
