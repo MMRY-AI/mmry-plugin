@@ -237,7 +237,7 @@ DOCS_WAITING="**The lead hears who is waiting for an approval.** When a member's
     for f in "${BATS_TEST_DIRNAME}/../../commands/formation.md" "${BATS_TEST_DIRNAME}/../../skills-codex/memory-system/SKILL.md"; do
         grep -qxF -- "$DOCS_WAITING" "$f" || { echo "not the approved paragraph: $f"; return 1; }
         ! grep -qF -- "with the name of the tool asking and nothing else from the prompt" "$f" || { echo "the old sentence: $f"; return 1; }
-        ! grep -qF -- "only the name of the program" "$f" || { echo "the 34519 sentence, untrue since 34651: $f"; return 1; }
+        ! grep -qF -- "only the name of the ""program" "$f" || { echo "the 34519 sentence, untrue since 34651: $f"; return 1; }
     done
 }
 
