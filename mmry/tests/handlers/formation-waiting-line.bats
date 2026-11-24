@@ -217,6 +217,29 @@ P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run 
     [ "$(_sys)" = "$P_W1" ] || { echo "person line: [$(_sys)]"; return 1; }
 }
 
+# #34651 round 3 (N2, Seat A's delta): the script and inline forms are shown only beside a listed
+# interpreter (the handler's own list, lib-waiting-actions.sh, the one _mmry_waiting_action_ok holds a
+# sent action to). A notice from an older service, or a row written past the service, that ends
+# "to run an inline curl script." or "to run the script x.sh with curl." gives the program-only person
+# line (the approved #34519 line): never the file name, never the word inline.
+@test "L-16 34651 N2: a script or an inline form beside a program that is no listed interpreter is never shown to the person; the program-only line is" {
+    local head='WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run ' row tail_ prog
+    for row in 'an inline curl script.|curl' 'the script x.sh with curl.|curl'                'the script SECRETX.sh with git.|git' 'an inline git script.|git'                'an inline s3cr3tword script.|s3cr3tword' 'the script tok.py with s3cr3tword.|s3cr3tword'                'the script x.sh with Bash.|Bash' 'an inline nodejs script.|nodejs'; do
+        tail_="${row%%|*}"; prog="${row##*|}"
+        _deliver claude "[$(_notice "${head}${tail_}" name)]"
+        [ "$status" -eq 0 ] || { echo "for [$tail_]: status $status: $output"; return 1; }
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run ${prog}. Answer the prompt in that window." ]             || { echo "for [$tail_]: person line: [$(_sys)]"; return 1; }
+    done
+    # Every listed interpreter still shows both forms, as L-12 pins for bash and node.
+    local i
+    for i in bash sh node pwsh powershell python python3; do
+        _deliver claude "[$(_notice "${head}the script x.sh with ${i}." name)]"
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run the script x.sh with ${i}. Answer the prompt in that window." ]             || { echo "for [$i] script: person line: [$(_sys)]"; return 1; }
+        _deliver claude "[$(_notice "${head}an inline ${i} script." name)]"
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run an inline ${i} script. Answer the prompt in that window." ]             || { echo "for [$i] inline: person line: [$(_sys)]"; return 1; }
+    done
+}
+
 @test "L-14 34651: Codex gets no person line for the three new lines either, and each still opens its batch" {
     local l
     for l in "$L_W1" "$L_W2" "$L_W3"; do
