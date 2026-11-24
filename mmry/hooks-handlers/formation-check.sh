@@ -299,10 +299,13 @@ hook_read_status="notty"
 #                (${CLAUDE_PLUGIN_ROOT}, a .claude/plugins/cache/... path, or .claude/mmry)
 # They mirror the server's own list for its connector, FormationStallNotice.NotWork behind
 # ConnectorToolCounts (MMRY-AI/mmry src/Mnemo.Api/Services/FormationStallNotice.cs): say, status (the
-# roster is the status read) and list. formation-check.sh is the message check itself. Change both
-# together; structural/formation-tool-marker.bats pins the two as the same set.
-_FC_NOT_WORK_TOOLS='formation_say|formation_roster|formation_status|formation_list'
-_FC_NOT_WORK_SCRIPTS='say|roster|status|list|check'
+# roster is the status read), list, the claims list and the queue list (the lead's ruling 2, #34089 part
+# 2). formation-check.sh is the message check itself. A script entry with a second word is withheld only
+# when that is its first argument: "claim --list" is the claims list, never a claim declared or released,
+# and "queue list" is the queue list, never a take, an add or a decline. Codex has no claims tool. Change
+# both together; structural/formation-tool-marker.bats pins the two as the same set.
+_FC_NOT_WORK_TOOLS='formation_say|formation_roster|formation_status|formation_list|formation_queue_list'
+_FC_NOT_WORK_SCRIPTS='say|roster|status|list|check|claim --list|queue list'
 # A Bash command is withheld only when EVERY part of it (split at && || ; | & and new lines, after quoted
 # text is set aside) runs one of those scripts. "git push && formation-say.sh ..." is real work and still
 # counts; so does a command that only mentions a script, a dev clone's copy, or one that runs $( ) or
@@ -317,20 +320,28 @@ _fc_payload_fields='def _fc_not_work:
       elif $t != "Bash" then ""
       else
         .tool_input.command as $c
-        | ("[/\\\\]hooks-handlers[/\\\\]formation-(" + $scripts + ")\\.sh") as $tail
-        | ("^(\\$\\{CLAUDE_PLUGIN_ROOT\\}|\\$CLAUDE_PLUGIN_ROOT|.*[/\\\\]\\.claude[/\\\\](plugins[/\\\\]cache[/\\\\].*|mmry))" + $tail + "$") as $quoted
-        | ("(\\$\\{CLAUDE_PLUGIN_ROOT\\}|\\$CLAUDE_PLUGIN_ROOT|[^\\s\"\\x27;&|]*[/\\\\]\\.claude[/\\\\](plugins[/\\\\]cache[/\\\\][^\\s\"\\x27;&|]*|mmry))" + $tail) as $bare
+        # Each entry is a script name and, for a list read, the first argument it must have.
+        | ($scripts | split("|") | map(split(" ") | {n: .[0], a: (.[1] // "")})) as $entries
+        | ($entries | map(.n) | unique | join("|")) as $names
+        | "[/\\\\]hooks-handlers[/\\\\]formation-" as $mid
+        | ("^(\\$\\{CLAUDE_PLUGIN_ROOT\\}|\\$CLAUDE_PLUGIN_ROOT|.*[/\\\\]\\.claude[/\\\\](plugins[/\\\\]cache[/\\\\].*|mmry))" + $mid + "(?<fcn>" + $names + ")\\.sh$") as $quoted
+        | "(\\$\\{CLAUDE_PLUGIN_ROOT\\}|\\$CLAUDE_PLUGIN_ROOT|[^\\s\"\\x27;&|]*[/\\\\]\\.claude[/\\\\](plugins[/\\\\]cache[/\\\\][^\\s\"\\x27;&|]*|mmry))" as $broot
         | if ($c | type) != "string" or ($c | test("\\$\\(|`")) then ""
           else
+            # A quoted install path to one of the scripts becomes "P:<name>", any other quoted text "Q".
             [ $c
-              | gsub("\"(?<s>(?:\\\\.|[^\"\\\\])*)\""; if (.s | test($quoted)) then "\"P\"" else "\"Q\"" end)
-              | gsub("\\x27(?<s>[^\\x27]*)\\x27"; if (.s | test($quoted)) then "\"P\"" else "\"Q\"" end)
+              | gsub("\"(?<s>(?:\\\\.|[^\"\\\\])*)\""; if (.s | test($quoted)) then "\"P:" + (.s | capture($quoted).fcn) + "\"" else "\"Q\"" end)
+              | gsub("\\x27(?<s>[^\\x27]*)\\x27"; if (.s | test($quoted)) then "\"P:" + (.s | capture($quoted).fcn) + "\"" else "\"Q\"" end)
               | gsub("[0-9]*>&[0-9]+"; "")
               | gsub("[0-9]*>>?\\s*/dev/null"; "")
               | splits("&&|\\|\\||[;|&\\n]")
               | sub("^\\s+"; "") | sub("\\s+$"; "")
               | select(length > 0) ] as $segs
-            | if ($segs | length) > 0 and all($segs[]; test("^((bash|sh)\\s+)?(\"P\"|" + $bare + ")(\\s.*)?$")) then "1" else "" end
+            | if ($segs | length) > 0
+                 and all($segs[]; . as $g | any($entries[]; . as $e
+                     | $g | test("^((bash|sh)\\s+)?(\"P:" + $e.n + "\"|" + $broot + $mid + $e.n + "\\.sh)"
+                                 + (if $e.a == "" then "" else "\\s+" + $e.a end) + "(\\s.*)?$")))
+              then "1" else "" end
           end
       end
   ) catch "";
@@ -427,7 +438,32 @@ if [[ -n "$session_id" && -f "${MMRY_TMPDIR}/.mmry-waiting-${session_id}" && -f 
     bash "${HANDLER_DIR}/formation-waiting.sh" --answer "$session_id" "$hook_event" "${MMRY_FORMATION_MODE:-}" \
         <<< "${payload:-}" >/dev/null 2>&1 || true
 fi
-[[ -z "$hook_agent_id" ]] || exit 0
+# ---- A HELPER'S REAL TOOL WORK IS THE MEMBER'S PROGRESS (#34089 part 2, verdict-171-C BL-7) ----------
+# A member whose work runs in a helper it dispatched was reported NO PROGRESS while the helper worked,
+# because the helper's events leave here. They still leave here, and #31991's guarantee holds whole: a
+# helper's event never polls, delivers, prints, marks anything read or writes the local state. The ONE
+# thing it does, after a PostToolUse for real work (not the plugin's own Formation message and read calls,
+# hook_not_work above), is one call to the stamp-only route with the MEMBER's session: the payload's
+# session_id is the parent's (measured, docs/evidence/31991), and its Formation is read from the parent's
+# local state, read only. The answer is discarded, the call has short timeouts, and any failure is silent.
+# In a subshell, so nothing it loads or sets reaches the rest of this file.
+if [[ -n "$hook_agent_id" ]]; then
+    if [[ "$hook_event" == "PostToolUse" && "$hook_not_work" != "1" && -n "$session_id" ]]; then
+        (
+            [[ -f "${HANDLER_DIR}/formation-state.sh" && -f "${HANDLER_DIR}/mmry-client.sh" ]] || exit 0
+            source "${HANDLER_DIR}/formation-state.sh" 2>/dev/null || exit 0
+            mmry_formation_state_read "$session_id" || exit 0
+            [[ "$MMRY_FS_FORMATION" =~ ^[0-9]+$ ]] || exit 0
+            [[ -z "$_fc_jq_unproved" ]] || _fc_resolve_jq
+            source "${HANDLER_DIR}/mmry-client.sh" 2>/dev/null || exit 0
+            command -v curl >/dev/null 2>&1 || exit 0
+            mmry_load_config 2>/dev/null || exit 0
+            MMRY_HTTP_CONNECT_TIMEOUT=2 MMRY_HTTP_MAX_TIME=3
+            mmry_stamp_formation_tool_work "$MMRY_FS_FORMATION" "$session_id"
+        ) </dev/null >/dev/null 2>&1 || true
+    fi
+    exit 0
+fi
 # Nothing proved the jq above (no payload, or one that did not parse): prove it the old way now.
 if [[ -n "$_fc_jq_unproved" ]]; then
     _fc_resolve_jq

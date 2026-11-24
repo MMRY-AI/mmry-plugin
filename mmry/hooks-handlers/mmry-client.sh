@@ -1379,6 +1379,9 @@ _mmry_formation_upgrade_note() {
     _mmry_api_error_v
     MMRY_FORMATION_UPGRADE_TEXT="${_MMRY_API_ERROR:-$_MMRY_FORMATION_UPGRADE_SENTENCE}"
     local sid
+    # A helper's tool-work stamp (mmry_stamp_formation_tool_work, #34089 part 2) changes no local state at
+    # all, a refusal included: the member's own next check meets the refusal and clears it there.
+    [[ -n "${_MMRY_FORMATION_KEEP_STATE:-}" ]] || \
     for sid in "${MMRY_FORMATION_REFUSAL_SID:-}" "$(mmry_session_id 2>/dev/null || true)"; do
         [[ -n "$sid" ]] || continue
         bash "${_MMRY_CLIENT_HANDLERS:-.}/formation-state.sh" clear "$sid" >/dev/null 2>&1 || true
@@ -2037,6 +2040,20 @@ mmry_get_formation_transmissions() {
     # after-tool check passes it (formation-check.sh); anything else sends the request as before.
     [[ "$tool_marker" == "1" ]] && path="${path}&tool=1"
     _mmry_request GET "$path"
+}
+
+# A HELPER'S TOOL WORK, STAMPED AS THE MEMBER'S PROGRESS (#34089 part 2, DD-203 item 13 in MMRY-AI/mmry).
+# POST /api/formations/{id}/tool-stamp?sessionId= answers 204 and does nothing but stamp the session's own
+# live entry's tool work, throttled as the tool=1 marker is: no messages, nothing marked read, no queued
+# work offered, no notice. formation-check.sh calls it for a dispatched helper's real tool call, with the
+# MEMBER's session, and discards the answer. It touches no local state, a refusal included.
+mmry_stamp_formation_tool_work() {
+    # Usage: mmry_stamp_formation_tool_work FORMATION_ID SESSION_ID
+    local formation_id="${1:-}" session_id="${2:-}"
+    [[ "$formation_id" =~ ^[0-9]+$ && -n "$session_id" ]] || return 1
+    _mmry_urlencode_v "$session_id"
+    local _MMRY_FORMATION_KEEP_STATE=1
+    _mmry_request POST "/api/formations/${formation_id}/tool-stamp?sessionId=${_MMRY_URLENC}" '{}'
 }
 
 mmry_get_formation_sent() {
