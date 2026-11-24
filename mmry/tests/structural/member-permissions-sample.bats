@@ -72,8 +72,9 @@ setup() {
 # is split). It is not Claude Code's matcher, so these tests prove the text of the sample, not a live
 # session. E-05 pins the helper itself to the documentation's own examples.
 
-_decide() { # $1 settings file, $2 a file of commands, one a line. Prints "decision<TAB>command" lines.
-    "$JQ" -r --arg tool Bash --rawfile cmds "$2" -f "${ROOT}/tests/helpers/permission-rule-match.jq" "$1" | tr -d '\r'
+_decide() { # $1 settings file, $2 a file of commands, one a line, $3 "0" for the Bash rules alone
+    # (no built-in read-only commands). Prints "decision<TAB>command" lines.
+    "$JQ" -r --arg tool Bash --arg readonly "${3:-1}" --rawfile cmds "$2" -f "${ROOT}/tests/helpers/permission-rule-match.jq" "$1" | tr -d '\r'
 }
 
 @test "E-04 34651 round 2: no command that reads a file, writes one or runs another is allowed by the sample, and the routine ones are" {
@@ -150,7 +151,7 @@ CMDS
     _one() { # $1 allow rules as a JSON array, $2 deny rules, $3 command. Prints the decision.
         printf '{"permissions":{"allow":%s,"deny":%s}}\n' "$1" "$2" > "$s"
         printf '%s\n' "$3" > "${s}.cmds"
-        _decide "$s" "${s}.cmds" | cut -f1
+        _decide "$s" "${s}.cmds" "${RO:-0}" | cut -f1
     }
     _is() { # $1 wanted decision, then _one's three arguments
         out="$(_one "$2" "$3" "$4")"
@@ -195,6 +196,83 @@ CMDS
     _is none  '["Bash(npm test *)"]' '[]' 'EVIL=1 npm test' || return 1
     # A redirect is never allowed by this helper (Claude Code checks its target against the file rules).
     _is none  '["Bash(gh pr diff *)"]' '[]' 'gh pr diff 1 > out.txt' || return 1
+    # More wrappers, and the body of a loop or an if (Seat A's delta, matcher review).
+    _is deny  '[]' '["Bash(rm *)"]' 'stdbuf -o0 rm -rf x' || return 1
+    _is deny  '[]' '["Bash(rm *)"]' 'xargs rm -rf x' || return 1
+    _is deny  '[]' '["Bash(rm *)"]' 'nice -n 5 rm -rf x' || return 1
+    _is deny  '[]' '["Bash(rm *)"]' 'for f in a; do rm -rf $f; done' || return 1
+    _is deny  '[]' '["Bash(rm *)"]' 'if true; then rm -rf x; fi' || return 1
+    # Round 3 (delta A3): the built-in read-only commands run with no rule at all, and only a deny stops
+    # them. Every row above was answered with them switched off; these are answered with them on.
+    RO=1
+    _is allow '[]' '[]' 'cat .secrets/x.json' || return 1
+    _is allow '[]' '[]' 'git status' || return 1
+    _is allow '[]' '[]' 'git log --oneline -1' || return 1
+    _is allow '[]' '[]' 'git -C /r status' || return 1
+    _is allow '[]' '[]' 'head -5 notes.txt' || return 1
+    _is allow '[]' '[]' 'git --no-pager -c core.fsmonitor=./evil.sh status' || return 1
+    _is none  '[]' '[]' 'git commit -m x' || return 1
+    _is none  '[]' '[]' 'npm test' || return 1
+    _is none  '[]' '[]' 'find . -name x -delete' || return 1
+    _is none  '[]' '[]' 'cat notes.txt > copy.txt' || return 1
+    _is none  '[]' '[]' 'cat notes.txt && npm test' || return 1
+    _is deny  '[]' '["Read(./.secrets/**)"]' 'cat .secrets/x.json' || return 1
+    _is deny  '[]' '["Read(./.secrets/**)"]' 'cat ./.secrets/a/b.json' || return 1
+    _is allow '[]' '["Read(./.secrets/**)"]' 'cat docs/.secrets/x.json' || return 1
+    _is deny  '[]' '["Read(./**/.secrets/**)"]' 'cat docs/.secrets/x.json' || return 1
+    _is deny  '[]' '["Read(//**/.secrets/**)"]' 'cat R:/Intranet/ClaudeAI/.secrets/mmry/x.json' || return 1
+    _is deny  '[]' '["Read(./.env)"]' 'git status && cat .env' || return 1
+    _is allow '[]' '["Read(./.env)"]' 'cat .env.local' || return 1
+    _is deny  '[]' '["Read(./.env.*)"]' 'head -1 .env.local' || return 1
+    _is deny  '[]' '["Bash(git * -c *)"]' 'git --no-pager -c core.fsmonitor=./evil.sh status' || return 1
+    RO=0
+}
+
+# ---- Round 3 (delta A3, Seat C gap 3): reads Claude Code runs without asking ---------------------------
+# cat, head, grep and the read-only forms of git need no allow entry, so "the allow list reads no
+# secrets" (W6) is kept only by DENY entries. These are the commands a member's assistant could run
+# with no prompt at all if the sample did not refuse them.
+SECRET_READS='cat .secrets/x.json
+cat ./.secrets/mmry/db.json
+head -3 .secrets/x.json
+grep password .secrets/x.json
+cat config/.secrets/x.json
+cat .env
+cat ./.env
+cat .env.local
+head -1 .env.production
+grep KEY config/.env
+cat services/api/.env.local
+tail -5 secrets/key.pem
+git --no-pager -c core.fsmonitor=./evil.sh status
+git --git-dir=.git -c core.fsmonitor=./evil.sh status
+git -P -c core.pager=./evil.sh log
+git -C . -c core.fsmonitor=./evil.sh status'
+
+@test "E-07 34651 round 3: the sample refuses every read of .secrets and of an .env file that Claude Code would otherwise run without asking, and a config value behind a git option" {
+    local out bad cmds="${BATS_TEST_TMPDIR}/reads.txt"
+    printf '%s\n' "$SECRET_READS" > "$cmds"
+    out="$(_decide "$SAMPLE" "$cmds")"
+    [ "$(grep -c . <<< "$out")" -eq 16 ] || { echo "the helper did not answer for every command:"; echo "$out"; return 1; }
+    bad="$(grep -v -E '^deny' <<< "$out" || true)"
+    [ -z "$bad" ] || { echo "not refused by the sample (allow means it runs with no prompt):"; echo "$bad"; return 1; }
+    # The everyday reads stay free: a deny that swallowed them would make the sample useless.
+    printf '%s\n' 'cat README.md' 'git status' 'git log --oneline -1' 'grep -rn TODO src' 'ls -la' 'cat src/environment.ts' > "$cmds"
+    out="$(_decide "$SAMPLE" "$cmds")"
+    bad="$(grep -v -E '^allow' <<< "$out" || true)"
+    [ -z "$bad" ] || { echo "an everyday read is not allowed:"; echo "$bad"; return 1; }
+}
+
+@test "E-08 34651 round 3: without its .secrets and .env denies the sample lets those reads run unasked (the proof E-07 can fail)" {
+    local s="${BATS_TEST_TMPDIR}/no-read-denies.json" out cmds="${BATS_TEST_TMPDIR}/reads.txt"
+    "$JQ" '.permissions.deny |= map(select(test("[.]secrets|[.]env|^Bash[(]git [*] -c ") | not))' < "$SAMPLE" > "$s"
+    [ "$("$JQ" '.permissions.deny | length' < "$s")" -lt "$("$JQ" '.permissions.deny | length' < "$SAMPLE")" ] || { echo "the sample holds no .secrets or .env deny to take away"; return 1; }
+    printf '%s\n' "$SECRET_READS" > "$cmds"
+    out="$(_decide "$s" "$cmds")"
+    [ "$(grep -c '^allow' <<< "$out")" -ge 14 ] || { echo "the helper no longer shows these reads as running unasked:"; echo "$out"; return 1; }
+    # And with the built-in read-only commands switched off, the old blind spot: nothing is flagged.
+    out="$(_decide "$s" "$cmds" 0)"
+    [ "$(grep -c '^allow' <<< "$out")" -eq 0 ] || { echo "$out"; return 1; }
 }
 
 @test "E-06 34651 round 2: the round 1 sample is what these tests refuse (the proof they can fail)" {
