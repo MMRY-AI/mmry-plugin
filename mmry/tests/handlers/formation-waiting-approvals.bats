@@ -29,6 +29,16 @@
 #   S-01..04  the stale flag: a prompt that timed out or was answered No, and a refused broad rm,
 #             clear on the member's next tool call (measured baseline: about 9 minutes, at its Stop);
 #             a call still open beside a parallel call does not clear.
+#   S-05..06  fix round 1 (QA 34519, Seat E): the clear stays bounded in a long session (5 MB, 50 earlier
+#             calls), and only the asked call's own result ends the wait.
+#   C-07..10  fix round 1: an approval holds for the same call in the same folder only (DD-206: the
+#             digest covers the working folder and the whole input); a helper's own run and a Claude
+#             Code run are never recorded as an approval.
+#   C-11..12  fix round 2: the approval is kept only when the run's own key (tool, cwd, whole input)
+#             equals the key recorded at the ask: a run in another folder, or with another argument,
+#             keeps nothing.
+#   M-01      fix round 2, the merge of develop (#34089): one helper tool call both makes #34089's
+#             tool-stamp call and is handled by #34519 (its own asked call ran: the wait clears once).
 
 load '../helpers/test-helper'
 load '../helpers/formation-waiting-helpers.sh'
@@ -88,16 +98,22 @@ _cc_post_tp() { # $1 command of the call that ran, $2 transcript
 # ---- R1, Codex (DD-206) ---------------------------------------------------------------------------
 
 # The member approves `git push` in its own thread: the asked call raises, then runs (its PostToolUse).
+# The JSON is built in a variable first: bash 3.2 (macOS /bin/bash) mis-reads \" inside "$( )", which
+# sent an empty or broken payload on the macOS runner (C-01, C-06, P-01, P-03 failed there, fix round 1).
+# The ask and the run carry the same tool_input and folder: Codex 0.171.0's PermissionRequest for a shell
+# command was measured with tool_input holding command only (measure/logs/codex), as its PostToolUse does
+# (codex-rs). Fix round 2: an approval is kept only when the run's own key equals the asked key (C-11, C-12).
 _codex_member_approves() { # $1 command
-    _waiting "$(_codex_ask Bash "" "{\"command\":\"$1\",\"description\":\"d\"}")"
-    _check "$(_codex_post Bash "" "{\"command\":\"$1\"}")" || true
+    local ask="{\"command\":\"$1\"}" post="{\"command\":\"$1\"}"
+    _waiting "$(_codex_ask Bash "" "$ask")"
+    _check "$(_codex_post Bash "" "$post")" || true
 }
 
 @test "C-01 34519 R1 DD-206: Codex allows a helper repeating a command its member approved in this session, and raises nothing for it" {
     _codex_member_approves "git push origin main"
     _cleared_once
     : > "$URLS"; : > "$BODIES"
-    run _waiting "$(_codex_ask Bash thread-sub-2 '{"command":"git push origin main","description":"d"}')"
+    run _waiting "$(_codex_ask Bash thread-sub-2 '{"command":"git push origin main"}')"
     [ "$status" -eq 0 ]
     [ "$output" = "$ALLOW" ] || { echo "answered: [$output]"; return 1; }
     [ "$(_puts)" -eq 0 ] || { echo "an allowed request was reported as waiting"; cat "$URLS"; return 1; }
@@ -148,7 +164,8 @@ _codex_member_approves() { # $1 command
 # ---- R2, the program ------------------------------------------------------------------------------
 
 @test "P-01 34519 R2: Codex sends the program only: the first word, never the arguments" {
-    _waiting "$(_codex_ask Bash "" "{\"command\":\"git push https://$PLANTED@host main\",\"description\":\"d\"}")"
+    local ask="{\"command\":\"git push https://$PLANTED@host main\",\"description\":\"d\"}"
+    _waiting "$(_codex_ask Bash "" "$ask")"
     [ "$(_program_sent)" = "git" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" || { echo "an argument was sent"; return 1; }
     ! grep -q "push" "$BODIES" || { echo "an argument was sent"; return 1; }
@@ -161,10 +178,11 @@ _codex_member_approves() { # $1 command
 }
 
 @test "P-03 34519 R2: a first word that is not a bare name (an assignment, a quoted word) sends no program" {
-    local c
+    local c ask
     for c in 'TOKEN=abc git push' '\"my tool\" run' '$(whoami)'; do
         rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
-        _waiting "$(_codex_ask Bash "" "{\"command\":\"$c\",\"description\":\"d\"}")"
+        ask="{\"command\":\"$c\",\"description\":\"d\"}"
+        _waiting "$(_codex_ask Bash "" "$ask")"
         [ "$(_program_sent)" = "<none>" ] || { echo "for [$c]"; cat "$BODIES"; return 1; }
         "$JQ_BIN" -e '.toolName == "Bash"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
     done
@@ -192,7 +210,7 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf build"
     _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     # Refused (timed out, or No): Claude Code writes the call's error result and the member goes on.
     _tp_call "$tp" "rm -rf build" error
@@ -204,7 +222,7 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf build"
     _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     _check "$(_cc_post_tp "ls -la" "$tp")" || true
     _held
 }
@@ -213,7 +231,7 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf ./junk/*"
     _ask "$(_cc_ask_tp "rm -rf ./junk/*" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     _tp_call "$tp" "rm -rf ./junk/*" error
     _check "$(_cc_post_tp "git status" "$tp")" || true
     _cleared_once
@@ -228,8 +246,197 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf build"
     _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"tool_result toolu_ask is_error"}]}}\n' >> "$tp"
     _check "$(_cc_post_tp "echo toolu_ask" "$tp")" || true
     _held
+}
+
+# ---- fix round 1 (QA 34519, Seat E): the clear's cost, and the asked call only ------------------------
+
+# A member session's transcript: $2 earlier Bash calls, each with a result of $3 bytes, then the asked call
+# (toolu_ask, "rm -rf build") with no result yet.
+_tp_long() { # $1 path, $2 earlier calls, $3 bytes in each earlier call's result
+    local tp="$1" n="$2" pad i
+    pad="$(printf '%0*d' "$3" 0)"
+    : > "$tp"
+    for ((i = 1; i <= n; i++)); do
+        printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_e%s","name":"Bash","input":{"command":"echo call-%s"}}]}}\n' "$i" "$i" >> "$tp"
+        printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_e%s","content":"%s"}]}}\n' "$i" "$pad" >> "$tp"
+    done
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_ask","name":"Bash","input":{"command":"rm -rf build"}}]}}\n' >> "$tp"
+}
+# The whole next-call check (formation-check.sh, the synchronous PostToolUse hook, timeout 15 s) after the
+# asked call was refused, in a session of $1 earlier calls of $2 bytes each. Sets CLEAR_S (whole seconds:
+# SECONDS, because bash 3.2 has no finer clock, structural/bash32-portability.bats) and checks it cleared.
+_timed_clear() {
+    local tp="$TEST_TMPDIR/transcript.jsonl" t0 t1
+    : > "$URLS"; : > "$NOTICES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*
+    _tp_long "$tp" "$1" "$2"
+    _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","is_error":true,"content":"The user did not approve"}]}}\n' >> "$tp"
+    t0=$SECONDS
+    _check "$(_cc_post_tp "ls -la" "$tp")" || true
+    t1=$SECONDS
+    CLEAR_S=$(( t1 - t0 ))
+    _cleared_once
+}
+
+# BOUND: 7 whole seconds (under 8 s) for the whole check at every size, about half the hook's 15 s limit. The whole check (not the
+# clear alone) is what the limit applies to, and its fixed cost, with no transcript work at all, measured
+# 2.2 to 4.0 s on the build PC under load; half the limit leaves that room on a slow runner while the old
+# cost at 5 MB (37.9 s on the build PC, 50.8 s measured by QA) fails it five times over. The bound is the
+# same at every size: the clear reads the transcript once, by the asked call's id, whatever its length.
+@test "S-05 34519 fix 1: the next-call clear stays well inside the 15 s hook limit at one call, 1 MB and 5 MB (50 earlier calls)" {
+    local size calls bytes over=""
+    for size in "0 0" "10 100000" "50 100000"; do
+        calls="${size% *}" bytes="${size#* }"
+        _timed_clear "$calls" "$bytes" || { echo "not cleared at $calls calls"; return 1; }
+        echo "# S-05 $calls earlier calls of $bytes bytes ($(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ') bytes): whole check ${CLEAR_S} s" >&3
+        [ "$CLEAR_S" -le 7 ] || over+=" ${CLEAR_S} s at $calls earlier calls of $bytes bytes;"
+    done
+    [ -z "$over" ] || { echo "the clear took$over"; return 1; }
+}
+
+@test "S-06 34519 fix 1 mutant guard: only the asked call's own result ends the wait, not an earlier or a parallel call of the same tool" {
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    : > "$tp"
+    # An earlier call of the same tool with its result (whose text names the asked call), the asked call,
+    # and a parallel call of the same tool, both still without a result when the prompt is raised.
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_e1","name":"Bash","input":{"command":"echo one"}}]}}\n' >> "$tp"
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_e1","content":"saw toolu_ask"}]}}\n' >> "$tp"
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_ask","name":"Bash","input":{"command":"rm -rf build"}},{"type":"tool_use","id":"toolu_par","name":"Bash","input":{"command":"sleep 1"}}]}}\n' >> "$tp"
+    _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    # The parallel call finishes (its result names the asked call too); the asked call is still open.
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_par","content":"toolu_ask"}]}}\n' >> "$tp"
+    _check "$(_cc_post_tp "sleep 1" "$tp")" || true
+    _held
+    # Then the asked call's own result: the next call clears.
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","is_error":true,"content":"The user did not approve"}]}}\n' >> "$tp"
+    _check "$(_cc_post_tp "ls -la" "$tp")" || true
+    _cleared_once
+}
+
+# Codex 0.171.0's PermissionRequest as measured (measure/logs/codex): the payload carries cwd, and a shell
+# command's tool_input holds command only.
+_codex_ask_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
+    printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PermissionRequest","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
+}
+# The same call's run (PostToolUse) in a given folder (fix round 2: the kept approval is the run's own key).
+_codex_post_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
+    printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PostToolUse","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s,"tool_response":"ok","tool_use_id":"call_1"%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
+}
+
+@test "C-07 34519 fix 1 DD-206: the same command in another working folder is not allowed; in the same folder it is" {
+    _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post_cwd "" /repo/a Bash '{"command":"git push origin main"}')" || true
+    _cleared_once
+    : > "$URLS"
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "allowed in a folder the member never approved it in: $output"; return 1; }
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ "$output" = "$ALLOW" ] || { echo "the same call in the same folder: [$output]"; return 1; }
+}
+
+@test "C-08 34519 fix 1 DD-206: an MCP call with another sibling argument is not allowed; the same input is" {
+    _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    _check "$(_codex_post_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')" || true
+    _cleared_once
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    [ -z "$output" ] || { echo "allowed another argument: $output"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    [ "$output" = "$ALLOW" ] || { echo "the same input: [$output]"; return 1; }
+}
+
+@test "C-09 34519 fix 1 mutant guard (M-a): a helper's own approved run is never recorded as the member's approval" {
+    _waiting "$(_codex_ask_cwd thread-sub-1 /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post Bash thread-sub-1 '{"command":"git push origin main"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "a helper's run was recorded:"; cat "$(_approved_file)"; return 1; }
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "another helper was allowed on a helper's run: $output"; return 1; }
+}
+
+@test "C-10 34519 fix 1 mutant guard (M-b): a Claude Code member's approved run is never recorded as an approval" {
+    _ask "$(_cc_ask Bash "" "git push origin main")" || true
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _check "$(_cc_post Bash "" '{"command":"git push origin main"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "Claude Code recorded an approval:"; cat "$(_approved_file)"; return 1; }
+}
+
+# ---- fix round 2 (QA 34519 round 2, Seat E, verdict-629-175-E-r2.md item 3): the keep --------------
+# The member's asked call is recognised as having run by its identifier (the command, WHICH CALL), but the
+# approval is kept only when the run's OWN approval key (tool, cwd, whole input; the digest C-07 and C-08
+# use) equals the key recorded at the ask. Otherwise nothing is recorded: the first build kept the ask's
+# key whenever the command matched, so a member who refused production and approved staging, or whose
+# call ran in another folder, left a helper allowed for a call the member never ran (KG-1, KG-2).
+
+@test "C-11 34519 fix 2 DD-206: asked in /repo/a and run in /repo/b records nothing: a helper in neither folder is allowed; asked and run in /repo/a is" {
+    _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post_cwd "" /repo/b Bash '{"command":"git push origin main"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "an approval was kept for a run in another folder:"; cat "$(_approved_file)"; return 1; }
+    : > "$URLS"
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "a helper in /repo/a was allowed, the run was in /repo/b: $output"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "a helper in /repo/b was allowed, the ask was in /repo/a: $output"; return 1; }
+    # Control (DD-206 still works): asked and run in /repo/a, a helper in /repo/a is allowed, in /repo/b not.
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post_cwd "" /repo/a Bash '{"command":"git push origin main"}')" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ "$output" = "$ALLOW" ] || { echo "control, asked and run in /repo/a: [$output]"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "control widened to /repo/b: $output"; return 1; }
+}
+
+@test "C-12 34519 fix 2 DD-206: an MCP call asked with env production and run with env staging records nothing: a helper is not allowed on either" {
+    _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    _check "$(_codex_post_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "an approval was kept for a run with another input:"; cat "$(_approved_file)"; return 1; }
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    [ -z "$output" ] || { echo "a helper was allowed on production, the member ran staging: $output"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    [ -z "$output" ] || { echo "a helper was allowed on staging, the member was asked for production: $output"; return 1; }
+    # Staging is allowed only when the asked key and the run's key are both staging.
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    _check "$(_codex_post_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    [ "$output" = "$ALLOW" ] || { echo "asked and ran staging: [$output]"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    [ -z "$output" ] || { echo "staging's approval widened to production: $output"; return 1; }
+}
+
+# formation-check.sh runs #34519's --answer for every event while a prompt is open, then #34089's helper
+# block, which makes the stamp-only call for a helper's real tool work and then leaves. The merge of
+# develop (a0f97fa) met #34519's bare "helper leaves" line at that spot; a resolution that kept it ahead of
+# the stamp would silence #34089, and one that put the helper block first would silence #34519.
+_stamps() { grep -c '^POST .*/api/formations/4242/tool-stamp?sessionId=' "$URLS" || true; }
+
+@test "M-01 34519 fix 2 merge (#34089): one helper tool call both stamps the member's tool work and answers the helper's own prompt" {
+    _ask "$(_cc_ask Bash "$BG" "touch probe-bg.txt")" || true
+    [ "$(_puts)" -eq 1 ] || { echo "the helper's request was not raised"; cat "$URLS"; return 1; }
+    : > "$URLS"
+    _check "$(_cc_post Bash "$BG" '{"command":"touch probe-bg.txt"}')" || true
+    [ "$(_stamps)" -eq 1 ] || { echo "tool-stamp calls: $(_stamps) (#34089)"; cat "$URLS"; return 1; }
+    _cleared_once
+    # Exactly those two calls: a helper's event still never polls, delivers or reads (#31991).
+    [ "$(wc -l < "$URLS" | tr -d ' ')" -eq 2 ] || { echo "other calls were made:"; cat "$URLS"; return 1; }
 }

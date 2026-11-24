@@ -193,6 +193,7 @@ if [[ "$_mmry_client_name" == "claude-code" ]]; then
     echo "${MMRY_FORMATION_BACKGROUND_WORK}"
 fi
 # #34519 R1: a member is told what its helper agents may run, in its own host's approved words.
+# After #34089's B3 sequence above, which it does not belong to, so that sequence stays unbroken.
 case "$own_role" in
     [Ll][Ee][Aa][Dd]) ;;
     *)

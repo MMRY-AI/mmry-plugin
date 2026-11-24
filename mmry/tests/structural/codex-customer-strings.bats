@@ -171,6 +171,10 @@ _allowed_reason() {
         #     session leading is the remedy for a Codex lead that cannot hear its members while
         #     idle. mmry_host_lead_notice returns before this line on any host but Codex.
         "lib-host.sh|rec=\"Codex is fine for joining a formation, but we recommend it does not lead one: start the formation from a Claude Code session, which hears its members while idle, and join it from here.\"") printf 'L'; return 0 ;;
+        # (N) #34519: the pattern that READS the service's WAITING ON APPROVAL notice, whose app is
+        #     Claude Code or Codex, to build the person line. Not a message; the person line is
+        #     built only on Claude Code (L-08 pins that Codex gets none). Single-quoted: no escapes.
+        'formation-check.sh|| capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)(?: >>> (?<name>.*?) <<<)?(?: \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9]{2}:[0-9]{2} UTC (?:for approval to run (?<prog>[-A-Za-z0-9_.:]{1,64})|for approval to use the (?<tool>[-A-Za-z0-9_.:]{1,64}) tool|on a permission prompt)\\.$")?)') printf 'N'; return 0 ;;
     esac
     return 1
 }
@@ -295,6 +299,7 @@ lib-foundation-key.sh|elif _mmry_claude_config_fallback_ok && [[ -n "${HOME:-}" 
 lib-foundation-key.sh|_MMRY_FND_CFG="${HOME}/.claude/mmry-config.json"
 lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE="MMRY AI: this account's one Foundation directive is not chosen to be sent with every message, so there is none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
 lib-foundation-switch.sh|MMRY_FND_EMPTY_NOTICE="MMRY AI: none of this account's ${n} Foundation directives is chosen to be sent with every message, so there are none to apply to your prompts in this session. An account administrator chooses when each one is sent, on the Foundation Memories page in the MMRY AI portal. This is said once a session. Run ${1:-/mmry:foundation-status} at any time to check."
+formation-check.sh|| capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)(?: >>> (?<name>.*?) <<<)?(?: \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9]{2}:[0-9]{2} UTC (?:for approval to run (?<prog>[-A-Za-z0-9_.:]{1,64})|for approval to use the (?<tool>[-A-Za-z0-9_.:]{1,64}) tool|on a permission prompt)\\.$")?)
 KEYS
 
     [ -z "$missing" ] || {
