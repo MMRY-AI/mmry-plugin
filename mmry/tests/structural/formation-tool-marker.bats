@@ -476,6 +476,41 @@ _requests() { tr -d '\r' < "$URL_LOG"; }
     done
 }
 
+# The stamp belongs to PostToolUse alone (#34089). The same helper payload (agent_id set, a real Bash
+# git push) under any other event makes no call, prints nothing and leaves the local state untouched.
+_helper_event_makes_no_stamp() {
+    local event="$1" before after
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    bash "${HANDLERS}/formation-state.sh" seen 2026-11-23T09:00:00 "$SID"
+    before="$(_state_snapshot)"
+    [ -n "$before" ] || { echo "no state written"; return 1; }
+    local bin payload; bin="$(_fake_curl_dir)"
+    payload="$(_bash_call 'git push origin 34088/formation-lead-stall' | jq -c --arg sid "$SID" --arg ev "$event" '.session_id = $sid | .hook_event_name = $ev | .agent_id = "a7f3c2" | .agent_type = "general-purpose"')"
+    : > "$URL_LOG"
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$(_directed "$NO_PROGRESS")" FAKE_URL_LOG="$URL_LOG" \
+        CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        MMRY_FORMATION_LISTEN_MINUTES=1 \
+        run env -u MMRY_HOST bash -c 'printf "%s" "$1" | bash "$2"' _ "$payload" "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 0 ] || { echo "$event: $status: $output"; return 1; }
+    [ -z "$output" ] || { echo "$event: printed: $output"; return 1; }
+    [ ! -s "$URL_LOG" ] || { echo "$event: requests:"; _requests; return 1; }
+    after="$(_state_snapshot)"
+    [ "$before" = "$after" ] || { echo "before:"; echo "$before"; echo "after:"; echo "$after"; return 1; }
+}
+
+@test "PART2R: a helper's Stop makes no stamp call, prints nothing and leaves the local state unchanged" {
+    _helper_event_makes_no_stamp Stop
+}
+
+@test "PART2R: a helper's PreToolUse makes no stamp call, prints nothing and leaves the local state unchanged" {
+    _helper_event_makes_no_stamp PreToolUse
+}
+
+@test "PART2R: a helper's UserPromptSubmit makes no stamp call, prints nothing and leaves the local state unchanged" {
+    _helper_event_makes_no_stamp UserPromptSubmit
+}
+
 @test "PART2R: on Codex a helper's real tool call makes the same one stamp-only call and prints nothing" {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
     local bin payload; bin="$(_fake_curl_dir)"
