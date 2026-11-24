@@ -456,6 +456,7 @@ already closed out, and a state that is not one of the five all look identical o
 `/mmry:formation free ["note"]`
 
 free reports that you have finished and are free: MMRY AI records your current work as Done and tells the lead, so it can give you your next job. Saying you are free in a message does not do this.
+While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help.
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-progress.sh" free ["note"]

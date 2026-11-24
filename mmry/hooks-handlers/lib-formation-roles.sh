@@ -41,6 +41,10 @@ MMRY_FORMATION_FREE_RULE="When you finish your work, report that you are free wi
 # holds the same two sentences in FormationFreeReport (WithWork, NoWork) for the connector.
 MMRY_FORMATION_FREE_DONE="Your work is recorded as Done and you are free. The lead is told, so it can give you your next job."
 MMRY_FORMATION_FREE_NONE="You have no work, so you are already free. Nothing was changed."
+# #34650 fix round 1: cmo-mmry's item 7, the refusal while this session's own work is reported as Blocked
+# (lead ruling 2026-11-24: Done would tell the lead unfinished work is finished), NO APOSTROPHES. The
+# service holds the same sentence in FormationFreeReport.Blocked for the connector.
+MMRY_FORMATION_FREE_BLOCKED="Your work is reported as Blocked, so you cannot report that you are free. Nothing was changed. Keep the block reported so the lead can help you clear it or release you from the work."
 MMRY_FORMATION_OFFER="Is there anything else I can do?"
 # What the member that reported its own Done is shown: its report carried the question.
 MMRY_FORMATION_OFFER_SENT="Your report to the lead ends with: ${MMRY_FORMATION_OFFER} Keep listening for the answer."

@@ -44,7 +44,7 @@ second="${2:-}"
 third="${3:-}"
 
 if [[ -z "$first" ]]; then
-    echo "Say how it is going. Usage: $(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned> "optional note"'). Add a member id first to report for somebody else, which only the lead may do."
+    echo "Say how it is going. Usage: $(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned|Free> "optional note"'). Add a member id first to report for somebody else, which only the lead may do."
     exit 1
 fi
 
@@ -60,7 +60,7 @@ if [[ "$first" =~ ^[1-9][0-9]*$ ]]; then
     progress="$second"
     note="$third"
     if [[ -z "$progress" ]]; then
-        echo "Member ${member_id} needs a state. Usage: $(mmry_host_formation_ref progress "${member_id}" '<Accepted|Done|Blocked|Abandoned> "optional note"')."
+        echo "Member ${member_id} needs a state. Usage: $(mmry_host_formation_ref progress "${member_id}" '<Accepted|Done|Blocked|Abandoned|Free> "optional note"')."
         exit 1
     fi
 else
@@ -82,7 +82,10 @@ if [[ "$(printf '%s' "$progress" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]
     free_report=1
     progress="Done"
     if [[ -n "${note//[[:space:]]/}" ]]; then note="free ${note}"; else note="free"; fi
-    note="${note:0:500}"  # the route's width; the word free always survives
+    # NEVER CUT HERE (fix round 1). The whole note is sent; one longer than the route's 500 characters is
+    # refused by the server with the sentence a too-long progress note already gets, printed below, and
+    # nothing is recorded. A cut here would drop the member's words silently (and under the C locale
+    # bash counts bytes, so it could split a character).
 fi
 
 session_id="$(mmry_session_id)"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
@@ -131,19 +134,33 @@ if [[ -z "$member_id" ]]; then
         echo "This session is not on formation ${formation_id}'s roster, so there is nothing to report against. It may have been released. Run $(mmry_host_formation_ref leave) and join again."
         exit 1
     fi
-    # #34650: NO WORK, ALREADY FREE. The same test the service uses (FormationFreeReport.HoldsNoWork):
-    # no assignment, or the work already ended Done or Abandoned. Nothing is sent, so the member's idle
-    # spell is not restarted and the lead is not told about a change that did not happen. A roster the
-    # script cannot read this way falls through to the report, and the server decides.
-    if [[ "$free_report" -eq 1 ]]; then
-        holds_work="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg s "$session_id" \
-            '[(.members // [])[] | select(.sessionId == $s and .leftDate == null)][0]
-             | (((.assignment // "") | test("\\S")) and (((.progress // "") | ascii_downcase) as $p | ($p != "done" and $p != "abandoned")))' \
+    roster_read=1
+fi
+
+# #34650: A FREE REPORT FOR THIS SESSION'S OWN ENTRY is checked against that entry first, the same tests
+# the service uses (FormationFreeReport). With a member id given, this applies only when that entry is
+# this session's own (a member naming its own id); a lead's free for somebody else is sent as Done and
+# answered as a lead's Done. A roster the script cannot read this way falls through to the report.
+#   - NO WORK, ALREADY FREE: no assignment, or the work already ended Done or Abandoned. Nothing is sent,
+#     so the member's idle spell is not restarted and the lead is not told about a change that did not
+#     happen.
+#   - BLOCKED, REFUSED (fix round 1, lead ruling): Blocked work is unfinished, so recording it as Done
+#     would tell the lead it is finished. cmo-mmry's item 7 is printed, nothing is sent, and the command
+#     fails, so Codex returns it as an error result as it returns the other refusals.
+if [[ "$free_report" -eq 1 && -n "${MMRY_JQ:-}" ]]; then
+    if [[ "${roster_read:-0}" -eq 1 ]] || mmry_get_formation "$formation_id"; then
+        own_free_state="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r --arg s "$session_id" --arg m "${member_id//$'\r'/}" \
+            '[(.members // [])[] | select(.sessionId == $s and .leftDate == null and ((.id | tostring) == $m))][0]
+             | if . == null then "other"
+               elif ((((.assignment // "") | test("\\S")) | not)
+                     or (((.progress // "") | ascii_downcase) as $p | ($p == "done" or $p == "abandoned"))) then "none"
+               elif ((.progress // "") | ascii_downcase) == "blocked" then "blocked"
+               else "work" end' \
             2>/dev/null || true)"
-        if [[ "${holds_work//$'\r'/}" == "false" ]]; then
-            printf '%s\n' "$MMRY_FORMATION_FREE_NONE"
-            exit 0
-        fi
+        case "${own_free_state//$'\r'/}" in
+            none)    printf '%s\n' "$MMRY_FORMATION_FREE_NONE"; exit 0 ;;
+            blocked) printf '%s\n' "$MMRY_FORMATION_FREE_BLOCKED"; exit 1 ;;
+        esac
     fi
 fi
 
@@ -153,7 +170,12 @@ if ! mmry_update_formation_member_progress "$formation_id" "$member_id" "$sessio
     # about the server's answer, not about the state of the world behind it.
     server_said=""
     if [[ -n "${MMRY_RESPONSE:-}" && -n "${MMRY_JQ:-}" ]]; then
-        server_said="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r '.error // .message // empty' 2>/dev/null || true)"
+        # #34650 fix round 1: a validation problem (the route's too-long note, for one) carries its
+        # sentence under errors, so that sentence is printed rather than the raw body.
+        server_said="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r \
+            '.error // .message // (if (.errors | type) == "object" then ([.errors[] | if type == "array" then .[] else . end | strings] | join(" ")) else empty end) // empty' \
+            2>/dev/null || true)"
+        server_said="${server_said//$'\r'/}"
     fi
     [[ -n "$server_said" ]] || server_said="${MMRY_RESPONSE:-}"
 

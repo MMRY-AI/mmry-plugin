@@ -221,7 +221,7 @@ which any member may do. Report how your assigned work is going with
 `formation_progress` (`Accepted`, `Done`, `Blocked` or `Abandoned`, and an optional `note`). Leave
 with `formation_leave`.
 
-To report that you are free, report progress with the state Free, not a message; do the same when the person asks you to tell the lead you are free. MMRY AI records your current work as Done and tells the lead, so it can give you your next job.
+To report that you are free, report progress with the state Free, not a message; do the same when the person asks you to tell the lead you are free. MMRY AI records your current work as Done and tells the lead, so it can give you your next job. While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help.
 
 Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
 

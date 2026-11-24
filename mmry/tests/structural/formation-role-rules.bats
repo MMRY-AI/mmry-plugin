@@ -644,4 +644,5 @@ FREE_RULE="When you finish your work, report that you are free with a progress r
     source "${HANDLERS}/lib-formation-roles.sh"
     tr -d '\r' < "$free" | grep -q -F -- "\"${MMRY_FORMATION_FREE_DONE}\"" || { echo "FormationFreeReport.cs lacks the with-work line"; return 1; }
     tr -d '\r' < "$free" | grep -q -F -- "\"${MMRY_FORMATION_FREE_NONE}\"" || { echo "FormationFreeReport.cs lacks the no-work line"; return 1; }
+    tr -d '\r' < "$free" | grep -q -F -- "\"${MMRY_FORMATION_FREE_BLOCKED}\"" || { echo "FormationFreeReport.cs lacks the Blocked refusal"; return 1; }
 }
