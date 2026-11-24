@@ -37,7 +37,7 @@
 #   C-11..12  fix round 2: the approval is kept only when the run's own key (tool, cwd, whole input)
 #             equals the key recorded at the ask: a run in another folder, or with another argument,
 #             keeps nothing.
-#   H-01      fix round 2, the merge of develop (#34089): one helper tool call both makes #34089's
+#   M-01      fix round 2, the merge of develop (#34089): one helper tool call both makes #34089's
 #             tool-stamp call and is handled by #34519 (its own asked call ran: the wait clears once).
 
 load '../helpers/test-helper'
@@ -430,7 +430,7 @@ _codex_post_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_inpu
 # the stamp would silence #34089, and one that put the helper block first would silence #34519.
 _stamps() { grep -c '^POST .*/api/formations/4242/tool-stamp?sessionId=' "$URLS" || true; }
 
-@test "H-01 34519 fix 2 merge (#34089): one helper tool call both stamps the member's tool work and answers the helper's own prompt" {
+@test "M-01 34519 fix 2 merge (#34089): one helper tool call both stamps the member's tool work and answers the helper's own prompt" {
     _ask "$(_cc_ask Bash "$BG" "touch probe-bg.txt")" || true
     [ "$(_puts)" -eq 1 ] || { echo "the helper's request was not raised"; cat "$URLS"; return 1; }
     : > "$URLS"
