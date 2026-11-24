@@ -232,7 +232,7 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    **Every window joins for itself.** Membership is held per session, so starting a formation in
    one terminal does not enrol the others; each runs join with the id.
 
-4. Show the two rules the script prints after the join line, and follow them for as long as this
+4. Show the four rules the script prints after the join line, and follow them for as long as this
    session is in the formation. See "Reporting to the lead" below.
 
 ### Reporting to the lead
