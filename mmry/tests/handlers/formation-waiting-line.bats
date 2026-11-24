@@ -133,8 +133,10 @@ FIRST="  [MMRY] DIRECTED TO YOU: "
     [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
 }
 
+# #34651: "git status." is now an approved line (W1, a program and its subcommand: L-11), so the line that
+# does not match carries an argument after the subcommand.
 @test "L-07 34519 R2 guard: a notice whose first line does not match the approved shape gives no person line" {
-    _deliver claude "[$(_notice 'WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git status.' name)]"
+    _deliver claude "[$(_notice 'WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git status --short.' name)]"
     # No person line, so the ordinary Claude Code route (stderr, exit 2) and no systemMessage.
     [ "$status" -eq 2 ] || { echo "status $status: $output"; return 1; }
     [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "$output"; return 1; }
@@ -156,6 +158,54 @@ P_NOAPP="MMRY AI Formation: Seat B is waiting for approval to run git. Answer th
     [ "$(_sys)" = "$P_NOAPP" ] || { echo "person line: [$(_sys)]"; return 1; }
     local ctx; ctx="$(_ctx)"
     [ "${ctx%%$'\n'*}" = "$FIRST$L_NOAPP" ] || { echo "$ctx"; return 1; }
+}
+
+# ---- #34651 (DD-207): the three lines that name the command kind --------------------------------------
+# cmo-mmry's approved W1 to W3 (R:/Intranet/ClaudeAI/plans/MMRY/v1.38/wording-approval-command-cmo.md),
+# byte for byte. They keep the #34519 frame, so the person line keeps its own frame with the new ending.
+L_W1="WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git push."
+L_W2="WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Codex) has been waiting since 09:41 UTC for approval to run the script check-x.sh with bash."
+L_W3="WAITING ON APPROVAL. Member 31 (Claude Code) has been waiting since 09:41 UTC for approval to run an inline node script."
+P_W1="MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run git push. Answer the prompt in that window."
+P_W2="MMRY AI Formation: Seat B (Codex) is waiting for approval to run the script check-x.sh with bash. Answer the prompt in that window."
+P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run an inline node script. Answer the prompt in that window."
+
+@test "L-11 34651 R1: W1, a program and its subcommand, gives the person line and still opens the batch" {
+    _deliver claude "[$(_member_msg 'please look at the build'),$(_notice "$L_W1" name)]"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_W1" ] || { echo "person line: [$(_sys)]"; return 1; }
+    local ctx; ctx="$(_ctx)"
+    [ "${ctx%%$'\n'*}" = "$FIRST$L_W1" ] || { echo "$ctx"; return 1; }
+}
+
+@test "L-12 34651 R1: W2, a script file, and W3, an inline script, give their person lines, one per waiting member" {
+    _deliver claude "[$(_notice "$L_W2" name),$(_notice "$L_W3")]"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_W2"$'\n'"$P_W3" ] || { echo "person lines: [$(_sys)]"; return 1; }
+    local ctx; ctx="$(_ctx)"
+    [ "${ctx%%$'\n'*}" = "$FIRST$L_W2" ] || { echo "$ctx"; return 1; }
+}
+
+@test "L-13 34651 R2 guard: a first line carrying anything past the three shapes gives no person line" {
+    local head='WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run ' tail_
+    for tail_ in 'git push origin.' 'git push --force.' 'git Push.' 'git push/main.' \
+                 'the script scripts/check.sh with bash.' 'the script check.sh with bash now.' \
+                 'the script check.sh --flag with bash.' 'an inline node script here.' 'an inline node -e script.'; do
+        _deliver claude "[$(_notice "${head}${tail_}" name)]"
+        [ "$status" -eq 2 ] || { echo "for [$tail_]: status $status: $output"; return 1; }
+        [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "for [$tail_]: $output"; return 1; }
+    done
+}
+
+@test "L-14 34651: Codex gets no person line for the three new lines either, and each still opens its batch" {
+    local l
+    for l in "$L_W1" "$L_W2" "$L_W3"; do
+        _deliver codex "[$(_notice "$l" name)]" prompt
+        [ "$status" -eq 0 ]
+        [ "$(_sys)" = "<none>" ] || { echo "Codex was given a person line: [$(_sys)]"; return 1; }
+        local ctx; ctx="$(_ctx)"
+        [[ "$ctx" == *"$FIRST$l"* ]] || { echo "$ctx"; return 1; }
+    done
 }
 
 # cmo-mmry's Approved section of wording-34519-docs-cmo-request.md, item 1 (with its changed opening).

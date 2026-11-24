@@ -271,11 +271,13 @@ _MMRY_WAITING_PROGRAM_JQ='if ((.tool_name // "") | tostring | test("^(Bash|Power
 # can sit in any argument), so the lead is told an ACTION taken from a CLOSED GRAMMAR, derived here
 # inside jq beside the program, and nothing else. Three shapes, or no action at all:
 #   subcommand  the program is in the fixed list below (git, gh, dotnet, ...) and the word RIGHT AFTER
-#               it is one plain lowercase word, ^[a-z][a-z0-9-]{0,23}$ : git push -> "push". A flag
-#               first (git -C dir push) gives NO action: flags are never skipped, because the list
-#               does not know which flags take a value, and a skipped flag's value (a folder, a name)
-#               would be taken for the subcommand. The word inline is left out: the service reads it
-#               as the third shape.
+#               it is one of THAT TOOL'S KNOWN SUBCOMMANDS, a closed list per tool
+#               (_MMRY_WAITING_SUBCOMMANDS): git push -> "push". A free-form lowercase word is not
+#               accepted, so a lowercase secret in the subcommand's place (npm s3cr3tword) is never
+#               sent (release lead 439's ruling, 2026-11-24, decisions.md "closed per-tool subcommand
+#               list"). A flag first (git -C dir push) gives NO action: flags are never skipped,
+#               because the list does not know which flags take a value, and a skipped flag's value
+#               (a folder named status) would be taken for the subcommand.
 #   script      the program is an interpreter (bash, sh, node, pwsh, powershell, python, python3) and
 #               its first word that is not a flag (at most 8 flags are passed over) is a script file:
 #               the folder removed, ^[A-Za-z0-9_.-]{1,64}\.(sh|bash|mjs|cjs|js|ts|ps1|py)$ and at most
@@ -288,22 +290,31 @@ _MMRY_WAITING_PROGRAM_JQ='if ((.tool_name // "") | tostring | test("^(Bash|Power
 # to _MMRY_WAITING_ACTION_RE (the service's FormationWaitingNotice.IsProgramAction) once more. What
 # can still be named is a script's FILE NAME, which the lead needs to decide and which is a name, not
 # an argument (the lead's ruling on option D, plan-approval-command-B.md section 3).
-# The assignment ends at the first line that ends in a single quote; formation-waiting-action.bats
+#
+# THE CLOSED LISTS, held once for the grammar and for the shell's second check, and word for word the
+# same text as the service's FormationWaitingActions.Subcommands and .Interpreters (MMRY-AI/mmry;
+# K-14 compares them when MMRY_SERVICE_REPO is set). One entry per tool: "tool= word word ... ;", every
+# word with a space on each side. Lowercase letters, digits, dashes, spaces, = and ; only, so the text
+# is safe inside the jq program below. Adding a subcommand is a change to both repositories.
+_MMRY_WAITING_SUBCOMMANDS='git= add am apply bisect blame branch checkout cherry-pick clean clone commit config describe diff fetch gc grep init log ls-files ls-remote merge mv pull push rebase reflog remote reset restore rev-list rev-parse revert rm show stash status submodule switch tag worktree ;gh= api auth browse gist issue label pr release repo run search secret status variable workflow ;dotnet= add build build-server clean dev-certs ef format list msbuild new nuget pack publish remove restore run sln test tool user-secrets watch workload ;npm= audit ci config exec init install link ls outdated pack publish rebuild run start test uninstall update version view ;pnpm= add audit dlx exec init install link list outdated publish rebuild remove run start test update ;yarn= add audit dlx exec init install link remove run start test up upgrade workspace workspaces ;docker= build compose container cp exec image images inspect kill login logout logs network ps pull push restart rm rmi run start stop system tag volume ;kubectl= apply config cp create delete describe edit exec explain get label logs patch port-forward rollout scale top ;az= account acr ad aks appservice deployment functionapp group keyvault login logout monitor network resource role sql storage vm webapp ;cargo= add bench build check clean clippy doc fmt init install new publish remove run test update ;go= build clean doc env fmt generate get install list mod run test tool version vet work ;pip= check config download freeze install list show uninstall wheel ;winget= export import install list search show source uninstall upgrade ;brew= cleanup doctor info install link list outdated reinstall search services uninstall update upgrade ;'
+_MMRY_WAITING_INTERPRETERS=' bash sh node pwsh powershell python python3 '
+# The assignment below ends at the first line that ends in a single quote; formation-waiting-action.bats
 # (K-09) reads it out by that, so no line inside it may end in one.
 _MMRY_WAITING_ACTION_JQ='
-    def mmry_subtool: . as $p | any(("git","gh","dotnet","npm","pnpm","yarn","docker","kubectl","az","cargo","go","pip","winget","brew"); . == $p);
-    def mmry_interp: . as $p | any(("bash","sh","node","pwsh","powershell","python","python3"); . == $p);
+    def mmry_known: . as $p | ["'"$_MMRY_WAITING_SUBCOMMANDS"'" | split(";")[] | select(startswith($p + "= "))] | (.[0] // "");
+    def mmry_interp: . as $p | ("'"$_MMRY_WAITING_INTERPRETERS"'" | contains(" " + $p + " "));
     if ((.tool_name // "") | tostring | test("^(Bash|PowerShell|shell|local_shell|exec_command|unified_exec)$"))
         and ((.tool_input // null) | type) == "object" and ((.tool_input.command // null) | type) == "string"
     then .tool_input.command as $c
         | (($c | capture("^\\s*(?<w>[^\\s]+)(?:\\s+(?<a>[^\\s]+))?")) // {w: "", a: null}) as $m
         | ($m.w | sub("^.*[/\\\\]"; "")) as $p
         | (($m.a // "") | tostring) as $a
-        | if ($p | mmry_subtool) then
+        | ($p | mmry_known) as $known
+        | if $known != "" then
               (if ($a | startswith("-")) then ""
-               elif ($a | test("^[a-z][a-z0-9-]{0,23}$")) and $a != "inline" then $a
+               elif ($a | test("^[a-z][a-z0-9-]{0,23}$")) and ($known | contains(" " + $a + " ")) then $a
                else "" end)
-          elif ($p | mmry_interp) then
+          elif ($p | test("^[a-z0-9]+$")) and ($p | mmry_interp) then
               (if ($a == "-e" or $a == "-c" or $a == "-Command" or $a == "--eval") then "inline"
                else ((($c | capture("^\\s*[^\\s]+(?:\\s+-[^\\s]*){0,8}\\s+(?<s>[^-\\s][^\\s]*)")) // {s: ""})
                      | .s | sub("^.*[/\\\\]"; "")) as $f
@@ -312,9 +323,26 @@ _MMRY_WAITING_ACTION_JQ='
                end)
           else "" end
     else "" end'
-# The service's rule for an action, held here too (ERE, bash 3.2): whatever the jq above printed, and
-# whatever an ask record on disk says, only one of the three shapes is ever sent.
+# The service's shape rule for an action (FormationWaitingNotice.IsProgramAction; ERE, bash 3.2).
 _MMRY_WAITING_ACTION_RE='^([a-z][a-z0-9-]{0,23}|script [A-Za-z0-9_.-]{1,64}|inline)$'
+# _mmry_waiting_action_ok PROGRAM ACTION: 0 when ACTION is one of the three shapes AND belongs to
+# PROGRAM by the closed lists above: a subcommand that tool is known to have, or script and inline for
+# an interpreter. The shell's second check of whatever the jq above printed, and of whatever an ask
+# record on disk says, so nothing else is ever sent. No process is started.
+_mmry_waiting_action_ok() {
+    local p="${1:-}" a="${2:-}" seg IFS
+    [[ "$p" =~ ^[a-z0-9]+$ && "$a" =~ $_MMRY_WAITING_ACTION_RE ]] || return 1
+    case "$a" in
+        inline|"script "*)
+            [[ "$_MMRY_WAITING_INTERPRETERS" == *" ${p} "* ]]
+            return ;;
+    esac
+    IFS=';'
+    for seg in $_MMRY_WAITING_SUBCOMMANDS; do
+        if [[ "$seg" == "${p}= "* && "$seg" == *" ${a} "* ]]; then return 0; fi
+    done
+    return 1
+}
 
 # ---- HELPER APPROVALS ON CODEX (#34519, DD-206, which supersedes DD-187 point 7) ---------------
 # Measured on Codex 0.171.0: an approval the person gives "for this session" in the member's own
@@ -731,7 +759,7 @@ if [[ "${1:-}" == "--ask" ]]; then
     # #34519: the program, its first word only, under the tool name's rule (THE PROGRAM above).
     [[ "$program" =~ $_MMRY_WAITING_TOOL_RE ]] || program="-"
     # #34651: the action, one of the three shapes and only beside a program (WHAT KIND OF RUN above).
-    [[ "$program" != "-" && "$action" =~ $_MMRY_WAITING_ACTION_RE ]] || action="-"
+    _mmry_waiting_action_ok "$program" "$action" || action="-"
     # The asked call's identifier: a digest of its input, never the input (WHICH CALL above). And its
     # approval key (THE APPROVAL KEY above), a digest too; on Claude Code nothing ever records it as an
     # approval (the marker's turn is "-"), and C-10 proves that guard.
@@ -794,7 +822,7 @@ paction="${paction%$'\r'}"
 # #34519: the program, for a PermissionRequest's own shell command (THE PROGRAM above).
 [[ "$pprogram" =~ $_MMRY_WAITING_TOOL_RE ]] || pprogram=""
 # #34651: the action beside it, one of the three shapes or nothing (WHAT KIND OF RUN above).
-[[ -n "$pprogram" && "$paction" =~ $_MMRY_WAITING_ACTION_RE ]] || paction=""
+_mmry_waiting_action_ok "$pprogram" "$paction" || paction=""
 program="" action=""
 
 case "$event" in
@@ -903,7 +931,7 @@ else
                     program="$_k_program"
                     # #34651: the record's action, only beside its program and only one of the three
                     # shapes; a line on disk that is anything else sends no action (K-10).
-                    if [[ "$_k_action" =~ $_MMRY_WAITING_ACTION_RE ]]; then action="$_k_action"; fi
+                    if _mmry_waiting_action_ok "$program" "$_k_action"; then action="$_k_action"; fi
                 fi
             fi
         fi
