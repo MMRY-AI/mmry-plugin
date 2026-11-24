@@ -283,7 +283,9 @@ _MMRY_WAITING_PROGRAM_JQ='if ((.tool_name // "") | tostring | test("^(Bash|Power
 # command). The first build digested tool_input.command alone, so the same command in another folder,
 # or an MCP call with another sibling argument, was allowed on one approval (C-07, C-08). Recorded only
 # for the member's own main-thread call on Codex: never for a helper's run (C-09), never on Claude Code
-# (C-10), where the marker's turn is "-".
+# (C-10), where the marker's turn is "-". And kept only when the run's own approval key equals the key
+# recorded at the ask: a call asked in one folder and run in another, or asked with one argument and
+# run with another, keeps nothing (fix round 2, C-11, C-12).
 _MMRY_WAITING_APPROVAL_JQ='if (type == "object" and has("tool_input")) then {tool: (.tool_name // null), cwd: (.cwd // null), tool_input: .tool_input} else empty end'
 _MMRY_WAITING_ALLOW='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
 _MMRY_WAITING_APPROVALS_MAX=200
@@ -605,10 +607,16 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
                 if [[ -n "$MMRY_WAITING_DIGEST" && "$MMRY_WAITING_DIGEST" == "$minput" ]]; then
                     answered=1
                     # #34519 DD-206: the member's OWN asked call ran, so the member approved it. Codex
-                    # only (the asking turn is known), the main thread only (no asker). The approval
-                    # kept is the approval key the raise recorded (tool, cwd, whole input).
+                    # only (the asking turn is known), the main thread only (no asker). The approval is
+                    # kept only when THIS RUN's own approval key (tool, cwd, whole input) equals the key
+                    # the raise recorded; otherwise nothing is kept. The identifier above is the command
+                    # alone, so without this a run in another folder, or with another sibling argument,
+                    # kept the ask's key (fix round 2, QA KG-1 and KG-2: C-11, C-12).
                     if [[ -z "$asker" && -n "$mturn" && -n "$mapprove" ]]; then
-                        _mmry_waiting_keep_approval "$sid" "$mtool" "$mapprove"
+                        _mmry_waiting_digest "$payload" "$_MMRY_WAITING_APPROVAL_JQ"
+                        if [[ -n "$MMRY_WAITING_DIGEST" && "$MMRY_WAITING_DIGEST" == "$mapprove" ]]; then
+                            _mmry_waiting_keep_approval "$sid" "$mtool" "$mapprove"
+                        fi
                     fi
                 fi
             fi

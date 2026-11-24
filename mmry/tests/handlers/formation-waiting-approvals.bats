@@ -34,6 +34,11 @@
 #   C-07..10  fix round 1: an approval holds for the same call in the same folder only (DD-206: the
 #             digest covers the working folder and the whole input); a helper's own run and a Claude
 #             Code run are never recorded as an approval.
+#   C-11..12  fix round 2: the approval is kept only when the run's own key (tool, cwd, whole input)
+#             equals the key recorded at the ask: a run in another folder, or with another argument,
+#             keeps nothing.
+#   H-01      fix round 2, the merge of develop (#34089): one helper tool call both makes #34089's
+#             tool-stamp call and is handled by #34519 (its own asked call ran: the wait clears once).
 
 load '../helpers/test-helper'
 load '../helpers/formation-waiting-helpers.sh'
@@ -95,8 +100,11 @@ _cc_post_tp() { # $1 command of the call that ran, $2 transcript
 # The member approves `git push` in its own thread: the asked call raises, then runs (its PostToolUse).
 # The JSON is built in a variable first: bash 3.2 (macOS /bin/bash) mis-reads \" inside "$( )", which
 # sent an empty or broken payload on the macOS runner (C-01, C-06, P-01, P-03 failed there, fix round 1).
+# The ask and the run carry the same tool_input and folder: Codex 0.171.0's PermissionRequest for a shell
+# command was measured with tool_input holding command only (measure/logs/codex), as its PostToolUse does
+# (codex-rs). Fix round 2: an approval is kept only when the run's own key equals the asked key (C-11, C-12).
 _codex_member_approves() { # $1 command
-    local ask="{\"command\":\"$1\",\"description\":\"d\"}" post="{\"command\":\"$1\"}"
+    local ask="{\"command\":\"$1\"}" post="{\"command\":\"$1\"}"
     _waiting "$(_codex_ask Bash "" "$ask")"
     _check "$(_codex_post Bash "" "$post")" || true
 }
@@ -105,7 +113,7 @@ _codex_member_approves() { # $1 command
     _codex_member_approves "git push origin main"
     _cleared_once
     : > "$URLS"; : > "$BODIES"
-    run _waiting "$(_codex_ask Bash thread-sub-2 '{"command":"git push origin main","description":"d"}')"
+    run _waiting "$(_codex_ask Bash thread-sub-2 '{"command":"git push origin main"}')"
     [ "$status" -eq 0 ]
     [ "$output" = "$ALLOW" ] || { echo "answered: [$output]"; return 1; }
     [ "$(_puts)" -eq 0 ] || { echo "an allowed request was reported as waiting"; cat "$URLS"; return 1; }
@@ -318,10 +326,14 @@ _timed_clear() {
 _codex_ask_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
     printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PermissionRequest","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
 }
+# The same call's run (PostToolUse) in a given folder (fix round 2: the kept approval is the run's own key).
+_codex_post_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
+    printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PostToolUse","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s,"tool_response":"ok","tool_use_id":"call_1"%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
+}
 
 @test "C-07 34519 fix 1 DD-206: the same command in another working folder is not allowed; in the same folder it is" {
     _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
-    _check "$(_codex_post Bash "" '{"command":"git push origin main"}')" || true
+    _check "$(_codex_post_cwd "" /repo/a Bash '{"command":"git push origin main"}')" || true
     _cleared_once
     : > "$URLS"
     run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
@@ -334,7 +346,7 @@ _codex_ask_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input
 
 @test "C-08 34519 fix 1 DD-206: an MCP call with another sibling argument is not allowed; the same input is" {
     _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
-    _check "$(_codex_post mcp__probe__deploy "" '{"command":"deploy","env":"staging"}')" || true
+    _check "$(_codex_post_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')" || true
     _cleared_once
     run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
     [ -z "$output" ] || { echo "allowed another argument: $output"; return 1; }
@@ -366,9 +378,6 @@ _codex_ask_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input
 # use) equals the key recorded at the ask. Otherwise nothing is recorded: the first build kept the ask's
 # key whenever the command matched, so a member who refused production and approved staging, or whose
 # call ran in another folder, left a helper allowed for a call the member never ran (KG-1, KG-2).
-_codex_post_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
-    printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PostToolUse","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s,"tool_response":"ok","tool_use_id":"call_1"%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
-}
 
 @test "C-11 34519 fix 2 DD-206: asked in /repo/a and run in /repo/b records nothing: a helper in neither folder is allowed; asked and run in /repo/a is" {
     _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
@@ -413,4 +422,21 @@ _codex_post_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_inpu
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*
     run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
     [ -z "$output" ] || { echo "staging's approval widened to production: $output"; return 1; }
+}
+
+# formation-check.sh runs #34519's --answer for every event while a prompt is open, then #34089's helper
+# block, which makes the stamp-only call for a helper's real tool work and then leaves. The merge of
+# develop (a0f97fa) met #34519's bare "helper leaves" line at that spot; a resolution that kept it ahead of
+# the stamp would silence #34089, and one that put the helper block first would silence #34519.
+_stamps() { grep -c '^POST .*/api/formations/4242/tool-stamp?sessionId=' "$URLS" || true; }
+
+@test "H-01 34519 fix 2 merge (#34089): one helper tool call both stamps the member's tool work and answers the helper's own prompt" {
+    _ask "$(_cc_ask Bash "$BG" "touch probe-bg.txt")" || true
+    [ "$(_puts)" -eq 1 ] || { echo "the helper's request was not raised"; cat "$URLS"; return 1; }
+    : > "$URLS"
+    _check "$(_cc_post Bash "$BG" '{"command":"touch probe-bg.txt"}')" || true
+    [ "$(_stamps)" -eq 1 ] || { echo "tool-stamp calls: $(_stamps) (#34089)"; cat "$URLS"; return 1; }
+    _cleared_once
+    # Exactly those two calls: a helper's event still never polls, delivers or reads (#31991).
+    [ "$(wc -l < "$URLS" | tr -d ' ')" -eq 2 ] || { echo "other calls were made:"; cat "$URLS"; return 1; }
 }
