@@ -24,7 +24,7 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Reload memories now | `memory_load` | optional `working_dir` |
 | Join a formation, as this conversation | `formation_join` | `formation_id`; optional `working_dir` |
 | Message the formation, or one member | `formation_say` | `message`; optional `to_member_id`, `confirm` |
-| Report Accepted, Done, Blocked or Abandoned | `formation_progress` | `state`; optional `note` |
+| Report Accepted, Done, Blocked, Abandoned or Free | `formation_progress` | `state`; optional `note` |
 | See the members, their ids, and the lead | `formation_roster` | nothing |
 | Start a formation, with this conversation as lead | `formation_start` | `objective`; optional `task_id`, `working_dir` |
 | As the lead, give one member work or a role | `formation_assign` | `member_id`; `assignment`, `role`, or both |
@@ -218,7 +218,7 @@ id to address each by, each member's name beside its id, and which one is the le
 `formation_status` shows the same members, plus which member this conversation is. Rename a member
 with `formation_assign` and `name`; with no `member_id` it renames this conversation's own member,
 which any member may do. Report how your assigned work is going with
-`formation_progress` (`Accepted`, `Done`, `Blocked` or `Abandoned`, and an optional `note`). Leave
+`formation_progress` (`Accepted`, `Done`, `Blocked`, `Abandoned` or `Free`, and an optional `note`). Leave
 with `formation_leave`.
 
 To report that you are free, report progress with the state Free, not a message; do the same when the person asks you to tell the lead you are free. MMRY AI records your current work as Done and tells the lead, so it can give you your next job. While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help.
