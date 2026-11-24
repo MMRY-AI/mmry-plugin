@@ -57,6 +57,13 @@ mmry_formation_save_outcome_prompt() {
 # a delivered assignment notice. Wording approved by cmo-mmry 2026-11-23 (wording-34161-cmo.md).
 MMRY_FORMATION_BACKGROUND_WORK="Run long commands and long delegated work in the background, so messages from your lead can reach you while that work runs instead of waiting until it ends."
 
+# ---- Helper agents and the member's allowed commands, members only (#34519 R1) --------------------
+# Printed by formation-join.sh after the member rule, by host. Wording approved by cmo-mmry 2026-11-23
+# (wording-34519-cmo.md item 5). Claude Code takes only the first part: whether an approval given only
+# for this session reaches a helper there is not yet measured (H1). Codex was measured: it does not.
+MMRY_FORMATION_HELPERS_CLAUDE="Helper agents you start can run the commands you have allowed without asking."
+MMRY_FORMATION_HELPERS_CODEX="Helper agents you start can run the commands you have allowed without asking, but a command you approved only for this session is not passed on, so add it to your allowed commands if your helpers need it."
+
 # ---- Each member's availability on the roster (#33847, DD-191 in MMRY-AI/mmry) -------------------
 #
 # The service decides each member's state and when it began, from what MMRY AI has recorded, and
