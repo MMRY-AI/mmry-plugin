@@ -50,6 +50,12 @@ _fake_curl_dir() {
     mkdir -p "$dir"
     cat > "${dir}/curl" <<'FAKECURL'
 #!/usr/bin/env bash
+# FAKE_SLEEP_ONCE=<path>: the first call sleeps FAKE_SLEEP_SECS (default 12) and leaves <path>.done,
+# so a check runs past its own deadline exactly once (#34011, the flaky req3 Codex case).
+if [[ -n "${FAKE_SLEEP_ONCE:-}" && ! -e "${FAKE_SLEEP_ONCE}.done" ]]; then
+    : > "${FAKE_SLEEP_ONCE}.done"
+    sleep "${FAKE_SLEEP_SECS:-12}"
+fi
 out=""; prev=""
 for arg in "$@"; do
     [[ "$prev" == "-o" ]] && out="$arg"
@@ -155,6 +161,19 @@ _flat() { printf '%s' "$output" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
     _deliver codex
     local flat; flat="$(_flat)"
     [[ "$flat" == *"A report to the lead is always worth sending: tell the lead when you finish, are blocked, are waiting, or stop with work still running."* ]] || return 1
+}
+
+@test "req3 (#34011): a Codex check that runs past its own deadline shows nothing, and the next check delivers the sentence" {
+    # The tool-mode check works to an 11 second deadline inside its 15 second budget and, past it,
+    # shows nothing and leaves the message pending (formation-check.sh, Time, #31746). On a loaded
+    # machine that made the Codex case above fail about 1 run in 20. Force it: the first request
+    # sleeps 12 seconds.
+    export FAKE_SLEEP_ONCE="${BATS_TEST_TMPDIR}/slow-once"
+    _deliver codex
+    unset FAKE_SLEEP_ONCE
+    [[ -e "${BATS_TEST_TMPDIR}/slow-once.done" ]] || { echo "the slow first request never happened"; return 1; }
+    local flat; flat="$(_flat)"
+    [[ "$flat" == *"A report to the lead is always worth sending: tell the lead when you finish, are blocked, are waiting, or stop with work still running."* ]] || { echo "output was: $output"; return 1; }
 }
 
 @test "req3: no wording that discourages a report to the lead is left in the delivery text" {
