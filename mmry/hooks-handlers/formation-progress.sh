@@ -24,6 +24,7 @@
 #
 # Usage: formation-progress.sh <state> ["note"]              # this session's own work
 #        formation-progress.sh <memberId> <state> ["note"]   # the lead, for somebody else
+#        formation-progress.sh free ["note"]                 # #34650: this session is free (sent as Done)
 #
 # The note is optional, is delivered to the people who need to read it, and IS NEVER STORED. It
 # cannot appear in the close-out record, because there is nowhere for it to be kept.
@@ -71,6 +72,19 @@ else
     fi
 fi
 
+# #34650: FREE IS AN INPUT WORD, SENT AS DONE. "free" (any case) is /mmry:formation free on Claude Code
+# and the state Free of Codex's formation_progress. It is sent as the state Done with the note "free"
+# (the member's own note after it), so it works against a server that has never heard of Free and is
+# stored as every reader of progress expects. The server maps Free the same way for the connector. A
+# member with no work is told it is already free and nothing is sent (below, after the roster read).
+free_report=0
+if [[ "$(printf '%s' "$progress" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" == "free" ]]; then
+    free_report=1
+    progress="Done"
+    if [[ -n "${note//[[:space:]]/}" ]]; then note="free ${note}"; else note="free"; fi
+    note="${note:0:500}"  # the route's width; the word free always survives
+fi
+
 session_id="$(mmry_session_id)"  # the command runtime provides CLAUDE_CODE_SESSION_ID (#31143)
 if [[ -z "$session_id" ]]; then
     echo "No session id is available, so there is no participation to report on. This needs to run inside a session."
@@ -116,6 +130,20 @@ if [[ -z "$member_id" ]]; then
     if [[ -z "$member_id" ]]; then
         echo "This session is not on formation ${formation_id}'s roster, so there is nothing to report against. It may have been released. Run $(mmry_host_formation_ref leave) and join again."
         exit 1
+    fi
+    # #34650: NO WORK, ALREADY FREE. The same test the service uses (FormationFreeReport.HoldsNoWork):
+    # no assignment, or the work already ended Done or Abandoned. Nothing is sent, so the member's idle
+    # spell is not restarted and the lead is not told about a change that did not happen. A roster the
+    # script cannot read this way falls through to the report, and the server decides.
+    if [[ "$free_report" -eq 1 ]]; then
+        holds_work="$(printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r --arg s "$session_id" \
+            '[(.members // [])[] | select(.sessionId == $s and .leftDate == null)][0]
+             | (((.assignment // "") | test("\\S")) and (((.progress // "") | ascii_downcase) as $p | ($p != "done" and $p != "abandoned")))' \
+            2>/dev/null || true)"
+        if [[ "${holds_work//$'\r'/}" == "false" ]]; then
+            printf '%s\n' "$MMRY_FORMATION_FREE_NONE"
+            exit 0
+        fi
     fi
 fi
 
@@ -187,8 +215,14 @@ if [[ -z "$applied" ]]; then
     exit 0
 fi
 
-printf 'Member %s in formation %s is now recorded as %s.\n' "$member_id" "$formation_id" "$applied"
-printf 'It is in the close-out record from here on. The lead sees this after its next tool call; no other member was told.\n'
+if [[ "$free_report" -eq 1 && "$own_report" -eq 1 \
+      && "$(printf '%s' "${applied//$'\r'/}" | tr '[:upper:]' '[:lower:]')" == "done" ]]; then
+    # #34650: cmo-mmry's confirmation for this session's own free report, in place of the two lines below.
+    printf '%s\n' "$MMRY_FORMATION_FREE_DONE"
+else
+    printf 'Member %s in formation %s is now recorded as %s.\n' "$member_id" "$formation_id" "$applied"
+    printf 'It is in the close-out record from here on. The lead sees this after its next tool call; no other member was told.\n'
+fi
 # #32683: A MEMBER'S OWN DONE ASKS THE LEAD FOR MORE WORK. The service ends the lead's PROGRESS
 # notice with the question; this tells the member so. Not for a lead's own Done, which has nobody
 # to ask, not for somebody else's Done, and not for any other state.

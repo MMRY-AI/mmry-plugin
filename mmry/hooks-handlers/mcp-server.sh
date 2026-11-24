@@ -218,11 +218,11 @@ MMRY_MCP_TOOLS='[
   {
     "name": "formation_progress",
     "title": "Report progress",
-    "description": "Report how this conversation'"'"'s assigned work is going: Accepted, Done, Blocked or Abandoned, with an optional note for the lead.",
+    "description": "Report how this conversation'"'"'s assigned work is going: Accepted, Done, Blocked or Abandoned, with an optional note for the lead. Free records your current work as Done and tells the lead you are free, so it can give you your next job; with no work, it changes nothing.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "state": {"type": "string", "enum": ["Accepted", "Done", "Blocked", "Abandoned"]},
+        "state": {"type": "string", "enum": ["Accepted", "Done", "Blocked", "Abandoned", "Free"]},
         "note": {"type": "string"}
       },
       "required": ["state"]
@@ -442,7 +442,7 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
       + (if (str("name") // "") != "" then ["--name", str("name")] else [] end)
    elif $n == "formation_say" then ["formation-say.sh", (str("message") | need("message"))] + (if int("to_member_id") == null then [] else [int("to_member_id")] end)
    elif $n == "formation_progress" then
-      ["formation-progress.sh", (str("state") | need("state") | if IN("Accepted","Done","Blocked","Abandoned") then . else error("state must be Accepted, Done, Blocked or Abandoned") end)]
+      ["formation-progress.sh", (str("state") | need("state") | if IN("Accepted","Done","Blocked","Abandoned","Free") then . else error("state must be Accepted, Done, Blocked or Abandoned") end)]
       + (if (str("note") // "") != "" then [str("note")] else [] end)
    elif $n == "formation_start" then
       ["formation-start.sh", (str("objective") | need("objective"))] + (if int("task_id") == null then [] else [int("task_id")] end)
