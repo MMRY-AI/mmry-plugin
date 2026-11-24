@@ -272,10 +272,19 @@ _MMRY_WAITING_PROGRAM_JQ='if ((.tool_name // "") | tostring | test("^(Bash|Power
 # hook answers allow in exactly one case: the request carries agent_id (a sub-agent of this member)
 # AND repeats, byte for byte, a command the same member approved in this session, which means the
 # member's own asked call RAN (its PostToolUse came, see --answer). The approval is kept as the tool
-# name and a SHA-256 digest of the call's input, never the command (.mmry-approved-<session>), and a
+# name and a SHA-256 digest of the APPROVAL KEY, never the command (.mmry-approved-<session>), and a
 # session start or leaving the Formation forgets it. Everything else prints nothing, as before: the
 # member's own requests, another command, a command the member refused, and every request on Claude
 # Code, where helpers already inherit the member's allowed commands (measured on 2.1.330).
+# THE APPROVAL KEY (fix round 1, QA 34519): the request's tool_name, cwd and WHOLE tool_input, keys
+# sorted. Those are the fields of Codex 0.171.0's measured PermissionRequest payload that change what
+# runs (measure/logs/codex: agent_id, agent_type, cwd, hook_event_name, model, permission_mode,
+# session_id, tool_input, tool_name, transcript_path, turn_id; a shell command's tool_input holds
+# command). The first build digested tool_input.command alone, so the same command in another folder,
+# or an MCP call with another sibling argument, was allowed on one approval (C-07, C-08). Recorded only
+# for the member's own main-thread call on Codex: never for a helper's run (C-09), never on Claude Code
+# (C-10), where the marker's turn is "-".
+_MMRY_WAITING_APPROVAL_JQ='if (type == "object" and has("tool_input")) then {tool: (.tool_name // null), cwd: (.cwd // null), tool_input: .tool_input} else empty end'
 _MMRY_WAITING_ALLOW='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
 _MMRY_WAITING_APPROVALS_MAX=200
 _mmry_waiting_approved_path() { MMRY_WAITING_APPROVED="${MMRY_TMPDIR}/.mmry-approved-$1"; }
@@ -307,31 +316,50 @@ _mmry_waiting_keep_approval() {
 # its own: no PostToolUse, no PostToolUseFailure, no PermissionDenied. The agent goes on with its next
 # tool call, or stops. Before this the flag waited for that Stop, which for a member working on came
 # about 9 minutes later (cmo-mmry's flag, 11:58Z to 12:07Z). Now the member's next tool call checks the
-# transcript the payload names: when the asked call (the main thread's latest call of the asked tool
-# whose input has the recorded digest) has a tool_result, the prompt is over, whatever its answer.
-# Read as JSON, line by line, as _mmry_waiting_open_call reads it; nothing of a call reaches a variable
-# but its id and its input's digest.
-_mmry_waiting_call_done() { # TRANSCRIPT TOOL DIGEST
-    local tp="${1:-}" tool="${2:-}" want="${3:-}" ids="" id js last="" res=""
-    [[ -f "$tp" && -r "$tp" && -n "${MMRY_JQ:-}" && "$tool" =~ $_MMRY_WAITING_TOOL_RE && "$want" =~ ^[0-9a-f]{64}$ ]] || return 1
-    ids="$(grep -F -- "\"${tool}\"" "$tp" 2>/dev/null | "$MMRY_JQ" -R -r --arg t "$tool" '
-        (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
-        | select(type == "object" and .type == "tool_use" and .name == $t and (.id | type) == "string")
-        | select(.id | test("^[A-Za-z0-9_-]{1,100}$")) | .id' 2>/dev/null || true)"
-    ids="${ids//$'\r'/}"
-    while read -r id; do
-        [[ -n "$id" ]] || continue
-        js="$(grep -F -- "\"${id}\"" "$tp" 2>/dev/null | "$MMRY_JQ" -R -c --arg id "$id" '
-            (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
-            | select(type == "object" and .type == "tool_use" and .id == $id) | {tool_input: .input}' 2>/dev/null || true)"
-        js="${js%%$'\n'*}"
-        [[ -n "$js" ]] || continue
-        _mmry_waiting_digest "$js"
-        [[ "$MMRY_WAITING_DIGEST" == "$want" ]] && last="$id"
-    done <<< "$ids"
-    [[ -n "$last" ]] || return 1
-    res="$(grep -F -- "\"${last}\"" "$tp" 2>/dev/null | "$MMRY_JQ" -R -r --arg id "$last" '
-        (fromjson? // empty) | (.message?.content? // empty) | if type == "array" then .[] else empty end
+# transcript the payload names: when the asked call has a tool_result, the prompt is over, whatever its
+# answer. Read as JSON, line by line, as _mmry_waiting_open_call reads it; nothing of a call reaches a
+# variable but its id and its input's digest.
+# BOUNDED (fix round 1, QA 34519): the first build looked up every earlier call of the asked tool and
+# digested each, about 5 processes per call, inside the synchronous PostToolUse hook (timeout 15 s): QA
+# measured 11.7 s at one call on a loaded PC, 28.0 s at 1 MB and 50.8 s at 5 MB. Now the asked call's ID
+# is found ONCE, when the prompt is raised (the permission_prompt Notification, 6 s or more after the
+# request, when the call is in the transcript and still has no result): one jq pass over the
+# transcript's last 4 MB lists the main thread's calls of the asked tool still WITHOUT a result, and
+# only those (at most 4: parallel calls of one tool) are digested. The marker keeps the id. The clear is
+# then one grep for that id and one jq over the lines it finds, whatever the session's length.
+_MMRY_WAITING_TAIL_BYTES=4000000
+_MMRY_WAITING_CANDIDATES_MAX=4
+# _mmry_waiting_find_call TRANSCRIPT TOOL DIGEST: sets MMRY_WAITING_CALL to the asked call's id, or empty.
+_mmry_waiting_find_call() {
+    local tp="${1:-}" tool="${2:-}" want="${3:-}" cands="" id js
+    MMRY_WAITING_CALL=""
+    [[ -f "$tp" && -r "$tp" && -n "${MMRY_JQ:-}" && "$tool" =~ $_MMRY_WAITING_TOOL_RE && "$want" =~ ^[0-9a-f]{64}$ ]] || return 0
+    cands="$(tail -c "$_MMRY_WAITING_TAIL_BYTES" -- "$tp" 2>/dev/null | "$MMRY_JQ" -n -R -r --arg t "$tool" \
+        --argjson max "$_MMRY_WAITING_CANDIDATES_MAX" '
+        [inputs | (fromjson? // empty) | select(type == "object" and (.isSidechain // false) != true)
+         | (.message?.content? // empty) | if type == "array" then .[] else empty end | select(type == "object")]
+        | (map(select(.type == "tool_result" and (.tool_use_id | type) == "string") | {key: .tool_use_id, value: true})
+           | from_entries) as $done
+        | [.[] | select(.type == "tool_use" and .name == $t and (.id | type) == "string")
+               | select((.id | test("^[A-Za-z0-9_-]{1,100}$")) and ($done[.id] | not))]
+        | .[((length - $max) | if . < 0 then 0 else . end):][]
+        | .id + "\u001f" + ({tool_input: .input} | tojson)' 2>/dev/null || true)"
+    cands="${cands//$'\r'/}"
+    while IFS=$'\037' read -r id js; do
+        if [[ -n "$id" && -n "$js" ]]; then
+            _mmry_waiting_digest "$js"
+            if [[ "$MMRY_WAITING_DIGEST" == "$want" ]]; then MMRY_WAITING_CALL="$id"; fi
+        fi
+    done <<< "$cands"
+    return 0
+}
+# _mmry_waiting_call_done TRANSCRIPT CALL_ID: 0 when that call, and only that call, has its result.
+_mmry_waiting_call_done() {
+    local tp="${1:-}" id="${2:-}" res=""
+    [[ -f "$tp" && -r "$tp" && -n "${MMRY_JQ:-}" && "$id" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || return 1
+    res="$(grep -F -- "\"${id}\"" "$tp" 2>/dev/null | "$MMRY_JQ" -R -r --arg id "$id" '
+        (fromjson? // empty) | select(type == "object" and (.isSidechain // false) != true)
+        | (.message?.content? // empty) | if type == "array" then .[] else empty end
         | select(type == "object" and .type == "tool_result" and .tool_use_id == $id) | "done"' 2>/dev/null || true)"
     [[ "$res" == *done* ]]
 }
@@ -393,15 +421,17 @@ _MMRY_WAITING_ASK_FRESH_SECS=300
 # apart; both would have asked for approval, so neither is a call the person did not answer.
 _MMRY_WAITING_INPUT_JQ='if (type == "object" and has("tool_input")) then (.tool_input | if (type == "object" and ((.command // null) | type) == "string") then {command: .command} else . end) else empty end'
 _MMRY_WAITING_EMPTY_SHA='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
-# _mmry_waiting_digest PAYLOAD: sets MMRY_WAITING_DIGEST to 64 hex characters, or empty. Needs MMRY_JQ.
+# _mmry_waiting_digest PAYLOAD [FILTER]: sets MMRY_WAITING_DIGEST to 64 hex characters, or empty. FILTER
+# is the call's identifier (_MMRY_WAITING_INPUT_JQ) unless given; the approval key passes
+# _MMRY_WAITING_APPROVAL_JQ. Needs MMRY_JQ.
 _mmry_waiting_digest() {
-    local h=""
+    local h="" f="${2:-$_MMRY_WAITING_INPUT_JQ}"
     MMRY_WAITING_DIGEST=""
     [[ -n "${MMRY_JQ:-}" ]] || return 0
     if command -v sha256sum >/dev/null 2>&1; then
-        h="$("$MMRY_JQ" -cS "$_MMRY_WAITING_INPUT_JQ" <<< "${1:-}" 2>/dev/null | sha256sum 2>/dev/null)" || h=""
+        h="$("$MMRY_JQ" -cS "$f" <<< "${1:-}" 2>/dev/null | sha256sum 2>/dev/null)" || h=""
     elif command -v shasum >/dev/null 2>&1; then
-        h="$("$MMRY_JQ" -cS "$_MMRY_WAITING_INPUT_JQ" <<< "${1:-}" 2>/dev/null | shasum -a 256 2>/dev/null)" || h=""
+        h="$("$MMRY_JQ" -cS "$f" <<< "${1:-}" 2>/dev/null | shasum -a 256 2>/dev/null)" || h=""
     fi
     h="${h%% *}"
     if [[ "$h" =~ ^[0-9a-f]{64}$ && "$h" != "$_MMRY_WAITING_EMPTY_SHA" ]]; then
@@ -541,18 +571,25 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
     fi
     # Who asked, and for which tool, as the raise recorded it ("-" or absent: the main thread, or a
     # tool whose exact name was not known).
-    asker="" mtool="" minput="" mturn=""
+    asker="" mtool="" minput="" mturn="" mapprove="" mcall=""
     while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
         case "$_a" in
             asker) asker="$_b" ;;
             tool)  mtool="$_b" ;;
             input) minput="$_b" ;;
             turn)  mturn="$_b" ;;
+            approve) mapprove="$_b" ;;
+            call)  mcall="$_b" ;;
         esac
     done < "$MMRY_WAITING_MARKER"
     [[ "$asker" == "-" ]] && asker=""
     [[ "$mtool" == "-" ]] && mtool=""
     [[ "$minput" =~ ^[0-9a-f]{64}$ ]] || minput=""
+    [[ "$mapprove" =~ ^[0-9a-f]{64}$ ]] || mapprove=""
+    [[ "$mcall" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || mcall=""
+    # "-" is how the marker writes "no turn" (Claude Code), and it passes the id rule: without this
+    # line a Claude Code member's run was recorded as an approval (fix round 1, C-10, red before).
+    [[ "$mturn" == "-" ]] && mturn=""
     [[ "$mturn" =~ $_MMRY_WAITING_SID_RE ]] || mturn=""
     answered=""
     case "$ev" in
@@ -568,14 +605,18 @@ if [[ "${1:-}" == "--answer" || "${1:-}" == "--answer-hook" ]]; then
                 if [[ -n "$MMRY_WAITING_DIGEST" && "$MMRY_WAITING_DIGEST" == "$minput" ]]; then
                     answered=1
                     # #34519 DD-206: the member's OWN asked call ran, so the member approved it. Codex
-                    # only (the asking turn is known), the main thread only (no asker).
-                    [[ -z "$asker" && -n "$mturn" ]] && _mmry_waiting_keep_approval "$sid" "$mtool" "$minput"
+                    # only (the asking turn is known), the main thread only (no asker). The approval
+                    # kept is the approval key the raise recorded (tool, cwd, whole input).
+                    if [[ -z "$asker" && -n "$mturn" && -n "$mapprove" ]]; then
+                        _mmry_waiting_keep_approval "$sid" "$mtool" "$mapprove"
+                    fi
                 fi
             fi
-            # #34519 (R2, the stale flag): the main thread's asked call already has its result, so it
-            # was refused, timed out or answered No, and this is the member's next tool call.
-            if [[ -z "$answered" && -z "$asker" && -z "$agent" && -n "$mtool" && -n "$minput" && -n "$ptp" ]]; then
-                _mmry_waiting_call_done "$ptp" "$mtool" "$minput" && answered=1
+            # #34519 (R2, the stale flag): the main thread's asked call, found by id when the prompt was
+            # raised, already has its result, so it was refused, timed out or answered No, and this is
+            # the member's next tool call. One grep and one jq (BOUNDED above).
+            if [[ -z "$answered" && -z "$asker" && -z "$agent" && -n "$mcall" && -n "$ptp" ]]; then
+                _mmry_waiting_call_done "$ptp" "$mcall" && answered=1
             fi ;;
         Stop)
             # The asking agent's turn ended (after a Deny there is no PostToolUse: measured). Codex's Stop
@@ -629,10 +670,14 @@ if [[ "${1:-}" == "--ask" ]]; then
     [[ "$tool" =~ $_MMRY_WAITING_TOOL_RE ]] || tool="-"
     # #34519: the program, its first word only, under the tool name's rule (THE PROGRAM above).
     [[ "$program" =~ $_MMRY_WAITING_TOOL_RE ]] || program="-"
-    # The asked call's identifier: a digest of its input, never the input (WHICH CALL above).
+    # The asked call's identifier: a digest of its input, never the input (WHICH CALL above). And its
+    # approval key (THE APPROVAL KEY above), a digest too; on Claude Code nothing ever records it as an
+    # approval (the marker's turn is "-"), and C-10 proves that guard.
     _mmry_waiting_digest "$payload"
+    _ask_input="${MMRY_WAITING_DIGEST:--}"
+    _mmry_waiting_digest "$payload" "$_MMRY_WAITING_APPROVAL_JQ"
     _mmry_waiting_ask_path "$sid"
-    printf 'asker %s\ntool %s\ninput %s\nprogram %s\nat %s\n' "$agent" "$tool" "${MMRY_WAITING_DIGEST:--}" "$program" "$(date +%s || echo 0)" \
+    printf 'asker %s\ntool %s\ninput %s\napprove %s\nprogram %s\nat %s\n' "$agent" "$tool" "$_ask_input" "${MMRY_WAITING_DIGEST:--}" "$program" "$(date +%s || echo 0)" \
         > "$MMRY_WAITING_ASK" || true
     # #34519 R1: A HELPER'S REQUEST IS REPORTED HERE. Measured on Claude Code 2.1.330: a background
     # helper's request that nobody can answer is refused with no Notification and no entry in
@@ -715,15 +760,18 @@ MMRY_FORMATION_REFUSAL_SID="$sid"
 # which also gives the lead the exact name where the sentence has only a display name, but only when
 # the transcript confirms it as the one still-waiting call of that server (#33898 C1); without a fresh
 # record, the main thread and no exact name (the clear then waits for the main thread's own events).
-asker="" exact="" input="" mturn=""
+asker="" exact="" input="" mturn="" approve="" call=""
 if [[ "$event" == "PermissionRequest" ]]; then
     [[ "$pagent" =~ $_MMRY_WAITING_SID_RE ]] && asker="$pagent"
     exact="$tool"
     mturn="$turn"
     # The asked call's identifier (WHICH CALL above): only when there is an exact tool to tie it to.
+    # And its approval key (THE APPROVAL KEY above: tool, cwd, whole input).
     if [[ -n "$exact" ]]; then
         _mmry_waiting_digest "$payload"
         input="$MMRY_WAITING_DIGEST"
+        _mmry_waiting_digest "$payload" "$_MMRY_WAITING_APPROVAL_JQ"
+        approve="$MMRY_WAITING_DIGEST"
     fi
     [[ -n "$exact" ]] && program="$pprogram"
     if [[ -n "${MMRY_WAITING_FROM_ASK:-}" ]]; then
@@ -731,7 +779,7 @@ if [[ "$event" == "PermissionRequest" ]]; then
         # prompt's Notification computes from the ask record, so that Notification stays silent.
         key="cc:${asker:--}:${exact:--}"
         mturn=""
-    elif [[ -n "$asker" && -n "$exact" && -n "$input" ]] && _mmry_waiting_is_approved "$sid" "$exact" "$input"; then
+    elif [[ -n "$asker" && -n "$exact" && -n "$approve" ]] && _mmry_waiting_is_approved "$sid" "$exact" "$approve"; then
         # #34519 DD-206 (Codex): a sub-agent repeating, byte for byte, a call its member approved in
         # this session. The one answer this hook ever prints; nothing is raised, nobody is waiting.
         printf '%s' "$_MMRY_WAITING_ALLOW"
@@ -741,12 +789,13 @@ else
     _mmry_waiting_ask_path "$sid"
     _k_named=""
     if [[ -f "$MMRY_WAITING_ASK" ]]; then
-        _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input="" _k_program=""
+        _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input="" _k_program="" _k_approve=""
         while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
             case "$_a" in
                 asker) _k_asker="$_b" ;;
                 tool)  _k_tool="$_b" ;;
                 input) _k_input="$_b" ;;
+                approve) _k_approve="$_b" ;;
                 program) _k_program="$_b" ;;
                 at)    _k_at="$_b" ;;
             esac
@@ -755,6 +804,8 @@ else
         if [[ "$_k_at" =~ ^[0-9]+$ && "$_now" =~ ^[0-9]+$ ]] && (( _now - _k_at <= _MMRY_WAITING_ASK_FRESH_SECS )); then
             _k_used=1
             [[ "$_k_asker" =~ $_MMRY_WAITING_SID_RE ]] && asker="$_k_asker"
+            # "-" is the record's "main thread", and it passes the id rule (fix round 1).
+            [[ "$asker" == "-" ]] && asker=""
             if [[ "$_k_tool" =~ $_MMRY_WAITING_TOOL_RE ]]; then
                 exact="$_k_tool" _k_named=1
                 # The NAME SENT (#33898 C1, round 4): see _mmry_waiting_asked_name. A fresh record wins
@@ -769,6 +820,12 @@ else
                 _mmry_waiting_asked_name "$_k_tool" "$_s_name" "$mprefix" "$tpath" "$mnamed"
                 tool="$MMRY_WAITING_TOOL"
                 [[ "$_k_input" =~ ^[0-9a-f]{64}$ ]] && input="$_k_input"
+                [[ "$_k_approve" =~ ^[0-9a-f]{64}$ ]] && approve="$_k_approve"
+                # Fix round 1 (BOUNDED above): the main thread's asked call, found once now, by id.
+                if [[ -z "$asker" && -n "$input" ]]; then
+                    _mmry_waiting_find_call "$tpath" "$exact" "$input"
+                    call="$MMRY_WAITING_CALL"
+                fi
                 # #34519: the record's program, only when the name sent is the record's own tool.
                 if [[ -n "$tool" && "$tool" == "$_k_tool" && "$_k_program" =~ $_MMRY_WAITING_TOOL_RE ]]; then
                     program="$_k_program"
@@ -831,7 +888,7 @@ mid="${own%% *}"; role="${own#* }"
 
 [[ -n "$tool" ]] || program=""
 if mmry_set_formation_member_waiting "$fid" "$mid" "$sid" "$tool" "$program" >/dev/null; then
-    printf '%s %s\nprompt %s %s\nasker %s\ntool %s\ninput %s\nturn %s\n' "$fid" "$mid" "$key" "$(date +%s || echo 0)" \
-        "${asker:--}" "${exact:--}" "${input:--}" "${mturn:--}" > "$MMRY_WAITING_MARKER" || true
+    printf '%s %s\nprompt %s %s\nasker %s\ntool %s\ninput %s\nturn %s\napprove %s\ncall %s\n' "$fid" "$mid" "$key" "$(date +%s || echo 0)" \
+        "${asker:--}" "${exact:--}" "${input:--}" "${mturn:--}" "${approve:--}" "${call:--}" > "$MMRY_WAITING_MARKER" || true
 fi
 exit 0

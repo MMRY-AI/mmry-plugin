@@ -274,17 +274,18 @@ _timed_clear() {
     _cleared_once
 }
 
-# BOUND: 5 s for the whole check at every size. A third of the hook's 15 s limit, so a check on a loaded
-# machine (QA measured 11.7 s for the old clear at ONE call on a PC under load) still ends inside the limit,
-# and far below the old cost at 5 MB (50.8 s measured by QA). The bound is the same at every size: the
-# clear reads the transcript once, by the asked call's id, whatever the session's length.
+# BOUND: 7.5 s for the whole check at every size, half the hook's 15 s limit. The whole check (not the
+# clear alone) is what the limit applies to, and its fixed cost, with no transcript work at all, measured
+# 2.2 to 4.0 s on the build PC under load; half the limit leaves that room on a slow runner while the old
+# cost at 5 MB (37.9 s on the build PC, 50.8 s measured by QA) fails it five times over. The bound is the
+# same at every size: the clear reads the transcript once, by the asked call's id, whatever its length.
 @test "S-05 34519 fix 1: the next-call clear stays well inside the 15 s hook limit at one call, 1 MB and 5 MB (50 earlier calls)" {
     local size calls bytes over=""
     for size in "0 0" "10 100000" "50 100000"; do
         calls="${size% *}" bytes="${size#* }"
         _timed_clear "$calls" "$bytes" || { echo "not cleared at $calls calls"; return 1; }
         echo "# S-05 $calls earlier calls of $bytes bytes ($(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ') bytes): whole check ${CLEAR_MS} ms" >&3
-        (( CLEAR_MS < 5000 )) || over+=" ${CLEAR_MS} ms at $calls earlier calls of $bytes bytes;"
+        (( CLEAR_MS < 7500 )) || over+=" ${CLEAR_MS} ms at $calls earlier calls of $bytes bytes;"
     done
     [ -z "$over" ] || { echo "the clear took$over"; return 1; }
 }
