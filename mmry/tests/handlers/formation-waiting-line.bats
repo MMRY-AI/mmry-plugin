@@ -228,14 +228,16 @@ P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run 
     done
 }
 
-# cmo-mmry's Approved section of wording-34519-docs-cmo-request.md, item 1 (with its changed opening).
-DOCS_WAITING="**The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, which app it runs in when MMRY AI knows it, and what it is waiting to run. For a command, only the name of the program is given, such as git, never the full command; otherwise it is the name of the tool asking. Nothing else from the prompt is sent, and the roster marks that member as waiting. On Claude Code, while the lead is working, the same line is also shown to the person at the lead window. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them."
+# cmo-mmry's Approved section of wording-34519-docs-cmo-request.md, item 1 (with its changed opening),
+# and for 34651 the command sentence as wording-34651-round2-cmo.md's Revision gives it (R2).
+DOCS_WAITING="**The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, which app it runs in when MMRY AI knows it, and what it is waiting to run. For a command, at most the program is given, with the kind of run when MMRY AI recognizes it, such as git push, the script check.sh or an inline script; never the full command, its arguments or its paths. Otherwise it is the name of the tool asking. Nothing else from the prompt is sent, and the roster marks that member as waiting. On Claude Code, while the lead is working, the same line is also shown to the person at the lead window. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them."
 
 @test "W-01 34519 fix 1 wording: the formation command page and the Codex skill carry the approved waiting paragraph, and not the old one" {
     local f
     for f in "${BATS_TEST_DIRNAME}/../../commands/formation.md" "${BATS_TEST_DIRNAME}/../../skills-codex/memory-system/SKILL.md"; do
         grep -qxF -- "$DOCS_WAITING" "$f" || { echo "not the approved paragraph: $f"; return 1; }
         ! grep -qF -- "with the name of the tool asking and nothing else from the prompt" "$f" || { echo "the old sentence: $f"; return 1; }
+        ! grep -qF -- "only the name of the program" "$f" || { echo "the 34519 sentence, untrue since 34651: $f"; return 1; }
     done
 }
 
