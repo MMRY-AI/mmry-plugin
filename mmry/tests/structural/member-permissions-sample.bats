@@ -193,6 +193,8 @@ CMDS
     _is allow '["Bash(npm test *)"]' '[]' 'timeout 30 npm test' || return 1
     _is deny  '[]' '["Bash(rm *)"]' 'FOO=bar rm -rf tmp/' || return 1
     _is none  '["Bash(npm test *)"]' '[]' 'EVIL=1 npm test' || return 1
+    # A redirect is never allowed by this helper (Claude Code checks its target against the file rules).
+    _is none  '["Bash(gh pr diff *)"]' '[]' 'gh pr diff 1 > out.txt' || return 1
 }
 
 @test "E-06 34651 round 2: the round 1 sample is what these tests refuse (the proof they can fail)" {

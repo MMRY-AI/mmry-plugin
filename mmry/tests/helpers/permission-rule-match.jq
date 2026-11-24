@@ -21,6 +21,8 @@
 #     command "none" here that Claude Code might allow;
 #   - it takes off no "known safe" variable assignment for an allow rule (the documentation does not
 #     list them);
+#   - a command with a redirect (< or >) is never "allow" here: Claude Code checks the redirect's
+#     target against the Read and Edit rules, which this helper does not match;
 #   - it knows nothing of Claude Code's built-in read-only commands, permission modes, hooks or the
 #     sandbox: "none" means "no rule decides", which in the default mode is a prompt;
 #   - Read and Edit path rules are not matched here.
@@ -64,6 +66,7 @@ def decide($deny; $ask; $allow):
     | if ($p | length) == 0 then "none"
       elif any($bare[]; matches_any($deny)) then "deny"
       elif any($bare[]; matches_any($ask)) then "ask"
+      elif any($p[]; test("[<>]")) then "none"
       elif all($p[]; matches_any($allow)) then "allow"
       else "none"
       end;
