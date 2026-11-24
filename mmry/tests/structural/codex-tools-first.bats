@@ -66,8 +66,9 @@ _script_hits() {
         grep -qF "\`$t\`" "$SKILL" || missing="${missing} $t"
     done < <(_server_tools)
     # 16 since #32270 added formation_remove; 17 since #31410 added formation_status; 15 since #32640;
-    # 19 since #33849 added the work queue's four; 20 since #34432 added formation_idle_limit.
-    [ "$(_server_tools | grep -c .)" -eq 20 ] || { echo "expected 20 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
+    # 19 since #33849 added the work queue's four; 20 since #34432 added formation_idle_limit; 21 since
+    # #34089 added formation_progress_limit.
+    [ "$(_server_tools | grep -c .)" -eq 21 ] || { echo "expected 21 server tools: $(_server_tools | tr '\n' ' ')"; return 1; }
     # Any memory_* or formation_* name in backticks must be one the server offers. The connector's
     # mmry_formation_* tools are a different, warned-about thing and are excluded by the prefix,
     # and an argument such as formation_id is not a tool.

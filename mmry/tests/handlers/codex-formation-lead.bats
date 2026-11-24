@@ -357,3 +357,45 @@ FAKECURL
         CODEX_SESSION_ID="$CLAUDE_SESSION_ID" _codex "$HH/formation-check.sh")"
     [[ "$member" != *"has reported Done."* && "$member" != *"IDLE MEMBERS"* ]] || { echo "$member"; return 1; }
 }
+
+# #34088 and #34089 (DD-203 in MMRY-AI/mmry), finish round item 18 (A13 and B17, the roster halves).
+# On Codex the roster and the status view (formation_roster and formation_status run the same scripts)
+# show the lead's state and each member's time since progress in cmo-mmry's A4 and B4 labels, byte for
+# byte as on Claude Code; a server that sends none of the fields reads as before on both hosts.
+@test "34088 34089: on Codex the roster and status show the lead's state and the time since progress, as on Claude Code" {
+    mkdir -p "$TEST_TMPDIR/lead-bin"
+    cat > "$TEST_TMPDIR/lead-bin/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+out=""; prev=""; url=""
+for arg in "$@"; do [[ "$prev" == "-o" ]] && out="$arg"; [[ "$arg" == http* ]] && url="$arg"; prev="$arg"; done
+resp='{"member":true,"messages":[]}'
+case "$url" in
+    */api/formations/42|*/api/formations/42"?sessionId="*) resp="$(cat "$LEAD_BODY_FILE")" ;;
+esac
+[[ -n "$out" ]] && printf '%s' "$resp" > "$out"
+printf '200'
+exit 0
+FAKECURL
+    chmod +x "$TEST_TMPDIR/lead-bin/curl"
+    export LEAD_BODY_FILE="$TEST_TMPDIR/lead-roster.json"
+    printf '%s' '{"formation":{"id":42,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leadState":"quiet","leadStateMinutes":25,"minutesSinceProgress":null,"leftDate":null},{"id":7,"role":"Wingman","email":"m@x.y","assignment":"port","progress":"Accepted","minutesSinceProgress":8,"leftDate":null},{"id":8,"role":"Wingman","email":"n@x.y","minutesSinceProgress":null,"leftDate":null}]}' > "$LEAD_BODY_FILE"
+    local codex claude
+    codex="$(PATH="$TEST_TMPDIR/lead-bin:$PATH" _codex "$HH/formation-roster.sh" 42 | tr -d '\r')"
+    claude="$(PATH="$TEST_TMPDIR/lead-bin:$PATH" _claude "$HH/formation-roster.sh" 42 | tr -d '\r')"
+    [[ "$codex" == *"  3  Lead  l@x.y  (quiet for 25 minutes)  (no assignment)"* ]] || { echo "$codex"; return 1; }
+    [[ "$codex" == *"  7  Wingman  m@x.y  - port  [Accepted]  (last progress 8 minutes ago)"* ]] || { echo "$codex"; return 1; }
+    [[ "$codex" == *"  8  Wingman  n@x.y  (no assignment)"* ]] || { echo "$codex"; return 1; }
+    [ "$(printf '%s\n' "$codex" | grep -F 'x.y')" = "$(printf '%s\n' "$claude" | grep -F 'x.y')" ] || { echo "--- codex"; echo "$codex"; echo "--- claude"; echo "$claude"; return 1; }
+    _assert_customer_typography "$codex"
+    # The status view, the same labels on each member line.
+    bash "$HH/formation-state.sh" set 42 "cs-lead" >/dev/null 2>&1 || true
+    local st
+    st="$(PATH="$TEST_TMPDIR/lead-bin:$PATH" CODEX_SESSION_ID=cs-lead CODEX_THREAD_ID=cs-lead _codex "$HH/formation-status.sh" | tr -d '\r')"
+    bash "$HH/formation-state.sh" clear "cs-lead" >/dev/null 2>&1 || true
+    [[ "$st" == *"  3  Lead  (quiet for 25 minutes)  (no assignment)"* ]] || { echo "$st"; return 1; }
+    [[ "$st" == *"  7  Wingman  (last progress 8 minutes ago)"* ]] || { echo "$st"; return 1; }
+    # And a server with none of the fields: no label on either host.
+    printf '%s' '{"formation":{"id":42,"objective":"o"},"members":[{"id":3,"role":"Lead","email":"l@x.y","leftDate":null},{"id":7,"role":"Wingman","email":"m@x.y","assignment":"port","progress":"Accepted","leftDate":null}]}' > "$LEAD_BODY_FILE"
+    codex="$(PATH="$TEST_TMPDIR/lead-bin:$PATH" _codex "$HH/formation-roster.sh" 42 | tr -d '\r')"
+    [ "$(printf '%s\n' "$codex" | grep -F 'x.y')" = "$(printf '%s\n' '  3  Lead  l@x.y' '  7  Wingman  m@x.y  - port  [Accepted]')" ] || { echo "$codex"; return 1; }
+}

@@ -27,15 +27,20 @@ set -euo pipefail
 # none, and say so only with the reason.
 MMRY_FORMATION_LEAD_RULE="As the lead, keep every member working. Hand each new piece of work to a member with assign, so MMRY AI knows what it is doing; the brief can still go as a message or a file. When a member is idle or reports Done, give it its next job now. Before deciding there is none, check five places: open quality gaps on work in flight, follow-ups promised to the person, preparation for the next stage, records that do not match what was built, and a hand-back from another member waiting for review. Say there is no work only with the reason, naming what everything is waiting on. Do not do work yourself that an idle member could take; keep the coordinating, the deciding and the reviewing for yourself."
 MMRY_FORMATION_MEMBER_RULE="As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer."
+# #34089 (DD-203 in MMRY-AI/mmry): cmo-mmry's B3 (Revision 1, wording-34088-34089-cmo.md), NO APOSTROPHES.
+# A member is given it on its own line straight after the member rule; a lead is not. B3 places it after
+# the existing member rules and before 34011's rules M and S, with the 34161 background-work sentence
+# after all of them on Claude Code (formation-join.sh prints that sentence after this rule).
+MMRY_FORMATION_PROGRESS_RULE="Report progress to the lead at each milestone of your assignment, so the lead can see the work is moving."
 MMRY_FORMATION_OFFER="Is there anything else I can do?"
 # What the member that reported its own Done is shown: its report carried the question.
 MMRY_FORMATION_OFFER_SENT="Your report to the lead ends with: ${MMRY_FORMATION_OFFER} Keep listening for the answer."
 
 # The rule for a role as the roster stores it. Lead gets the lead rule; anything else, including no
-# role at all, gets the member rule, because a join never makes a new lead.
+# role at all, gets the member rule and then the progress rule, because a join never makes a new lead.
 mmry_formation_role_rule() {
     case "${1:-}" in
         [Ll][Ee][Aa][Dd]) printf '%s\n' "$MMRY_FORMATION_LEAD_RULE" ;;
-        *)                printf '%s\n' "$MMRY_FORMATION_MEMBER_RULE" ;;
+        *)                printf '%s\n%s\n' "$MMRY_FORMATION_MEMBER_RULE" "$MMRY_FORMATION_PROGRESS_RULE" ;;
     esac
 }
