@@ -60,6 +60,9 @@ case "$method $url" in
     "PUT "*/api/formations/*/idle-limit) resp='{"message":"This Formation'"'"'s idle limit is now 30 minutes."}'
         # #34521: a server that answers with no message and no number (older than the idle-limit route's reply).
         [[ -n "${FAKE_IDLE_LIMIT_BODY+set}" ]] && resp="$FAKE_IDLE_LIMIT_BODY" ;;
+    "PUT "*/api/formations/*/progress-limit) resp='{"message":"This Formation'"'"'s progress limit is now 30 minutes."}'
+        # #34089: a server that answers with no message and no number.
+        [[ -n "${FAKE_PROGRESS_LIMIT_BODY+set}" ]] && resp="$FAKE_PROGRESS_LIMIT_BODY" ;;
     "PUT "*/api/formations/*/members/*) resp='{"id":6,"role":"Wingman","assignment":"write the tests"}' ;;
     "GET "*/api/formations/*/close-out|"GET "*/api/formations/*/close-out"?sessionId="*) resp='{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}' ;;
     "POST "*/api/formations/*/debrief) resp='{"closeOut":{"record":"CLOSE-OUT RECORD: member 6 Wingman, write the tests, Done"}}' ;;
@@ -137,16 +140,17 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
     [ "$(answer 9 | jq -c '.result')" = "{}" ]
 }
 
-@test "protocol: tools/list names the twenty tools, each with an object input schema" {
+@test "protocol: tools/list names the twenty-one tools, each with an object input schema" {
     # #31789 added the lead's four: formation_start, formation_assign, formation_report and
     # formation_debrief. #32270 added formation_remove, so a lead or an administrator on Codex can
     # take off a member whose session has dropped without the Internet access prompt. #31410 added
     # formation_status, the status view with each member's name beside its member id. #33849 added
     # the work queue's four: formation_queue_add, formation_queue_list, formation_queue_take and
-    # formation_queue_decline. #34432 added formation_idle_limit, the twentieth.
+    # formation_queue_decline. #34432 added formation_idle_limit, the twentieth. #34089 added
+    # formation_progress_limit, the twenty-first.
     mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
     [ "$(answer 2 | jq -r '.result.tools | map(.name) | sort | join(",")')" = \
-      "formation_assign,formation_debrief,formation_idle_limit,formation_join,formation_leave,formation_progress,formation_queue_add,formation_queue_decline,formation_queue_list,formation_queue_take,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_load,memory_retire,memory_save,memory_search" ]
+      "formation_assign,formation_debrief,formation_idle_limit,formation_join,formation_leave,formation_progress,formation_progress_limit,formation_queue_add,formation_queue_decline,formation_queue_list,formation_queue_take,formation_remove,formation_report,formation_roster,formation_say,formation_start,formation_status,memory_load,memory_retire,memory_save,memory_search" ]
     [ "$(answer 2 | jq -r '[.result.tools[] | .inputSchema.type] | unique | join(",")')" = "object" ]
 }
 
@@ -195,7 +199,7 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     local t
     for t in memory_save memory_search memory_load \
              formation_join formation_say formation_progress formation_roster formation_leave \
-             formation_start formation_assign formation_report formation_status; do
+             formation_start formation_assign formation_report formation_status formation_progress_limit; do
         [ "$(_codex_would_prompt "$t")" = "no-prompt" ] || { echo "$t would prompt"; return 1; }
     done
 }
@@ -642,6 +646,94 @@ JQCRLF
     handler="$(bash -c "$(grep -m1 '^IDLE_LIMIT_RANGE=' "$PLUGIN_ROOT/hooks-handlers/formation-idle-limit.sh"); printf '%s' \"\$IDLE_LIMIT_RANGE\"")"
     [ -n "$server" ] && [ "$server" = "$handler" ] || { echo "server: $server"; echo "handler: $handler"; return 1; }
     [ "$server" = "$IDLE_RANGE_34432" ] || { echo "$server"; return 1; }
+}
+
+# #34089 (DD-203 in MMRY-AI/mmry), finish round item 14: formation_progress_limit, beside
+# formation_idle_limit, with cmo-mmry's C3 words (Revision 1, 5 to 1440, {stall_default} = 5) and
+# #169's range handling: anything that is not a whole number from 5 to 1440 is answered with the
+# approved C4 sentence alone, before any handler runs.
+PROGRESS_RANGE_34089="The progress limit is between 5 and 1440 minutes. Leave it unset to use the default of 5 minutes."
+
+@test "34089 tool: formation_progress_limit with 4, 0, 1441 or \"abc\" answers the approved range sentence alone and asks nothing" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3470 formation_progress_limit '{"minutes":4}' '{"sessionId":"conv-A"}')" \
+        "$(call 3471 formation_progress_limit '{"minutes":0}' '{"sessionId":"conv-A"}')" \
+        "$(call 3472 formation_progress_limit '{"minutes":1441}' '{"sessionId":"conv-A"}')" \
+        "$(call 3473 formation_progress_limit '{"minutes":"abc"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3474 formation_progress_limit '{"minutes":"4"}' '{"sessionId":"conv-A"}')" \
+        "$(call 3475 formation_progress_limit '{"minutes":2.5}' '{"sessionId":"conv-A"}')" \
+        "$(call 3476 formation_progress_limit '{"minutes":-5}' '{"sessionId":"conv-A"}')" \
+        "$(call 3477 formation_progress_limit '{"minutes":true}' '{"sessionId":"conv-A"}')"
+    local i
+    for i in 3470 3471 3472 3473 3474 3475 3476 3477; do
+        [ "$(is_error $i)" = "true" ] || { echo "call $i: isError $(is_error $i): $(text_of $i)"; return 1; }
+        [ "$(text_of $i | tr -d '\r')" = "$PROGRESS_RANGE_34089" ] || { echo "call $i: $(text_of $i)"; return 1; }
+    done
+    [ ! -s "$REQLOG" ] || { cat "$REQLOG"; return 1; }
+}
+
+@test "34089 tool: formation_progress_limit 5, 1440 and \"30\" reach the handler, which PUTs that value to progress-limit" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3478 formation_progress_limit '{"minutes":5}' '{"sessionId":"conv-A"}')" \
+        "$(call 3479 formation_progress_limit '{"minutes":1440}' '{"sessionId":"conv-A"}')" \
+        "$(call 3480 formation_progress_limit '{"minutes":"30"}' '{"sessionId":"conv-A"}')"
+    local i
+    for i in 3478 3479 3480; do
+        [ "$(is_error $i)" = "false" ] || { echo "call $i: $(text_of $i)"; return 1; }
+    done
+    [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/progress-limit {"minutes":5}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(sed -n 2p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/progress-limit {"minutes":1440}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(sed -n 3p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/progress-limit {"minutes":30}' ] || { cat "$REQLOG"; return 1; }
+    [ "$(grep -c . "$REQLOG")" -eq 3 ]
+    [ "$(text_of 3480)" = "This Formation's progress limit is now 30 minutes." ] || { text_of 3480; return 1; }
+}
+
+@test "34089 tool: formation_progress_limit use_default sends null; no minutes reads, and a server with no progress limit reads as the default of 5" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3481 formation_progress_limit '{"use_default":true}' '{"sessionId":"conv-A"}')" \
+        "$(call 3482 formation_progress_limit '{}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 3481)" = "false" ] || { text_of 3481; return 1; }
+    [ "$(is_error 3482)" = "false" ] || { text_of 3482; return 1; }
+    [ "$(sed -n 1p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/progress-limit {"minutes":null}' ] || { cat "$REQLOG"; return 1; }
+    [[ "$(sed -n 2p "$REQLOG")" == "GET http://fake.invalid/api/formations/77?sessionId=conv-A "* ]] || { cat "$REQLOG"; return 1; }
+    # The fake Formation answer carries no progressNoticeAfterSeconds, as an older server's does not.
+    [ "$(text_of 3482)" = "This Formation's progress limit is 5 minutes." ] || { text_of 3482; return 1; }
+}
+
+@test "34089 tool: formation_progress_limit use_default, answered with no message and no number, reports the 5-minute default" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    export FAKE_PROGRESS_LIMIT_BODY='{}'
+    mcp "$(call 3483 formation_progress_limit '{"use_default":true}' '{"sessionId":"conv-A"}')"
+    unset FAKE_PROGRESS_LIMIT_BODY
+    [ "$(is_error 3483)" = "false" ] || { text_of 3483; return 1; }
+    [ "$(text_of 3483)" = "This Formation's progress limit is now 5 minutes." ] || { text_of 3483; return 1; }
+}
+
+@test "34089 tool: formation_progress_limit carries cmo-mmry's C3 description, title and argument words" {
+    mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+    local tool; tool="$(answer 2 | jq -c '.result.tools[] | select(.name == "formation_progress_limit")')"
+    [ -n "$tool" ] || { echo "no formation_progress_limit tool"; return 1; }
+    [ "$(jq -r '.description' <<< "$tool" | tr -d '\r')" = "Read or set how many minutes a member with an assignment can go without progress before the lead is told. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 5 to 1440 minutes; leave it unset for the default of 5." ] || { echo "$tool"; return 1; }
+    [ "$(jq -r '.title' <<< "$tool" | tr -d '\r')" = "Read or set the progress limit" ] || { echo "$tool"; return 1; }
+    [ "$(jq -r '.inputSchema.properties.minutes.description' <<< "$tool" | tr -d '\r')" = "Optional: the new progress limit in minutes, 5 to 1440. Omit to read the current limit." ] || { echo "$tool"; return 1; }
+    [ "$(jq -r '.inputSchema.properties.use_default.description' <<< "$tool" | tr -d '\r')" = "Optional: true to go back to the default of 5 minutes." ] || { echo "$tool"; return 1; }
+    [ "$(jq -r '.inputSchema.properties.minutes.type' <<< "$tool" | tr -d '\r')" = "integer" ] || { echo "$tool"; return 1; }
+}
+
+@test "34089: the MCP server's progress range sentence and formation-progress-limit.sh's are the same, word for word" {
+    local server handler
+    server="$(bash -c "$(grep -m1 '^MMRY_MCP_PROGRESS_LIMIT_RANGE=' "$PLUGIN_ROOT/hooks-handlers/mcp-server.sh"); printf '%s' \"\$MMRY_MCP_PROGRESS_LIMIT_RANGE\"")"
+    handler="$(bash -c "$(grep -m1 '^PROGRESS_LIMIT_RANGE=' "$PLUGIN_ROOT/hooks-handlers/formation-progress-limit.sh"); printf '%s' \"\$PROGRESS_LIMIT_RANGE\"")"
+    [ -n "$server" ] && [ "$server" = "$handler" ] || { echo "server: $server"; echo "handler: $handler"; return 1; }
+    [ "$server" = "$PROGRESS_RANGE_34089" ] || { echo "$server"; return 1; }
+}
+
+@test "34089 control: the idle limit's range is unchanged by the progress limit (1 and 4 still reach the idle handler)" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
+    mcp "$(call 3484 formation_idle_limit '{"minutes":1}' '{"sessionId":"conv-A"}')" \
+        "$(call 3485 formation_idle_limit '{"minutes":4}' '{"sessionId":"conv-A"}')"
+    [ "$(is_error 3484)" = "false" ] && [ "$(is_error 3485)" = "false" ] || { text_of 3484; text_of 3485; return 1; }
+    [ "$(sed -n 2p "$REQLOG")" = 'PUT http://fake.invalid/api/formations/77/idle-limit {"minutes":4}' ] || { cat "$REQLOG"; return 1; }
 }
 
 @test "identity: each lead tool that names no conversation is refused, never guessed, and sends nothing" {

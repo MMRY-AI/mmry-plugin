@@ -57,7 +57,9 @@ if ! command -v curl >/dev/null 2>&1 || ! mmry_get_formation "$formation_id" || 
     exit 0
 fi
 
-lines="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r --arg sid "$session_id" --arg footer "$MMRY_FORMATION_AVAILABILITY_FOOTER" "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}"'
+# #34088, #34089 (DD-203): each member line carries the lead's state and the time since progress, in the
+# roster's labels (lib-formation-prompts.sh), before the availability.
+lines="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r --arg sid "$session_id" --arg footer "$MMRY_FORMATION_AVAILABILITY_FOOTER" "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}${MMRY_JQ_PROGRESS_DEFS}"'
     ([(.members // [])[] | select(.sessionId == $sid and .leftDate == null)] | last) as $me
     | (if (.formation.objective // "") != "" then "Objective: " + (.formation.objective | mmry_name_clean) else empty end),
       (if $me == null then "This session has no current place on the roster."
@@ -66,7 +68,7 @@ lines="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r --arg sid "$session_id
        else "You are member \($me.id), shown to the others as \($me.role // "Member") \($me.id), because this session has no name." end),
       "Members:",
       ((.members // []) | sort_by(.leftDate != null, .id) | .[]
-       | mmry_member_line + mmry_availability_suffix + (if .leftDate == null then "" else "   (has left)" end)),
+       | mmry_member_line + mmry_lead_state_suffix + mmry_progress_suffix + mmry_availability_suffix + (if .leftDate == null then "" else "   (has left)" end)),
       (if mmry_roster_has_availability then $footer else empty end)
 ' 2>/dev/null || true)"
 

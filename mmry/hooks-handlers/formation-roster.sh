@@ -104,7 +104,10 @@ printf 'Formation %s: %s\n\n' "$formation_id" \
 # and before the availability, so the line still ends with its availability. The service sends null
 # for a lead and for a member never idle, and nothing is shown then. It is the service's text, so its
 # control characters are removed, and a value that is not text is not shown.
-printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}"'
+# #34088, #34089 (DD-203): the lead's state and each member's time since progress, in cmo-mmry's labels
+# from lib-formation-prompts.sh, after the idle total and before the availability. A server that sends
+# neither shows neither.
+printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAILABILITY_DEFS}${MMRY_JQ_PROGRESS_DEFS}"'
     (.members // [])
     | sort_by(.leftDate != null, .id)
     | .[]
@@ -122,6 +125,8 @@ printf '%s' "$MMRY_RESPONSE" | "$MMRY_JQ" -r "${MMRY_JQ_NAME_DEFS}${MMRY_JQ_AVAI
          then (.idleTotal | gsub("[\u0000-\u001f\u007f-\u009f]"; "")) as $idle
               | (if $idle != "" then "  (" + $idle + ")" else "" end)
          else "" end)
+      + mmry_lead_state_suffix
+      + mmry_progress_suffix
       + mmry_availability_suffix
       + (if .leftDate == null then ""
          elif .removedByEmail then "   (removed by " + .removedByEmail + "; cannot be addressed)"
