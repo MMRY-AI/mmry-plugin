@@ -579,16 +579,23 @@ _permission_request_turn() { # $1 tool_name, $2 turn_id
     _cleared_once
 }
 
-@test "X-12 33900: the ask record holds the agent and the tool name only, prints nothing, makes no call, and is not written for a non-member" {
-    run _ask "$(_cc_ask Bash "$SUB" "curl -H Authorization: $PLANTED")"
+@test "X-12 33900: the ask record holds the agent, the tool name and the program only, prints nothing, makes no call for the main thread, and is not written for a non-member" {
+    # #34519: the main thread's ask makes no call (its Notification raises it); a helper's ask is
+    # raised at once (formation-waiting-approvals.bats A-01). The record keeps the program, the
+    # command's first word (curl), and never the rest of the command.
+    run _ask "$(_cc_ask Bash "" "curl -H Authorization: $PLANTED")"
     [ "$status" -eq 0 ]
     [ -z "$output" ] || { echo "printed (Claude Code would read it as a decision): $output"; return 1; }
     [ -n "$(ls "$TEST_TMPDIR"/.mmry-asking-* 2>/dev/null)" ] || { echo "no ask record"; return 1; }
     ! grep -rq "$PLANTED" "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "planted string stored"; return 1; }
     # #33900 A2: the asked call is identified by a one-way digest of its input, never the input itself.
     grep -Eq '^input [0-9a-f]{64}$' "$TEST_TMPDIR"/.mmry-asking-* || { cat "$TEST_TMPDIR"/.mmry-asking-*; return 1; }
-    ! grep -rq 'curl' "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "the command was stored"; return 1; }
+    grep -Eq '^program curl$' "$TEST_TMPDIR"/.mmry-asking-* || { cat "$TEST_TMPDIR"/.mmry-asking-*; return 1; }
+    ! grep -rq 'Authorization' "$TEST_TMPDIR"/.mmry-* 2>/dev/null || { echo "the command was stored"; return 1; }
     [ ! -s "$URLS" ] || { echo "the ask record made a call"; cat "$URLS"; return 1; }
+    run _ask "$(_cc_ask Bash "$SUB" "curl -H Authorization: $PLANTED")"
+    [ -z "$output" ] || { echo "printed for a helper: $output"; return 1; }
+    ! grep -q "$PLANTED" "$BODIES" || { echo "the command was sent"; return 1; }
     bash "$HH/formation-state.sh" clear "$SID" >/dev/null
     rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*
     run _ask "$(_cc_ask Bash)"
