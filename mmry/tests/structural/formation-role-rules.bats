@@ -249,10 +249,10 @@ M_RULE_34011="Message the one member who needs something; message everyone only 
 S_RULE_34011="Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply."
 
 @test "P3 (#34011): M and S sit beside, never inside, the lead rule and the member rule" {
-    [[ "$LEAD_RULE" != *"$M_RULE_34011"* ]]
-    [[ "$LEAD_RULE" != *"$S_RULE_34011"* ]]
-    [[ "$MEMBER_RULE" != *"$M_RULE_34011"* ]]
-    [[ "$MEMBER_RULE" != *"$S_RULE_34011"* ]]
+    [[ "$LEAD_RULE" != *"$M_RULE_34011"* ]] || return 1
+    [[ "$LEAD_RULE" != *"$S_RULE_34011"* ]] || return 1
+    [[ "$MEMBER_RULE" != *"$M_RULE_34011"* ]] || return 1
+    [[ "$MEMBER_RULE" != *"$S_RULE_34011"* ]] || return 1
     # The plugin's own role-rule text (lib-formation-roles.sh, which 34011 never edits) carries neither.
     ! grep -q -F -- "$M_RULE_34011" "${HANDLERS}/lib-formation-roles.sh"
     ! grep -q -F -- "$S_RULE_34011" "${HANDLERS}/lib-formation-roles.sh"

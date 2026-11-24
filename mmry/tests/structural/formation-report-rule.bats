@@ -413,7 +413,7 @@ _report_then_ack_in_proc() {
     local pu pt mu su
     pu="$(_file_lines "$edits" "Proc = 'usp_Mnemo_UpdateFormationMember'" | head -n 1)"
     pt="$(_file_lines "$edits" "Proc = 'usp_Mnemo_TakeFormationQueuePiece'" | head -n 1)"
-    [[ -n "$pu" && -n "$pt" ]]
+    [[ -n "$pu" && -n "$pt" ]] || return 1
     mu=($(_file_lines "$edits" "N'\" + \$Migration106MessageRule"))
     su=($(_file_lines "$edits" "N'\" + \$Migration106ScreenRule"))
     [ "${#mu[@]}" -eq 2 ]
