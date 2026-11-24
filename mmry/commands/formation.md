@@ -232,17 +232,21 @@ The user gives a numeric formation id, for example `/mmry:formation join 42`.
    **Every window joins for itself.** Membership is held per session, so starting a formation in
    one terminal does not enrol the others; each runs join with the id.
 
-4. Show the two rules the script prints after the join line, and follow them for as long as this
+4. Show the four rules the script prints after the join line, and follow them for as long as this
    session is in the formation. See "Reporting to the lead" below.
 
 ### Reporting to the lead
 
-Every member is given these two rules when it joins, and every assignment it receives repeats
+Every member is given these four rules when it joins, and every assignment it receives repeats
 them. They read the same in Claude Code, in Codex and in a connected assistant:
 
 > Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running.
 >
 > When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
+>
+> Message the one member who needs something; message everyone only when every member must act or change course.
+>
+> Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply.
 
 Each member is also given one rule for its own role:
 
@@ -363,6 +367,8 @@ The lead gives one member its work, for example `/mmry:formation assign 12 "take
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-assign.sh" <memberId> "<assignment>" [role]
 ```
+
+An assignment holds up to 500 characters; for longer work, put the brief in a file and give its path in the assignment.
 
 This is how the lead stops being a title. Until #31044 each member declared its own job when it
 joined and nothing could change it afterwards, so the person running the work opened every window
