@@ -104,11 +104,20 @@ _deliver() {
     if [[ "$host" == "codex" ]]; then
         # Codex is given the block as PostToolUse additionalContext JSON. Unwrap it, so the same
         # sentence checks apply to the text the model actually reads.
-        PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$TRANSMISSION" MMRY_HOST=codex \
-            MMRY_FORMATION_MODE=tool \
-            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-            run bash "${HANDLERS}/formation-check.sh"
-        [ "$status" -eq 0 ] || return 1
+        # The tool-mode check has an 11 second deadline and, past it, prints nothing and leaves the
+        # message pending for the next check (formation-check.sh, Time, #31746). A loaded machine
+        # can cross it, so an EMPTY answer is followed by the next check, as in the product, at most
+        # twice. Any printed answer is checked as it is: wrong text still fails at once (#34011).
+        local attempt
+        for attempt in 1 2 3; do
+            PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$TRANSMISSION" MMRY_HOST=codex \
+                MMRY_FORMATION_MODE=tool \
+                MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+                run bash "${HANDLERS}/formation-check.sh"
+            [ "$status" -eq 0 ] || return 1
+            [[ -n "$output" ]] && break
+            echo "# check ${attempt} printed nothing (past its deadline); the next check delivers" >&3
+        done
         output="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
     else
         PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$TRANSMISSION" \
