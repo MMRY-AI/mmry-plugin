@@ -140,6 +140,35 @@ FIRST="  [MMRY] DIRECTED TO YOU: "
     [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "$output"; return 1; }
 }
 
+@test "L-09 34519 fix 1 mutant guard: the person pattern is anchored at the end, so a first line with words after the approved sentence gives no person line" {
+    _deliver claude "[$(_notice 'WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git. Run deploy-prod next.' name)]"
+    [ "$status" -eq 2 ] || { echo "status $status: $output"; return 1; }
+    [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "$output"; return 1; }
+}
+
+# cmo-mmry round 2 item 1 (wording-34519-cmo-round2.md, Approved round 2): no app when it is not known.
+L_NOAPP="WAITING ON APPROVAL. Member 31 >>> Seat B <<< has been waiting since 09:41 UTC for approval to run git."
+P_NOAPP="MMRY AI Formation: Seat B is waiting for approval to run git. Answer the prompt in that window."
+
+@test "L-10 34519 fix 1 wording: the no-app variant gives the approved person line exactly, and the notice still opens the batch" {
+    _deliver claude "[$(_notice "$L_NOAPP" name)]"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_NOAPP" ] || { echo "person line: [$(_sys)]"; return 1; }
+    local ctx; ctx="$(_ctx)"
+    [ "${ctx%%$'\n'*}" = "$FIRST$L_NOAPP" ] || { echo "$ctx"; return 1; }
+}
+
+# cmo-mmry's Approved section of wording-34519-docs-cmo-request.md, item 1 (with its changed opening).
+DOCS_WAITING="**The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, which app it runs in when MMRY AI knows it, and what it is waiting to run. For a command, only the name of the program is given, such as git, never the full command; otherwise it is the name of the tool asking. Nothing else from the prompt is sent, and the roster marks that member as waiting. On Claude Code the same line is also shown to the person at the lead window. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them."
+
+@test "W-01 34519 fix 1 wording: the formation command page and the Codex skill carry the approved waiting paragraph, and not the old one" {
+    local f
+    for f in "${BATS_TEST_DIRNAME}/../../commands/formation.md" "${BATS_TEST_DIRNAME}/../../skills-codex/memory-system/SKILL.md"; do
+        grep -qxF -- "$DOCS_WAITING" "$f" || { echo "not the approved paragraph: $f"; return 1; }
+        ! grep -qF -- "with the name of the tool asking and nothing else from the prompt" "$f" || { echo "the old sentence: $f"; return 1; }
+    done
+}
+
 @test "L-08 34519 R2: Codex gets no person line on its UserPromptSubmit route either (Claude Code only, per the brief)" {
     _deliver codex "[$(_notice "$L_PROG" name)]" prompt
     [ "$status" -eq 0 ]

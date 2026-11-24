@@ -29,6 +29,11 @@
 #   S-01..04  the stale flag: a prompt that timed out or was answered No, and a refused broad rm,
 #             clear on the member's next tool call (measured baseline: about 9 minutes, at its Stop);
 #             a call still open beside a parallel call does not clear.
+#   S-05..06  fix round 1 (QA 34519, Seat E): the clear stays bounded in a long session (5 MB, 50 earlier
+#             calls), and only the asked call's own result ends the wait.
+#   C-07..10  fix round 1: an approval holds for the same call in the same folder only (DD-206: the
+#             digest covers the working folder and the whole input); a helper's own run and a Claude
+#             Code run are never recorded as an approval.
 
 load '../helpers/test-helper'
 load '../helpers/formation-waiting-helpers.sh'
@@ -192,7 +197,7 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf build"
     _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     # Refused (timed out, or No): Claude Code writes the call's error result and the member goes on.
     _tp_call "$tp" "rm -rf build" error
@@ -204,7 +209,7 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf build"
     _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     _check "$(_cc_post_tp "ls -la" "$tp")" || true
     _held
 }
@@ -213,7 +218,7 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf ./junk/*"
     _ask "$(_cc_ask_tp "rm -rf ./junk/*" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     _tp_call "$tp" "rm -rf ./junk/*" error
     _check "$(_cc_post_tp "git status" "$tp")" || true
     _cleared_once
@@ -228,8 +233,126 @@ _codex_member_approves() { # $1 command
     local tp="$TEST_TMPDIR/transcript.jsonl"
     _tp_call "$tp" "rm -rf build"
     _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
-    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"tool_result toolu_ask is_error"}]}}\n' >> "$tp"
     _check "$(_cc_post_tp "echo toolu_ask" "$tp")" || true
     _held
+}
+
+# ---- fix round 1 (QA 34519, Seat E): the clear's cost, and the asked call only ------------------------
+
+# A member session's transcript: $2 earlier Bash calls, each with a result of $3 bytes, then the asked call
+# (toolu_ask, "rm -rf build") with no result yet.
+_tp_long() { # $1 path, $2 earlier calls, $3 bytes in each earlier call's result
+    local tp="$1" n="$2" pad i
+    pad="$(printf '%0*d' "$3" 0)"
+    : > "$tp"
+    for ((i = 1; i <= n; i++)); do
+        printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_e%s","name":"Bash","input":{"command":"echo call-%s"}}]}}\n' "$i" "$i" >> "$tp"
+        printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_e%s","content":"%s"}]}}\n' "$i" "$pad" >> "$tp"
+    done
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_ask","name":"Bash","input":{"command":"rm -rf build"}}]}}\n' >> "$tp"
+}
+_ms_now() { # milliseconds, from EPOCHREALTIME where the shell has it (bash 5), else whole seconds
+    local t="${EPOCHREALTIME:-}"
+    if [[ -n "$t" ]]; then t="${t//[.,]/}"; printf '%s' "$(( 10#$t / 1000 ))"; else printf '%s' "$(( SECONDS * 1000 ))"; fi
+}
+# The whole next-call check (formation-check.sh, the synchronous PostToolUse hook, timeout 15 s) after the
+# asked call was refused, in a session of $1 earlier calls of $2 bytes each. Sets CLEAR_MS and checks it cleared.
+_timed_clear() {
+    local tp="$TEST_TMPDIR/transcript.jsonl" t0 t1
+    : > "$URLS"; : > "$NOTICES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*
+    _tp_long "$tp" "$1" "$2"
+    _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","is_error":true,"content":"The user did not approve"}]}}\n' >> "$tp"
+    t0="$(_ms_now)"
+    _check "$(_cc_post_tp "ls -la" "$tp")" || true
+    t1="$(_ms_now)"
+    CLEAR_MS=$(( t1 - t0 ))
+    _cleared_once
+}
+
+# BOUND: 5 s for the whole check at every size. A third of the hook's 15 s limit, so a check on a loaded
+# machine (QA measured 11.7 s for the old clear at ONE call on a PC under load) still ends inside the limit,
+# and far below the old cost at 5 MB (50.8 s measured by QA). The bound is the same at every size: the
+# clear reads the transcript once, by the asked call's id, whatever the session's length.
+@test "S-05 34519 fix 1: the next-call clear stays well inside the 15 s hook limit at one call, 1 MB and 5 MB (50 earlier calls)" {
+    local size calls bytes over=""
+    for size in "0 0" "10 100000" "50 100000"; do
+        calls="${size% *}" bytes="${size#* }"
+        _timed_clear "$calls" "$bytes" || { echo "not cleared at $calls calls"; return 1; }
+        echo "# S-05 $calls earlier calls of $bytes bytes ($(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ') bytes): whole check ${CLEAR_MS} ms" >&3
+        (( CLEAR_MS < 5000 )) || over+=" ${CLEAR_MS} ms at $calls earlier calls of $bytes bytes;"
+    done
+    [ -z "$over" ] || { echo "the clear took$over"; return 1; }
+}
+
+@test "S-06 34519 fix 1 mutant guard: only the asked call's own result ends the wait, not an earlier or a parallel call of the same tool" {
+    local tp="$TEST_TMPDIR/transcript.jsonl"
+    : > "$tp"
+    # An earlier call of the same tool with its result (whose text names the asked call), the asked call,
+    # and a parallel call of the same tool, both still without a result when the prompt is raised.
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_e1","name":"Bash","input":{"command":"echo one"}}]}}\n' >> "$tp"
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_e1","content":"saw toolu_ask"}]}}\n' >> "$tp"
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_ask","name":"Bash","input":{"command":"rm -rf build"}},{"type":"tool_use","id":"toolu_par","name":"Bash","input":{"command":"sleep 1"}}]}}\n' >> "$tp"
+    _ask "$(_cc_ask_tp "rm -rf build" "$tp")" || true
+    _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    # The parallel call finishes (its result names the asked call too); the asked call is still open.
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_par","content":"toolu_ask"}]}}\n' >> "$tp"
+    _check "$(_cc_post_tp "sleep 1" "$tp")" || true
+    _held
+    # Then the asked call's own result: the next call clears.
+    printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","is_error":true,"content":"The user did not approve"}]}}\n' >> "$tp"
+    _check "$(_cc_post_tp "ls -la" "$tp")" || true
+    _cleared_once
+}
+
+# Codex 0.171.0's PermissionRequest as measured (measure/logs/codex): the payload carries cwd, and a shell
+# command's tool_input holds command only.
+_codex_ask_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
+    printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PermissionRequest","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
+}
+
+@test "C-07 34519 fix 1 DD-206: the same command in another working folder is not allowed; in the same folder it is" {
+    _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post Bash "" '{"command":"git push origin main"}')" || true
+    _cleared_once
+    : > "$URLS"
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "allowed in a folder the member never approved it in: $output"; return 1; }
+    [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ "$output" = "$ALLOW" ] || { echo "the same call in the same folder: [$output]"; return 1; }
+}
+
+@test "C-08 34519 fix 1 DD-206: an MCP call with another sibling argument is not allowed; the same input is" {
+    _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    _check "$(_codex_post mcp__probe__deploy "" '{"command":"deploy","env":"staging"}')" || true
+    _cleared_once
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    [ -z "$output" ] || { echo "allowed another argument: $output"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    [ "$output" = "$ALLOW" ] || { echo "the same input: [$output]"; return 1; }
+}
+
+@test "C-09 34519 fix 1 mutant guard (M-a): a helper's own approved run is never recorded as the member's approval" {
+    _waiting "$(_codex_ask_cwd thread-sub-1 /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post Bash thread-sub-1 '{"command":"git push origin main"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "a helper's run was recorded:"; cat "$(_approved_file)"; return 1; }
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "another helper was allowed on a helper's run: $output"; return 1; }
+}
+
+@test "C-10 34519 fix 1 mutant guard (M-b): a Claude Code member's approved run is never recorded as an approval" {
+    _ask "$(_cc_ask Bash "" "git push origin main")" || true
+    _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+    _check "$(_cc_post Bash "" '{"command":"git push origin main"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "Claude Code recorded an approval:"; cat "$(_approved_file)"; return 1; }
 }
