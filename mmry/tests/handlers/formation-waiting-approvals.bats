@@ -93,9 +93,12 @@ _cc_post_tp() { # $1 command of the call that ran, $2 transcript
 # ---- R1, Codex (DD-206) ---------------------------------------------------------------------------
 
 # The member approves `git push` in its own thread: the asked call raises, then runs (its PostToolUse).
+# The JSON is built in a variable first: bash 3.2 (macOS /bin/bash) mis-reads \" inside "$( )", which
+# sent an empty or broken payload on the macOS runner (C-01, C-06, P-01, P-03 failed there, fix round 1).
 _codex_member_approves() { # $1 command
-    _waiting "$(_codex_ask Bash "" "{\"command\":\"$1\",\"description\":\"d\"}")"
-    _check "$(_codex_post Bash "" "{\"command\":\"$1\"}")" || true
+    local ask="{\"command\":\"$1\",\"description\":\"d\"}" post="{\"command\":\"$1\"}"
+    _waiting "$(_codex_ask Bash "" "$ask")"
+    _check "$(_codex_post Bash "" "$post")" || true
 }
 
 @test "C-01 34519 R1 DD-206: Codex allows a helper repeating a command its member approved in this session, and raises nothing for it" {
@@ -153,7 +156,8 @@ _codex_member_approves() { # $1 command
 # ---- R2, the program ------------------------------------------------------------------------------
 
 @test "P-01 34519 R2: Codex sends the program only: the first word, never the arguments" {
-    _waiting "$(_codex_ask Bash "" "{\"command\":\"git push https://$PLANTED@host main\",\"description\":\"d\"}")"
+    local ask="{\"command\":\"git push https://$PLANTED@host main\",\"description\":\"d\"}"
+    _waiting "$(_codex_ask Bash "" "$ask")"
     [ "$(_program_sent)" = "git" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" || { echo "an argument was sent"; return 1; }
     ! grep -q "push" "$BODIES" || { echo "an argument was sent"; return 1; }
@@ -166,10 +170,11 @@ _codex_member_approves() { # $1 command
 }
 
 @test "P-03 34519 R2: a first word that is not a bare name (an assignment, a quoted word) sends no program" {
-    local c
+    local c ask
     for c in 'TOKEN=abc git push' '\"my tool\" run' '$(whoami)'; do
         rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
-        _waiting "$(_codex_ask Bash "" "{\"command\":\"$c\",\"description\":\"d\"}")"
+        ask="{\"command\":\"$c\",\"description\":\"d\"}"
+        _waiting "$(_codex_ask Bash "" "$ask")"
         [ "$(_program_sent)" = "<none>" ] || { echo "for [$c]"; cat "$BODIES"; return 1; }
         "$JQ_BIN" -e '.toolName == "Bash"' < "$BODIES" >/dev/null || { cat "$BODIES"; return 1; }
     done
