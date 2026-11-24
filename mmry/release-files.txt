@@ -182,6 +182,7 @@ tests/helpers/live-foundation.bash
 tests/helpers/live-journey.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
+tests/helpers/permission-rule-match.jq
 tests/helpers/self-update-release.bash
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
