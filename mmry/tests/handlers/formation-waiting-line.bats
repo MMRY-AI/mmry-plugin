@@ -68,17 +68,27 @@ _member_msg() { # $1 content
 
 # Deliver a batch to the lead through formation-check.sh. $1 host (claude|codex), $2 the JSON array,
 # $3 mode (tool by default; prompt for UserPromptSubmit).
+#
+# THE CHECK'S CLOCK IS SET BACK (#34651 round 3). formation-check.sh works to a deadline on its own
+# clock in the tool and prompt modes (11 seconds, bash's SECONDS) and, past it, prints NOTHING with
+# exit 0 and leaves the batch pending (#31746). On a loaded machine one check can cross it, and L-15
+# then failed on an empty answer in a full-file run while passing alone. These cases are about what the
+# check prints, not how fast, so each check here starts with SECONDS far in the past (bash takes
+# SECONDS from its environment) and the deadline can never be the outcome. There is NO retry: every
+# case compares the printed line itself, so an empty or partial answer fails it, and L-17 pins that a
+# check past its deadline prints nothing, so that failure stays visible. The deadline itself is
+# tested in structural/formation-check-timeout.bats. $4 sets another clock (L-17 only).
 _deliver() {
-    local host="$1" body="$2" mode="${3:-tool}" bin; bin="$(_fake_curl_dir)"
+    local host="$1" body="$2" mode="${3:-tool}" clock="${4:--100000}" bin; bin="$(_fake_curl_dir)"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_CODE_SESSION_ID"
     if [[ "$host" == "codex" ]]; then
         PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" MMRY_HOST=codex MMRY_FORMATION_MODE="$mode" \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-            run bash "${HANDLERS}/formation-check.sh"
+            run env SECONDS="$clock" bash "${HANDLERS}/formation-check.sh"
     else
         PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" MMRY_FORMATION_MODE="$mode" \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-            run env -u MMRY_HOST bash "${HANDLERS}/formation-check.sh"
+            run env -u MMRY_HOST SECONDS="$clock" bash "${HANDLERS}/formation-check.sh"
     fi
 }
 _ctx() { printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext' | tr -d '\r'; }
@@ -206,6 +216,7 @@ P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run 
     for pair in 'npm s3cr3tword' 'git hunter2token' 'git install' 'make push' 'curl inline' 'git script'; do
         _deliver claude "[$(_notice "${head}${pair}." name)]"
         [ "$status" -eq 0 ] || { echo "for [$pair]: status $status: $output"; return 1; }
+        [ -n "$output" ] || { echo "for [$pair]: the check printed nothing; an empty answer proves nothing and fails"; return 1; }
         [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run ${pair%% *}. Answer the prompt in that window." ] \
             || { echo "for [$pair]: person line: [$(_sys)]"; return 1; }
     done
@@ -228,6 +239,7 @@ P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run 
         tail_="${row%%|*}"; prog="${row##*|}"
         _deliver claude "[$(_notice "${head}${tail_}" name)]"
         [ "$status" -eq 0 ] || { echo "for [$tail_]: status $status: $output"; return 1; }
+        [ -n "$output" ] || { echo "for [$tail_]: the check printed nothing; an empty answer proves nothing and fails"; return 1; }
         [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run ${prog}. Answer the prompt in that window." ]             || { echo "for [$tail_]: person line: [$(_sys)]"; return 1; }
     done
     # Every listed interpreter still shows both forms, as L-12 pins for bash and node.
@@ -238,6 +250,21 @@ P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run 
         _deliver claude "[$(_notice "${head}an inline ${i} script." name)]"
         [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run an inline ${i} script. Answer the prompt in that window." ]             || { echo "for [$i] inline: person line: [$(_sys)]"; return 1; }
     done
+}
+
+# #34651 round 3: why L-15 failed under load, pinned. A check whose own clock is past its deadline
+# prints nothing and exits 0, so it must never be read as "nothing was shown": the same notice with the
+# clock set back gives the line, and the two answers differ. If bash ever stopped taking SECONDS from
+# its environment, the first half would print a line and this case would say so.
+@test "L-17 34651 round 3: a check past its own deadline prints nothing at all (exit 0), which no case here accepts; with its clock set back the same notice gives the person line" {
+    local n; n="[$(_notice "$L_PROG" name)]"
+    _deliver claude "$n" tool 12
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ -z "$output" ] || { echo "a check started past its deadline printed: [$output] (SECONDS not taken from the environment?)"; return 1; }
+    [ "$(_sys)" != "$P_PROG" ] || { echo "an empty answer was read as the person line"; return 1; }
+    _deliver claude "$n"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_PROG" ] || { echo "person line: [$(_sys)]"; return 1; }
 }
 
 @test "L-14 34651: Codex gets no person line for the three new lines either, and each still opens its batch" {
