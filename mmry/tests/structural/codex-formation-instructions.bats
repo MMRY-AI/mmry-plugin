@@ -323,7 +323,9 @@ _ROSTER_JSON='{"formation":{"id":42,"objective":"migrate the billing schema"},"m
     _assert_targets_exist
 }
 
-@test "roster: the same footer on Claude Code is unchanged, BYTE FOR BYTE" {
+@test "roster: the same footer on Claude Code, from a service that sends no progressShown, is unchanged, BYTE FOR BYTE" {
+    # #34466: this roster carries no progressShown (an older service), so the footer is today's. The
+    # approved footer for a roster that does carry it is pinned in the next test.
     # THREE SUBSTRINGS ARE NOT A FOOTER (#31245 QA round 6).
     #
     # The round-5 version of this test asserted these same three fragments and passed against a
@@ -356,6 +358,39 @@ FOOTER
     [ -n "$actual" ]
     if [ "$actual" != "$expected" ]; then
         echo "the Claude Code roster footer has changed." >&2
+        echo "--- expected ---" >&2; printf '%s\n' "$expected" >&2
+        echo "--- actual ---"   >&2; printf '%s\n' "$actual"   >&2
+        return 1
+    fi
+}
+
+@test "roster: under a roster carrying progressShown, the Claude Code footer is cmo-mmry's approved text, BYTE FOR BYTE (#34466)" {
+    # Changed on purpose: the bracket is now what MMRY AI derives from activity, not only what the member
+    # reported, so "The state in brackets is the last thing that member reported" is no longer true.
+    # wording-34466-cmo.md item 2, with its line breaks.
+    bash "${HANDLERS}/formation-state.sh" set 42 "$CLAUDE_SESSION_ID"
+    local bin; bin="$(_fake_curl_dir)"
+    local body='{"formation":{"id":42,"objective":"migrate the billing schema"},"members":[{"id":11,"sessionId":"s1","role":"Lead","email":"lead@example.com","assignment":"coordinate","progressShown":null,"leftDate":null},{"id":12,"role":"Wingman","email":"w@example.com","assignment":"build","progress":"Assigned","progressShown":"working","leftDate":null}]}'
+    local out
+    out="$(PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        bash "${HANDLERS}/formation-roster.sh")"
+
+    local actual expected
+    actual="$(printf '%s\n' "$out" | tr -d '\r' | sed -n '/^Direct a message at one of them with/,$p')"
+    expected="$(cat <<'FOOTER'
+Direct a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off
+and the message goes to the whole formation.
+In brackets, working means MMRY AI has recorded activity from the member since its work was given,
+and not started means it has recorded none. Blocked, Done and Abandoned are what the member
+reported, and they always show. Messages count as activity, not as progress. Report your own with
+/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account
+with /mmry:formation report.
+FOOTER
+)"
+    [ -n "$actual" ]
+    if [ "$actual" != "$expected" ]; then
+        echo "the Claude Code roster footer is not the approved text." >&2
         echo "--- expected ---" >&2; printf '%s\n' "$expected" >&2
         echo "--- actual ---"   >&2; printf '%s\n' "$actual"   >&2
         return 1

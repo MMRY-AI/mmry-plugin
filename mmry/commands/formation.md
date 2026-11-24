@@ -1,6 +1,6 @@
 Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>` | `/mmry:formation idle-limit [<minutes>|default]` | `/mmry:formation progress-limit [<minutes>|default]`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>] [--confirm]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>` | `/mmry:formation idle-limit [<minutes>|default]` | `/mmry:formation progress-limit [<minutes>|default]`
 
 ## What This Does
 
@@ -334,6 +334,12 @@ having gone to the formation, or the reverse.
 **A refusal names its own cause and you pass it through.** The server refuses a member id that is
 not in this formation, one belonging to another account, one who has left, and the sender's own.
 Nothing is sent in any of those cases, and the message is not quietly broadcast instead.
+
+A directed message that mentions another member, by name or member id, or a task assigned to another member, is held and not sent, with a warning naming what it mentions. If the recipient is right, send it again with --confirm. Messages to the whole Formation and to the lead are never held.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-say.sh" "<message>" <memberId> --confirm
+```
 
 Send one when it affects what somebody else is doing: you are about to change a file, you are
 blocked, you have finished something they are waiting on. Do not narrate. Every member is
