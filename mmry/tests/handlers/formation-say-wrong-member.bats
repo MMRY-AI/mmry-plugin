@@ -137,10 +137,12 @@ _sends() { grep -c '^POST http://fake.invalid/api/formations/77/transmissions ' 
 }
 
 @test "W-09 the service's warning is cleaned: no control characters, no carriage return" {
-    export FAKE_HOLD_BODY='{"message":"Nothing was sent.\r This \u001b[31mmessage\u0007 is held.","code":"recipient_check","stored":0}'
+    # U+0085 (NEL, a C1 control, two bytes in UTF-8) is removed only by the jq clean; tr cannot see it.
+    export FAKE_HOLD_BODY='{"message":"Nothing was sent.\r This \u001b[31mmessage\u0007 is\u0085 held.","code":"recipient_check","stored":0}'
     run bash "$HH/formation-say.sh" "Builder has the API half." 441
     [ "$status" -ne 0 ]
     [[ "$output" != *$'\r'* && "$output" != *$'\e'* && "$output" != *$'\a'* ]] || { echo "a control character was printed"; return 1; }
+    [[ "$output" != *$'\xc2\x85'* ]] || { echo "a C1 control (U+0085) was printed"; return 1; }
     [[ "$output" == "Nothing was sent. This [31mmessage is held." ]] || { echo "$output"; return 1; }
 }
 

@@ -142,11 +142,13 @@ reported, and they always show. Messages count as activity, not as progress. Rep
 }
 
 @test "P5: control characters in the service's word are removed, and a value that is not text is not shown" {
-    _roster "${HEAD}${LEAD},$(_member 7 Assigned ',"progressShown":"work\u001b[31ming\r"'),$(_member 8 Assigned ',"progressShown":42')]}"
+    _roster "${HEAD}${LEAD},$(_member 7 Assigned ',"progressShown":"work\u001b[31m\u0085ing\r"'),$(_member 8 Assigned ',"progressShown":42')]}"
     local l7 l8; l7="$(printf '%s\n' "$output" | grep -F m7@x.y)"; l8="$(_line_for m8@x.y)"
     # Raw line, so a carriage return inside the word would show as "ing\r]" (jq on Windows may end the
     # line with its own \r, which is after the bracket).
     [[ "$l7" != *$'\e'* ]] || { echo "an escape character was printed"; return 1; }
+    # U+0085 (NEL, a C1 control, two bytes in UTF-8) is removed only by the C1 part of the jq clean.
+    [[ "$l7" != *$'\xc2\x85'* ]] || { echo "a C1 control (U+0085) was printed"; return 1; }
     [[ "$l7" == *"  [work[31ming]"* ]] || { echo "$l7"; return 1; }
     [[ "$l8" != *"["*"]"* ]] || { echo "$l8"; return 1; }
 }
