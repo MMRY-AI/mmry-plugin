@@ -151,6 +151,36 @@ _never() { # $1 host, $2.. words
     done
 }
 
+# #34651 fix round 1 (F1, Seat D early read item 2): the script is the word RIGHT AFTER the interpreter,
+# or after flags from that interpreter's closed list of flags that take NO value (and, for pwsh and
+# powershell, -File). Any other flag first sends NO action, because the word after it may be that
+# flag's value: node --require ./SECRETX-loader.js app.js named the loader, a flag value, as the script.
+@test "K-16 34651 R2 fix 1: a flag that may take a value before the script sends the program alone, never the flag's value as the script" {
+    local h c
+    for h in claude codex; do
+        for c in "node --require ./SECRETX-loader.js app.js" "node -r ./SECRETX.js app.js" \
+                 "python -X importtime ./tok-SECRETX.py run.py" "python -X ./tok-SECRETX.py run.py" \
+                 "python3 -W ./SECRETX-warn.py run.py" "pwsh -ExecutionPolicy Bypass -File x.ps1" \
+                 "pwsh -ConfigurationFile ./SECRETX-conf.ps1 -File x.ps1" "bash --rcfile ./SECRETX-rc.sh deploy.sh" \
+                 "bash -O ./SECRETX-opt.sh deploy.sh" "sh -o ./SECRETX-o.sh run.sh"; do
+            _prompt "$h" "$c" || return 1
+            _expect "$h" "${c%% *}" "<none>" || { echo "for [$c]"; return 1; }
+            _never "$h" SECRETX loader importtime Bypass ExecutionPolicy app.js run.py x.ps1 deploy.sh run.sh script || { echo "for [$c]"; return 1; }
+        done
+        # The listed value-less flags, and no flag at all, still name the script.
+        _prompt "$h" "bash -x deploy.sh" || return 1
+        _expect "$h" bash "script deploy.sh" || return 1
+        _prompt "$h" "pwsh -NoProfile -File check.ps1" || return 1
+        _expect "$h" pwsh "script check.ps1" || return 1
+        _never "$h" NoProfile File || return 1
+        _prompt "$h" "node app.js" || return 1
+        _expect "$h" node "script app.js" || return 1
+        _prompt "$h" "python3 -u -B tools/x.py --token $PLANTED" || return 1
+        _expect "$h" python3 "script x.py" || return 1
+        _never "$h" tools "$PLANTED" token || return 1
+    done
+}
+
 @test "K-06 34651 R2: a bearer-token curl sends curl only" {
     local h
     for h in claude codex; do
@@ -329,7 +359,37 @@ python manage.py migrate|script manage.py
 python3 -u tools/x.py|script x.py
 pwsh -NoProfile -File sql/prod_108.ps1 -VerifyOnly|script prod_108.ps1
 powershell -File x.ps1|script x.ps1
-bash -C x.sh|script x.sh
+bash -C x.sh|
+bash -e -u -x -l -v x.sh|script x.sh
+sh -e run.sh|script run.sh
+bash -ex x.sh|
+bash -x -o pipefail x.sh|
+bash -O extglob deploy.sh|
+bash --rcfile rc.sh deploy.sh|
+bash -File x.sh|
+bash -x|
+bash -x -c ls|
+python -u -B -E -s -I x.py|script x.py
+python -X importtime ./tok.py run.py|
+python -X ./tok.py run.py|
+python3 -W x.py run.py|
+python -m x.py|
+node --require ./loader.js app.js|
+node -r ./loader.js app.js|
+node --inspect app.js|
+node -u app.js|
+pwsh -NoProfile -NonInteractive -NoLogo -File a/b.ps1 -Key x|script b.ps1
+pwsh -NoLogo x.ps1|script x.ps1
+pwsh x.ps1|script x.ps1
+pwsh -ExecutionPolicy Bypass -File x.ps1|
+pwsh -ExecutionPolicy x.ps1|
+pwsh -File -NoProfile x.ps1|
+pwsh -File -File x.ps1|
+pwsh -noprofile -File x.ps1|
+pwsh -NoProfileX x.ps1|
+pwsh -e x.ps1|inline
+powershell -NoProfile -File x.ps1|script x.ps1
+powershell -WorkingDirectory d.ps1 -File x.ps1|
 bash scripts/noext|
 bash a.txt|
 bash a.sh.bak|

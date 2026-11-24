@@ -197,6 +197,26 @@ P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run 
     done
 }
 
+# #34651 fix round 1 (F2, Seat D early read item 5): the person line shows a subcommand only when it is
+# on THAT program's closed list (the handler's own lists, lib-waiting-actions.sh). A notice from an
+# older service, or a row written past the service, that ends "to run npm s3cr3tword." gives the
+# program-only person line (the approved #34519 line), never the word.
+@test "L-15 34651 R2 fix 1: a subcommand outside its program's closed list is never shown to the person; the program-only line is" {
+    local head='WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run ' pair
+    for pair in 'npm s3cr3tword' 'git hunter2token' 'git install' 'make push' 'curl inline' 'git script'; do
+        _deliver claude "[$(_notice "${head}${pair}." name)]"
+        [ "$status" -eq 0 ] || { echo "for [$pair]: status $status: $output"; return 1; }
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run ${pair%% *}. Answer the prompt in that window." ] \
+            || { echo "for [$pair]: person line: [$(_sys)]"; return 1; }
+    done
+    # A listed pair still shows, as L-11 pins for git push.
+    _deliver claude "[$(_notice "${head}npm install." name)]"
+    [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run npm install. Answer the prompt in that window." ] \
+        || { echo "person line: [$(_sys)]"; return 1; }
+    _deliver claude "[$(_notice "$L_W1" name)]"
+    [ "$(_sys)" = "$P_W1" ] || { echo "person line: [$(_sys)]"; return 1; }
+}
+
 @test "L-14 34651: Codex gets no person line for the three new lines either, and each still opens its batch" {
     local l
     for l in "$L_W1" "$L_W2" "$L_W3"; do
