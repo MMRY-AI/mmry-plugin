@@ -202,6 +202,7 @@ CMDS
     _is deny  '[]' '["Bash(rm *)"]' 'nice -n 5 rm -rf x' || return 1
     _is deny  '[]' '["Bash(rm *)"]' 'for f in a; do rm -rf $f; done' || return 1
     _is deny  '[]' '["Bash(rm *)"]' 'if true; then rm -rf x; fi' || return 1
+    _is none  '["Bash(npm test *)"]' '[]' 'npm test &&' || return 1
     # Round 3 (delta A3): the built-in read-only commands run with no rule at all, and only a deny stops
     # them. Every row above was answered with them switched off; these are answered with them on.
     RO=1

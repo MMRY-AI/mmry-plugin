@@ -16,7 +16,8 @@
 #   - timeout, time, nice (with or without -n N), nohup, command, builtin, noglob, stdbuf and a bare
 #     xargs in front are taken off before matching, and so is the do, then or else that opens the body
 #     of a loop or an if;
-#   - a deny or ask rule matches past a leading VAR=value; an allow rule does not.
+#   - a deny or ask rule matches past a leading VAR=value; an allow rule does not;
+#   - a command that ends in a dangling && || | or & is never "allow".
 #
 # THE BUILT-IN READ-ONLY COMMANDS (round 3, Seat A's delta A3). The documentation: "Claude Code
 # recognizes a built-in set of Bash commands as read-only and runs them without a permission prompt in
@@ -128,6 +129,7 @@ def decide($deny; $ask; $allow; $rd):
       elif readonly_on and any($bare[]; read_denied($rd)) then "deny"
       elif any($bare[]; matches_any($ask)) then "ask"
       elif any($p[]; test("[<>]")) then "none"
+      elif test("(&&|\\|\\||\\||&)\\s*$") then "none"
       elif all($p[]; matches_any($allow) or (readonly_on and readonly_part)) then "allow"
       else "none"
       end;
