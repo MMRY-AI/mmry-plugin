@@ -23,7 +23,7 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Retire (deactivate) a memory | `memory_retire` | `id` |
 | Reload memories now | `memory_load` | optional `working_dir` |
 | Join a formation, as this conversation | `formation_join` | `formation_id`; optional `working_dir` |
-| Message the formation, or one member | `formation_say` | `message`; optional `to_member_id` |
+| Message the formation, or one member | `formation_say` | `message`; optional `to_member_id`, `confirm` |
 | Report Accepted, Done, Blocked or Abandoned | `formation_progress` | `state`; optional `note` |
 | See the members, their ids, and the lead | `formation_roster` | nothing |
 | Start a formation, with this conversation as lead | `formation_start` | `objective`; optional `task_id`, `working_dir` |
@@ -224,6 +224,8 @@ with `formation_leave`.
 To report that you are free, report progress with the state Free, not a message; do the same when the person asks you to tell the lead you are free. MMRY AI records your current work as Done and tells the lead, so it can give you your next job.
 
 Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
+
+A directed message that mentions another member, by name or member id, or a task assigned to another member, is held and not sent, with a warning naming what it mentions. If the recipient is right, send it again with confirm set to true. Messages to the whole Formation and to the lead are never held.
 
 Start a formation with `formation_start` and an `objective` that says what the job is; this
 conversation becomes its lead, and the reply gives the id to share with the other sessions. As the

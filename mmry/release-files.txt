@@ -129,6 +129,7 @@ tests/handlers/formation-list-privacy.bats
 tests/handlers/formation-member-names.bats
 tests/handlers/formation-progress-limit.bats
 tests/handlers/formation-rejoin.bats
+tests/handlers/formation-say-wrong-member.bats
 tests/handlers/formation-upgrade-refusal.bats
 tests/handlers/formation-waiting-busy.bats
 tests/handlers/formation-waiting-guards.bats
@@ -260,6 +261,7 @@ tests/structural/formation-renewal-turn.bats
 tests/structural/formation-report-rule.bats
 tests/structural/formation-report.bats
 tests/structural/formation-role-rules.bats
+tests/structural/formation-roster-progress-shown.bats
 tests/structural/formation-roster.bats
 tests/structural/formation-save-outcome.bats
 tests/structural/formation-say.bats
