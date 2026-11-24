@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # lib-waiting-actions.sh - the closed lists behind the waiting notice's ACTION (#34651, DD-207 in
 # MMRY-AI/mmry, amending DD-206). Sourced, never run: it sets four variables and one function, starts
-# no process and prints nothing.
+# no process and prints nothing. Both callers run under their own set -euo pipefail, and this file
+# changes no shell option of theirs (file-integrity.bats reads the next line for that):
+# mmry-lib: sets no shell options
 #
 # WHY A FILE OF ITS OWN (#34651 fix round 1). Two handlers must hold a word to the SAME lists:
 #   formation-waiting.sh   derives the action from a waiting command and sends it (the member's side);
