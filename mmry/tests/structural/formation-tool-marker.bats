@@ -56,6 +56,8 @@ for arg in "$@"; do
     prev="$arg"
 done
 [[ -n "${FAKE_URL_LOG:-}" ]] && printf '%s %s\n' "$method" "$url" >> "$FAKE_URL_LOG"
+[[ -n "${FAKE_ARGS_LOG:-}" ]] && printf '%s\n' "$*" >> "$FAKE_ARGS_LOG"
+[[ -n "${FAKE_EXIT:-}" ]] && exit "$FAKE_EXIT"
 [[ -n "$out" ]] && printf '%s' "${FAKE_BODY:-}" > "$out"
 printf '%s' "${FAKE_CODE:-200}"
 exit 0
@@ -383,24 +385,181 @@ SERVER_NOT_WORK='mmry_formation_status mmry_formation_say mmry_formation_list mm
     scripts="$(sed -n -E "s/^_FC_NOT_WORK_SCRIPTS='([^']*)'.*/\1/p" "$check")"
     [ -n "$tools" ] && [ -n "$scripts" ] || { echo "tools=$tools scripts=$scripts"; return 1; }
     # Each script is the Claude Code twin of a Codex tool, and formation-check.sh is the message check itself.
-    [ "$scripts" = "say|roster|status|list|check" ] || { echo "scripts: $scripts"; return 1; }
-    [ "$tools" = "formation_say|formation_roster|formation_status|formation_list" ] || { echo "tools: $tools"; return 1; }
-    # The server's name for each plugin tool (the roster is the status read: there is no mmry_formation_roster).
-    local t image="" server_formation=""
+    # An entry with a word after the name is withheld only with that first argument: the claims list
+    # (formation-claim.sh --list) and the queue list (formation-queue.sh list), never a claim or a take.
+    [ "$scripts" = "say|roster|status|list|check|claim --list|queue list" ] || { echo "scripts: $scripts"; return 1; }
+    [ "$tools" = "formation_say|formation_roster|formation_status|formation_list|formation_queue_list" ] || { echo "tools: $tools"; return 1; }
+    # The server's name for each plugin entry (the roster is the status read: there is no mmry_formation_roster;
+    # Codex has no claims tool, so the claims list is the Claude Code script's alone).
+    local t image="" server_formation="" old_ifs="$IFS"
     for t in ${tools//|/ }; do
         case "$t" in
             formation_roster) image+=" mmry_formation_status" ;;
             *)                image+=" mmry_${t}" ;;
         esac
     done
+    IFS='|'
+    for t in $scripts; do
+        case "$t" in
+            check)          ;;   # the message check itself, not a connector tool
+            roster)         image+=" mmry_formation_status" ;;
+            "claim --list") image+=" mmry_formation_claims" ;;
+            "queue list")   image+=" mmry_formation_queue_list" ;;
+            *)              image+=" mmry_formation_${t}" ;;
+        esac
+    done
+    IFS="$old_ifs"
     for t in $SERVER_NOT_WORK; do [[ "$t" == mmry_formation_* ]] && server_formation+=" $t"; done
     # Every plugin entry is on the server's list.
     for t in $image; do [[ " $server_formation " == *" $t "* ]] || { echo "plugin withholds $t, the server counts it"; return 1; }; done
-    # The server's Formation reads the plugin still marks are exactly these two, named for the lead's ruling:
-    # the claims list and the queue list (the brief withholds only say, roster, status and list).
+    # And every Formation read the server withholds, the plugin withholds too (lead's ruling 2, part 2 round).
     local missing=""
     for t in $server_formation; do [[ " $image " == *" $t "* ]] || missing+=" $t"; done
-    [ "$missing" = " mmry_formation_claims mmry_formation_queue_list" ] || { echo "server-only: $missing"; return 1; }
+    [ -z "$missing" ] || { echo "server-only: $missing"; return 1; }
+}
+
+# ---- PART 2 ROUND (lead's ruling 2): the claims list and the queue list are reads, not work ----
+
+@test "PART2R: the member's own claims list and queue list send no marker, on Claude Code and on Codex (both name forms)" {
+    local cmd name
+    for cmd in \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" --list' \
+        'bash "C:/Users/Eric Barone/.claude/plugins/cache/mmry-ai/mmry/2.20.0/hooks-handlers/formation-claim.sh" --list 2>&1' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" list' \
+        'bash ~/.claude/mmry/hooks-handlers/formation-queue.sh list'; do
+        _check_tool claude "$(_bash_call "$cmd")"
+        _polled_unmarked "$cmd" || return 1
+    done
+    for name in formation_queue_list mcp__mmry_plugin__formation_queue_list; do
+        _check_tool codex "$(jq -cn --arg n "$name" '{tool_name:$n,tool_input:{}}')"
+        _polled_unmarked "codex $name" || return 1
+    done
+}
+
+@test "PART2R control: declaring an area, taking or adding queued work still sends the marker" {
+    local cmd name
+    for cmd in \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" mmry src/Endpoints' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" --release 4532' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" take 7' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" add "list the files"' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" "--list"x'; do
+        _check_tool claude "$(_bash_call "$cmd")"
+        _polled_marked "$cmd" || return 1
+    done
+    for name in formation_queue_take mcp__mmry_plugin__formation_queue_add; do
+        _check_tool codex "$(jq -cn --arg n "$name" '{tool_name:$n,tool_input:{pieceId:7}}')"
+        _polled_marked "codex $name" || return 1
+    done
+}
+
+# ---- PART 2 ROUND: a helper's real tool work stamps the member's progress, and does nothing else ----
+#
+# The stamp is POST /api/formations/{id}/tool-stamp?sessionId=<the member's session> (mmry #628, DD-203
+# item 13): it returns no messages and changes no read, queue or notice state. The member's session and
+# Formation are read from the parent session's local state, which is never written.
+
+STAMP_URL_PREFIX='POST http://fake.invalid/api/formations/4242/tool-stamp?sessionId='
+
+# The requests of the last helper check, CRs dropped.
+_requests() { tr -d '\r' < "$URL_LOG"; }
+
+@test "PART2R: a helper's real tool call (Bash git push, Edit) makes exactly one stamp-only call with the member's session, and prints and delivers nothing" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    local body
+    for body in "$(_bash_call 'git push origin 34088/formation-lead-stall')" \
+                '{"tool_name":"Edit","tool_input":{"file_path":"src/x.cs","old_string":"a","new_string":"b"}}'; do
+        _check_helper "$body"
+        [ "$status" -eq 0 ] || { echo "$status: $output"; return 1; }
+        [ -z "$output" ] || { echo "printed: $output"; return 1; }
+        [ "$(_requests)" = "${STAMP_URL_PREFIX}${SID}" ] || { echo "requests:"; _requests; return 1; }
+    done
+}
+
+@test "PART2R: on Codex a helper's real tool call makes the same one stamp-only call and prints nothing" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    local bin payload; bin="$(_fake_curl_dir)"
+    payload="$(jq -cn --arg sid "$SID" '{session_id:$sid,hook_event_name:"PostToolUse",agent_id:"019a-thread",tool_name:"shell",tool_input:{command:["git","--version"]}}')"
+    : > "$URL_LOG"
+    PATH="${bin}:${PATH}" FAKE_CODE=204 FAKE_BODY="" FAKE_URL_LOG="$URL_LOG" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run env MMRY_HOST=codex CODEX_SESSION_ID="$SID" bash -c 'printf "%s" "$1" | bash "$2"' _ "$payload" "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 0 ] || { echo "$status: $output"; return 1; }
+    [ -z "$output" ] || { echo "printed: $output"; return 1; }
+    [ "$(_requests)" = "${STAMP_URL_PREFIX}${SID}" ] || { echo "requests:"; _requests; return 1; }
+}
+
+@test "PART2R: a helper's Formation send, claims list or queue list makes no call at all, on Claude Code and on Codex" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    local cmd
+    for cmd in \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-say.sh" "from the helper"' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-claim.sh" --list' \
+        'bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-queue.sh" list'; do
+        _check_helper "$(_bash_call "$cmd")"
+        [ "$status" -eq 0 ] && [ -z "$output" ] || { echo "$cmd: $status: $output"; return 1; }
+        [ ! -s "$URL_LOG" ] || { echo "$cmd: requests: $(_requests)"; return 1; }
+    done
+    local name
+    for name in formation_say mcp__mmry_plugin__formation_queue_list formation_queue_list; do
+        _check_helper "$(jq -cn --arg n "$name" '{tool_name:$n,tool_input:{}}')"
+        [ "$status" -eq 0 ] && [ -z "$output" ] || { echo "$name: $status: $output"; return 1; }
+        [ ! -s "$URL_LOG" ] || { echo "$name: requests: $(_requests)"; return 1; }
+    done
+}
+
+@test "PART2R: a helper's stamp leaves every local Formation file byte for byte unchanged, also when the service refuses it" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    bash "${HANDLERS}/formation-state.sh" seen 2026-11-23T09:00:00 "$SID"
+    local before after bin payload
+    before="$(_state_snapshot)"
+    _check_helper "$(_bash_call 'git push origin 34088/formation-lead-stall')"
+    [ "$(_requests)" = "${STAMP_URL_PREFIX}${SID}" ] || { echo "no stamp made:"; _requests; return 1; }
+    # The upgrade refusal (#34285) on the helper's stamp: the member's own membership is not cleared by a helper.
+    bin="$(_fake_curl_dir)"
+    payload="$(_bash_call 'git push' | jq -c --arg sid "$SID" '.session_id = $sid | .hook_event_name = "PostToolUse" | .agent_id = "a7f3c2"')"
+    : > "$URL_LOG"
+    PATH="${bin}:${PATH}" FAKE_CODE=403 FAKE_BODY='{"code":"formation_upgrade_required","error":"x"}' FAKE_URL_LOG="$URL_LOG" \
+        CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run env -u MMRY_HOST bash -c 'printf "%s" "$1" | bash "$2"' _ "$payload" "${HANDLERS}/formation-check.sh"
+    [ "$status" -eq 0 ] && [ -z "$output" ] || { echo "$status: $output"; return 1; }
+    [ "$(_requests)" = "${STAMP_URL_PREFIX}${SID}" ] || { echo "no stamp made on the refusal run:"; _requests; return 1; }
+    after="$(_state_snapshot)"
+    [ "$before" = "$after" ] || { echo "before:"; echo "$before"; echo "after:"; echo "$after"; return 1; }
+}
+
+@test "PART2R: the helper's stamp never blocks the hook: short timeouts, and a failed or refused stamp is silent" {
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    local args="${BATS_TEST_TMPDIR}/args.log" bin payload code
+    bin="$(_fake_curl_dir)"
+    payload="$(_bash_call 'git push' | jq -c --arg sid "$SID" '.session_id = $sid | .hook_event_name = "PostToolUse" | .agent_id = "a7f3c2"')"
+    for code in 500 000; do
+        : > "$URL_LOG"; : > "$args"
+        local fexit=""; [[ "$code" == "000" ]] && fexit=7
+        PATH="${bin}:${PATH}" FAKE_CODE="$code" FAKE_EXIT="$fexit" FAKE_BODY='{"error":"down"}' FAKE_URL_LOG="$URL_LOG" FAKE_ARGS_LOG="$args" \
+            CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" \
+            MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+            run env -u MMRY_HOST bash -c 'printf "%s" "$1" | bash "$2"' _ "$payload" "${HANDLERS}/formation-check.sh"
+        [ "$status" -eq 0 ] && [ -z "$output" ] || { echo "$code: $status: $output"; return 1; }
+        [ "$(grep -c 'tool-stamp' "$args")" -eq 1 ] || { echo "$code: calls:"; cat "$args"; return 1; }
+        grep 'tool-stamp' "$args" | grep -q -E -- '--connect-timeout 2 --max-time 3( |$)' || { echo "$code: timeouts:"; cat "$args"; return 1; }
+    done
+}
+
+@test "PART2R: a helper in a session with no local Formation state makes no call" {
+    _check_helper "$(_bash_call 'git push')"
+    [ "$status" -eq 0 ] && [ -z "$output" ] || { echo "$status: $output"; return 1; }
+    [ ! -s "$URL_LOG" ] || { echo "requests: $(_requests)"; return 1; }
+}
+
+@test "PART2R: the client's mmry_stamp_formation_tool_work posts the stamp-only route, and refuses a formation id that is not a number" {
+    local bin; bin="$(_fake_curl_dir)"
+    : > "$URL_LOG"
+    PATH="${bin}:${PATH}" FAKE_CODE=204 FAKE_BODY='' FAKE_URL_LOG="$URL_LOG" \
+        bash -c 'unset MMRY_API_URL MMRY_API_KEY MMRY_HOST; source "$1/mmry-client.sh"; MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid"; mmry_stamp_formation_tool_work 4242 "s 1"; echo "rc=$?"; mmry_stamp_formation_tool_work "42; x" s-1; echo "rc=$?"' _ "$HANDLERS" > "${BATS_TEST_TMPDIR}/client.out" 2>&1 || true
+    [ "$(_requests)" = 'POST http://fake.invalid/api/formations/4242/tool-stamp?sessionId=s%201' ] || { echo "requests:"; _requests; cat "${BATS_TEST_TMPDIR}/client.out"; return 1; }
+    grep -q '^rc=0$' "${BATS_TEST_TMPDIR}/client.out" && grep -q '^rc=1$' "${BATS_TEST_TMPDIR}/client.out" || { cat "${BATS_TEST_TMPDIR}/client.out"; return 1; }
 }
 
 # ---- PART 2 (#171 QA rulings, BL-7): a dispatched helper's calls ----
