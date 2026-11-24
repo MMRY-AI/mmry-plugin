@@ -215,6 +215,20 @@ _codex_member_approves() { # $1 command
     [ "$(_program_sent)" = "<none>" ] || { cat "$BODIES"; return 1; }
 }
 
+@test "P-06 34519 R2: on Claude Code a first word that is not a bare name sends no program, never the ask record's '-'" {
+    # Found by Seat B (34651, K-02 and K-11): the ask record writes "no program" as "-", which passes the
+    # name rule when the Notification reads it back, so the lead was told "for approval to run -.".
+    local c
+    for c in 'TOKEN=abc git push' '"my tool" run'; do
+        rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"; : > "$URLS"
+        _ask "$(_cc_ask Bash "" "$c")" || true
+        _waiting "$(_notification permission_prompt 'Claude needs your permission to use Bash')"
+        [ "$(_puts)" -eq 1 ] || { echo "for [$c]: not raised"; cat "$URLS"; return 1; }
+        [ "$(_program_sent)" = "<none>" ] || { echo "for [$c]"; cat "$BODIES"; return 1; }
+        ! grep -q 'abc' "$BODIES" || { echo "for [$c]: the assignment value was sent"; return 1; }
+    done
+}
+
 # ---- R2, the stale flag (live evidence: cmo-mmry's flag stayed set from 11:58Z to 12:07Z) ----------
 
 @test "S-01 34519 (a) and (b): a prompt that timed out or was answered No clears on the member's next tool call, not at its Stop" {
