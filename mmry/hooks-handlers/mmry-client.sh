@@ -1379,6 +1379,9 @@ _mmry_formation_upgrade_note() {
     _mmry_api_error_v
     MMRY_FORMATION_UPGRADE_TEXT="${_MMRY_API_ERROR:-$_MMRY_FORMATION_UPGRADE_SENTENCE}"
     local sid
+    # A helper's tool-work stamp (mmry_stamp_formation_tool_work, #34089 part 2) changes no local state at
+    # all, a refusal included: the member's own next check meets the refusal and clears it there.
+    [[ -n "${_MMRY_FORMATION_KEEP_STATE:-}" ]] || \
     for sid in "${MMRY_FORMATION_REFUSAL_SID:-}" "$(mmry_session_id 2>/dev/null || true)"; do
         [[ -n "$sid" ]] || continue
         bash "${_MMRY_CLIENT_HANDLERS:-.}/formation-state.sh" clear "$sid" >/dev/null 2>&1 || true
@@ -2016,13 +2019,13 @@ mmry_send_formation_transmission() {
 # Both values are encoded with the variable form, which starts no process: this runs before every
 # prompt (#31976).
 mmry_get_formation_transmissions() {
-    # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601] [SHOWN_IDS]
+    # Usage: mmry_get_formation_transmissions FORMATION_ID SESSION_ID [SINCE_ISO8601] [SHOWN_IDS] [TOOL_MARKER]
     #
     # Both parameters are encoded, as its siblings on the claims endpoints already were. The
     # session id is not ours to assume the shape of, and "since" is an ISO timestamp whose colons
     # are reserved characters in a query string: an unencoded value is a request the server is
     # entitled to read differently from the one we meant to send (#31196 QA round 2).
-    local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}"
+    local formation_id="$1" session_id="$2" since="${3:-}" shown="${4:-}" tool_marker="${5:-}"
     _mmry_urlencode_v "$session_id"; local path="/api/formations/${formation_id}/transmissions?sessionId=${_MMRY_URLENC}"
     if [[ -n "$since" ]]; then
         _mmry_urlencode_v "$since"
@@ -2032,7 +2035,25 @@ mmry_get_formation_transmissions() {
     if [[ -n "${shown//,/}" ]]; then
         path="${path}&shownIds=${shown}"
     fi
+    # TOOL_MARKER "1" (#34089, DD-203 in MMRY-AI/mmry) adds the marker last: the check made right after
+    # this session did real work, which the service counts as progress on its assignment. Only the
+    # after-tool check passes it (formation-check.sh); anything else sends the request as before.
+    [[ "$tool_marker" == "1" ]] && path="${path}&tool=1"
     _mmry_request GET "$path"
+}
+
+# A HELPER'S TOOL WORK, STAMPED AS THE MEMBER'S PROGRESS (#34089 part 2, DD-203 item 13 in MMRY-AI/mmry).
+# POST /api/formations/{id}/tool-stamp?sessionId= answers 204 and does nothing but stamp the session's own
+# live entry's tool work, throttled as the tool=1 marker is: no messages, nothing marked read, no queued
+# work offered, no notice. formation-check.sh calls it for a dispatched helper's real tool call, with the
+# MEMBER's session, and discards the answer. It touches no local state, a refusal included.
+mmry_stamp_formation_tool_work() {
+    # Usage: mmry_stamp_formation_tool_work FORMATION_ID SESSION_ID
+    local formation_id="${1:-}" session_id="${2:-}"
+    [[ "$formation_id" =~ ^[0-9]+$ && -n "$session_id" ]] || return 1
+    _mmry_urlencode_v "$session_id"
+    local _MMRY_FORMATION_KEEP_STATE=1
+    _mmry_request POST "/api/formations/${formation_id}/tool-stamp?sessionId=${_MMRY_URLENC}" '{}'
 }
 
 mmry_get_formation_sent() {
@@ -2116,6 +2137,18 @@ mmry_set_formation_idle_limit() {
     local formation_id="$1" minutes="$2"
     [[ "$minutes" =~ ^([0-9]{1,6}|null)$ ]] || return 1
     _mmry_request PUT "/api/formations/${formation_id}/idle-limit" "{\"minutes\":${minutes}}"
+}
+
+mmry_set_formation_progress_limit() {
+    # Usage: mmry_set_formation_progress_limit FORMATION_ID MINUTES|null
+    #
+    # #34089 (DD-203 in MMRY-AI/mmry). Set the Formation's progress limit, 5 to 1440 minutes, or "null"
+    # to go back to the default of 5. The server checks the range and decides who may (the lead, the
+    # person who created the Formation, or an account administrator), and answers with cmo-mmry's
+    # sentence; formation-progress-limit.sh refuses out-of-range minutes before calling this.
+    local formation_id="$1" minutes="$2"
+    [[ "$minutes" =~ ^([0-9]{1,6}|null)$ ]] || return 1
+    _mmry_request PUT "/api/formations/${formation_id}/progress-limit" "{\"minutes\":${minutes}}"
 }
 
 mmry_add_formation_queue_piece() {

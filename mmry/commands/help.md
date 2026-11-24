@@ -49,6 +49,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:formation queue take <pieceId>`: Take the queued piece you were offered. It becomes your assignment.
   - `/mmry:formation queue decline <pieceId>`: Turn down the queued piece you were offered. It goes back to the queue for the next member.
   - `/mmry:formation idle-limit [<minutes>|default]`: idle-limit <minutes> sets how long a member of this Formation can have no work before the lead is reminded, from 1 to 1440 minutes (5 by default). Use idle-limit default to go back to 5, or idle-limit alone to see the current limit.
+  - `/mmry:formation progress-limit [<minutes>|default]`: progress-limit <minutes> sets how long a member with an assignment can go without progress before the lead is told, from 5 to 1440 minutes (5 by default). Use progress-limit default to go back to 5, or progress-limit alone to see the current limit.
 - `/mmry:database <subcommand>` starts and uses a database in your AI database. Asking in plain words does the same. The subcommands:
   - `/mmry:database create "what to keep track of"` sets up a database, with fields named in your words.
   - `/mmry:database list` lists your databases, or one database in full with its fields.

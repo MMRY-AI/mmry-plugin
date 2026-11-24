@@ -316,6 +316,19 @@ MMRY_MCP_TOOLS='[
     "annotations": {"title": "Read or set the idle limit", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
   },
   {
+    "name": "formation_progress_limit",
+    "title": "Read or set the progress limit",
+    "description": "Read or set how many minutes a member with an assignment can go without progress before the lead is told. Any member can read it; only the lead of this Formation, the person who created it, or an account administrator can set it. 5 to 1440 minutes; leave it unset for the default of 5.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "minutes": {"type": "integer", "description": "Optional: the new progress limit in minutes, 5 to 1440. Omit to read the current limit."},
+        "use_default": {"type": "boolean", "description": "Optional: true to go back to the default of 5 minutes."}
+      }
+    },
+    "annotations": {"title": "Read or set the progress limit", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
     "name": "formation_queue_add",
     "title": "Queue a piece of work",
     "description": "Queue a piece of work in the Formation you lead, with an optional host it needs. Only the lead can add.",
@@ -389,6 +402,10 @@ MMRY_MCP_INSTRUCTIONS="MMRY AI is this customer's persistent memory. These tools
 # keeps its own copy, since it runs without this server on Claude Code; mcp-server.bats pins the two
 # copies equal so they cannot drift. #34521 (DD-202): the default of 5 minutes, cmo-mmry's item 4.
 MMRY_MCP_IDLE_LIMIT_RANGE="The idle limit is between 1 and 1440 minutes. Leave it unset to use the default of 5 minutes."
+# #34089 (DD-203): the same handling for the progress limit, 5 to 1440 minutes, with cmo-mmry's C4 sentence
+# (Revision 1), word for word as formation-progress-limit.sh's PROGRESS_LIMIT_RANGE; mcp-server.bats pins
+# the two copies equal.
+MMRY_MCP_PROGRESS_LIMIT_RANGE="The progress limit is between 5 and 1440 minutes. Leave it unset to use the default of 5 minutes."
 
 # shellcheck disable=SC2016
 MMRY_MCP_ARGV_JQ='
@@ -401,6 +418,10 @@ def idle_minutes: (.arguments.minutes // null) | if . == null then null
     elif type == "number" and . == floor and . >= 1 and . <= 1440 then tostring
     elif type == "string" and test("^[1-9][0-9]{0,3}$") and (tonumber <= 1440) then .
     else error($idle_range) end;
+def progress_minutes: (.arguments.minutes // null) | if . == null then null
+    elif type == "number" and . == floor and . >= 5 and . <= 1440 then tostring
+    elif type == "string" and test("^[1-9][0-9]{0,3}$") and (tonumber >= 5) and (tonumber <= 1440) then .
+    else error($progress_range) end;
 def need($k): if . == null or . == "" then error("\($k) is required") else . end;
 def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
 (.name // "") as $n
@@ -446,6 +467,11 @@ def opt($flag; $v): if $v == null or $v == "" then [] else [$flag, $v] end;
       + (if (.arguments.use_default // false) == true then ["default"]
          elif idle_minutes == null then []
          else [idle_minutes] end)
+   elif $n == "formation_progress_limit" then
+      ["formation-progress-limit.sh"]
+      + (if (.arguments.use_default // false) == true then ["default"]
+         elif progress_minutes == null then []
+         else [progress_minutes] end)
    elif $n == "formation_queue_add" then
       ["formation-queue.sh", "add", (str("description") | need("description"))]
       + (if (str("host") // "") != "" then ["--host", (str("host") | if IN("codex","claude-code") then . else error("host must be codex or claude-code") end)] else [] end)
@@ -513,13 +539,13 @@ _mcp_tools_call() {
     local id="$1" params="$2" setup name
     name="$("$JQ" -r '.name // ""' <<< "$params" 2>/dev/null)"
     name="${name%$'\r'}"
-    if ! setup="$("$JQ" -r --arg idle_range "$MMRY_MCP_IDLE_LIMIT_RANGE" "$MMRY_MCP_ARGV_JQ" <<< "$params" 2>&1)"; then
+    if ! setup="$("$JQ" -r --arg idle_range "$MMRY_MCP_IDLE_LIMIT_RANGE" --arg progress_range "$MMRY_MCP_PROGRESS_LIMIT_RANGE" "$MMRY_MCP_ARGV_JQ" <<< "$params" 2>&1)"; then
         setup="${setup#jq: error (at <stdin>:*): }"
         setup="${setup%$'\r'}"
         if [[ "$setup" == unknown\ tool:* ]]; then
             _mcp_error "$id" -32602 "$setup"
-        elif [[ "$setup" == "$MMRY_MCP_IDLE_LIMIT_RANGE" ]]; then
-            # #34432: the approved sentence is the whole answer, with nothing in front of it.
+        elif [[ "$setup" == "$MMRY_MCP_IDLE_LIMIT_RANGE" || "$setup" == "$MMRY_MCP_PROGRESS_LIMIT_RANGE" ]]; then
+            # #34432, #34089: the approved sentence is the whole answer, with nothing in front of it.
             _mcp_tool_text "$id" "$setup" true
         else
             _mcp_tool_text "$id" "Nothing was done: ${setup}" true

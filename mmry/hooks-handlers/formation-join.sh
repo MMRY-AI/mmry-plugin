@@ -168,11 +168,6 @@ fi
 # change all of them.
 echo "${MMRY_FORMATION_REPORT_RULE}"
 echo "${MMRY_FORMATION_ACK_RULE}"
-# #34161: a Claude Code member is told that long work run in the background keeps it reachable.
-# Codex does not wake on Formation messages while idle, so the advice would change nothing there.
-if [[ "$_mmry_client_name" == "claude-code" ]]; then
-    echo "${MMRY_FORMATION_BACKGROUND_WORK}"
-fi
 
 # THE RULE FOR THIS SESSION'S OWN ROLE (#32683), after the two above, which are unchanged. The role
 # is read off this session's own row in the server's answer, so a lead returning to its seat gets
@@ -184,7 +179,15 @@ if [[ -n "${MMRY_JQ:-}" && -n "${MMRY_RESPONSE:-}" ]]; then
     own_role="${own_role//$''/}"
 fi
 mmry_formation_role_rule "$own_role"
+# #34161: a Claude Code member is told that long work run in the background keeps it reachable.
+# Codex does not wake on Formation messages while idle, so the advice would change nothing there.
+# #34089: it comes after the role rule, so the member rules read in the order cmo-mmry's B3 sets:
+# report, acknowledge, never go idle silently, report progress at milestones, then this sentence.
+if [[ "$_mmry_client_name" == "claude-code" ]]; then
+    echo "${MMRY_FORMATION_BACKGROUND_WORK}"
+fi
 # #34519 R1: a member is told what its helper agents may run, in its own host's approved words.
+# After #34089's B3 sequence above, which it does not belong to, so that sequence stays unbroken.
 case "$own_role" in
     [Ll][Ee][Aa][Dd]) ;;
     *)

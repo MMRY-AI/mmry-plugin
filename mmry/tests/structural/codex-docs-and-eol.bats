@@ -442,6 +442,10 @@ _codex_tree() {
             idle-limit)
                 grep -q "\`formation_idle_limit\`" "$skill" || missing="${missing} idle_limit(tool)"
                 ! grep -q "formation-idle-limit.sh" "$skill" || missing="${missing} idle-limit(script-named)" ;;
+            # #34089: the progress limit is one tool, formation_progress_limit, beside the idle limit.
+            progress-limit)
+                grep -q "\`formation_progress_limit\`" "$skill" || missing="${missing} progress_limit(tool)"
+                ! grep -q "formation-progress-limit.sh" "$skill" || missing="${missing} progress-limit(script-named)" ;;
             *)
                 grep -q "formation-${op}.sh" "$skill" || missing="${missing} ${op}" ;;
         esac
