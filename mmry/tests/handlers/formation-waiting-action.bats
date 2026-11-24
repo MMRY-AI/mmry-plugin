@@ -490,6 +490,22 @@ _asked() { # $1 program, $2 the whole action line's value
     [ "$(_sent programName)" = "<none>" ] && [ "$(_sent programAction)" = "<none>" ] || { cat "$BODIES"; return 1; }
 }
 
+@test "K-18 34651 round 2 guard: an ask record whose program line carries more than the name sends no program and no action" {
+    local a
+    # The program line is "program git push": the name is never taken from the first word of a longer line.
+    for a in "" "push"; do
+        rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"; : > "$URLS"
+        printf 'asker -\ntool Bash\ninput -\napprove -\nprogram git push\n' > "$TEST_TMPDIR/.mmry-asking-$SID"
+        [ -z "$a" ] || printf 'action %s\n' "$a" >> "$TEST_TMPDIR/.mmry-asking-$SID"
+        printf 'at %s\n' "$(date +%s)" >> "$TEST_TMPDIR/.mmry-asking-$SID"
+        _waiting "$(_notification permission_prompt "$SAID")"
+        [ "$(_puts)" -eq 1 ] || { echo "not raised (action line [$a])"; cat "$URLS"; return 1; }
+        [ "$(_sent programName)" = "<none>" ] || { echo "a program was sent from a longer program line (action line [$a]):"; cat "$BODIES"; return 1; }
+        [ "$(_sent programAction)" = "<none>" ] || { echo "an action was sent (action line [$a]):"; cat "$BODIES"; return 1; }
+        ! grep -q -e git -e push "$BODIES" || { echo "the body holds the line's words:"; cat "$BODIES"; return 1; }
+    done
+}
+
 # ---- K-14, K-15: the closed per-tool list ---------------------------------------------------------------
 
 @test "K-14 34651 R2: a lowercase word that is not a known subcommand of its tool is never sent, on either host" {
