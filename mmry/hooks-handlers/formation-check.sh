@@ -1061,6 +1061,10 @@ _poll_once() {
     # On Claude Code the person at the lead's window is also shown cmo-mmry's approved one-line version
     # (wording-34519-cmo.md item 3) as a user-only systemMessage, built from the notice's first line by
     # the pattern below and nothing else; a line a member typed is never read for it (it has a sender).
+    # #34651 (DD-207): the notice may also end "to run git push.", "to run the script check.sh with bash."
+    # or "to run an inline node script." (cmo-mmry W1 to W3, the same frame), and the person line keeps
+    # its own frame with that ending. The pattern admits a subcommand word, a file name with no folder
+    # and nothing else, so a first line carrying anything more gives no person line (L-13).
     # Measured on Claude Code 2.1.330: a systemMessage from PostToolUse and UserPromptSubmit reaches the
     # person. The Stop wake (asyncRewake, exit 2) cannot carry one: a named limit.
     FORMATION_PERSON=""
@@ -1083,10 +1087,13 @@ _poll_once() {
         def waitnote: system and (((.content // "") | tostring) | startswith("WAITING ON APPROVAL. "));
         def person:
             (((.content // "") | tostring | split("\n")[0] | rtrimstr("\r"))
-             | capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)(?: >>> (?<name>.*?) <<<)?(?: \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9]{2}:[0-9]{2} UTC (?:for approval to run (?<prog>[-A-Za-z0-9_.:]{1,64})|for approval to use the (?<tool>[-A-Za-z0-9_.:]{1,64}) tool|on a permission prompt)\\.$")?)
+             | capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)(?: >>> (?<name>.*?) <<<)?(?: \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9]{2}:[0-9]{2} UTC (?:for approval to run the script (?<file>[-A-Za-z0-9_.]{1,64}) with (?<sprog>[-A-Za-z0-9_.:]{1,64})|for approval to run an inline (?<iprog>[-A-Za-z0-9_.:]{1,64}) script|for approval to run (?<prog>[-A-Za-z0-9_.:]{1,64})(?: (?<sub>[a-z][a-z0-9-]{0,23}))?|for approval to use the (?<tool>[-A-Za-z0-9_.:]{1,64}) tool|on a permission prompt)\\.$")?)
             | "MMRY AI Formation: " + (if (.name // "") != "" then .name else "Member " + .id end)
               + (if (.app // "") != "" then " (" + .app + ")" else "" end)
-              + (if (.prog // "") != "" then " is waiting for approval to run " + .prog + "."
+              + (if (.file // "") != "" then " is waiting for approval to run the script " + .file + " with " + .sprog + "."
+                 elif (.iprog // "") != "" then " is waiting for approval to run an inline " + .iprog + " script."
+                 elif (.prog // "") != "" then " is waiting for approval to run " + .prog
+                      + (if (.sub // "") != "" then " " + .sub else "" end) + "."
                  elif (.tool // "") != "" then " is waiting for approval to use the " + .tool + " tool."
                  else " is waiting on a permission prompt." end)
               + " Answer the prompt in that window.";

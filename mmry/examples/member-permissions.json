@@ -1,0 +1,29 @@
+{
+  "_comment": "Sample only. MMRY AI never applies this file. Copy the rules you want into your own Claude Code settings, review each one, and leave commands that delete files, force-push or read secrets out of the allow list.",
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git fetch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(npm test *)",
+      "Bash(npm run test *)",
+      "Bash(dotnet test *)",
+      "Bash(pytest *)"
+    ],
+    "deny": [
+      "Bash(git push*--force*)",
+      "Bash(git push* -f)",
+      "Bash(git push* -f *)",
+      "Bash(git reset*--hard*)",
+      "Bash(rm -rf*)",
+      "Bash(rm -fr*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)"
+    ]
+  }
+}

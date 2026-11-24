@@ -15,6 +15,7 @@ commands/search.md
 commands/setup.md
 commands/uninstall.md
 commands/visibility.md
+examples/member-permissions.json
 hooks-handlers/codex-first-prompt.sh
 hooks-handlers/codex-hook.cmd
 hooks-handlers/codex-hook.sh
@@ -129,6 +130,7 @@ tests/handlers/formation-member-names.bats
 tests/handlers/formation-progress-limit.bats
 tests/handlers/formation-rejoin.bats
 tests/handlers/formation-upgrade-refusal.bats
+tests/handlers/formation-waiting-action.bats
 tests/handlers/formation-waiting-approvals.bats
 tests/handlers/formation-waiting-busy.bats
 tests/handlers/formation-waiting-guards.bats
@@ -275,6 +277,7 @@ tests/structural/hooks-json-format.bats
 tests/structural/hooks-json.bats
 tests/structural/macos-hook-payload.bats
 tests/structural/marketplace-sync.bats
+tests/structural/member-permissions-sample.bats
 tests/structural/plugin-json.bats
 tests/structural/public-text-check.bats
 tests/structural/release-files.bats
