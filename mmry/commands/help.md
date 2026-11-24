@@ -38,6 +38,7 @@ You don't need to do anything special. MMRY AI runs quietly in the background:
   - `/mmry:formation say "message" [--to <memberId>]` sends a message to the other members, or to one member.
   - `/mmry:formation assign <memberId> "work"` gives one member its work (the lead).
   - `/mmry:formation progress <state> "note"` tells the lead how your assigned work is going.
+  - `/mmry:formation free ["note"]`: free reports that you have finished and are free: MMRY AI records your current work as Done and tells the lead, so it can give you your next job. Saying you are free in a message does not do this.
   - `/mmry:formation report` shows what each member was asked to do and how it ended.
   - `/mmry:formation claim "<path>"` declares the area this session is about to work, so nobody collides with it.
   - `/mmry:formation debrief "summary"` closes the job out with a record that lasts (the lead).

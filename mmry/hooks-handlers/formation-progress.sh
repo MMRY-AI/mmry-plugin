@@ -146,15 +146,16 @@ fi
 #     happen.
 #   - BLOCKED, REFUSED (fix round 1, lead ruling): Blocked work is unfinished, so recording it as Done
 #     would tell the lead it is finished. cmo-mmry's item 7 is printed, nothing is sent, and the command
-#     fails, so Codex returns it as an error result as it returns the other refusals.
+#     fails, so Codex returns it as an error result as it returns the other refusals. Checked BEFORE no
+#     work (fix round 2), so a Blocked entry with no assignment is refused, never told it is free.
 if [[ "$free_report" -eq 1 && -n "${MMRY_JQ:-}" ]]; then
     if [[ "${roster_read:-0}" -eq 1 ]] || mmry_get_formation "$formation_id"; then
         own_free_state="$(printf '%s' "${MMRY_RESPONSE:-}" | "$MMRY_JQ" -r --arg s "$session_id" --arg m "${member_id//$'\r'/}" \
             '[(.members // [])[] | select(.sessionId == $s and .leftDate == null and ((.id | tostring) == $m))][0]
              | if . == null then "other"
+               elif ((.progress // "") | ascii_downcase) == "blocked" then "blocked"
                elif ((((.assignment // "") | test("\\S")) | not)
                      or (((.progress // "") | ascii_downcase) as $p | ($p == "done" or $p == "abandoned"))) then "none"
-               elif ((.progress // "") | ascii_downcase) == "blocked" then "blocked"
                else "work" end' \
             2>/dev/null || true)"
         case "${own_free_state//$'\r'/}" in
