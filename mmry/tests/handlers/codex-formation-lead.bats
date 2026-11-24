@@ -399,3 +399,47 @@ FAKECURL
     codex="$(PATH="$TEST_TMPDIR/lead-bin:$PATH" _codex "$HH/formation-roster.sh" 42 | tr -d '\r')"
     [ "$(printf '%s\n' "$codex" | grep -F 'x.y')" = "$(printf '%s\n' '  3  Lead  l@x.y' '  7  Wingman  m@x.y  - port  [Accepted]')" ] || { echo "$codex"; return 1; }
 }
+
+# #34011 P2 (DD-204). Joining on Codex, as a member and as a returning lead, prints the two new member
+# rules once each, M before S, both after the acknowledgement line, and not the Claude Code background
+# sentence. The literals are the approved wording (wording-34011-cmo.md), not read from the script.
+@test "34011 P2: a Codex join prints M and S once each after the acknowledgement, with no Claude Code background sentence" {
+    local m_rule s_rule ack_start bg role body out
+    m_rule="Message the one member who needs something; message everyone only when every member must act or change course."
+    s_rule="Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply."
+    ack_start="When you receive an assignment, a brief or a question, acknowledge it before you start"
+    bg="Run long commands and long delegated work in the background"
+    for role in Wingman Lead; do
+        body='{"formation":{"id":42,"objective":"o"},"members":[{"id":3,"sessionId":null,"role":"Lead","leftDate":null},{"id":9,"sessionId":"'"$CLAUDE_SESSION_ID"'","role":"'"$role"'","displayName":"P2","leftDate":null}]}'
+        printf '%s' "$body" > "$TEST_TMPDIR/join-body.json"
+        cat > "$BIN/curl" <<'FAKEJOIN'
+#!/usr/bin/env bash
+out=""; method="GET"; url=""; prev=""
+for arg in "$@"; do
+    case "$prev" in -o) out="$arg" ;; -X) method="$arg" ;; esac
+    case "$arg" in http://*|https://*) url="$arg" ;; esac
+    prev="$arg"
+done
+code=200; resp='{}'
+case "$method $url" in
+    "POST "*/api/sessions) code=201; resp='' ;;
+    "POST "*/join) resp="$(cat "$JOIN_BODY_FILE")" ;;
+    "GET "*/api/formations/*) resp="$(cat "$JOIN_BODY_FILE")" ;;
+esac
+[[ -n "$out" ]] && printf '%s' "$resp" > "$out"
+printf '%s' "$code"
+exit 0
+FAKEJOIN
+        chmod +x "$BIN/curl"
+        out="$(JOIN_BODY_FILE="$TEST_TMPDIR/join-body.json" _codex "$HH/formation-join.sh" 42 | tr -d '\r')"
+        bash "$HH/formation-state.sh" clear "$CLAUDE_SESSION_ID" >/dev/null 2>&1 || true
+        [ "$(printf '%s\n' "$out" | grep -c -F -x -- "$m_rule")" = "1" ] || { echo "$role: $out"; return 1; }
+        [ "$(printf '%s\n' "$out" | grep -c -F -x -- "$s_rule")" = "1" ] || { echo "$role: $out"; return 1; }
+        local a m s
+        a="$(printf '%s\n' "$out" | grep -n -F -- "$ack_start" | head -n 1 | cut -d: -f1)"
+        m="$(printf '%s\n' "$out" | grep -n -F -x -- "$m_rule" | cut -d: -f1)"
+        s="$(printf '%s\n' "$out" | grep -n -F -x -- "$s_rule" | cut -d: -f1)"
+        [ -n "$a" ] && [ "$a" -lt "$m" ] && [ "$m" -lt "$s" ] || { echo "$role: $out"; return 1; }
+        [[ "$out" != *"$bg"* ]] || { echo "$role: the Claude Code background sentence appeared on Codex"; echo "$out"; return 1; }
+    done
+}

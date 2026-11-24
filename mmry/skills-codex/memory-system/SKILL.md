@@ -228,7 +228,7 @@ A directed message that mentions another member, by name or member id, or a task
 Start a formation with `formation_start` and an `objective` that says what the job is; this
 conversation becomes its lead, and the reply gives the id to share with the other sessions. As the
 lead, give a member work with `formation_assign` (`member_id` from the roster, and an
-`assignment`); only that member is told. `formation_report` prints the close-out record: every
+`assignment`); only that member is told. An assignment holds up to 500 characters; for longer work, put the brief in a file and give its path in the assignment. `formation_report` prints the close-out record: every
 member, the work it was given and the state it ended in. Close the formation out with
 `formation_debrief` and a `summary` of what was accomplished, decided and learned; the summary and
 the record become lasting memories, except for each member's idle time, which stays in the record
@@ -271,12 +271,16 @@ member id, `[Wingman 14]`, when the sender has no name. A line marked
 `DIRECTED TO YOU` was sent to this session and nobody else: act on it. A line marked `[MMRY]` came
 from the memory system rather than from a colleague.
 
-Joining prints two standing rules, and every assignment repeats them. Follow them for as long as
+Joining prints four standing rules, and every assignment repeats them. Follow them for as long as
 this session is in the formation; they are the same on every platform:
 
 > Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running.
 >
 > When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement.
+>
+> Message the one member who needs something; message everyone only when every member must act or change course.
+>
+> Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply.
 
 Each member is also given one rule for its own role:
 

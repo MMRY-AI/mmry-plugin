@@ -261,7 +261,7 @@ MMRY_MCP_TOOLS='[
       "type": "object",
       "properties": {
         "member_id": {"type": "integer", "description": "Roster entry id of the member. Leave unset, with name, to rename this conversation'"'"'s own member."},
-        "assignment": {"type": "string", "description": "What they should work on."},
+        "assignment": {"type": "string", "description": "What they should work on. An assignment holds up to 500 characters; for longer work, put the brief in a file and give its path in the assignment."},
         "role": {"type": "string", "enum": ["Lead", "Wingman"], "description": "Optional new role."},
         "name": {"type": "string", "description": "Optional new name, shown beside the member id."}
       }
