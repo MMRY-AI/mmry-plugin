@@ -279,30 +279,43 @@ _MMRY_WAITING_PROGRAM_JQ='if ((.tool_name // "") | tostring | test("^(Bash|Power
 #               because the list does not know which flags take a value, and a skipped flag's value
 #               (a folder named status) would be taken for the subcommand.
 #   script      the program is an interpreter (bash, sh, node, pwsh, powershell, python, python3) and
-#               its first word that is not a flag (at most 8 flags are passed over) is a script file:
-#               the folder removed, ^[A-Za-z0-9_.-]{1,64}\.(sh|bash|mjs|cjs|js|ts|ps1|py)$ and at most
-#               64 characters in all (the service's rule) -> "script check.sh". A quoted path, a name
-#               with a space or any other character gives no action, never a cleaned one.
+#               the word RIGHT AFTER it is a script file, or the word after flags from THAT
+#               INTERPRETER'S closed list of flags that take no value (_MMRY_WAITING_SCRIPT_FLAGS:
+#               bash -x, python -u, pwsh -NoProfile; at most 8), and for pwsh and powershell after
+#               -File: the folder removed, ^[A-Za-z0-9_.-]{1,64}\.(sh|bash|mjs|cjs|js|ts|ps1|py)$ and
+#               at most 64 characters in all (the service's rule) -> "script check.sh". ANY OTHER FLAG
+#               FIRST GIVES NO ACTION (#34651 fix round 1): the word after a flag this list does not
+#               know may be that flag's VALUE, and node --require ./loader.js app.js named the loader
+#               as the script. A quoted path, a name with a space or any other character gives no
+#               action, never a cleaned one.
 #   inline      the program is an interpreter and the word right after it is exactly -e, -c, -Command
-#               or --eval -> "inline", and none of the code.
+#               or --eval -> "inline", and none of the code. Not when that word is the interpreter's
+#               own value-less flag: bash -e and sh -e are "exit on error", and go the script's way.
 # Anything else gives "", and the program is sent alone, as #34519 sends it. The command never reaches
 # a shell variable: this program prints one of the three shapes or nothing, and the shell holds that
 # to _MMRY_WAITING_ACTION_RE (the service's FormationWaitingNotice.IsProgramAction) once more. What
 # can still be named is a script's FILE NAME, which the lead needs to decide and which is a name, not
 # an argument (the lead's ruling on option D, plan-approval-command-B.md section 3).
 #
-# THE CLOSED LISTS, held once for the grammar and for the shell's second check, and word for word the
-# same text as the service's FormationWaitingActions.Subcommands and .Interpreters (MMRY-AI/mmry;
-# K-14 compares them when MMRY_SERVICE_REPO is set). One entry per tool: "tool= word word ... ;", every
-# word with a space on each side. Lowercase letters, digits, dashes, spaces, = and ; only, so the text
-# is safe inside the jq program below. Adding a subcommand is a change to both repositories.
-_MMRY_WAITING_SUBCOMMANDS='git= add am apply bisect blame branch checkout cherry-pick clean clone commit config describe diff fetch gc grep init log ls-files ls-remote merge mv pull push rebase reflog remote reset restore rev-list rev-parse revert rm show stash status submodule switch tag worktree ;gh= api auth browse gist issue label pr release repo run search secret status variable workflow ;dotnet= add build build-server clean dev-certs ef format list msbuild new nuget pack publish remove restore run sln test tool user-secrets watch workload ;npm= audit ci config exec init install link ls outdated pack publish rebuild run start test uninstall update version view ;pnpm= add audit dlx exec init install link list outdated publish rebuild remove run start test update ;yarn= add audit dlx exec init install link remove run start test up upgrade workspace workspaces ;docker= build compose container cp exec image images inspect kill login logout logs network ps pull push restart rm rmi run start stop system tag volume ;kubectl= apply config cp create delete describe edit exec explain get label logs patch port-forward rollout scale top ;az= account acr ad aks appservice deployment functionapp group keyvault login logout monitor network resource role storage vm webapp ;cargo= add bench build check clean clippy doc fmt init install new publish remove run test update ;go= build clean doc env fmt generate get install list mod run test tool version vet work ;pip= check config download freeze install list show uninstall wheel ;winget= export import install list search show source uninstall upgrade ;brew= cleanup doctor info install link list outdated reinstall search services uninstall update upgrade ;'
-_MMRY_WAITING_INTERPRETERS=' bash sh node pwsh powershell python python3 '
+# THE CLOSED LISTS and the shell's second check (_mmry_waiting_action_ok) are in lib-waiting-actions.sh,
+# held once for this handler and for formation-check.sh's person line. Without that file (it is listed
+# in release-files.txt, so only a half-finished update could lose it) the lists are empty: no action is
+# ever sent, and the program goes alone, as #34519 sent it.
+_MMRY_WAITING_SUBCOMMANDS=""
+_MMRY_WAITING_INTERPRETERS=""
+_MMRY_WAITING_SCRIPT_FLAGS=""
+_MMRY_WAITING_ACTION_RE='^$'
+_mmry_waiting_action_ok() { return 1; }
+if [[ -f "${HANDLER_DIR}/lib-waiting-actions.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${HANDLER_DIR}/lib-waiting-actions.sh" || true
+fi
 # The assignment below ends at the first line that ends in a single quote; formation-waiting-action.bats
 # (K-09) reads it out by that, so no line inside it may end in one.
 _MMRY_WAITING_ACTION_JQ='
     def mmry_known: . as $p | ["'"$_MMRY_WAITING_SUBCOMMANDS"'" | split(";")[] | select(startswith($p + "= "))] | (.[0] // "");
     def mmry_interp: . as $p | ("'"$_MMRY_WAITING_INTERPRETERS"'" | contains(" " + $p + " "));
+    def mmry_flags: . as $p | ["'"$_MMRY_WAITING_SCRIPT_FLAGS"'" | split(";")[] | select(startswith($p + "= "))] | (.[0] // "") | split(" ") | map(select(startswith("-")));
     if ((.tool_name // "") | tostring | test("^(Bash|PowerShell|shell|local_shell|exec_command|unified_exec)$"))
         and ((.tool_input // null) | type) == "object" and ((.tool_input.command // null) | type) == "string"
     then .tool_input.command as $c
@@ -315,34 +328,19 @@ _MMRY_WAITING_ACTION_JQ='
                elif ($a | test("^[a-z][a-z0-9-]{0,23}$")) and ($known | contains(" " + $a + " ")) then $a
                else "" end)
           elif ($p | test("^[a-z0-9]+$")) and ($p | mmry_interp) then
-              (if ($a == "-e" or $a == "-c" or $a == "-Command" or $a == "--eval") then "inline"
-               else ((($c | capture("^\\s*[^\\s]+(?:\\s+-[^\\s]*){0,8}\\s+(?<s>[^-\\s][^\\s]*)")) // {s: ""})
-                     | .s | sub("^.*[/\\\\]"; "")) as $f
-                    | if ($f | length) <= 64 and ($f | test("^[A-Za-z0-9_.-]{1,64}\\.(sh|bash|mjs|cjs|js|ts|ps1|py)$"))
-                      then "script " + $f else "" end
-               end)
+              ($p | mmry_flags) as $fl
+              | (if (($fl | map(select(. == $a)) | length) == 0)
+                    and ($a == "-e" or $a == "-c" or $a == "-Command" or $a == "--eval") then "inline"
+                 else ((($c | capture("^\\s*[^\\s]+"
+                            + (if ($fl | length) > 0 then "(?:\\s+(?:" + ($fl | join("|")) + ")){0,8}" else "" end)
+                            + (if ($p == "pwsh" or $p == "powershell") then "(?:\\s+-File)?" else "" end)
+                            + "\\s+(?<s>[^-\\s][^\\s]*)")) // {s: ""})
+                       | .s | sub("^.*[/\\\\]"; "")) as $f
+                      | if ($f | length) <= 64 and ($f | test("^[A-Za-z0-9_.-]{1,64}\\.(sh|bash|mjs|cjs|js|ts|ps1|py)$"))
+                        then "script " + $f else "" end
+                 end)
           else "" end
     else "" end'
-# The service's shape rule for an action (FormationWaitingNotice.IsProgramAction; ERE, bash 3.2).
-_MMRY_WAITING_ACTION_RE='^([a-z][a-z0-9-]{0,23}|script [A-Za-z0-9_.-]{1,64}|inline)$'
-# _mmry_waiting_action_ok PROGRAM ACTION: 0 when ACTION is one of the three shapes AND belongs to
-# PROGRAM by the closed lists above: a subcommand that tool is known to have, or script and inline for
-# an interpreter. The shell's second check of whatever the jq above printed, and of whatever an ask
-# record on disk says, so nothing else is ever sent. No process is started.
-_mmry_waiting_action_ok() {
-    local p="${1:-}" a="${2:-}" seg IFS
-    [[ "$p" =~ ^[a-z0-9]+$ && "$a" =~ $_MMRY_WAITING_ACTION_RE ]] || return 1
-    case "$a" in
-        inline|"script "*)
-            [[ "$_MMRY_WAITING_INTERPRETERS" == *" ${p} "* ]]
-            return ;;
-    esac
-    IFS=';'
-    for seg in $_MMRY_WAITING_SUBCOMMANDS; do
-        if [[ "$seg" == "${p}= "* && "$seg" == *" ${a} "* ]]; then return 0; fi
-    done
-    return 1
-}
 
 # ---- HELPER APPROVALS ON CODEX (#34519, DD-206, which supersedes DD-187 point 7) ---------------
 # Measured on Codex 0.171.0: an approval the person gives "for this session" in the member's own

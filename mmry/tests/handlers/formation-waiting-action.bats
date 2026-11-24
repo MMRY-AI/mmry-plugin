@@ -11,9 +11,10 @@
 #               (npm secretx1a2b3), sends the program alone.
 #               A flag first (git -C dir push) gives NO action: the list never learns flag arities,
 #               so a flag's value can never be taken for the subcommand.
-#   script      the program is one of bash sh node pwsh powershell python python3, and the first word
-#               that is not a flag is a script file: bash scripts/check-x.sh -> "script check-x.sh",
-#               the folder removed.
+#   script      the program is one of bash sh node pwsh powershell python python3, and the word right
+#               after it, or after that interpreter's listed value-less flags (and pwsh -File), is a
+#               script file: bash scripts/check-x.sh -> "script check-x.sh", the folder removed. Any
+#               other flag first sends the program alone (fix round 1, K-16).
 #   inline      the same programs with -e, -c, -Command or --eval first: "inline", and no code.
 #   anything else sends the program alone, as #34519 does.
 #
@@ -32,6 +33,9 @@
 #   K-14      the closed list, end to end: a lowercase word that is not a known subcommand of its tool
 #             is never sent, and a script or inline action never goes with a tool that is no interpreter.
 #   K-15      the closed lists are the service's, word for word (needs MMRY_SERVICE_REPO).
+#   K-16      a flag that may take a value never has its value sent as the script (fix round 1).
+#   K-17      the per-interpreter value-less flag list, pinned as text; without the lists file no
+#             action is sent at all.
 
 load '../helpers/test-helper'
 load '../helpers/formation-waiting-helpers.sh'
@@ -278,9 +282,10 @@ _inside_budget() { # $1 seconds taken, $2 seconds a one-word command took, $3 wh
 # line to the first line ending in a single quote), so the grammar is pinned apart from the shell's
 # second check of what it gives. Prints "<program>|<action>" for a shell tool's command.
 _grammar() { # $1 command, $2 tool name (Bash by default)
-    local _MMRY_WAITING_ACTION_JQ="" _MMRY_WAITING_SUBCOMMANDS="" _MMRY_WAITING_INTERPRETERS=""
-    # The two closed lists first (one line each), then the program that embeds them.
-    eval "$(grep -E "^_MMRY_WAITING_(SUBCOMMANDS|INTERPRETERS)='[a-z0-9 =;-]*'\$" "$HH/formation-waiting.sh")"
+    local _MMRY_WAITING_ACTION_JQ="" _MMRY_WAITING_SUBCOMMANDS="" _MMRY_WAITING_INTERPRETERS="" _MMRY_WAITING_SCRIPT_FLAGS=""
+    # The three closed lists first (one line each, lib-waiting-actions.sh), then the program that embeds them.
+    eval "$(grep -E "^_MMRY_WAITING_(SUBCOMMANDS|INTERPRETERS|SCRIPT_FLAGS)='[A-Za-z0-9 =;-]*'\$" "$HH/lib-waiting-actions.sh")"
+    [ -n "$_MMRY_WAITING_SCRIPT_FLAGS" ] || { echo "NO-FLAG-LIST"; return 0; }
     eval "$(sed -n "/^_MMRY_WAITING_ACTION_JQ='/,/'\$/p" "$HH/formation-waiting.sh")"
     [ -n "$_MMRY_WAITING_ACTION_JQ" ] || { echo "NO-GRAMMAR"; return 0; }
     printf '%s' "$1" | "$JQ_BIN" -cRs --arg t "${2:-Bash}" '{tool_name: $t, tool_input: {command: .}}' \
@@ -507,11 +512,31 @@ _asked() { # $1 program, $2 the whole action line's value
     fi
     local cs="${MMRY_SERVICE_REPO}/src/Mnemo.Api/Services/FormationWaitingActions.cs" subs ints
     [ -f "$cs" ] || { echo "not found: $cs"; return 1; }
-    subs="$(grep -E "^_MMRY_WAITING_SUBCOMMANDS='[a-z0-9 =;-]*'\$" "$HH/formation-waiting.sh")"
-    ints="$(grep -E "^_MMRY_WAITING_INTERPRETERS='[a-z0-9 ]*'\$" "$HH/formation-waiting.sh")"
+    subs="$(grep -E "^_MMRY_WAITING_SUBCOMMANDS='[a-z0-9 =;-]*'\$" "$HH/lib-waiting-actions.sh")"
+    ints="$(grep -E "^_MMRY_WAITING_INTERPRETERS='[a-z0-9 ]*'\$" "$HH/lib-waiting-actions.sh")"
     subs="${subs#*=\'}"; subs="${subs%\'}"
     ints="${ints#*=\'}"; ints="${ints%\'}"
     [ -n "$subs" ] && [ -n "$ints" ] || { echo "the lists were not read out of the handler"; return 1; }
     grep -q -F -- "\"${subs}\"" "$cs" || { echo "the service's subcommand list differs from the plugin's"; return 1; }
     grep -q -F -- "\"${ints}\"" "$cs" || { echo "the service's interpreter list differs from the plugin's"; return 1; }
+}
+
+# ---- K-17: the value-less flag list ----------------------------------------------------------------------
+
+@test "K-17 34651 fix 1: the per-interpreter value-less flag list is this text, and with no lists file the program goes alone" {
+    local want="_MMRY_WAITING_SCRIPT_FLAGS='bash= -e -u -x -l -v ;sh= -e -u -x -l -v ;python= -u -B -E -s -I ;python3= -u -B -E -s -I ;pwsh= -NoProfile -NonInteractive -NoLogo ;powershell= -NoProfile -NonInteractive -NoLogo ;node= ;'"
+    grep -q -x -F -- "$want" "$HH/lib-waiting-actions.sh" || { echo "the flag list changed: review every flag for a value before changing this pin"; return 1; }
+    # A handler folder without lib-waiting-actions.sh (a half-finished update): raised, program only.
+    local alt="$TEST_TMPDIR/hh-nolib" h
+    mkdir -p "$alt"
+    cp "$HH"/*.sh "$HH"/*.awk "$alt"/ 2>/dev/null || true
+    rm -f -- "$alt/lib-waiting-actions.sh"
+    [ -f "$alt/formation-waiting.sh" ] || return 1
+    HH="$alt"
+    for h in claude codex; do
+        _prompt "$h" "git push origin main" || return 1
+        _expect "$h" git "<none>" || return 1
+        _prompt "$h" "bash deploy.sh" || return 1
+        _expect "$h" bash "<none>" || return 1
+    done
 }

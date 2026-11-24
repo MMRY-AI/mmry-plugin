@@ -56,6 +56,7 @@ hooks-handlers/lib-host.sh
 hooks-handlers/lib-jq.sh
 hooks-handlers/lib-release-files.sh
 hooks-handlers/lib-tool-server.sh
+hooks-handlers/lib-waiting-actions.sh
 hooks-handlers/list-databases.sh
 hooks-handlers/list-groups.sh
 hooks-handlers/make-private.sh

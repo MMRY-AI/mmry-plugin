@@ -1065,11 +1065,21 @@ _poll_once() {
     # or "to run an inline node script." (cmo-mmry W1 to W3, the same frame), and the person line keeps
     # its own frame with that ending. The pattern admits a subcommand word, a file name with no folder
     # and nothing else, so a first line carrying anything more gives no person line (L-13).
+    # #34651 fix round 1: a subcommand is shown only when it is on THAT program's closed list, the
+    # handler's own (lib-waiting-actions.sh, the lists _mmry_waiting_action_ok holds a sent action to,
+    # and by the same test: the program's entry, the word with a space each side). A notice from an
+    # older service, or a row written past the service, ending "to run npm s3cr3tword." gives the
+    # program-only person line (the approved #34519 line), never the word (L-15). Without the lists
+    # file no subcommand is shown at all.
     # Measured on Claude Code 2.1.330: a systemMessage from PostToolUse and UserPromptSubmit reaches the
     # person. The Stop wake (asyncRewake, exit 2) cannot carry one: a named limit.
     FORMATION_PERSON=""
-    local person_on=""
+    local person_on="" _MMRY_WAITING_SUBCOMMANDS=""
     [[ "$_MMRY_HOST_V" != "codex" ]] && person_on=1
+    if [[ -n "$person_on" && -f "${HANDLER_DIR}/lib-waiting-actions.sh" ]]; then
+        # shellcheck source=/dev/null
+        source "${HANDLER_DIR}/lib-waiting-actions.sh" 2>/dev/null || true
+    fi
     local count="" directed_count="" system_count="" away_count="" newest="" directed_ids="" lines="" wlines="" person=""
     {
         IFS= read -r -d '' count || true
@@ -1081,10 +1091,12 @@ _poll_once() {
         IFS= read -r -d '' lines || true
         IFS= read -r -d '' wlines || true
         IFS= read -r -d '' person || true
-    } < <("$MMRY_JQ" -j --arg bg "$bg_sentence" --arg astart "$assign_start" --arg pon "$person_on" "${MMRY_JQ_NAME_DEFS:-}"'
+    } < <("$MMRY_JQ" -j --arg bg "$bg_sentence" --arg astart "$assign_start" --arg pon "$person_on" --arg subs "${_MMRY_WAITING_SUBCOMMANDS:-}" "${MMRY_JQ_NAME_DEFS:-}"'
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
         def away: (.sentWhileAway // false) == true;
         def waitnote: system and (((.content // "") | tostring) | startswith("WAITING ON APPROVAL. "));
+        def listed($p; $w): ($p | test("^[a-z0-9]+$"))
+            and ([$subs | split(";")[] | select(startswith($p + "= ")) | select(contains(" " + $w + " "))] | length) > 0;
         def person:
             (((.content // "") | tostring | split("\n")[0] | rtrimstr("\r"))
              | capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)(?: >>> (?<name>.*?) <<<)?(?: \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9]{2}:[0-9]{2} UTC (?:for approval to run the script (?<file>[-A-Za-z0-9_.]{1,64}) with (?<sprog>[-A-Za-z0-9_.:]{1,64})|for approval to run an inline (?<iprog>[-A-Za-z0-9_.:]{1,64}) script|for approval to run (?<prog>[-A-Za-z0-9_.:]{1,64})(?: (?<sub>[a-z][a-z0-9-]{0,23}))?|for approval to use the (?<tool>[-A-Za-z0-9_.:]{1,64}) tool|on a permission prompt)\\.$")?)
@@ -1093,7 +1105,7 @@ _poll_once() {
               + (if (.file // "") != "" then " is waiting for approval to run the script " + .file + " with " + .sprog + "."
                  elif (.iprog // "") != "" then " is waiting for approval to run an inline " + .iprog + " script."
                  elif (.prog // "") != "" then " is waiting for approval to run " + .prog
-                      + (if (.sub // "") != "" then " " + .sub else "" end) + "."
+                      + (if (.sub // "") != "" and listed(.prog; .sub) then " " + .sub else "" end) + "."
                  elif (.tool // "") != "" then " is waiting for approval to use the " + .tool + " tool."
                  else " is waiting on a permission prompt." end)
               + " Answer the prompt in that window.";
