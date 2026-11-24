@@ -278,6 +278,14 @@ _say() {
     ! grep -q '/progress' "$LOG" || { cat "$LOG"; return 1; }
 }
 
+@test "34650 fix round 2, fix 6b: the Codex skill's two state lists end with Free, as cmo-mmry's item 6 list (round 2 answer 5)" {
+    local skill="${BATS_TEST_DIRNAME}/../../skills-codex/memory-system/SKILL.md"
+    grep -q -F -- '| Report Accepted, Done, Blocked, Abandoned or Free | `formation_progress` |' "$skill" || return 1
+    grep -q -F -- '`formation_progress` (`Accepted`, `Done`, `Blocked`, `Abandoned` or `Free`, and an optional `note`)' "$skill" || return 1
+    ! grep -q -F -- 'Blocked or Abandoned' "$skill" || return 1
+    ! grep -q -F -- '`Blocked` or `Abandoned`' "$skill" || return 1
+}
+
 # The note as the fake logged it on the PUT.
 _sent_note() { grep '^PUT ' "$LOG" | tail -n 1 | sed 's/^PUT [^ ]* //' | "${MMRY_JQ:-jq}" -r '.note' | tr -d '\r'; }
 _rep() { local s="" i; for ((i = 0; i < $2; i++)); do s+="$1"; done; printf '%s' "$s"; }
