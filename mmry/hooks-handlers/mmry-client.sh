@@ -1997,7 +1997,7 @@ mmry_send_formation_transmission() {
     # only when it is "true", as an unquoted boolean, so a caller passing neither, and a service older
     # than the check (which ignores both), produce exactly the request and the answer of today.
     local formation_id="$1" session_id="$2" message="$3" working_dir="${4:-}"
-    local recipient_member_id="${5:-}" check_recipient="" confirmed=""
+    local recipient_member_id="${5:-}" check_recipient="false" confirmed="false"
     [[ "${6:-}" == "true" ]] && check_recipient="true"
     [[ "${7:-}" == "true" ]] && confirmed="true"
     local body

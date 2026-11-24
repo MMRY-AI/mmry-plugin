@@ -189,3 +189,52 @@ _sends() { grep -c '^POST http://fake.invalid/api/formations/77/transmissions ' 
     [ "$(printf '%s' "$prop" | jq -r '.type')" = "boolean" ] || { echo "$prop"; return 1; }
     [ "$(printf '%s' "$prop" | jq -r '.description')" = "Optional: true to send a directed message that was held because it mentions another member or a task assigned to another member. Use it only when the recipient is right." ] || { echo "$prop"; return 1; }
 }
+
+# THE SERIALISED BODY (W-14 to W-17). mmry_send_formation_transmission is called directly, through the
+# same fake curl, and the WHOLE request line it sent is compared, so a key that appears as false, null
+# or out of place is caught, not only a missing one. checkRecipient and confirmed are each sent only
+# when they are "true"; a broadcast and a send with neither flag carry neither key, which is exactly
+# today's request, so a service older than the check sees nothing new. The client is sourced in its
+# own shell with MMRY_API_URL and MMRY_API_KEY unset first and only the fake address set, and the
+# logged URL proves the request went to the fake.
+_client_send() {
+    bash -c 'unset MMRY_API_URL MMRY_API_KEY MMRY_HOST
+             export MMRY_API_URL="http://fake.invalid" MMRY_API_KEY="fake-key" MMRY_AUTH_METHOD="apikey"
+             source "$1/mmry-client.sh"; shift; mmry_send_formation_transmission "$@"' _ "$HH" "$@" >/dev/null 2>&1 || true
+}
+_last_request() { tail -n 1 "$REQLOG" | tr -d '\r'; }
+PIN_URL='POST http://fake.invalid/api/formations/77/transmissions'
+
+@test "W-14 body: a directed send with the check carries \"checkRecipient\":true and no confirmed key" {
+    _client_send 77 s-pin "pin text" "" 441 true
+    [ "$(_last_request)" = "$PIN_URL"' {"sessionId":"s-pin","content":"pin text","recipientMemberId":441,"checkRecipient":true}' ] \
+        || { cat "$REQLOG"; return 1; }
+}
+
+@test "W-15 body: a confirmed send carries \"confirmed\":true, beside the check" {
+    _client_send 77 s-pin "pin text" "" 441 true true
+    [ "$(_last_request)" = "$PIN_URL"' {"sessionId":"s-pin","content":"pin text","recipientMemberId":441,"checkRecipient":true,"confirmed":true}' ] \
+        || { cat "$REQLOG"; return 1; }
+    : > "$REQLOG"
+    run bash "$HH/formation-say.sh" "pin text" 441 --confirm
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$(_last_request)" == "$PIN_URL "*'"recipientMemberId":441,"checkRecipient":true,"confirmed":true}' ]] || { cat "$REQLOG"; return 1; }
+}
+
+@test "W-16 body: a send with neither flag, or with a flag other than true, carries neither key" {
+    _client_send 77 s-pin "pin text" "" 441
+    [ "$(_last_request)" = "$PIN_URL"' {"sessionId":"s-pin","content":"pin text","recipientMemberId":441}' ] || { cat "$REQLOG"; return 1; }
+    _client_send 77 s-pin "pin text" "" 441 false false
+    [ "$(_last_request)" = "$PIN_URL"' {"sessionId":"s-pin","content":"pin text","recipientMemberId":441}' ] || { cat "$REQLOG"; return 1; }
+    _client_send 77 s-pin "pin text"
+    [ "$(_last_request)" = "$PIN_URL"' {"sessionId":"s-pin","content":"pin text"}' ] || { cat "$REQLOG"; return 1; }
+}
+
+@test "W-17 body: a broadcast from formation-say.sh, with or without --confirm, carries neither key" {
+    run bash "$HH/formation-say.sh" "pin text"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    run bash "$HH/formation-say.sh" "pin text" --confirm
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(grep -c "^$PIN_URL " "$REQLOG")" -eq 2 ] || { cat "$REQLOG"; return 1; }
+    ! grep "^$PIN_URL " "$REQLOG" | grep -q -e '"checkRecipient"' -e '"confirmed"' -e '"recipientMemberId"' || { cat "$REQLOG"; return 1; }
+}
