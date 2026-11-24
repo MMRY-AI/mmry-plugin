@@ -32,12 +32,20 @@
       "Bash(git *--upload-pack*)",
       "Bash(git *--exec*)",
       "Bash(git -c *)",
+      "Bash(git * -c *)",
       "Bash(git *submodule foreach*)",
       "Bash(rm -rf*)",
       "Bash(rm -fr*)",
+      "Bash(*.secrets/*)",
+      "Bash(* .env*)",
+      "Bash(*/.env*)",
       "Read(./.env)",
       "Read(./.env.*)",
-      "Read(./secrets/**)"
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./secrets/**)",
+      "Read(./.secrets/**)",
+      "Read(./**/.secrets/**)"
     ]
   }
 }
