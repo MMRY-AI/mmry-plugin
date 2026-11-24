@@ -351,7 +351,7 @@ _ROSTER_JSON='{"formation":{"id":42,"objective":"migrate the billing schema"},"m
 Direct a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off
 and the message goes to the whole formation.
 The state in brackets is the last thing that member reported. Report your own with
-/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account
+/mmry:formation progress <Accepted|Done|Blocked|Abandoned|Free>, and read the whole account
 with /mmry:formation report.
 FOOTER
 )"
@@ -384,7 +384,7 @@ and the message goes to the whole formation.
 In brackets, working means MMRY AI has recorded activity from the member since its work was given,
 and not started means it has recorded none. Blocked, Done and Abandoned are what the member
 reported, and they always show. Messages count as activity, not as progress. Report your own with
-/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account
+/mmry:formation progress <Accepted|Done|Blocked|Abandoned|Free>, and read the whole account
 with /mmry:formation report.
 FOOTER
 )"
