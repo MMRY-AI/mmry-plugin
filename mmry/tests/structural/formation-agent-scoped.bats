@@ -46,6 +46,7 @@ setup() {
 
     CURL_LOG="${BATS_TEST_TMPDIR}/curl-calls.log"
     : > "$CURL_LOG"
+    : > "${CURL_LOG}.methods"
     FAKE_BIN="$(_fake_server_dir)"
 }
 
@@ -62,13 +63,15 @@ _fake_server_dir() {
     mkdir -p "$dir"
     cat > "${dir}/curl" <<'FAKECURL'
 #!/usr/bin/env bash
-out=""; prev=""; url=""
+out=""; prev=""; url=""; method=""
 for arg in "$@"; do
     [[ "$prev" == "-o" ]] && out="$arg"
+    [[ "$prev" == "-X" ]] && method="$arg"
     [[ "$arg" == http* ]] && url="$arg"
     prev="$arg"
 done
 printf '%s\n' "$url" >> "${MMRY_TEST_CURL_LOG:?}"
+printf '%s\n' "${method:-GET}" >> "${MMRY_TEST_CURL_LOG}.methods"
 body="${FAKE_BODY:-[]}"
 [[ "$url" == *"since="* ]] && body='[]'
 [[ -n "$out" ]] && printf '%s' "$body" > "$out"
@@ -84,6 +87,9 @@ _payload() {
     local event="$1" who="$2"
     case "$who" in
         agent)  printf '{"session_id":"%s","hook_event_name":"%s","agent_id":"add22966ec6f3f9bf","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"echo probe-sub"}}' "$SID" "$event" ;;
+        # A helper's own Formation send and read calls: not real work, so nothing is stamped (#34089).
+        agentsay)  printf '{"session_id":"%s","hook_event_name":"%s","agent_id":"add22966ec6f3f9bf","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"bash ~/.claude/mmry/hooks-handlers/formation-say.sh \\"still working\\""}}' "$SID" "$event" ;;
+        agentread) printf '{"session_id":"%s","hook_event_name":"%s","agent_id":"add22966ec6f3f9bf","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"bash ~/.claude/mmry/hooks-handlers/formation-roster.sh"}}' "$SID" "$event" ;;
         lead)   printf '{"session_id":"%s","hook_event_name":"%s","agent_type":"pm-engineering-mmry","tool_name":"Bash","tool_input":{"command":"echo probe-lead"}}' "$SID" "$event" ;;
         parent) printf '{"session_id":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"echo probe-main"}}' "$SID" "$event" ;;
     esac
@@ -121,11 +127,33 @@ _assert_untouched() {
         echo "${label}: the parent's record changed, so a message was marked seen: [$(_state)]"
         return 1
     }
+    if [ "${2:-}" = "stamp" ]; then
+        # A helper's real tool work may make EXACTLY ONE request, the stamp-only route with the
+        # member's session (#34089 part 2). Any second call, or any other call, is red.
+        [ "$(wc -l < "$CURL_LOG" | tr -d ' ')" -eq 1 ] || {
+            echo "${label}: expected exactly one tool-stamp call, the service was asked $(wc -l < "$CURL_LOG" | tr -d ' ') time(s): $(cat "$CURL_LOG")"
+            return 1
+        }
+        [ "$(cat "$CURL_LOG")" = "http://fake.invalid/api/formations/4242/tool-stamp?sessionId=${SID}" ] || {
+            echo "${label}: the one call is not the member's tool-stamp: $(cat "$CURL_LOG")"
+            return 1
+        }
+        [ "$(cat "${CURL_LOG}.methods")" = "POST" ] || {
+            echo "${label}: the tool-stamp call is not a POST: $(cat "${CURL_LOG}.methods")"
+            return 1
+        }
+        # And never a poll, with or without tool=1.
+        ! grep -q 'transmissions' "$CURL_LOG" || { echo "${label}: a transmissions poll: $(cat "$CURL_LOG")"; return 1; }
+        return 0
+    fi
     [ ! -s "$CURL_LOG" ] || {
         echo "${label}: the service was asked $(wc -l < "$CURL_LOG") time(s); a poll moves the read position: $(cat "$CURL_LOG")"
         return 1
     }
 }
+
+# Clear both request logs between runs inside one case.
+_reset_logs() { : > "$CURL_LOG"; : > "${CURL_LOG}.methods"; }
 
 # ---------------------------------------------------------------------------------------------
 # Ticket test case 1: a hook payload from a dispatched agent leaves the parent's pending messages
@@ -135,7 +163,19 @@ _assert_untouched() {
 @test "tc1: a dispatched agent's PostToolUse leaves the parent's pending message unread and prints nothing" {
     _join
     _run_check PostToolUse agent
-    _assert_untouched "dispatched agent PostToolUse"
+    _assert_untouched "dispatched agent PostToolUse" stamp
+}
+
+@test "tc1: a dispatched agent's own Formation send and read calls make no service call at all" {
+    # Part 1 withholds the tool marker for the plugin's own message calls, and a helper's stamp is
+    # withheld the same way: a helper that only messages has not made progress.
+    _join
+    local who
+    for who in agentsay agentread; do
+        _reset_logs
+        _run_check PostToolUse "$who"
+        _assert_untouched "dispatched agent ${who} PostToolUse"
+    done
 }
 
 @test "tc1: a dispatched agent is skipped on every event the handler serves, not only PostToolUse" {
@@ -145,9 +185,14 @@ _assert_untouched() {
     _join
     local event
     for event in PostToolUse SubagentStop Stop UserPromptSubmit SessionStart; do
-        : > "$CURL_LOG"
+        _reset_logs
         _run_check "$event" agent
-        _assert_untouched "dispatched agent ${event}"
+        # Only real tool work (PostToolUse) is stamped, once; every other event asks for nothing.
+        if [ "$event" = "PostToolUse" ]; then
+            _assert_untouched "dispatched agent ${event}" stamp
+        else
+            _assert_untouched "dispatched agent ${event}"
+        fi
         [ ! -e "${TMPDIR}/.mmry-formation-poll-${SID}" ] || { echo "${event}: left a poller lock"; return 1; }
     done
 }
@@ -157,7 +202,7 @@ _assert_untouched() {
     # call would still exit 0: the empty output and the untouched record are what tell them apart.
     _join
     _run_check PostToolUse agent codex
-    _assert_untouched "codex sub-agent PostToolUse"
+    _assert_untouched "codex sub-agent PostToolUse" stamp
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -194,8 +239,9 @@ _assert_untouched() {
     # mid-run. The agent's tool call comes first and must leave it; the lead's next one gets it.
     _join
     _run_check PostToolUse agent
-    _assert_untouched "dispatched agent, mid-run"
+    _assert_untouched "dispatched agent, mid-run" stamp
 
+    _reset_logs
     _run_check PostToolUse parent
     [ "$status" -eq 2 ] || { echo "the lead did not get the message the agent left: ${status} ${output}"; return 1; }
     [[ "$output" == *"Directed: please rebase onto develop"* ]] || return 1
