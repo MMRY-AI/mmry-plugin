@@ -1071,10 +1071,14 @@ _poll_once() {
     # older service, or a row written past the service, ending "to run npm s3cr3tword." gives the
     # program-only person line (the approved #34519 line), never the word (L-15). Without the lists
     # file no subcommand is shown at all.
+    # #34651 round 3 (N2): the script and inline forms are shown only beside a listed INTERPRETER, the
+    # same list (_MMRY_WAITING_INTERPRETERS in lib-waiting-actions.sh, not a second copy). "to run an
+    # inline curl script." and "to run the script x.sh with curl." give the program-only line (L-16).
+    # Without the lists file neither form is shown at all.
     # Measured on Claude Code 2.1.330: a systemMessage from PostToolUse and UserPromptSubmit reaches the
     # person. The Stop wake (asyncRewake, exit 2) cannot carry one: a named limit.
     FORMATION_PERSON=""
-    local person_on="" _MMRY_WAITING_SUBCOMMANDS=""
+    local person_on="" _MMRY_WAITING_SUBCOMMANDS="" _MMRY_WAITING_INTERPRETERS=""
     [[ "$_MMRY_HOST_V" != "codex" ]] && person_on=1
     if [[ -n "$person_on" && -f "${HANDLER_DIR}/lib-waiting-actions.sh" ]]; then
         # shellcheck source=/dev/null
@@ -1091,19 +1095,22 @@ _poll_once() {
         IFS= read -r -d '' lines || true
         IFS= read -r -d '' wlines || true
         IFS= read -r -d '' person || true
-    } < <("$MMRY_JQ" -j --arg bg "$bg_sentence" --arg astart "$assign_start" --arg pon "$person_on" --arg subs "${_MMRY_WAITING_SUBCOMMANDS:-}" "${MMRY_JQ_NAME_DEFS:-}"'
+    } < <("$MMRY_JQ" -j --arg bg "$bg_sentence" --arg astart "$assign_start" --arg pon "$person_on" --arg subs "${_MMRY_WAITING_SUBCOMMANDS:-}" --arg interps "${_MMRY_WAITING_INTERPRETERS:-}" "${MMRY_JQ_NAME_DEFS:-}"'
         def system: (.senderSessionID // null) == null and (.senderUserID // null) == null;
         def away: (.sentWhileAway // false) == true;
         def waitnote: system and (((.content // "") | tostring) | startswith("WAITING ON APPROVAL. "));
         def listed($p; $w): ($p | test("^[a-z0-9]+$"))
             and ([$subs | split(";")[] | select(startswith($p + "= ")) | select(contains(" " + $w + " "))] | length) > 0;
+        def interp($p): ($p | test("^[a-z0-9]+$")) and ($interps | contains(" " + $p + " "));
         def person:
             (((.content // "") | tostring | split("\n")[0] | rtrimstr("\r"))
              | capture("^WAITING ON APPROVAL\\. Member (?<id>[0-9]+)(?: >>> (?<name>.*?) <<<)?(?: \\((?<app>Claude Code|Codex)\\))? has been waiting since [0-9]{2}:[0-9]{2} UTC (?:for approval to run the script (?<file>[-A-Za-z0-9_.]{1,64}) with (?<sprog>[-A-Za-z0-9_.:]{1,64})|for approval to run an inline (?<iprog>[-A-Za-z0-9_.:]{1,64}) script|for approval to run (?<prog>[-A-Za-z0-9_.:]{1,64})(?: (?<sub>[a-z][a-z0-9-]{0,23}))?|for approval to use the (?<tool>[-A-Za-z0-9_.:]{1,64}) tool|on a permission prompt)\\.$")?)
             | "MMRY AI Formation: " + (if (.name // "") != "" then .name else "Member " + .id end)
               + (if (.app // "") != "" then " (" + .app + ")" else "" end)
-              + (if (.file // "") != "" then " is waiting for approval to run the script " + .file + " with " + .sprog + "."
-                 elif (.iprog // "") != "" then " is waiting for approval to run an inline " + .iprog + " script."
+              + (if (.file // "") != "" and interp(.sprog) then " is waiting for approval to run the script " + .file + " with " + .sprog + "."
+                 elif (.file // "") != "" then " is waiting for approval to run " + .sprog + "."
+                 elif (.iprog // "") != "" and interp(.iprog) then " is waiting for approval to run an inline " + .iprog + " script."
+                 elif (.iprog // "") != "" then " is waiting for approval to run " + .iprog + "."
                  elif (.prog // "") != "" then " is waiting for approval to run " + .prog
                       + (if (.sub // "") != "" and listed(.prog; .sub) then " " + .sub else "" end) + "."
                  elif (.tool // "") != "" then " is waiting for approval to use the " + .tool + " tool."
