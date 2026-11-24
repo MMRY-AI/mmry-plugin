@@ -253,12 +253,9 @@ _tp_long() { # $1 path, $2 earlier calls, $3 bytes in each earlier call's result
     done
     printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_ask","name":"Bash","input":{"command":"rm -rf build"}}]}}\n' >> "$tp"
 }
-_ms_now() { # milliseconds, from EPOCHREALTIME where the shell has it (bash 5), else whole seconds
-    local t="${EPOCHREALTIME:-}"
-    if [[ -n "$t" ]]; then t="${t//[.,]/}"; printf '%s' "$(( 10#$t / 1000 ))"; else printf '%s' "$(( SECONDS * 1000 ))"; fi
-}
 # The whole next-call check (formation-check.sh, the synchronous PostToolUse hook, timeout 15 s) after the
-# asked call was refused, in a session of $1 earlier calls of $2 bytes each. Sets CLEAR_MS and checks it cleared.
+# asked call was refused, in a session of $1 earlier calls of $2 bytes each. Sets CLEAR_S (whole seconds:
+# SECONDS, because bash 3.2 has no finer clock, structural/bash32-portability.bats) and checks it cleared.
 _timed_clear() {
     local tp="$TEST_TMPDIR/transcript.jsonl" t0 t1
     : > "$URLS"; : > "$NOTICES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-* "$TEST_TMPDIR"/.mmry-asking-*
@@ -267,14 +264,14 @@ _timed_clear() {
     _waiting "$(_notification_tp 'Claude needs your permission to use Bash' "$tp")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","is_error":true,"content":"The user did not approve"}]}}\n' >> "$tp"
-    t0="$(_ms_now)"
+    t0=$SECONDS
     _check "$(_cc_post_tp "ls -la" "$tp")" || true
-    t1="$(_ms_now)"
-    CLEAR_MS=$(( t1 - t0 ))
+    t1=$SECONDS
+    CLEAR_S=$(( t1 - t0 ))
     _cleared_once
 }
 
-# BOUND: 7.5 s for the whole check at every size, half the hook's 15 s limit. The whole check (not the
+# BOUND: 7 whole seconds (under 8 s) for the whole check at every size, about half the hook's 15 s limit. The whole check (not the
 # clear alone) is what the limit applies to, and its fixed cost, with no transcript work at all, measured
 # 2.2 to 4.0 s on the build PC under load; half the limit leaves that room on a slow runner while the old
 # cost at 5 MB (37.9 s on the build PC, 50.8 s measured by QA) fails it five times over. The bound is the
@@ -284,8 +281,8 @@ _timed_clear() {
     for size in "0 0" "10 100000" "50 100000"; do
         calls="${size% *}" bytes="${size#* }"
         _timed_clear "$calls" "$bytes" || { echo "not cleared at $calls calls"; return 1; }
-        echo "# S-05 $calls earlier calls of $bytes bytes ($(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ') bytes): whole check ${CLEAR_MS} ms" >&3
-        (( CLEAR_MS < 7500 )) || over+=" ${CLEAR_MS} ms at $calls earlier calls of $bytes bytes;"
+        echo "# S-05 $calls earlier calls of $bytes bytes ($(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ') bytes): whole check ${CLEAR_S} s" >&3
+        [ "$CLEAR_S" -le 7 ] || over+=" ${CLEAR_S} s at $calls earlier calls of $bytes bytes;"
     done
     [ -z "$over" ] || { echo "the clear took$over"; return 1; }
 }
