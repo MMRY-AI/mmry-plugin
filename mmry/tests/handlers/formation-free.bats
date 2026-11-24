@@ -229,6 +229,55 @@ _lead_done_body() {
     [ "$(grep -c '^PUT .*"progress":"Done".*"note":"free"' "$LOG")" -eq 2 ] || { cat "$LOG"; return 1; }
 }
 
+# ---- fix round 2 ------------------------------------------------------------------------------------
+
+@test "34650 fix round 2, fix 3: free on Blocked with no assignment gets item 7, not the already-free line (Claude Code)" {
+    _free claude "$(_roster 'null' '"Blocked"')" free
+    [ "$status" -eq 1 ] || { echo "status $status"; echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | tr -d '\r')" = "$FREE_BLOCKED" ] || { echo "$output"; return 1; }
+    [[ "$output" != *"$FREE_NONE"* ]] || { echo "$output"; return 1; }
+    ! grep -q '^PUT ' "$LOG" || { cat "$LOG"; return 1; }
+}
+
+@test "34650 fix round 2, fix 3: on Codex, Free on Blocked with an empty assignment gets item 7 as an error result" {
+    _free codex "$(_roster '""' '"Blocked"')" Free
+    [ "$status" -ne 0 ] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | tr -d '\r')" = "$FREE_BLOCKED" ] || { echo "$output"; return 1; }
+    ! grep -q '^PUT ' "$LOG" || { cat "$LOG"; return 1; }
+}
+
+@test "34650 fix round 2, fix 6a: a lead's free for member 7 whose work is Blocked is sent as Done with the note free, and prints what a lead's Done prints" {
+    BODY_OVERRIDE="$(_lead_done_body)" _free claude "$(_lead_roster Blocked)" 7 free
+    [ "$status" -eq 0 ] || { echo "$output"; cat "$LOG"; return 1; }
+    local free_out="$output"
+    grep -q '^PUT http://fake.invalid/api/formations/4242/members/7/progress .*"progress":"Done".*"note":"free"' "$LOG" || { cat "$LOG"; return 1; }
+    BODY_OVERRIDE="$(_lead_done_body)" _free claude "$(_lead_roster Blocked)" 7 Done
+    [ "$free_out" = "$output" ] || { printf 'free:\n%s\ndone:\n%s\n' "$free_out" "$output"; return 1; }
+    [[ "$free_out" != *"$FREE_BLOCKED"* ]] || { echo "$free_out"; return 1; }
+}
+
+# Fix 5 (R4 variants): the send path. formation-say.sh posts a message and nothing else; a message saying
+# free in any words, directed or to everyone, never reaches the progress route.
+_say() {
+    local bin; bin="$(_curl_dir)"
+    bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
+    PATH="${bin}:${PATH}" FAKE_CODE=201 FAKE_BODY='{"id":501}' FAKE_BODY_GET='{"id":501,"stored":1}' FAKE_URL_LOG="$LOG" \
+        CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" \
+        MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
+        run env -u MMRY_HOST bash "${HANDLERS}/formation-say.sh" "$@"
+}
+
+@test "34650 fix round 2, fix 5: 'I am free' and 'free?' to the lead and 'free' to everyone are sent as messages and never as progress" {
+    _say "I am free" 3 --confirm
+    [ "$status" -eq 0 ] || { echo "$output"; cat "$LOG"; return 1; }
+    _say "free?" 3 --confirm
+    [ "$status" -eq 0 ] || { echo "$output"; cat "$LOG"; return 1; }
+    _say "free"
+    [ "$status" -eq 0 ] || { echo "$output"; cat "$LOG"; return 1; }
+    [ "$(grep -c '^POST .*/transmissions' "$LOG")" -eq 3 ] || { cat "$LOG"; return 1; }
+    ! grep -q '/progress' "$LOG" || { cat "$LOG"; return 1; }
+}
+
 # The note as the fake logged it on the PUT.
 _sent_note() { grep '^PUT ' "$LOG" | tail -n 1 | sed 's/^PUT [^ ]* //' | "${MMRY_JQ:-jq}" -r '.note' | tr -d '\r'; }
 _rep() { local s="" i; for ((i = 0; i < $2; i++)); do s+="$1"; done; printf '%s' "$s"; }
