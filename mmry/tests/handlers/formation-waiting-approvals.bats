@@ -163,12 +163,23 @@ _codex_member_approves() { # $1 command
 
 # ---- R2, the program ------------------------------------------------------------------------------
 
-@test "P-01 34519 R2: Codex sends the program only: the first word, never the arguments" {
+# #34651 (DD-207) changed what this pins: the known subcommand of a listed tool is now sent beside the
+# program, as programAction, so "push" is in the body by design (it failed here on the 34651 build with
+# the old line "no push in the body"). Everything after the subcommand is still never sent, and a
+# program that is no listed tool still sends its first word only (formation-waiting-action.bats has the
+# full set of cases).
+@test "P-01 34519 R2, 34651: Codex sends the program and its known subcommand, never the arguments" {
     local ask="{\"command\":\"git push https://$PLANTED@host main\",\"description\":\"d\"}"
     _waiting "$(_codex_ask Bash "" "$ask")"
     [ "$(_program_sent)" = "git" ] || { cat "$BODIES"; return 1; }
+    [ "$("$JQ_BIN" -r '.programAction // "<none>"' < "$BODIES" | tail -1)" = "push" ] || { cat "$BODIES"; return 1; }
     ! grep -q "$PLANTED" "$BODIES" || { echo "an argument was sent"; return 1; }
-    ! grep -q "push" "$BODIES" || { echo "an argument was sent"; return 1; }
+    ! grep -q -e "https" -e "host" -e "main" "$BODIES" || { echo "an argument was sent"; return 1; }
+    : > "$BODIES"; rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    ask="{\"command\":\"make push https://$PLANTED@host main\",\"description\":\"d\"}"
+    _waiting "$(_codex_ask Bash "" "$ask")"
+    [ "$(_program_sent)" = "make" ] || { cat "$BODIES"; return 1; }
+    ! grep -q -e "$PLANTED" -e "push" "$BODIES" || { echo "an argument was sent"; return 1; }
 }
 
 @test "P-02 34519 R2: a program given with a folder is sent without the folder" {
