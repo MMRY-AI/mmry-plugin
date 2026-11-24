@@ -29,6 +29,10 @@ source "${HANDLER_DIR}/lib-formation-prompts.sh"
 # only, no apostrophes, so the same text can be held unchanged in a T-SQL literal on the service.
 MMRY_FORMATION_REPORT_RULE="Report to the lead at every stopping point, with a message directed to the lead: when you finish, when you are blocked, when you are waiting, and when you stop with work still running, saying what is still running. Never hold finished work back for a slow check; report it and say the check is still running."
 MMRY_FORMATION_ACK_RULE="When you receive an assignment, a brief or a question, acknowledge it before you start, with substance: what you understood, anything you cannot do, and when to expect the result. If the job is short, fold that into your first update. Findings and status updates need no acknowledgement."
+# #34011 (DD-204): two more standing member rules. Approved wording (cmo-mmry, 2026-11-23). ASCII, no
+# apostrophes, so the same text is held unchanged in a T-SQL literal on the service.
+MMRY_FORMATION_MESSAGE_RULE="Message the one member who needs something; message everyone only when every member must act or change course."
+MMRY_FORMATION_SCREEN_RULE="Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply."
 
 formation_id="${1:-}"
 [[ $# -gt 0 ]] && shift
@@ -161,13 +165,15 @@ fi
 # every brief; on 2026-10-04 a member held finished work for about 40 minutes behind a slow check
 # and the sponsor had to ask whether the lead had been told.
 #
-# THE WORDING IS SHARED, NOT RESTATED. The same two rules are in the connector's join response
-# and the service's assignment notice (MMRY-AI/mmry: FormationReportRule.cs, migration 066) and on
+# THE WORDING IS SHARED, NOT RESTATED. The same four rules are in the connector's join response
+# and the service's assignment notice (MMRY-AI/mmry: FormationReportRule.cs, migrations 066 and 106) and on
 # the formation command page. tests/structural/formation-report-rule.bats pins them here byte for
 # byte, and the service repository pins its copies to the same text (DD-109 there). Change one and
 # change all of them.
 echo "${MMRY_FORMATION_REPORT_RULE}"
 echo "${MMRY_FORMATION_ACK_RULE}"
+echo "${MMRY_FORMATION_MESSAGE_RULE}"
+echo "${MMRY_FORMATION_SCREEN_RULE}"
 
 # THE RULE FOR THIS SESSION'S OWN ROLE (#32683), after the two above, which are unchanged. The role
 # is read off this session's own row in the server's answer, so a lead returning to its seat gets
