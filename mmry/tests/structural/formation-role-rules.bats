@@ -599,6 +599,41 @@ FREE_RULE="When you finish your work, report that you are free with a progress r
     tr -d '\r' < "$page" | grep -q -F -- 'formation-progress.sh" free ["note"]' || { echo "command page: no run line"; return 1; }
 }
 
+@test "34650 fix 2: the command page and the Codex skill carry cmo-mmry's Blocked sentence right after the item 3 sentence" {
+    local blocked="While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help."
+    local page="${PLUGIN_DIR}/commands/formation.md" skill="${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+    tr -d '\r' < "$page" | grep -q -F -- "Saying you are free in a message does not do this. ${blocked}" \
+        || tr -d '\r' < "$page" | grep -A1 -x -F -- "free reports that you have finished and are free: MMRY AI records your current work as Done and tells the lead, so it can give you your next job. Saying you are free in a message does not do this." | tail -n 1 | grep -q -x -F -- "$blocked" \
+        || { echo "command page: no Blocked sentence after item 3"; return 1; }
+    tr -d '\r' < "$skill" | grep -q -F -- "MMRY AI records your current work as Done and tells the lead, so it can give you your next job. ${blocked}" \
+        || { echo "Codex skill: no Blocked sentence after item 3"; return 1; }
+}
+
+@test "34650 fix 5: the free rule is the last member rule line, on Claude Code and on Codex" {
+    # Lead ruling: the free line goes last among the member rules, after the milestone line and after
+    # 34011's rules M and S when they arrive. Written against whatever lines the rule libraries hold, so
+    # it still holds when M and S are added to them.
+    source "${HANDLERS}/lib-formation-roles.sh"
+    [ "$(mmry_formation_role_rule Wingman | tr -d '\r' | tail -n 1)" = "$FREE_RULE" ] || { mmry_formation_role_rule Wingman; return 1; }
+    local rules=() line
+    while IFS= read -r line; do rules+=("$line"); done < <(mmry_formation_role_rule Wingman | tr -d '\r')
+    rules+=("$(grep -m1 '^MMRY_FORMATION_REPORT_RULE=' "${HANDLERS}/formation-join.sh" | sed 's/^[^=]*="//; s/"$//')")
+    rules+=("$(grep -m1 '^MMRY_FORMATION_ACK_RULE=' "${HANDLERS}/formation-join.sh" | sed 's/^[^=]*="//; s/"$//')")
+    local host f n r
+    for host in claude codex; do
+        _join "$host" Wingman
+        [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+        f="$(_line_no_of "$FREE_RULE")"
+        [ -n "$f" ] || { echo "$host: no free rule"; echo "$output"; return 1; }
+        for r in "${rules[@]}"; do
+            [ "$r" = "$FREE_RULE" ] && continue
+            n="$(_line_no_of "$r")"
+            [ -n "$n" ] || { echo "$host: rule line missing: $r"; echo "$output"; return 1; }
+            [ "$n" -lt "$f" ] || { echo "$host: rule at $n after the free rule at $f: $r"; echo "$output"; return 1; }
+        done
+    done
+}
+
 @test "34650: with MMRY_SERVICE_REPO, the service holds the same free rule and confirmations" {
     if [[ -z "${MMRY_SERVICE_REPO:-}" ]]; then
         skip "MMRY_SERVICE_REPO is not set; set it to a checkout of MMRY-AI/mmry to compare the service"

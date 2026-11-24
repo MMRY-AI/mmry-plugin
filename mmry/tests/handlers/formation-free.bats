@@ -51,6 +51,15 @@ if [[ "$url" != *"/progress"* ]]; then body="${FAKE_BODY_GET:-}"; code=200; fi
 if [[ "$url" == *"/progress"* && "$data" == *'"progress":"'[Ff][Rr][Ee][Ee]'"'* ]]; then
     body='{"error":"Progress is one of Assigned, Accepted, Done, Blocked or Abandoned."}'; code=400
 fi
+# The route's validator: a note longer than 500 characters (counted as characters, not bytes) is
+# refused 400 with its own sentence in a validation problem, and nothing is recorded.
+if [[ "$url" == *"/progress"* ]]; then
+    n="$(printf '%s' "$data" | "${MMRY_JQ:-jq}" -r '(.note // "") | length' 2>/dev/null | tr -d '\r')"
+    if [[ "$n" =~ ^[0-9]+$ ]] && (( n > 500 )); then
+        body='{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.1","title":"One or more validation errors occurred.","status":400,"errors":{"Note":["The length of '"'"'Note'"'"' must be 500 characters or fewer. You entered '"$n"' characters."]}}'
+        code=400
+    fi
+fi
 [[ -n "$out" ]] && printf '%s' "$body" > "$out"
 printf '%s' "$code"
 exit 0
@@ -77,7 +86,7 @@ _free() {
     bash "${HANDLERS}/formation-state.sh" set 4242 "$SID"
     local hostenv=(env -u MMRY_HOST)
     [[ "$host" == "codex" ]] && hostenv=(env MMRY_HOST=codex CODEX_SESSION_ID="$SID")
-    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$(_done_body)" FAKE_BODY_GET="$roster" FAKE_URL_LOG="$LOG" \
+    PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="${BODY_OVERRIDE:-$(_done_body)}" FAKE_BODY_GET="$roster" FAKE_URL_LOG="$LOG" \
         CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_SESSION_ID="$SID" \
         MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
         run "${hostenv[@]}" bash "${HANDLERS}/formation-progress.sh" "$@"
@@ -157,4 +166,116 @@ _line() { printf '%s\n' "$output" | tr -d '\r' | grep -c -x -F -- "$1"; }
     grep -q '^PUT .*"progress":"Done"' "$LOG" || { cat "$LOG"; return 1; }
     ! grep -q '"note":"free"' "$LOG" || { cat "$LOG"; return 1; }
     [[ "$output" != *"$FREE_DONE"* ]] || { echo "$output"; return 1; }
+}
+
+# ---- fix round 1 ------------------------------------------------------------------------------------
+
+# cmo-mmry item 7 (lead ruling 2026-11-24), byte for byte, NO APOSTROPHES.
+FREE_BLOCKED="Your work is reported as Blocked, so you cannot report that you are free. Nothing was changed. Keep the block reported so the lead can help you clear it or release you from the work."
+
+# The roster with THIS session as the lead (3) and somebody else as member 7, holding work.
+_lead_roster() {
+    printf '{"formation":{"id":4242,"objective":"o"},"members":[{"id":3,"sessionId":"%s","role":"Lead","assignment":null,"progress":null,"leftDate":null},{"id":7,"sessionId":null,"role":"Wingman","assignment":"the validator","progress":"%s","leftDate":null}]}' \
+        "$SID" "${1:-Accepted}"
+}
+# The service's answer to a lead reporting for member 7: that member's entry, no session, no free field.
+_lead_done_body() {
+    printf '%s' '{"id":7,"sessionId":null,"role":"Wingman","assignment":"the validator","progress":"Done","progressUpdatedDate":"2026-11-24T09:00:00","leftDate":null}'
+}
+
+@test "34650 fix 1: a lead's free for member 7 prints exactly what a lead's Done for member 7 prints, not the member's confirmation" {
+    BODY_OVERRIDE="$(_lead_done_body)" _free claude "$(_lead_roster)" 7 free
+    [ "$status" -eq 0 ] || { echo "$output"; cat "$LOG"; return 1; }
+    local free_out="$output"
+    grep -q '^PUT http://fake.invalid/api/formations/4242/members/7/progress .*"progress":"Done".*"note":"free"' "$LOG" || { cat "$LOG"; return 1; }
+    BODY_OVERRIDE="$(_lead_done_body)" _free claude "$(_lead_roster)" 7 Done
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$free_out" = "$output" ] || { printf 'free:\n%s\ndone:\n%s\n' "$free_out" "$output"; return 1; }
+    [[ "$free_out" != *"$FREE_DONE"* ]] || { echo "$free_out"; return 1; }
+    [[ "$free_out" != *"Is there anything else I can do?"* ]] || { echo "$free_out"; return 1; }
+}
+
+@test "34650 fix 1: the member's own free still gets the approved confirmation" {
+    _free claude "$(_roster '"the validator"' '"Accepted"')" free
+    [ "$(_line "$FREE_DONE")" -eq 1 ] || { echo "$output"; return 1; }
+}
+
+@test "34650 fix 2: free on Blocked work is refused with cmo-mmry's sentence, nothing is sent, on Claude Code" {
+    _free claude "$(_roster '"the validator"' '"Blocked"')" free "it is finished really"
+    [ "$status" -eq 1 ] || { echo "status $status"; echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | tr -d '\r')" = "$FREE_BLOCKED" ] || { echo "$output"; return 1; }
+    ! grep -q '^PUT ' "$LOG" || { cat "$LOG"; return 1; }
+}
+
+@test "34650 fix 2: on Codex, the state Free on Blocked work is refused with the same sentence (an error result)" {
+    _free codex "$(_roster '"the validator"' '"blocked"')" Free
+    [ "$status" -ne 0 ] || { echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | tr -d '\r')" = "$FREE_BLOCKED" ] || { echo "$output"; return 1; }
+    ! grep -q '^PUT ' "$LOG" || { cat "$LOG"; return 1; }
+}
+
+@test "34650 fix 2: a member naming its own member id with free on Blocked work is refused too" {
+    _free claude "$(_roster '"the validator"' '"Blocked"')" 7 free
+    [ "$status" -eq 1 ] || { echo "status $status"; echo "$output"; return 1; }
+    [ "$(printf '%s\n' "$output" | tr -d '\r')" = "$FREE_BLOCKED" ] || { echo "$output"; return 1; }
+    ! grep -q '^PUT ' "$LOG" || { cat "$LOG"; return 1; }
+}
+
+@test "34650 fix 2: free on Assigned and on Accepted is still recorded as Done" {
+    _free claude "$(_roster '"the validator"' '"Assigned"')" free
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    _free codex "$(_roster '"the validator"' '"Accepted"')" Free
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(grep -c '^PUT .*"progress":"Done".*"note":"free"' "$LOG")" -eq 2 ] || { cat "$LOG"; return 1; }
+}
+
+# The note as the fake logged it on the PUT.
+_sent_note() { grep '^PUT ' "$LOG" | tail -n 1 | sed 's/^PUT [^ ]* //' | "${MMRY_JQ:-jq}" -r '.note' | tr -d '\r'; }
+_rep() { local s="" i; for ((i = 0; i < $2; i++)); do s+="$1"; done; printf '%s' "$s"; }
+TOO_LONG_501="The length of 'Note' must be 500 characters or fewer. You entered 501 characters."
+
+@test "34650 fix 3: free with a note one over the limit is sent whole and refused with the route's too-long sentence" {
+    local note; note="$(_rep a 496)"
+    _free claude "$(_roster '"the validator"' '"Accepted"')" free "$note"
+    [ "$status" -eq 1 ] || { echo "status $status"; echo "$output"; return 1; }
+    [ "$(_sent_note)" = "free ${note}" ] || { echo "the note was cut"; _sent_note | wc -c; return 1; }
+    [ "$(_line "The server refused it, and nothing was recorded. ${TOO_LONG_501}")" -eq 1 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"$FREE_DONE"* ]] || { echo "$output"; return 1; }
+}
+
+@test "34650 fix 3: a multibyte note one over the limit is refused, not cut, under the C locale too" {
+    local note; note="$(_rep '€' 496)"
+    LC_ALL=C _free claude "$(_roster '"the validator"' '"Accepted"')" free "$note"
+    [ "$status" -eq 1 ] || { echo "status $status"; echo "$output"; return 1; }
+    [ "$(_sent_note)" = "free ${note}" ] || { echo "the note was cut"; return 1; }
+    [ "$(_line "The server refused it, and nothing was recorded. ${TOO_LONG_501}")" -eq 1 ] || { echo "$output"; return 1; }
+}
+
+@test "34650 fix 3: a note at the limit is accepted whole, ASCII and multibyte, under the C locale too" {
+    local note
+    note="$(_rep a 495)"
+    _free claude "$(_roster '"the validator"' '"Accepted"')" free "$note"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(_sent_note)" = "free ${note}" ] || { echo "ascii note cut"; return 1; }
+    [ "$(_line "$FREE_DONE")" -eq 1 ] || { echo "$output"; return 1; }
+    note="$(_rep '€' 495)"
+    LC_ALL=C _free claude "$(_roster '"the validator"' '"Accepted"')" free "$note"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(_sent_note)" = "free ${note}" ] || { echo "multibyte note cut"; return 1; }
+    [ "$(_line "$FREE_DONE")" -eq 1 ] || { echo "$output"; return 1; }
+}
+
+@test "34650 fix 3: the script does not cut the note itself" {
+    ! grep -q -F -- 'note="${note:0:' "${HANDLERS}/formation-progress.sh" || return 1
+}
+
+@test "34650 fix 4: the usage lines and the Codex reference list Free last, as cmo-mmry's item 6 says" {
+    _free claude "$(_roster '"the validator"' '"Accepted"')"
+    [[ "$output" == *'<Accepted|Done|Blocked|Abandoned|Free>'* ]] || { echo "$output"; return 1; }
+    _free claude "$(_roster '"the validator"' '"Accepted"')" 7
+    [[ "$output" == *'<Accepted|Done|Blocked|Abandoned|Free>'* ]] || { echo "$output"; return 1; }
+    _free codex "$(_roster '"the validator"' '"Accepted"')"
+    [[ "$output" == *"with state Accepted, Done, Blocked, Abandoned or Free, and an optional note"* ]] || { echo "$output"; return 1; }
+    ! grep -q -F -- '<Accepted|Done|Blocked|Abandoned>' "${HANDLERS}/formation-progress.sh" || return 1
+    ! grep -q -F -- 'with state Accepted, Done, Blocked or Abandoned, and' "${HANDLERS}/lib-host.sh" || return 1
 }
