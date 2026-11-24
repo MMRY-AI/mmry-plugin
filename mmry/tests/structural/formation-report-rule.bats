@@ -259,19 +259,10 @@ _flat() { printf '%s' "$output" | tr -d '\r' | tr '\n' ' ' | tr -s ' '; }
 # held here as literals so the join output is compared against the approved text, never against
 # itself. No apostrophes, plain ASCII. Order on Claude Code: REPORT, ACK, M, S, then 34161's
 # background sentence; on Codex the same without that sentence.
-#
-# STAGE 2 SWITCH. In stage 1 of #34011 formation-join.sh is fenced (plugin #171 and #175), so the
-# join does not print M and S yet and these cases cannot pass. They are skipped with the reason
-# named, not passed. Stage 2 deletes _stage2 and the call to it in each case. Run with
-# MMRY_STAGE2=1 to see them red (stage 1) and green (stage 2).
 M_RULE="Message the one member who needs something; message everyone only when every member must act or change course."
 S_RULE="Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply."
 LINE_A="An assignment holds up to 500 characters; for longer work, put the brief in a file and give its path in the assignment."
 BACKGROUND_SENTENCE="Run long commands and long delegated work in the background, so messages from your lead can reach you while that work runs instead of waiting until it ends."
-
-_stage2() {
-    [[ "${MMRY_STAGE2:-}" == "1" ]] || skip "stage 2: formation-join.sh fenced by #171 and #175"
-}
 
 # The 1-based line number of an exact line in $output, or empty.
 _line_no() {
@@ -295,7 +286,6 @@ _count_line() {
 }
 
 @test "P1 (#34011) joining on Claude Code prints REPORT, ACK, M, S in that order, each once" {
-    _stage2
     _join claude
     [ "$status" -eq 0 ]
     _has_line "$M_RULE"
@@ -313,7 +303,6 @@ _count_line() {
 }
 
 @test "P2 (#34011) joining on Codex prints M and S once each, after ACK, the same as Claude Code" {
-    _stage2
     _join codex
     [ "$status" -eq 0 ]
     [ "$(_count_line "$M_RULE")" = "1" ]
@@ -325,7 +314,6 @@ _count_line() {
 }
 
 @test "P6 (#34011) the 34161 background sentence follows M and S on Claude Code and is absent on Codex" {
-    _stage2
     _join claude
     local s b
     s="$(_line_no "$S_RULE")"; b="$(_line_no "$BACKGROUND_SENTENCE")"
@@ -353,7 +341,6 @@ _count_line() {
 }
 
 @test "req4 (#34011) the command page and the Codex skill carry M and S byte for byte" {
-    _stage2
     grep -q -F -- "> ${M_RULE}" "${PLUGIN_DIR}/commands/formation.md"
     grep -q -F -- "> ${S_RULE}" "${PLUGIN_DIR}/commands/formation.md"
     grep -q -F -- "> ${M_RULE}" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
@@ -361,7 +348,6 @@ _count_line() {
 }
 
 @test "P4 (#34011, req3) the assign help, the Codex skill and the formation_assign description carry line A" {
-    _stage2
     grep -q -F -- "${LINE_A}" "${PLUGIN_DIR}/commands/formation.md"
     grep -q -F -- "${LINE_A}" "${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
     grep -q -F -- "${LINE_A}" "${HANDLERS}/mcp-server.sh"

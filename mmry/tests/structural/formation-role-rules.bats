@@ -243,6 +243,35 @@ AVAIL_FOOTER='Availability is based on the activity MMRY AI has recorded for eac
     printf '%s\n' "$out" | grep -q '^Report to the lead at every stopping point'
 }
 
+# #34011 P3 (DD-204). M and S are member rules for every role, said beside REPORT and ACK, never
+# inside the role rules, and the role rule lines are untouched by them.
+M_RULE_34011="Message the one member who needs something; message everyone only when every member must act or change course."
+S_RULE_34011="Before anything appears on the screen of the person, such as a window, a browser, a test app or a prompt, give them a heads-up through the lead: what will appear and whether anything is needed from them. Then carry on without waiting for a reply."
+
+@test "P3 (#34011): M and S sit beside, never inside, the lead rule and the member rule" {
+    [[ "$LEAD_RULE" != *"$M_RULE_34011"* ]]
+    [[ "$LEAD_RULE" != *"$S_RULE_34011"* ]]
+    [[ "$MEMBER_RULE" != *"$M_RULE_34011"* ]]
+    [[ "$MEMBER_RULE" != *"$S_RULE_34011"* ]]
+    # The plugin's own role-rule text (lib-formation-roles.sh, which 34011 never edits) carries neither.
+    ! grep -q -F -- "$M_RULE_34011" "${HANDLERS}/lib-formation-roles.sh"
+    ! grep -q -F -- "$S_RULE_34011" "${HANDLERS}/lib-formation-roles.sh"
+}
+
+@test "P3 (#34011): the join prints M and S before the role rule, and the role rule line is the same literal" {
+    _join claude Wingman
+    local out; out="$(printf '%s\n' "$output" | tr -d '\r')"
+    local ack_at m_at s_at rule_at
+    ack_at="$(printf '%s\n' "$out" | grep -n '^When you receive an assignment' | cut -d: -f1)"
+    m_at="$(printf '%s\n' "$out" | grep -n -F -x -- "$M_RULE_34011" | cut -d: -f1)"
+    s_at="$(printf '%s\n' "$out" | grep -n -F -x -- "$S_RULE_34011" | cut -d: -f1)"
+    rule_at="$(printf '%s\n' "$out" | grep -n -F -x -- "$MEMBER_RULE" | cut -d: -f1)"
+    [ -n "$ack_at" ] && [ -n "$m_at" ] && [ -n "$s_at" ] && [ -n "$rule_at" ] || { echo "$out"; return 1; }
+    [ "$ack_at" -lt "$m_at" ] && [ "$m_at" -lt "$s_at" ] && [ "$s_at" -lt "$rule_at" ] || { echo "$out"; return 1; }
+    _join claude Lead '"2026-10-23T12:30:00"'
+    printf '%s\n' "$output" | tr -d '\r' | grep -q -F -x -- "$LEAD_RULE"
+}
+
 @test "req3 control: a refused join prints no role rule" {
     export FAKE_CODE=403 FAKE_BODY='{}' FAKE_CODE_GET=403 FAKE_BODY_GET='{}'
     _on claude "${HANDLERS}/formation-join.sh" 4242
