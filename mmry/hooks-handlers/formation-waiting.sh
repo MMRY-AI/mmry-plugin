@@ -804,7 +804,8 @@ else
                 tool)  _k_tool="$_b" ;;
                 input) _k_input="$_b" ;;
                 approve) _k_approve="$_b" ;;
-                program) _k_program="$_b" ;;
+                # A program line with anything after the name is no program: never its first word.
+                program) _k_program="$_b"; [[ -z "$_rest" ]] || _k_program="" ;;
                 at)    _k_at="$_b" ;;
             esac
         done < "$MMRY_WAITING_ASK"
@@ -835,6 +836,10 @@ else
                     call="$MMRY_WAITING_CALL"
                 fi
                 # #34519: the record's program, only when the name sent is the record's own tool.
+                # "-" is the record's "no program", and it passes the name rule (P-06, red before: a
+                # command whose first word was not a bare name, TOKEN=x git push, told the lead "for
+                # approval to run -." on Claude Code; the same fix as 34651's K-02 and K-11).
+                [[ "$_k_program" == "-" ]] && _k_program=""
                 if [[ -n "$tool" && "$tool" == "$_k_tool" && "$_k_program" =~ $_MMRY_WAITING_TOOL_RE ]]; then
                     program="$_k_program"
                 fi
