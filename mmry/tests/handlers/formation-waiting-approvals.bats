@@ -359,3 +359,58 @@ _codex_ask_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input
     _cleared_once
     [ ! -f "$(_approved_file)" ] || { echo "Claude Code recorded an approval:"; cat "$(_approved_file)"; return 1; }
 }
+
+# ---- fix round 2 (QA 34519 round 2, Seat E, verdict-629-175-E-r2.md item 3): the keep --------------
+# The member's asked call is recognised as having run by its identifier (the command, WHICH CALL), but the
+# approval is kept only when the run's OWN approval key (tool, cwd, whole input; the digest C-07 and C-08
+# use) equals the key recorded at the ask. Otherwise nothing is recorded: the first build kept the ask's
+# key whenever the command matched, so a member who refused production and approved staging, or whose
+# call ran in another folder, left a helper allowed for a call the member never ran (KG-1, KG-2).
+_codex_post_cwd() { # $1 agent_id (optional), $2 cwd, $3 tool_name, $4 tool_input JSON
+    printf '{"session_id":"%s","turn_id":"turn-77","transcript_path":null,"cwd":"%s","hook_event_name":"PostToolUse","model":"gpt-5","permission_mode":"default","tool_name":"%s","tool_input":%s,"tool_response":"ok","tool_use_id":"call_1"%s}' "$SID" "$2" "$3" "$4" "$(_agent_part "${1:-}")"
+}
+
+@test "C-11 34519 fix 2 DD-206: asked in /repo/a and run in /repo/b records nothing: a helper in neither folder is allowed; asked and run in /repo/a is" {
+    _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post_cwd "" /repo/b Bash '{"command":"git push origin main"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "an approval was kept for a run in another folder:"; cat "$(_approved_file)"; return 1; }
+    : > "$URLS"
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "a helper in /repo/a was allowed, the run was in /repo/b: $output"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "a helper in /repo/b was allowed, the ask was in /repo/a: $output"; return 1; }
+    # Control (DD-206 still works): asked and run in /repo/a, a helper in /repo/a is allowed, in /repo/b not.
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _waiting "$(_codex_ask_cwd "" /repo/a Bash '{"command":"git push origin main"}')"
+    _check "$(_codex_post_cwd "" /repo/a Bash '{"command":"git push origin main"}')" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a Bash '{"command":"git push origin main"}')"
+    [ "$output" = "$ALLOW" ] || { echo "control, asked and run in /repo/a: [$output]"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/b Bash '{"command":"git push origin main"}')"
+    [ -z "$output" ] || { echo "control widened to /repo/b: $output"; return 1; }
+}
+
+@test "C-12 34519 fix 2 DD-206: an MCP call asked with env production and run with env staging records nothing: a helper is not allowed on either" {
+    _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    _check "$(_codex_post_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')" || true
+    _cleared_once
+    [ ! -f "$(_approved_file)" ] || { echo "an approval was kept for a run with another input:"; cat "$(_approved_file)"; return 1; }
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    [ -z "$output" ] || { echo "a helper was allowed on production, the member ran staging: $output"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    [ -z "$output" ] || { echo "a helper was allowed on staging, the member was asked for production: $output"; return 1; }
+    # Staging is allowed only when the asked key and the run's key are both staging.
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    _waiting "$(_codex_ask_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    _check "$(_codex_post_cwd "" /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')" || true
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"staging"}')"
+    [ "$output" = "$ALLOW" ] || { echo "asked and ran staging: [$output]"; return 1; }
+    rm -f "$TEST_TMPDIR"/.mmry-waiting-*
+    run _waiting "$(_codex_ask_cwd thread-sub-2 /repo/a mcp__probe__deploy '{"command":"deploy","env":"production"}')"
+    [ -z "$output" ] || { echo "staging's approval widened to production: $output"; return 1; }
+}
