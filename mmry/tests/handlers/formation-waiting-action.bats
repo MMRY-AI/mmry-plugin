@@ -369,7 +369,7 @@ ROWS
 # ---- K-10..13: the local ask record, and older shapes --------------------------------------------------
 
 # An ask record as --ask writes it, with the action line given.
-_record() { # $1 program, $2 the whole action line's value
+_asked() { # $1 program, $2 the whole action line's value
     printf 'asker -\ntool Bash\ninput -\napprove -\nprogram %s\naction %s\nat %s\n' "$1" "$2" "$(date +%s)" > "$TEST_TMPDIR/.mmry-asking-$SID"
 }
 
@@ -378,7 +378,7 @@ _record() { # $1 program, $2 the whole action line's value
     for a in "push origin" "script scripts/a.sh" "script a.sh --flag" "inline code" "Push" "push/main" "$PLANTED" \
              "secretx1a2b3" "install" "inline" "script check.sh"; do
         rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"; : > "$URLS"
-        _record git "$a"
+        _asked git "$a"
         _waiting "$(_notification permission_prompt "$SAID")"
         [ "$(_puts)" -eq 1 ] || { echo "not raised for [$a]"; return 1; }
         [ "$(_sent programName)" = "git" ] || { echo "for [$a]"; cat "$BODIES"; return 1; }
@@ -386,19 +386,19 @@ _record() { # $1 program, $2 the whole action line's value
     done
     # And a record inside the vocabulary is sent as it stands.
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
-    _record bash "script check.sh"
+    _asked bash "script check.sh"
     _waiting "$(_notification permission_prompt "$SAID")"
     [ "$(_sent programAction)" = "script check.sh" ] || { cat "$BODIES"; return 1; }
 }
 
 @test "K-11 34651 R2 guard: an action never goes without its program" {
-    _record - push
+    _asked - push
     _waiting "$(_notification permission_prompt "$SAID")"
     [ "$(_puts)" -eq 1 ] || { cat "$URLS"; return 1; }
     [ "$(_sent programName)" = "<none>" ] && [ "$(_sent programAction)" = "<none>" ] || { cat "$BODIES"; return 1; }
     # A program that is not a bare name takes its action with it.
     rm -f "$TEST_TMPDIR"/.mmry-waiting-*; : > "$BODIES"
-    _record "git/x" push
+    _asked "git/x" push
     _waiting "$(_notification permission_prompt "$SAID")"
     [ "$(_sent programName)" = "<none>" ] && [ "$(_sent programAction)" = "<none>" ] || { cat "$BODIES"; return 1; }
 }
