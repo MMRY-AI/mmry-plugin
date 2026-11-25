@@ -24,7 +24,7 @@ approves Internet access for the conversation, which is the prompt these tools e
 | Reload memories now | `memory_load` | optional `working_dir` |
 | Join a formation, as this conversation | `formation_join` | `formation_id`; optional `working_dir` |
 | Message the formation, or one member | `formation_say` | `message`; optional `to_member_id`, `confirm` |
-| Report Accepted, Done, Blocked or Abandoned | `formation_progress` | `state`; optional `note` |
+| Report Accepted, Done, Blocked, Abandoned or Free | `formation_progress` | `state`; optional `note` |
 | See the members, their ids, and the lead | `formation_roster` | nothing |
 | Start a formation, with this conversation as lead | `formation_start` | `objective`; optional `task_id`, `working_dir` |
 | As the lead, give one member work or a role | `formation_assign` | `member_id`; `assignment`, `role`, or both |
@@ -218,8 +218,10 @@ id to address each by, each member's name beside its id, and which one is the le
 `formation_status` shows the same members, plus which member this conversation is. Rename a member
 with `formation_assign` and `name`; with no `member_id` it renames this conversation's own member,
 which any member may do. Report how your assigned work is going with
-`formation_progress` (`Accepted`, `Done`, `Blocked` or `Abandoned`, and an optional `note`). Leave
+`formation_progress` (`Accepted`, `Done`, `Blocked`, `Abandoned` or `Free`, and an optional `note`). Leave
 with `formation_leave`.
+
+To report that you are free, report progress with the state Free, not a message; do the same when the person asks you to tell the lead you are free. MMRY AI records your current work as Done and tells the lead, so it can give you your next job. While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help.
 
 Member ids come from the roster, never from a session id. Assigning work is the lead's to do.
 
@@ -289,6 +291,8 @@ Each member is also given one rule for its own role:
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 >
 > Report progress to the lead at each milestone of your assignment, so the lead can see the work is moving.
+>
+> When you finish your work, report that you are free with a progress report, not only in a message, so the lead can give you your next job.
 
 **The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 5 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
 

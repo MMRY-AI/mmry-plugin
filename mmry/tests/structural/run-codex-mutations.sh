@@ -534,7 +534,7 @@ mutate "the formation remedy names no command on Claude Code (the Codex branch i
 #    and surviving it is precisely how twenty such strings shipped in the first place.
 # ---- round 6 ----------------------------------------------------------------------------------
 mutate "the roster footer is re-wrapped, same bytes, different breaks [R6]" hooks-handlers/formation-roster.sh \
-  's = s.replace("printf " + chr(39) + "%s, and read the whole account" + chr(92) + "n" + chr(39) + " " + chr(34) + "$(mmry_host_formation_ref progress " + chr(39) + "<Accepted|Done|Blocked|Abandoned>" + chr(39) + ")" + chr(34) + chr(10) + "printf " + chr(39) + "with %s." + chr(92) + "n" + chr(39), "printf " + chr(39) + "%s," + chr(39) + " " + chr(34) + "$(mmry_host_formation_ref progress " + chr(39) + "<Accepted|Done|Blocked|Abandoned>" + chr(39) + ")" + chr(34) + chr(10) + "printf " + chr(39) + chr(92) + "nand read the whole account with %s." + chr(92) + "n" + chr(39), 1)' \
+  's = s.replace("printf " + chr(39) + "%s, and read the whole account" + chr(92) + "n" + chr(39) + " " + chr(34) + "$(mmry_host_formation_ref progress " + chr(39) + "<Accepted|Done|Blocked|Abandoned|Free>" + chr(39) + ")" + chr(34) + chr(10) + "printf " + chr(39) + "with %s." + chr(92) + "n" + chr(39), "printf " + chr(39) + "%s," + chr(39) + " " + chr(34) + "$(mmry_host_formation_ref progress " + chr(39) + "<Accepted|Done|Blocked|Abandoned|Free>" + chr(39) + ")" + chr(34) + chr(10) + "printf " + chr(39) + chr(92) + "nand read the whole account with %s." + chr(92) + "n" + chr(39), 1)' \
   structural/codex-formation-instructions.bats "BYTE FOR BYTE"
 
 mutate "the sweep is satisfied by a handler that says nothing [R6]" hooks-handlers/formation-join.sh \
