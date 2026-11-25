@@ -68,17 +68,27 @@ _member_msg() { # $1 content
 
 # Deliver a batch to the lead through formation-check.sh. $1 host (claude|codex), $2 the JSON array,
 # $3 mode (tool by default; prompt for UserPromptSubmit).
+#
+# THE CHECK'S CLOCK IS SET BACK (#34651 round 3). formation-check.sh works to a deadline on its own
+# clock in the tool and prompt modes (11 seconds, bash's SECONDS) and, past it, prints NOTHING with
+# exit 0 and leaves the batch pending (#31746). On a loaded machine one check can cross it, and L-15
+# then failed on an empty answer in a full-file run while passing alone. These cases are about what the
+# check prints, not how fast, so each check here starts with SECONDS far in the past (bash takes
+# SECONDS from its environment) and the deadline can never be the outcome. There is NO retry: every
+# case compares the printed line itself, so an empty or partial answer fails it, and L-17 pins that a
+# check past its deadline prints nothing, so that failure stays visible. The deadline itself is
+# tested in structural/formation-check-timeout.bats. $4 sets another clock (L-17 only).
 _deliver() {
-    local host="$1" body="$2" mode="${3:-tool}" bin; bin="$(_fake_curl_dir)"
+    local host="$1" body="$2" mode="${3:-tool}" clock="${4:--100000}" bin; bin="$(_fake_curl_dir)"
     bash "${HANDLERS}/formation-state.sh" set 4242 "$CLAUDE_CODE_SESSION_ID"
     if [[ "$host" == "codex" ]]; then
         PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" MMRY_HOST=codex MMRY_FORMATION_MODE="$mode" \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-            run bash "${HANDLERS}/formation-check.sh"
+            run env SECONDS="$clock" bash "${HANDLERS}/formation-check.sh"
     else
         PATH="${bin}:${PATH}" FAKE_CODE=200 FAKE_BODY="$body" MMRY_FORMATION_MODE="$mode" \
             MMRY_AUTH_METHOD=apikey MMRY_API_KEY=fake-key MMRY_API_URL="http://fake.invalid" \
-            run env -u MMRY_HOST bash "${HANDLERS}/formation-check.sh"
+            run env -u MMRY_HOST SECONDS="$clock" bash "${HANDLERS}/formation-check.sh"
     fi
 }
 _ctx() { printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext' | tr -d '\r'; }
@@ -133,8 +143,10 @@ FIRST="  [MMRY] DIRECTED TO YOU: "
     [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
 }
 
+# #34651: "git status." is now an approved line (W1, a program and its subcommand: L-11), so the line that
+# does not match carries an argument after the subcommand.
 @test "L-07 34519 R2 guard: a notice whose first line does not match the approved shape gives no person line" {
-    _deliver claude "[$(_notice 'WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git status.' name)]"
+    _deliver claude "[$(_notice 'WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git status --short.' name)]"
     # No person line, so the ordinary Claude Code route (stderr, exit 2) and no systemMessage.
     [ "$status" -eq 2 ] || { echo "status $status: $output"; return 1; }
     [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "$output"; return 1; }
@@ -158,14 +170,124 @@ P_NOAPP="MMRY AI Formation: Seat B is waiting for approval to run git. Answer th
     [ "${ctx%%$'\n'*}" = "$FIRST$L_NOAPP" ] || { echo "$ctx"; return 1; }
 }
 
-# cmo-mmry's Approved section of wording-34519-docs-cmo-request.md, item 1 (with its changed opening).
-DOCS_WAITING="**The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, which app it runs in when MMRY AI knows it, and what it is waiting to run. For a command, only the name of the program is given, such as git, never the full command; otherwise it is the name of the tool asking. Nothing else from the prompt is sent, and the roster marks that member as waiting. On Claude Code, while the lead is working, the same line is also shown to the person at the lead window. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them."
+# ---- #34651 (DD-207): the three lines that name the command kind --------------------------------------
+# cmo-mmry's approved W1 to W3 (R:/Intranet/ClaudeAI/plans/MMRY/v1.38/wording-approval-command-cmo.md),
+# byte for byte. They keep the #34519 frame, so the person line keeps its own frame with the new ending.
+L_W1="WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run git push."
+L_W2="WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Codex) has been waiting since 09:41 UTC for approval to run the script check-x.sh with bash."
+L_W3="WAITING ON APPROVAL. Member 31 (Claude Code) has been waiting since 09:41 UTC for approval to run an inline node script."
+P_W1="MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run git push. Answer the prompt in that window."
+P_W2="MMRY AI Formation: Seat B (Codex) is waiting for approval to run the script check-x.sh with bash. Answer the prompt in that window."
+P_W3="MMRY AI Formation: Member 31 (Claude Code) is waiting for approval to run an inline node script. Answer the prompt in that window."
+
+@test "L-11 34651 R1: W1, a program and its subcommand, gives the person line and still opens the batch" {
+    _deliver claude "[$(_member_msg 'please look at the build'),$(_notice "$L_W1" name)]"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_W1" ] || { echo "person line: [$(_sys)]"; return 1; }
+    local ctx; ctx="$(_ctx)"
+    [ "${ctx%%$'\n'*}" = "$FIRST$L_W1" ] || { echo "$ctx"; return 1; }
+}
+
+@test "L-12 34651 R1: W2, a script file, and W3, an inline script, give their person lines, one per waiting member" {
+    _deliver claude "[$(_notice "$L_W2" name),$(_notice "$L_W3")]"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_W2"$'\n'"$P_W3" ] || { echo "person lines: [$(_sys)]"; return 1; }
+    local ctx; ctx="$(_ctx)"
+    [ "${ctx%%$'\n'*}" = "$FIRST$L_W2" ] || { echo "$ctx"; return 1; }
+}
+
+@test "L-13 34651 R2 guard: a first line carrying anything past the three shapes gives no person line" {
+    local head='WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run ' tail_
+    for tail_ in 'git push origin.' 'git push --force.' 'git Push.' 'git push/main.' \
+                 'the script scripts/check.sh with bash.' 'the script check.sh with bash now.' \
+                 'the script check.sh --flag with bash.' 'an inline node script here.' 'an inline node -e script.'; do
+        _deliver claude "[$(_notice "${head}${tail_}" name)]"
+        [ "$status" -eq 2 ] || { echo "for [$tail_]: status $status: $output"; return 1; }
+        [[ "$output" != *"systemMessage"* && "$output" != *"MMRY AI Formation: "* ]] || { echo "for [$tail_]: $output"; return 1; }
+    done
+}
+
+# #34651 fix round 1 (F2, Seat D early read item 5): the person line shows a subcommand only when it is
+# on THAT program's closed list (the handler's own lists, lib-waiting-actions.sh). A notice from an
+# older service, or a row written past the service, that ends "to run npm s3cr3tword." gives the
+# program-only person line (the approved #34519 line), never the word.
+@test "L-15 34651 R2 fix 1: a subcommand outside its program's closed list is never shown to the person; the program-only line is" {
+    local head='WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run ' pair
+    for pair in 'npm s3cr3tword' 'git hunter2token' 'git install' 'make push' 'curl inline' 'git script'; do
+        _deliver claude "[$(_notice "${head}${pair}." name)]"
+        [ "$status" -eq 0 ] || { echo "for [$pair]: status $status: $output"; return 1; }
+        [ -n "$output" ] || { echo "for [$pair]: the check printed nothing; an empty answer proves nothing and fails"; return 1; }
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run ${pair%% *}. Answer the prompt in that window." ] \
+            || { echo "for [$pair]: person line: [$(_sys)]"; return 1; }
+    done
+    # A listed pair still shows, as L-11 pins for git push.
+    _deliver claude "[$(_notice "${head}npm install." name)]"
+    [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run npm install. Answer the prompt in that window." ] \
+        || { echo "person line: [$(_sys)]"; return 1; }
+    _deliver claude "[$(_notice "$L_W1" name)]"
+    [ "$(_sys)" = "$P_W1" ] || { echo "person line: [$(_sys)]"; return 1; }
+}
+
+# #34651 round 3 (N2, Seat A's delta): the script and inline forms are shown only beside a listed
+# interpreter (the handler's own list, lib-waiting-actions.sh, the one _mmry_waiting_action_ok holds a
+# sent action to). A notice from an older service, or a row written past the service, that ends
+# "to run an inline curl script." or "to run the script x.sh with curl." gives the program-only person
+# line (the approved #34519 line): never the file name, never the word inline.
+@test "L-16 34651 N2: a script or an inline form beside a program that is no listed interpreter is never shown to the person; the program-only line is" {
+    local head='WAITING ON APPROVAL. Member 31 >>> Seat B <<< (Claude Code) has been waiting since 09:41 UTC for approval to run ' row tail_ prog
+    for row in 'an inline curl script.|curl' 'the script x.sh with curl.|curl'                'the script SECRETX.sh with git.|git' 'an inline git script.|git'                'an inline s3cr3tword script.|s3cr3tword' 'the script tok.py with s3cr3tword.|s3cr3tword'                'the script x.sh with Bash.|Bash' 'an inline nodejs script.|nodejs'; do
+        tail_="${row%%|*}"; prog="${row##*|}"
+        _deliver claude "[$(_notice "${head}${tail_}" name)]"
+        [ "$status" -eq 0 ] || { echo "for [$tail_]: status $status: $output"; return 1; }
+        [ -n "$output" ] || { echo "for [$tail_]: the check printed nothing; an empty answer proves nothing and fails"; return 1; }
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run ${prog}. Answer the prompt in that window." ]             || { echo "for [$tail_]: person line: [$(_sys)]"; return 1; }
+    done
+    # Every listed interpreter still shows both forms, as L-12 pins for bash and node.
+    local i
+    for i in bash sh node pwsh powershell python python3; do
+        _deliver claude "[$(_notice "${head}the script x.sh with ${i}." name)]"
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run the script x.sh with ${i}. Answer the prompt in that window." ]             || { echo "for [$i] script: person line: [$(_sys)]"; return 1; }
+        _deliver claude "[$(_notice "${head}an inline ${i} script." name)]"
+        [ "$(_sys)" = "MMRY AI Formation: Seat B (Claude Code) is waiting for approval to run an inline ${i} script. Answer the prompt in that window." ]             || { echo "for [$i] inline: person line: [$(_sys)]"; return 1; }
+    done
+}
+
+# #34651 round 3: why L-15 failed under load, pinned. A check whose own clock is past its deadline
+# prints nothing and exits 0, so it must never be read as "nothing was shown": the same notice with the
+# clock set back gives the line, and the two answers differ. If bash ever stopped taking SECONDS from
+# its environment, the first half would print a line and this case would say so.
+@test "L-17 34651 round 3: a check past its own deadline prints nothing at all (exit 0), which no case here accepts; with its clock set back the same notice gives the person line" {
+    local n; n="[$(_notice "$L_PROG" name)]"
+    _deliver claude "$n" tool 12
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ -z "$output" ] || { echo "a check started past its deadline printed: [$output] (SECONDS not taken from the environment?)"; return 1; }
+    [ "$(_sys)" != "$P_PROG" ] || { echo "an empty answer was read as the person line"; return 1; }
+    _deliver claude "$n"
+    [ "$status" -eq 0 ] || { echo "status $status: $output"; return 1; }
+    [ "$(_sys)" = "$P_PROG" ] || { echo "person line: [$(_sys)]"; return 1; }
+}
+
+@test "L-14 34651: Codex gets no person line for the three new lines either, and each still opens its batch" {
+    local l
+    for l in "$L_W1" "$L_W2" "$L_W3"; do
+        _deliver codex "[$(_notice "$l" name)]" prompt
+        [ "$status" -eq 0 ]
+        [ "$(_sys)" = "<none>" ] || { echo "Codex was given a person line: [$(_sys)]"; return 1; }
+        local ctx; ctx="$(_ctx)"
+        [[ "$ctx" == *"$FIRST$l"* ]] || { echo "$ctx"; return 1; }
+    done
+}
+
+# cmo-mmry's Approved section of wording-34519-docs-cmo-request.md, item 1 (with its changed opening),
+# and for 34651 the command sentence as wording-34651-round2-cmo.md's Revision gives it (R2).
+DOCS_WAITING="**The lead hears who is waiting for an approval.** When a member's window shows a permission prompt, the lead is told which member is waiting and since when, which app it runs in when MMRY AI knows it, and what it is waiting to run. For a command, at most the program is given, with the kind of run when MMRY AI recognizes it, such as git push, the script check.sh or an inline script; never the full command, its arguments or its paths. Otherwise it is the name of the tool asking. Nothing else from the prompt is sent, and the roster marks that member as waiting. On Claude Code, while the lead is working, the same line is also shown to the person at the lead window. The lead is told again when the member continues. As the lead, ask the person at that member's window to answer the prompt. This works for members in Claude Code and Codex; a connected assistant shows its approval prompts in its own app, where MMRY AI cannot see them."
 
 @test "W-01 34519 fix 1 wording: the formation command page and the Codex skill carry the approved waiting paragraph, and not the old one" {
     local f
     for f in "${BATS_TEST_DIRNAME}/../../commands/formation.md" "${BATS_TEST_DIRNAME}/../../skills-codex/memory-system/SKILL.md"; do
         grep -qxF -- "$DOCS_WAITING" "$f" || { echo "not the approved paragraph: $f"; return 1; }
         ! grep -qF -- "with the name of the tool asking and nothing else from the prompt" "$f" || { echo "the old sentence: $f"; return 1; }
+        ! grep -qF -- "only the name of the ""program" "$f" || { echo "the 34519 sentence, untrue since 34651: $f"; return 1; }
     done
 }
 

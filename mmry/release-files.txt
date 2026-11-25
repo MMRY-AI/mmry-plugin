@@ -15,6 +15,7 @@ commands/search.md
 commands/setup.md
 commands/uninstall.md
 commands/visibility.md
+examples/member-permissions.json
 hooks-handlers/codex-first-prompt.sh
 hooks-handlers/codex-hook.cmd
 hooks-handlers/codex-hook.sh
@@ -55,6 +56,7 @@ hooks-handlers/lib-host.sh
 hooks-handlers/lib-jq.sh
 hooks-handlers/lib-release-files.sh
 hooks-handlers/lib-tool-server.sh
+hooks-handlers/lib-waiting-actions.sh
 hooks-handlers/list-databases.sh
 hooks-handlers/list-groups.sh
 hooks-handlers/make-private.sh
@@ -131,6 +133,7 @@ tests/handlers/formation-progress-limit.bats
 tests/handlers/formation-rejoin.bats
 tests/handlers/formation-say-wrong-member.bats
 tests/handlers/formation-upgrade-refusal.bats
+tests/handlers/formation-waiting-action.bats
 tests/handlers/formation-waiting-approvals.bats
 tests/handlers/formation-waiting-busy.bats
 tests/handlers/formation-waiting-guards.bats
@@ -180,6 +183,7 @@ tests/helpers/live-foundation.bash
 tests/helpers/live-journey.bash
 tests/helpers/mock-config.bash
 tests/helpers/mock-curl.sh
+tests/helpers/permission-rule-match.jq
 tests/helpers/self-update-release.bash
 tests/helpers/teardown-tmp.bash
 tests/helpers/test-helper.bash
@@ -278,6 +282,7 @@ tests/structural/hooks-json-format.bats
 tests/structural/hooks-json.bats
 tests/structural/macos-hook-payload.bats
 tests/structural/marketplace-sync.bats
+tests/structural/member-permissions-sample.bats
 tests/structural/plugin-json.bats
 tests/structural/public-text-check.bats
 tests/structural/release-files.bats

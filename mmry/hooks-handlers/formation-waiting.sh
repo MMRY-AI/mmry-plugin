@@ -265,6 +265,83 @@ _MMRY_WAITING_PROGRAM_JQ='if ((.tool_name // "") | tostring | test("^(Bash|Power
     then ((.tool_input.command | capture("^\\s*(?<w>[^\\s]+)") // {w: ""}) | .w | sub("^.*[/\\\\]"; ""))
     else "" end'
 
+# ---- WHAT KIND OF RUN IT IS (#34651, DD-207 in MMRY-AI/mmry, amending DD-206) ------------------
+# The program alone did not decide a prompt: "git" is git status and git push, "bash" is a reviewed
+# script and code typed on the command line. The whole command can never be sent (a password or a key
+# can sit in any argument), so the lead is told an ACTION taken from a CLOSED GRAMMAR, derived here
+# inside jq beside the program, and nothing else. Three shapes, or no action at all:
+#   subcommand  the program is in the fixed list below (git, gh, dotnet, ...) and the word RIGHT AFTER
+#               it is one of THAT TOOL'S KNOWN SUBCOMMANDS, a closed list per tool
+#               (_MMRY_WAITING_SUBCOMMANDS): git push -> "push". A free-form lowercase word is not
+#               accepted, so a lowercase secret in the subcommand's place (npm s3cr3tword) is never
+#               sent (release lead 439's ruling, 2026-11-24, decisions.md "closed per-tool subcommand
+#               list"). A flag first (git -C dir push) gives NO action: flags are never skipped,
+#               because the list does not know which flags take a value, and a skipped flag's value
+#               (a folder named status) would be taken for the subcommand.
+#   script      the program is an interpreter (bash, sh, node, pwsh, powershell, python, python3) and
+#               the word RIGHT AFTER it is a script file, or the word after flags from THAT
+#               INTERPRETER'S closed list of flags that take no value (_MMRY_WAITING_SCRIPT_FLAGS:
+#               bash -x, python -u, pwsh -NoProfile; at most 8), and for pwsh and powershell after
+#               -File: the folder removed, ^[A-Za-z0-9_.-]{1,64}\.(sh|bash|mjs|cjs|js|ts|ps1|py)$ and
+#               at most 64 characters in all (the service's rule) -> "script check.sh". ANY OTHER FLAG
+#               FIRST GIVES NO ACTION (#34651 fix round 1): the word after a flag this list does not
+#               know may be that flag's VALUE, and node --require ./loader.js app.js named the loader
+#               as the script. A quoted path, a name with a space or any other character gives no
+#               action, never a cleaned one.
+#   inline      the program is an interpreter and the word right after it is exactly -e, -c, -Command
+#               or --eval -> "inline", and none of the code. Not when that word is the interpreter's
+#               own value-less flag: bash -e and sh -e are "exit on error", and go the script's way.
+# Anything else gives "", and the program is sent alone, as #34519 sends it. The command never reaches
+# a shell variable: this program prints one of the three shapes or nothing, and the shell holds that
+# to _MMRY_WAITING_ACTION_RE (the service's FormationWaitingNotice.IsProgramAction) once more. What
+# can still be named is a script's FILE NAME, which the lead needs to decide and which is a name, not
+# an argument (the lead's ruling on option D, plan-approval-command-B.md section 3).
+#
+# THE CLOSED LISTS and the shell's second check (_mmry_waiting_action_ok) are in lib-waiting-actions.sh,
+# held once for this handler and for formation-check.sh's person line. Without that file (it is listed
+# in release-files.txt, so only a half-finished update could lose it) the lists are empty: no action is
+# ever sent, and the program goes alone, as #34519 sent it.
+_MMRY_WAITING_SUBCOMMANDS=""
+_MMRY_WAITING_INTERPRETERS=""
+_MMRY_WAITING_SCRIPT_FLAGS=""
+_MMRY_WAITING_ACTION_RE='^$'
+_mmry_waiting_action_ok() { return 1; }
+if [[ -f "${HANDLER_DIR}/lib-waiting-actions.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${HANDLER_DIR}/lib-waiting-actions.sh" || true
+fi
+# The assignment below ends at the first line that ends in a single quote; formation-waiting-action.bats
+# (K-09) reads it out by that, so no line inside it may end in one.
+_MMRY_WAITING_ACTION_JQ='
+    def mmry_known: . as $p | ["'"$_MMRY_WAITING_SUBCOMMANDS"'" | split(";")[] | select(startswith($p + "= "))] | (.[0] // "");
+    def mmry_interp: . as $p | ("'"$_MMRY_WAITING_INTERPRETERS"'" | contains(" " + $p + " "));
+    def mmry_flags: . as $p | ["'"$_MMRY_WAITING_SCRIPT_FLAGS"'" | split(";")[] | select(startswith($p + "= "))] | (.[0] // "") | split(" ") | map(select(startswith("-")));
+    if ((.tool_name // "") | tostring | test("^(Bash|PowerShell|shell|local_shell|exec_command|unified_exec)$"))
+        and ((.tool_input // null) | type) == "object" and ((.tool_input.command // null) | type) == "string"
+    then .tool_input.command as $c
+        | (($c | capture("^\\s*(?<w>[^\\s]+)(?:\\s+(?<a>[^\\s]+))?")) // {w: "", a: null}) as $m
+        | ($m.w | sub("^.*[/\\\\]"; "")) as $p
+        | (($m.a // "") | tostring) as $a
+        | ($p | mmry_known) as $known
+        | if $known != "" then
+              (if ($a | startswith("-")) then ""
+               elif ($a | test("^[a-z][a-z0-9-]{0,23}$")) and ($known | contains(" " + $a + " ")) then $a
+               else "" end)
+          elif ($p | test("^[a-z0-9]+$")) and ($p | mmry_interp) then
+              ($p | mmry_flags) as $fl
+              | (if (($fl | map(select(. == $a)) | length) == 0)
+                    and ($a == "-e" or $a == "-c" or $a == "-Command" or $a == "--eval") then "inline"
+                 else ((($c | capture("^\\s*[^\\s]+"
+                            + (if ($fl | length) > 0 then "(?:\\s+(?:" + ($fl | join("|")) + ")){0,8}" else "" end)
+                            + (if ($p == "pwsh" or $p == "powershell") then "(?:\\s+-File)?" else "" end)
+                            + "\\s+(?<s>[^-\\s][^\\s]*)")) // {s: ""})
+                       | .s | sub("^.*[/\\\\]"; "")) as $f
+                      | if ($f | length) <= 64 and ($f | test("^[A-Za-z0-9_.-]{1,64}\\.(sh|bash|mjs|cjs|js|ts|ps1|py)$"))
+                        then "script " + $f else "" end
+                 end)
+          else "" end
+    else "" end'
+
 # ---- HELPER APPROVALS ON CODEX (#34519, DD-206, which supersedes DD-187 point 7) ---------------
 # Measured on Codex 0.171.0: an approval the person gives "for this session" in the member's own
 # thread is not passed to the member's sub-agents, which ask again; and an "allow" answer from this
@@ -668,9 +745,10 @@ if [[ "${1:-}" == "--ask" ]]; then
     source "${HANDLER_DIR}/lib-jq.sh" || exit 0
     mmry_resolve_jq >/dev/null || exit 0
     [[ -n "${MMRY_JQ:-}" ]] || exit 0
-    parsed="$("$MMRY_JQ" -r '[(.session_id // "" | tostring), (.hook_event_name // "" | tostring), (.agent_id // "" | tostring), (.tool_name // "" | tostring), ('"$_MMRY_WAITING_PROGRAM_JQ"')] | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")' <<< "$payload" || true)"
+    parsed="$("$MMRY_JQ" -r '[(.session_id // "" | tostring), (.hook_event_name // "" | tostring), (.agent_id // "" | tostring), (.tool_name // "" | tostring), ('"$_MMRY_WAITING_PROGRAM_JQ"'), ('"$_MMRY_WAITING_ACTION_JQ"')] | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")' <<< "$payload" || true)"
     [[ "$parsed" == *$'\037'* ]] || exit 0
-    IFS=$'\037' read -r sid event agent tool program <<< "$parsed" || true
+    IFS=$'\037' read -r sid event agent tool program action <<< "$parsed" || true
+    action="${action%$'\r'}"
     [[ "$event" == "PermissionRequest" ]] || exit 0
     [[ "$sid" =~ $_MMRY_WAITING_SID_RE ]] || exit 0
     [[ -f "${MMRY_TMPDIR}/.mmry-formation-${sid}" ]] || exit 0
@@ -678,6 +756,8 @@ if [[ "${1:-}" == "--ask" ]]; then
     [[ "$tool" =~ $_MMRY_WAITING_TOOL_RE ]] || tool="-"
     # #34519: the program, its first word only, under the tool name's rule (THE PROGRAM above).
     [[ "$program" =~ $_MMRY_WAITING_TOOL_RE ]] || program="-"
+    # #34651: the action, one of the three shapes and only beside a program (WHAT KIND OF RUN above).
+    _mmry_waiting_action_ok "$program" "$action" || action="-"
     # The asked call's identifier: a digest of its input, never the input (WHICH CALL above). And its
     # approval key (THE APPROVAL KEY above), a digest too; on Claude Code nothing ever records it as an
     # approval (the marker's turn is "-"), and C-10 proves that guard.
@@ -685,7 +765,7 @@ if [[ "${1:-}" == "--ask" ]]; then
     _ask_input="${MMRY_WAITING_DIGEST:--}"
     _mmry_waiting_digest "$payload" "$_MMRY_WAITING_APPROVAL_JQ"
     _mmry_waiting_ask_path "$sid"
-    printf 'asker %s\ntool %s\ninput %s\napprove %s\nprogram %s\nat %s\n' "$agent" "$tool" "$_ask_input" "${MMRY_WAITING_DIGEST:--}" "$program" "$(date +%s || echo 0)" \
+    printf 'asker %s\ntool %s\ninput %s\napprove %s\nprogram %s\naction %s\nat %s\n' "$agent" "$tool" "$_ask_input" "${MMRY_WAITING_DIGEST:--}" "$program" "$action" "$(date +%s || echo 0)" \
         > "$MMRY_WAITING_ASK" || true
     # #34519 R1: A HELPER'S REQUEST IS REPORTED HERE. Measured on Claude Code 2.1.330: a background
     # helper's request that nobody can answer is refused with no Notification and no entry in
@@ -731,14 +811,17 @@ _fields='[(.session_id // "" | tostring), (.hook_event_name // "" | tostring),
           ((.message // "" | tostring) | '"$_MMRY_WAITING_SENTENCE_JQ"'),
           (.turn_id // "" | tostring), (.transcript_path // "" | tostring), (.agent_id // "" | tostring),
           ((.message // "" | tostring) | if test("permission to use ") then "1" else "" end),
-          ('"$_MMRY_WAITING_PROGRAM_JQ"')]
+          ('"$_MMRY_WAITING_PROGRAM_JQ"'), ('"$_MMRY_WAITING_ACTION_JQ"')]
          | flatten | map(gsub("[\u001f\r\n]"; " ")) | join("\u001f")'
 parsed="$("$MMRY_JQ" -r "$_fields" <<< "$payload" || true)"
 [[ "$parsed" == *$'\037'* ]] || exit 0
-IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent mnamed pprogram <<< "$parsed" || true
+IFS=$'\037' read -r sid event ntype ptool mtool mprefix turn tpath pagent mnamed pprogram paction <<< "$parsed" || true
+paction="${paction%$'\r'}"
 # #34519: the program, for a PermissionRequest's own shell command (THE PROGRAM above).
 [[ "$pprogram" =~ $_MMRY_WAITING_TOOL_RE ]] || pprogram=""
-program=""
+# #34651: the action beside it, one of the three shapes or nothing (WHAT KIND OF RUN above).
+_mmry_waiting_action_ok "$pprogram" "$paction" || paction=""
+program="" action=""
 
 case "$event" in
     Notification)
@@ -781,7 +864,7 @@ if [[ "$event" == "PermissionRequest" ]]; then
         _mmry_waiting_digest "$payload" "$_MMRY_WAITING_APPROVAL_JQ"
         approve="$MMRY_WAITING_DIGEST"
     fi
-    [[ -n "$exact" ]] && program="$pprogram"
+    [[ -n "$exact" ]] && program="$pprogram" action="$paction"
     if [[ -n "${MMRY_WAITING_FROM_ASK:-}" ]]; then
         # #34519: a Claude Code helper's request, raised from --ask. Its key is the one the same
         # prompt's Notification computes from the ask record, so that Notification stays silent.
@@ -797,7 +880,7 @@ else
     _mmry_waiting_ask_path "$sid"
     _k_named=""
     if [[ -f "$MMRY_WAITING_ASK" ]]; then
-        _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input="" _k_program="" _k_approve=""
+        _k_asker="" _k_tool="" _k_at="" _k_used="" _k_input="" _k_program="" _k_approve="" _k_action=""
         while IFS=' ' read -r _a _b _rest || [[ -n "$_a" ]]; do
             case "$_a" in
                 asker) _k_asker="$_b" ;;
@@ -806,6 +889,8 @@ else
                 approve) _k_approve="$_b" ;;
                 # A program line with anything after the name is no program: never its first word.
                 program) _k_program="$_b"; [[ -z "$_rest" ]] || _k_program="" ;;
+                # #34651: the whole line after "action", so "script check.sh" is read as it was written.
+                action) _k_action="${_b}${_rest:+ ${_rest}}"; _k_action="${_k_action%$'\r'}" ;;
                 at)    _k_at="$_b" ;;
             esac
         done < "$MMRY_WAITING_ASK"
@@ -842,6 +927,9 @@ else
                 [[ "$_k_program" == "-" ]] && _k_program=""
                 if [[ -n "$tool" && "$tool" == "$_k_tool" && "$_k_program" =~ $_MMRY_WAITING_TOOL_RE ]]; then
                     program="$_k_program"
+                    # #34651: the record's action, only beside its program and only one of the three
+                    # shapes; a line on disk that is anything else sends no action (K-10).
+                    if _mmry_waiting_action_ok "$program" "$_k_action"; then action="$_k_action"; fi
                 fi
             fi
         fi
@@ -900,7 +988,9 @@ mid="${own%% *}"; role="${own#* }"
 [[ "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" != "lead" ]] || exit 0
 
 [[ -n "$tool" ]] || program=""
-if mmry_set_formation_member_waiting "$fid" "$mid" "$sid" "$tool" "$program" >/dev/null; then
+# #34651: an action never goes without its program.
+[[ -n "$program" ]] || action=""
+if mmry_set_formation_member_waiting "$fid" "$mid" "$sid" "$tool" "$program" "$action" >/dev/null; then
     printf '%s %s\nprompt %s %s\nasker %s\ntool %s\ninput %s\nturn %s\napprove %s\ncall %s\n' "$fid" "$mid" "$key" "$(date +%s || echo 0)" \
         "${asker:--}" "${exact:--}" "${input:--}" "${mturn:--}" "${approve:--}" "${call:--}" > "$MMRY_WAITING_MARKER" || true
 fi

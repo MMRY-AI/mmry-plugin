@@ -2280,7 +2280,7 @@ mmry_release_formation_claim() {
 }
 
 mmry_set_formation_member_waiting() {
-    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME [PROGRAM_NAME]]
+    # Usage: mmry_set_formation_member_waiting FORMATION_ID MEMBER_ID SESSION_ID [TOOL_NAME [PROGRAM_NAME [PROGRAM_ACTION]]]
     #
     # #33452. This member is waiting on a permission prompt in its own window, so the lead is told.
     # The server records it only for the caller's OWN entry, resolved from the session, and refuses
@@ -2291,9 +2291,14 @@ mmry_set_formation_member_waiting() {
     # #34519 (DD-206 in MMRY-AI/mmry): PROGRAM_NAME, optional, is the bare program a shell command
     # runs (git, npm), the command's first word with any folder removed, under the same rule. Never
     # the rest of the command. Left out of the body when empty, so an older server is asked as before.
-    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}" program="${5:-}"
+    # #34651 (DD-207 in MMRY-AI/mmry): PROGRAM_ACTION, optional, is what kind of run it is, from the
+    # closed grammar formation-waiting.sh derives: one plain subcommand word (push), "script" and a
+    # file name (script check.sh), or "inline". Never the command's arguments, paths or quoted text.
+    # Sent only beside a program, and left out of the body when empty.
+    local formation_id="$1" member_id="$2" session_id="$3" tool="${4:-}" program="${5:-}" action="${6:-}"
     local body
-    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool" "programName" "$program")"
+    [[ -n "$program" ]] || action=""
+    body="$(_mmry_build_json "sessionId" "$session_id" "toolName" "$tool" "programName" "$program" "programAction" "$action")"
     _mmry_request PUT "/api/formations/${formation_id}/members/${member_id}/waiting" "$body"
 }
 
