@@ -32,15 +32,29 @@ MMRY_FORMATION_MEMBER_RULE="As a member, never go idle silently: when you finish
 # the existing member rules and before 34011's rules M and S, with the 34161 background-work sentence
 # after all of them on Claude Code (formation-join.sh prints that sentence after this rule).
 MMRY_FORMATION_PROGRESS_RULE="Report progress to the lead at each milestone of your assignment, so the lead can see the work is moving."
+# #34650: cmo-mmry's approved item 2 (wording-free-release-cmo.md), NO APOSTROPHES. A member is given it
+# on its own line after the milestone line; a lead is not. The approved placement is after 34011's rules
+# M and S as well; until those land it follows the milestone line directly. The service holds the same
+# literal in FormationRoleRule.Free (the connector join's freeRule).
+MMRY_FORMATION_FREE_RULE="When you finish your work, report that you are free with a progress report, not only in a message, so the lead can give you your next job."
+# #34650: cmo-mmry's approved item 1, the confirmation after a free report, NO APOSTROPHES. The service
+# holds the same two sentences in FormationFreeReport (WithWork, NoWork) for the connector.
+MMRY_FORMATION_FREE_DONE="Your work is recorded as Done and you are free. The lead is told, so it can give you your next job."
+MMRY_FORMATION_FREE_NONE="You have no work, so you are already free. Nothing was changed."
+# #34650 fix round 1: cmo-mmry's item 7, the refusal while this session's own work is reported as Blocked
+# (lead ruling 2026-11-24: Done would tell the lead unfinished work is finished), NO APOSTROPHES. The
+# service holds the same sentence in FormationFreeReport.Blocked for the connector.
+MMRY_FORMATION_FREE_BLOCKED="Your work is reported as Blocked, so you cannot report that you are free. Nothing was changed. Keep the block reported so the lead can help you clear it or release you from the work."
 MMRY_FORMATION_OFFER="Is there anything else I can do?"
 # What the member that reported its own Done is shown: its report carried the question.
 MMRY_FORMATION_OFFER_SENT="Your report to the lead ends with: ${MMRY_FORMATION_OFFER} Keep listening for the answer."
 
 # The rule for a role as the roster stores it. Lead gets the lead rule; anything else, including no
-# role at all, gets the member rule and then the progress rule, because a join never makes a new lead.
+# role at all, gets the member rule, then the progress rule, then the free rule (#34650), because a join
+# never makes a new lead.
 mmry_formation_role_rule() {
     case "${1:-}" in
         [Ll][Ee][Aa][Dd]) printf '%s\n' "$MMRY_FORMATION_LEAD_RULE" ;;
-        *)                printf '%s\n%s\n' "$MMRY_FORMATION_MEMBER_RULE" "$MMRY_FORMATION_PROGRESS_RULE" ;;
+        *)                printf '%s\n%s\n%s\n' "$MMRY_FORMATION_MEMBER_RULE" "$MMRY_FORMATION_PROGRESS_RULE" "$MMRY_FORMATION_FREE_RULE" ;;
     esac
 }

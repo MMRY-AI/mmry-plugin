@@ -1,6 +1,6 @@
 Join a formation, hand out its work, declare what you are touching, speak to it, say how it is going, remove a member whose session has dropped, or leave: a group of assistants coordinating on one job at the same time.
 
-Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>] [--confirm]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>` | `/mmry:formation idle-limit [<minutes>|default]` | `/mmry:formation progress-limit [<minutes>|default]`
+Usage: `/mmry:formation start "objective"` | `/mmry:formation join <formationId> [--name "name"]` | `/mmry:formation roster` | `/mmry:formation assign <memberId> "what they should work on"` | `/mmry:formation assign [memberId] --name "name"` | `/mmry:formation progress <state> ["note"]` | `/mmry:formation free ["note"]` | `/mmry:formation claim "src/Billing"` | `/mmry:formation say "message" [--to <memberId>] [--confirm]` | `/mmry:formation report` | `/mmry:formation debrief "summary"` | `/mmry:formation remove <memberId> [formationId]` | `/mmry:formation leave` | `/mmry:formation status` | `/mmry:formation queue add "description" [--host codex|claude-code]` | `/mmry:formation queue list` | `/mmry:formation queue take <pieceId>` | `/mmry:formation queue decline <pieceId>` | `/mmry:formation idle-limit [<minutes>|default]` | `/mmry:formation progress-limit [<minutes>|default]`
 
 ## What This Does
 
@@ -255,6 +255,8 @@ Each member is also given one rule for its own role:
 > As a member, never go idle silently: when you finish, report Done to the lead and end the report by asking whether there is anything else you can do, then keep listening for the answer.
 >
 > Report progress to the lead at each milestone of your assignment, so the lead can see the work is moving.
+>
+> When you finish your work, report that you are free with a progress report, not only in a message, so the lead can give you your next job.
 
 **The lead is reminded who is free until each has work.** A member that has had no work for the Formation's idle limit, 5 minutes by default, is named to the lead with how long it has had none. The reminder repeats until it is given work, is removed or leaves, and it also names a member that finished its work and has said nothing since. A lead on Claude Code is reminded while it waits and each time a member reports Done; an idle Claude Code lead is woken for it at most three times, 30 minutes apart. A lead on Codex or a connected assistant is reminded on its next action, at most every 30 minutes, and when a member reports Done. The lead, the person who created the Formation, or an account administrator can set the idle limit from 1 to 1440 minutes. A member's own Done asks the lead: Is there anything else I can do?
 
@@ -454,6 +456,17 @@ When you record Done or Abandoned for your own work, or leave, MMRY prints a sho
 **Report what the script reports.** On success it prints the state the server read back, not the
 one that was asked for. On a refusal it prints the server's own reason: no such member, a formation
 already closed out, and a state that is not one of the five all look identical otherwise.
+
+### free
+
+`/mmry:formation free ["note"]`
+
+free reports that you have finished and are free: MMRY AI records your current work as Done and tells the lead, so it can give you your next job. Saying you are free in a message does not do this.
+While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help.
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/formation-progress.sh" free ["note"]
+```
 
 ### report
 

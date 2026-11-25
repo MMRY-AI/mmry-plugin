@@ -324,6 +324,38 @@ _codex_would_prompt() { # tool name -> "prompt" or "no-prompt", by Codex 0.160's
     [ ! -s "$REQLOG" ]
 }
 
+@test "34650 tool: formation_progress takes the state Free and runs the free report; an unknown state is still refused" {
+    # The fake roster gives member 6 (conv-B) no assignment, so Free is answered as already free and
+    # nothing is sent; formation-free.bats proves the Done report for a member holding work.
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-B"
+    mcp "$(call 92 formation_progress '{"state":"Free"}' '{"sessionId":"conv-B"}')" \
+        "$(call 93 formation_progress '{"state":"Freed"}' '{"sessionId":"conv-B"}')"
+    [ "$(is_error 92)" = "false" ] || { text_of 92; return 1; }
+    [[ "$(text_of 92)" == *"You have no work, so you are already free. Nothing was changed."* ]] || { text_of 92; return 1; }
+    [ "$(is_error 93)" = "true" ]
+    # cmo-mmry item 6 (fix round 1): the refusal names Free, last.
+    [[ "$(text_of 93)" == *"state must be Accepted, Done, Blocked, Abandoned or Free"* ]] || { text_of 93; return 1; }
+    ! grep -q '^PUT ' "$REQLOG"
+}
+
+@test "34650 fix 4: the unknown-state refusal is cmo-mmry's item 6 sentence and the old list is gone" {
+    printf '77\n' > "$TMPDIR/.mmry-formation-conv-B"
+    mcp "$(call 94 formation_progress '{"state":"Finished"}' '{"sessionId":"conv-B"}')"
+    [ "$(is_error 94)" = "true" ]
+    [[ "$(text_of 94)" == *"state must be Accepted, Done, Blocked, Abandoned or Free"* ]] || { text_of 94; return 1; }
+    ! grep -q -F -- 'state must be Accepted, Done, Blocked or Abandoned' "$SERVER" || return 1
+}
+
+@test "34650 tool: formation_progress lists Free in its schema and carries cmo-mmry's sentence" {
+    mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+    local tool; tool="$(answer 2 | jq -c '.result.tools[] | select(.name == "formation_progress")')"
+    [ -n "$tool" ] || { echo "no formation_progress tool"; return 1; }
+    [ "$(jq -r '.inputSchema.properties.state.enum | index("Free") != null' <<< "$tool" | tr -d '\r')" = "true" ] || { echo "$tool"; return 1; }
+    [[ "$(jq -r '.description' <<< "$tool" | tr -d '\r')" == *"Free records your current work as Done and tells the lead you are free, so it can give you your next job; with no work, it changes nothing. While your work is reported as Blocked, Free is refused."* ]] || { echo "$tool"; return 1; }
+    # cmo-mmry item 6: the description's first sentence lists Free last.
+    [[ "$(jq -r '.description' <<< "$tool" | tr -d '\r')" == "Report how this conversation's assigned work is going: Accepted, Done, Blocked, Abandoned or Free, with an optional note for the lead. "* ]] || { echo "$tool"; return 1; }
+}
+
 @test "tool: formation_roster reads this conversation's formation and lists ids and the lead" {
     printf '77\n' > "$TMPDIR/.mmry-formation-conv-A"
     mcp "$(call 100 formation_roster '{}' '{"sessionId":"conv-A"}')"

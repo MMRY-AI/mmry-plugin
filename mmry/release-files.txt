@@ -125,6 +125,7 @@ tests/handlers/database-command.bats
 tests/handlers/deactivate-memory.bats
 tests/handlers/entry-handlers.bats
 tests/handlers/entry-page-fit.bats
+tests/handlers/formation-free.bats
 tests/handlers/formation-held-refusal.bats
 tests/handlers/formation-list-privacy.bats
 tests/handlers/formation-member-names.bats

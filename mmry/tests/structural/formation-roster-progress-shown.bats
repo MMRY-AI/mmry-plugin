@@ -75,13 +75,13 @@ and the message goes to the whole formation.
 In brackets, working means MMRY AI has recorded activity from the member since its work was given,
 and not started means it has recorded none. Blocked, Done and Abandoned are what the member
 reported, and they always show. Messages count as activity, not as progress. Report your own with
-/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account
+/mmry:formation progress <Accepted|Done|Blocked|Abandoned|Free>, and read the whole account
 with /mmry:formation report.'
 
 OLD_FOOTER_CLAUDE='Direct a message at one of them with /mmry:formation say "..." --to <id>. Leave the id off
 and the message goes to the whole formation.
 The state in brackets is the last thing that member reported. Report your own with
-/mmry:formation progress <Accepted|Done|Blocked|Abandoned>, and read the whole account
+/mmry:formation progress <Accepted|Done|Blocked|Abandoned|Free>, and read the whole account
 with /mmry:formation report.'
 
 @test "P1: an Assigned member that has been active shows working, not not started, on Claude Code" {
@@ -139,6 +139,13 @@ reported, and they always show. Messages count as activity, not as progress. Rep
 "* ]] || { echo "$f"; return 1; }
     [[ "$f" != *"/mmry:"* ]] || { echo "a slash command on Codex: $f"; return 1; }
     [[ "$f" != *"The state in brackets is the last thing"* ]] || { echo "$f"; return 1; }
+}
+
+@test "P4 (#34650): on Codex both footers list Free beside the other words, through the formation_progress tool" {
+    _roster_on codex "${HEAD}${LEAD},$(_member 7 Assigned ',"progressShown":"working"')]}"
+    [[ "$(_footer)" == *"formation_progress tool with state Accepted, Done, Blocked, Abandoned or Free, and an optional note"* ]] || { echo "$(_footer)"; return 1; }
+    _roster_on codex "${HEAD}${LEAD},$(_member 7 Assigned)]}"
+    [[ "$(_footer)" == *"formation_progress tool with state Accepted, Done, Blocked, Abandoned or Free, and an optional note"* ]] || { echo "$(_footer)"; return 1; }
 }
 
 @test "P5: control characters in the service's word are removed, and a value that is not text is not shown" {

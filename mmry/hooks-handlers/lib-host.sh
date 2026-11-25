@@ -787,7 +787,7 @@ _mmry_host_formation_tool() {
             elif [[ "$1" =~ ^[0-9]+$ || "$1" == "<memberId>"* ]]; then
                 return 1
             else
-                mmry_host_tool_ref formation_progress "with state Accepted, Done, Blocked or Abandoned, and an optional note"
+                mmry_host_tool_ref formation_progress "with state Accepted, Done, Blocked, Abandoned or Free, and an optional note"
             fi
             ;;
         *) return 1 ;;

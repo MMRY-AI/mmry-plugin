@@ -567,3 +567,111 @@ _line_no_of() { printf '%s\n' "$output" | tr -d '\r' | grep -n -x -F -- "$1" | h
         [ "$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | sed -n "$((m + 2))p")" = "> ${PROGRESS_RULE}" ] || { echo "$f: no progress rule after the member rule"; return 1; }
     done
 }
+
+# ---- #34650 (MMRY-AI/mmry FormationRoleRule.Free): report that you are free ---------------------------
+#
+# cmo-mmry's item 2 (wording-free-release-cmo.md), NO APOSTROPHES. A member is given it on its own line
+# after the milestone line, on Claude Code and on Codex; a lead is not. The approved placement is after
+# 34011's rules M and S too; until those land (mmry-plugin #176) it follows the milestone line directly.
+
+FREE_RULE="When you finish your work, report that you are free with a progress report, not only in a message, so the lead can give you your next job."
+
+@test "34650: the free rule is ASCII with no apostrophes, held once in lib-formation-roles.sh" {
+    [[ "$FREE_RULE" != *"'"* ]] || return 1
+    ! printf '%s' "$FREE_RULE" | LC_ALL=C grep -q '[^ -~]' || return 1
+    grep -q -F -- "MMRY_FORMATION_FREE_RULE=\"${FREE_RULE}\"" "${HANDLERS}/lib-formation-roles.sh" || return 1
+    [ "$(grep -l -r -F -- "$FREE_RULE" "$HANDLERS" | grep -c .)" -eq 1 ] || { grep -l -r -F -- "$FREE_RULE" "$HANDLERS"; return 1; }
+}
+
+@test "34650: a member joining on Claude Code gets the free rule after the milestone line, before the 34161 sentence" {
+    _join claude Wingman
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local p f b
+    p="$(_line_no_of "$PROGRESS_RULE")"; f="$(_line_no_of "$FREE_RULE")"; b="$(_line_no_of "$BACKGROUND_34161")"
+    [ -n "$p" ] && [ -n "$f" ] && [ -n "$b" ] || { echo "progress ${p:-none}, free ${f:-none}, background ${b:-none}"; echo "$output"; return 1; }
+    [ "$f" -eq "$((p + 1))" ] || { echo "progress at $p, free at $f"; echo "$output"; return 1; }
+    [ "$b" -gt "$f" ] || { echo "free at $f, background at $b"; echo "$output"; return 1; }
+}
+
+@test "34650: a member joining on Codex gets the free rule after the milestone line, byte for byte" {
+    _join codex Wingman
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local p f
+    p="$(_line_no_of "$PROGRESS_RULE")"; f="$(_line_no_of "$FREE_RULE")"
+    [ -n "$p" ] && [ -n "$f" ] && [ "$f" -eq "$((p + 1))" ] || { echo "progress ${p:-none}, free ${f:-none}"; echo "$output"; return 1; }
+}
+
+@test "34650: a lead, returning or starting, is not given the free rule" {
+    _join claude Lead '"2026-10-23T12:30:00"'
+    _lacks "$FREE_RULE"
+    _join codex Lead '"2026-10-23T12:30:00"'
+    _lacks "$FREE_RULE"
+}
+
+@test "34650: the command page and the Codex skill quote the free rule right after the progress rule" {
+    local f p
+    for f in commands/formation.md skills-codex/memory-system/SKILL.md; do
+        p="$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | grep -n -x -F -- "> ${PROGRESS_RULE}" | cut -d: -f1)"
+        [ -n "$p" ] || { echo "$f: no progress rule"; return 1; }
+        [ "$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | sed -n "$((p + 1))p")" = ">" ] || { echo "$f: line after the progress rule"; return 1; }
+        [ "$(tr -d '\r' < "${PLUGIN_DIR}/${f}" | sed -n "$((p + 2))p")" = "> ${FREE_RULE}" ] || { echo "$f: no free rule after the progress rule"; return 1; }
+    done
+}
+
+@test "34650: the command page and the Codex skill carry cmo-mmry's free lines byte for byte" {
+    local page="${PLUGIN_DIR}/commands/formation.md" skill="${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+    # Item 3: the usage, the command page sentence and the Codex skill sentence.
+    tr -d '\r' < "$page" | grep -q -F -- '`/mmry:formation free ["note"]`' || { echo "command page: no free usage"; return 1; }
+    tr -d '\r' < "$page" | grep -q -x -F -- "free reports that you have finished and are free: MMRY AI records your current work as Done and tells the lead, so it can give you your next job. Saying you are free in a message does not do this." || { echo "command page: no approved free sentence"; return 1; }
+    tr -d '\r' < "$skill" | grep -q -F -- "To report that you are free, report progress with the state Free, not a message; do the same when the person asks you to tell the lead you are free. MMRY AI records your current work as Done and tells the lead, so it can give you your next job." || { echo "Codex skill: no approved free sentence"; return 1; }
+    # The command page tells the model how to run it.
+    tr -d '\r' < "$page" | grep -q -F -- 'formation-progress.sh" free ["note"]' || { echo "command page: no run line"; return 1; }
+}
+
+@test "34650 fix 2: the command page and the Codex skill carry cmo-mmry's Blocked sentence right after the item 3 sentence" {
+    local blocked="While your work is reported as Blocked, free is refused and nothing changes; keep the block reported so the lead can help."
+    local page="${PLUGIN_DIR}/commands/formation.md" skill="${PLUGIN_DIR}/skills-codex/memory-system/SKILL.md"
+    tr -d '\r' < "$page" | grep -q -F -- "Saying you are free in a message does not do this. ${blocked}" \
+        || tr -d '\r' < "$page" | grep -A1 -x -F -- "free reports that you have finished and are free: MMRY AI records your current work as Done and tells the lead, so it can give you your next job. Saying you are free in a message does not do this." | tail -n 1 | grep -q -x -F -- "$blocked" \
+        || { echo "command page: no Blocked sentence after item 3"; return 1; }
+    tr -d '\r' < "$skill" | grep -q -F -- "MMRY AI records your current work as Done and tells the lead, so it can give you your next job. ${blocked}" \
+        || { echo "Codex skill: no Blocked sentence after item 3"; return 1; }
+}
+
+@test "34650 fix 5: the free rule is the last member rule line, on Claude Code and on Codex" {
+    # Lead ruling: the free line goes last among the member rules, after the milestone line and after
+    # 34011's rules M and S when they arrive. Written against whatever lines the rule libraries hold, so
+    # it still holds when M and S are added to them.
+    source "${HANDLERS}/lib-formation-roles.sh"
+    [ "$(mmry_formation_role_rule Wingman | tr -d '\r' | tail -n 1)" = "$FREE_RULE" ] || { mmry_formation_role_rule Wingman; return 1; }
+    local rules=() line
+    while IFS= read -r line; do rules+=("$line"); done < <(mmry_formation_role_rule Wingman | tr -d '\r')
+    rules+=("$(grep -m1 '^MMRY_FORMATION_REPORT_RULE=' "${HANDLERS}/formation-join.sh" | sed 's/^[^=]*="//; s/"$//')")
+    rules+=("$(grep -m1 '^MMRY_FORMATION_ACK_RULE=' "${HANDLERS}/formation-join.sh" | sed 's/^[^=]*="//; s/"$//')")
+    local host f n r
+    for host in claude codex; do
+        _join "$host" Wingman
+        [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+        f="$(_line_no_of "$FREE_RULE")"
+        [ -n "$f" ] || { echo "$host: no free rule"; echo "$output"; return 1; }
+        for r in "${rules[@]}"; do
+            [ "$r" = "$FREE_RULE" ] && continue
+            n="$(_line_no_of "$r")"
+            [ -n "$n" ] || { echo "$host: rule line missing: $r"; echo "$output"; return 1; }
+            [ "$n" -lt "$f" ] || { echo "$host: rule at $n after the free rule at $f: $r"; echo "$output"; return 1; }
+        done
+    done
+}
+
+@test "34650: with MMRY_SERVICE_REPO, the service holds the same free rule and confirmations" {
+    if [[ -z "${MMRY_SERVICE_REPO:-}" ]]; then
+        skip "MMRY_SERVICE_REPO is not set; set it to a checkout of MMRY-AI/mmry to compare the service"
+    fi
+    local rule="${MMRY_SERVICE_REPO}/src/Mnemo.Api/Services/FormationRoleRule.cs"
+    local free="${MMRY_SERVICE_REPO}/src/Mnemo.Api/Services/FormationFreeReport.cs"
+    tr -d '\r' < "$rule" | grep -q -F -- "\"${FREE_RULE}\"" || { echo "FormationRoleRule.cs lacks the free rule"; return 1; }
+    source "${HANDLERS}/lib-formation-roles.sh"
+    tr -d '\r' < "$free" | grep -q -F -- "\"${MMRY_FORMATION_FREE_DONE}\"" || { echo "FormationFreeReport.cs lacks the with-work line"; return 1; }
+    tr -d '\r' < "$free" | grep -q -F -- "\"${MMRY_FORMATION_FREE_NONE}\"" || { echo "FormationFreeReport.cs lacks the no-work line"; return 1; }
+    tr -d '\r' < "$free" | grep -q -F -- "\"${MMRY_FORMATION_FREE_BLOCKED}\"" || { echo "FormationFreeReport.cs lacks the Blocked refusal"; return 1; }
+}

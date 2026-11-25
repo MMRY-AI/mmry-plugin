@@ -226,7 +226,7 @@ if [[ "$(printf '%s' "$_mmry_roster_response" | "$MMRY_JQ" -r '[(.members // [])
 else
     printf 'The state in brackets is the last thing that member reported. Report your own with\n'
 fi
-printf '%s, and read the whole account\n' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned>')"
+printf '%s, and read the whole account\n' "$(mmry_host_formation_ref progress '<Accepted|Done|Blocked|Abandoned|Free>')"
 printf 'with %s.\n' "$(mmry_host_formation_ref report)"
 # #33847: what availability rests on, said once, and only under a roster that carries it.
 if [[ "$(printf '%s' "$_mmry_roster_response" | "$MMRY_JQ" -r "${MMRY_JQ_AVAILABILITY_DEFS}"' mmry_roster_has_availability' 2>/dev/null | tr -d '\r')" == "true" ]]; then
