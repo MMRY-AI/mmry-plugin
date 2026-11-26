@@ -300,6 +300,7 @@ CMDS
     # Not a settings file of either host, and not inside a folder a host reads settings from.
     [ "$(basename "$SAMPLE")" != "settings.json" ] && [ "$(basename "$SAMPLE")" != "settings.local.json" ]
     [[ "$SAMPLE" != *"/.claude/"* && "$SAMPLE" != *"/.codex/"* && "$SAMPLE" != *"/.claude-plugin/"* && "$SAMPLE" != *"/hooks/"* ]] || return 1
-    # The examples folder holds this one file: no script rides along with it.
-    [ "$(ls -A "${ROOT}/examples" | wc -l | tr -d ' ')" = "1" ] || { ls -A "${ROOT}/examples"; return 1; }
+    # The examples folder holds the two samples, this one and its Codex form (#34651 requirement 4,
+    # member-permissions-codex-sample.bats): no script rides along with them.
+    [ "$(ls -A "${ROOT}/examples" | tr -d '\r' | tr '\n' ' ')" = "member-permissions.codex.rules member-permissions.json " ] || { ls -A "${ROOT}/examples"; return 1; }
 }
