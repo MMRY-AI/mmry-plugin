@@ -17,6 +17,8 @@
 #   E-05  round 2: the rule helper answers the documentation's own examples.
 #   E-06  round 2: the round 1 sample is refused by the same helper.
 
+# cmo-mmry's approved note (v1.38/wording-34651-limits-request.md item 3), after W6 in the same "_comment".
+NOTE="These rules check the command a member runs, not what a script or program does after it starts; allow a script only if you trust everything it does."
 W6="Sample only. MMRY AI never applies this file. Copy the rules you want into your own Claude Code settings, review each one, and leave commands that delete files, force-push or read secrets out of the allow list."
 
 setup() {
@@ -35,7 +37,7 @@ setup() {
 
 @test "E-01 34651 R4: the sample parses, is headed by the approved sentence, and holds allow and deny" {
     [ -f "$SAMPLE" ] || { echo "no sample at $SAMPLE"; return 1; }
-    [ "$("$JQ" -r '._comment' < "$SAMPLE" | tr -d '\r')" = "$W6" ] || { echo "the header is not the approved sentence: $("$JQ" -r '._comment' < "$SAMPLE")"; return 1; }
+    [ "$("$JQ" -r '._comment' < "$SAMPLE" | tr -d '\r')" = "$W6 $NOTE" ] || { echo "the header is not W6 followed by the approved note: $("$JQ" -r '._comment' < "$SAMPLE")"; return 1; }
     # The header is the first key, so a person opening the file reads it before any rule.
     [ "$("$JQ" -r 'keys_unsorted[0]' < "$SAMPLE" | tr -d '\r')" = "_comment" ]
     "$JQ" -e '(.permissions.allow | type) == "array" and (.permissions.allow | length) > 0
