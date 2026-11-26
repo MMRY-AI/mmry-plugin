@@ -12,7 +12,7 @@
 #         stated (allowed, asks, refused, or no decision). Skipped where Codex is not installed (CI).
 #   C-04  the sample is never applied: nothing the plugin runs or tells an assistant names it.
 
-HEADER="# Sample only. MMRY AI never applies this file. Copy the rules you want into your own Codex rules, review each one, and leave commands that delete files, force-push or read secrets out of the allow rules."
+HEADER="# Sample only. MMRY AI never applies this file. Copy the rules you want into your own Codex rules file, review each one, and leave commands that delete files, force-push or read secrets out of the allow rules."
 
 setup() {
     ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
