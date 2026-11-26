@@ -4,8 +4,8 @@
 # beside the Claude Code one. Like that one it is documentation: nothing in the plugin may read,
 # install or apply it (DD-187: a product default never widens anyone's permissions).
 #
-#   C-01  the sample exists and is headed by the sample sentence, and every rule has a pattern and one of
-#         Codex's three decisions.
+#   C-01  the sample exists, is headed by the sample sentence, explains itself with the approved C2 line and
+#         names no ticket or design decision, and every rule has a pattern and one of Codex's three decisions.
 #   C-02  the allow rules hold only commands whose every continuation is a read (git status, git rev-parse):
 #         nothing that pushes, resets, deletes, prints a file, sets configuration or runs a program.
 #   C-03  where Codex is installed, `codex execpolicy check` decides each command in the table below as
@@ -13,6 +13,9 @@
 #   C-04  the sample is never applied: nothing the plugin runs or tells an assistant names it.
 
 HEADER="# Sample only. MMRY AI never applies this file. Copy the rules you want into your own Codex rules file, review each one, and leave commands that delete files, force-push or read secrets out of the allow rules."
+
+# cmo-mmry's approved first explanation line (C2): a customer opens this file, so no internal reference.
+C2="# This is the Codex form of member-permissions.json, the Claude Code sample beside it."
 
 setup() {
     ROOT="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
@@ -31,6 +34,8 @@ setup() {
 @test "C-01 34651 R4 Codex: the sample exists, is headed by the sample sentence, and every rule has a pattern and a decision" {
     [ -f "$SAMPLE" ] || { echo "no Codex sample at $SAMPLE"; return 1; }
     [ "$(head -1 "$SAMPLE" | tr -d '\r')" = "$HEADER" ] || { echo "the first line is not the sample sentence: $(head -1 "$SAMPLE")"; return 1; }
+    [ "$(sed -n 3p "$SAMPLE" | tr -d '\r')" = "$C2" ] || { echo "line 3 is not the approved C2 line: $(sed -n 3p "$SAMPLE")"; return 1; }
+    ! grep -nE '#[0-9]{5}|DD-[0-9]' "$SAMPLE" || { echo "an internal ticket or design decision reference is in the sample"; return 1; }
     local rules patterns decisions bad
     rules="$(grep -c '^prefix_rule($' "$SAMPLE")"
     patterns="$(grep -c '^    pattern = \[' "$SAMPLE")"
