@@ -1,0 +1,122 @@
+# Sample only. MMRY AI never applies this file. Copy the rules you want into your own Codex rules file, review each one, and leave commands that delete files, force-push or read secrets out of the allow rules.
+# These rules check the command a member runs, not what a script or program does after it starts; allow a script only if you trust everything it does.
+#
+# This is the Codex form of member-permissions.json, the Claude Code sample beside it.
+# To use it, copy the rules you want into a file ending in .rules in the rules folder of your Codex
+# home (normally ~/.codex/rules/default.rules), then restart Codex.
+#
+# HOW CODEX READS THESE RULES (measured with `codex execpolicy check` on codex-cli 0.171.0):
+#   - each rule is a PREFIX of the command's words, and a position may list alternatives;
+#   - the decisions are "allow", "prompt" and "forbidden"; when several rules match, the strictest wins;
+#   - a command that no rule matches gets no decision here and follows the session's approval policy.
+# A prefix rule cannot see a word later in the command, cannot match part of a word and has no
+# wildcard, so an ALLOW rule allows every continuation of its prefix. That is why this sample allows
+# less than the Claude Code sample:
+#   - `git log`, `git diff`, `git show` and `git fetch` are not allowed: `git log --output=<path>` writes
+#     a file, `git diff --no-index <a> <b>` reads any two files and `git fetch --upload-pack=<program>`
+#     runs a program, and a prefix rule cannot see those options to refuse them. They ask instead.
+#   - `git add -A`, `npm test`, `npm run test`, `dotnet test` and `pytest` are not allowed: each one
+#     can be continued with a file or a project of the caller's choosing (for example
+#     `npm test --prefix <dir>` or `pytest <any path>`), which a prefix rule cannot see.
+#   - a forced push is refused only where a prefix can see the flag: right after `push`, after the
+#     remote, or after `-u` and the remote, and, for main, master, develop and HEAD, after the branch.
+#     With any other branch name, or behind `git -C <dir>`, the same push asks.
+#   - reading a secrets file cannot be refused: a rule cannot match a path. The programs that print a
+#     file ask every time instead, and a read through another program is not seen.
+
+# ---- ALLOW: reads whose every continuation is a read -----------------------------------------------
+# git status and git rev-parse have no option that writes a file, reads one by name or runs a program.
+prefix_rule(
+    pattern = ["git", ["status", "rev-parse"]],
+    decision = "allow",
+)
+
+# ---- PROMPT: always ask, where a refusal in the Claude Code sample cannot be written here ----------
+# A git command that starts with -C asks: a rule cannot skip the folder to see what follows it, so
+# `git -C <dir> push --force` cannot be told from `git -C <dir> status`.
+prefix_rule(
+    pattern = ["git", "-C"],
+    decision = "prompt",
+)
+# A push asks every time: a prefix rule cannot see --force after a branch name.
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+)
+# These write a file, read one by name or run a program when given the right option (--output,
+# --no-index, --upload-pack, --exec), and a prefix rule cannot see the option.
+prefix_rule(
+    pattern = ["git", ["log", "diff", "show", "fetch", "ls-remote", "pull", "clone", "archive", "format-patch", "bundle"]],
+    decision = "prompt",
+)
+# A git command that starts with one of git's own options asks, so a configuration value cannot hide
+# behind one (see the refusals below).
+prefix_rule(
+    pattern = ["git", ["--no-pager", "-P", "-p", "--paginate", "--bare", "--git-dir", "--work-tree", "--namespace", "--no-replace-objects", "--literal-pathspecs", "--no-optional-locks"]],
+    decision = "prompt",
+)
+# The programs that print a file ask every time, because a rule cannot refuse a secrets path.
+prefix_rule(
+    pattern = [["cat", "head", "tail", "less", "more", "type", "nl", "strings", "xxd", "od", "base64", "Get-Content", "gc"]],
+    decision = "prompt",
+)
+
+# ---- FORBIDDEN: always refused ---------------------------------------------------------------------
+# A forced push or a mirror push, right after push, after the remote, and after -u and the remote.
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease", "--force-if-includes", "-fu", "-uf", "--mirror"]],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], ["--force", "-f", "--force-with-lease", "--force-if-includes", "-fu", "-uf", "--mirror"]],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["git", "push", ["-u", "--set-upstream"], ["origin", "upstream"], ["--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror"]],
+    decision = "forbidden",
+)
+# A forced push of main, master, develop or HEAD with the flag after the branch, or with a + before it.
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], ["main", "master", "develop", "HEAD"], ["--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror"]],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], ["+main", "+master", "+develop", "+HEAD"]],
+    decision = "forbidden",
+)
+# A hard reset, with the flag first or after the commits most often named.
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["git", "reset", ["HEAD", "HEAD~", "HEAD^", "HEAD~1", "@", "ORIG_HEAD", "origin/main", "origin/master", "origin/develop", "main", "master", "develop"], "--hard"],
+    decision = "forbidden",
+)
+# git -c sets a configuration value for one command, and several values name a program to run.
+prefix_rule(
+    pattern = ["git", ["-c", "--config-env", "--exec-path"]],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["git", ["--no-pager", "-P", "-p", "--paginate", "--bare", "--no-replace-objects", "--literal-pathspecs", "--no-optional-locks"], ["-c", "--config-env", "--exec-path"]],
+    decision = "forbidden",
+)
+# Runs a command of the caller's choosing in every submodule.
+prefix_rule(
+    pattern = ["git", "submodule", "foreach"],
+    decision = "forbidden",
+)
+# A recursive delete.
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr", "-Rf", "-fR"]],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["rm", ["-r", "-R", "--recursive"], ["-f", "--force"]],
+    decision = "forbidden",
+)
+prefix_rule(
+    pattern = ["rm", ["-f", "--force"], ["-r", "-R", "--recursive"]],
+    decision = "forbidden",
+)

@@ -15,6 +15,7 @@ commands/search.md
 commands/setup.md
 commands/uninstall.md
 commands/visibility.md
+examples/member-permissions.codex.rules
 examples/member-permissions.json
 hooks-handlers/codex-first-prompt.sh
 hooks-handlers/codex-hook.cmd
@@ -282,6 +283,7 @@ tests/structural/hooks-json-format.bats
 tests/structural/hooks-json.bats
 tests/structural/macos-hook-payload.bats
 tests/structural/marketplace-sync.bats
+tests/structural/member-permissions-codex-sample.bats
 tests/structural/member-permissions-sample.bats
 tests/structural/plugin-json.bats
 tests/structural/public-text-check.bats

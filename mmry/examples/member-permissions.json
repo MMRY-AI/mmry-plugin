@@ -1,5 +1,5 @@
 {
-  "_comment": "Sample only. MMRY AI never applies this file. Copy the rules you want into your own Claude Code settings, review each one, and leave commands that delete files, force-push or read secrets out of the allow list.",
+  "_comment": "Sample only. MMRY AI never applies this file. Copy the rules you want into your own Claude Code settings, review each one, and leave commands that delete files, force-push or read secrets out of the allow list. These rules check the command a member runs, not what a script or program does after it starts; allow a script only if you trust everything it does.",
   "permissions": {
     "allow": [
       "Bash(git status)",
